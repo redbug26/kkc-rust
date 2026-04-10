@@ -365,8 +365,13 @@ impl App {
             config.right.sort,
             config.right.show_hidden,
         );
-        let mut history = VecDeque::with_capacity(config.dir_history_max);
-        history.push_front(config.left.path.clone());
+        let max = config.dir_history_max;
+        let mut history: VecDeque<PathBuf> =
+            config.dir_history.iter().cloned().take(max).collect();
+        // Always seed with the left panel path if history is empty
+        if history.is_empty() {
+            history.push_front(config.left.path.clone());
+        }
 
         App {
             config,
@@ -730,6 +735,7 @@ impl App {
         self.config.right.path = self.right.persisted_path();
         self.config.right.sort = self.right.sort;
         self.config.right.show_hidden = self.right.show_hidden;
+        self.config.dir_history = self.dir_history.iter().cloned().collect();
         self.config.save()
     }
 }

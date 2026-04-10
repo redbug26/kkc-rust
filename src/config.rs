@@ -141,6 +141,9 @@ pub struct Config {
     /// Maximum number of directory history entries.
     #[serde(default = "history_max")]
     pub dir_history_max: usize,
+    /// Persisted directory history (most recent first).
+    #[serde(default)]
+    pub dir_history: Vec<PathBuf>,
 }
 
 impl Default for Config {
@@ -159,6 +162,7 @@ impl Default for Config {
             pager: default_pager(),
             viewer: ViewerConfig::default(),
             dir_history_max: 32,
+            dir_history: Vec::new(),
         }
     }
 }
