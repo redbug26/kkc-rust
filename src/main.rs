@@ -3,6 +3,7 @@ mod config;
 mod events;
 mod file_ops;
 mod file_types;
+mod help;
 mod panel;
 mod search;
 mod ui;

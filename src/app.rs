@@ -1,5 +1,6 @@
 use crate::config::{Config, SortMode};
 use crate::file_ops;
+use crate::help::HelpState;
 use crate::panel::Panel;
 use crate::search::{search, SearchQuery, SearchResult};
 use crate::viewer::Viewer;
@@ -49,8 +50,122 @@ pub enum AppMode {
     /// Directory history popup.
     DirHistory,
     /// Help overlay.
-    Help,
+    Help(HelpState),
+    /// Menu bar / dropdown (F2).
+    Menu(MenuState),
 }
+
+// ---------------------------------------------------------------------------
+// Menu
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct MenuState {
+    /// Which top-level header is highlighted (0 = File … 6 = Help).
+    pub bar_pos: usize,
+    /// Whether the dropdown is open.
+    pub open: bool,
+    /// Cursor inside the dropdown (index into MENU_DATA[bar_pos]).
+    pub item_pos: usize,
+}
+
+impl MenuState {
+    pub fn new() -> Self {
+        Self { bar_pos: 0, open: false, item_pos: 0 }
+    }
+}
+
+/// Action executed when a menu item is chosen.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MenuAction {
+    Separator,
+    ViewFile,
+    EditFile,
+    CopyFile,
+    MoveFile,
+    MkDir,
+    RenameFile,
+    DeleteFile,
+    Quit,
+    SwapPanels,
+    SortName,
+    SortExtension,
+    SortDate,
+    SortSize,
+    SortUnsorted,
+    ToggleHidden,
+    Reload,
+    GoToPath,
+    SelectPattern,
+    DeselectPattern,
+    InvertSelection,
+    SearchFiles,
+    DirHistory,
+    ToggleFBar,
+    SaveConfig,
+    Help,
+    About,
+}
+
+pub type MenuEntry = (&'static str, Option<&'static str>, MenuAction);
+
+pub const MENU_HEADERS: &[&str] = &[
+    "File", "Panel", "Disk", "Selection", "Tools", "Options", "Help",
+];
+
+pub static MENU_DATA: &[&[MenuEntry]] = &[
+    // 0 – File
+    &[
+        ("View",        Some("F3"),   MenuAction::ViewFile),
+        ("Edit",        Some("F4"),   MenuAction::EditFile),
+        ("",            None,         MenuAction::Separator),
+        ("Copy to..",   Some("F5"),   MenuAction::CopyFile),
+        ("Move to..",   Some("F6"),   MenuAction::MoveFile),
+        ("Create Dir",  Some("F7"),   MenuAction::MkDir),
+        ("Rename",      Some("S-F6"), MenuAction::RenameFile),
+        ("Delete",      Some("F8"),   MenuAction::DeleteFile),
+        ("",            None,         MenuAction::Separator),
+        ("Quit",        Some("F10"),  MenuAction::Quit),
+    ],
+    // 1 – Panel
+    &[
+        ("Swap Panels",   None,         MenuAction::SwapPanels),
+        ("",              None,         MenuAction::Separator),
+        ("Sort by Name",  Some("^F1"),  MenuAction::SortName),
+        ("Sort by Ext",   Some("^F2"),  MenuAction::SortExtension),
+        ("Sort by Date",  Some("^F3"),  MenuAction::SortDate),
+        ("Sort by Size",  Some("^F4"),  MenuAction::SortSize),
+        ("Unsorted",      Some("^F5"),  MenuAction::SortUnsorted),
+        ("",              None,         MenuAction::Separator),
+        ("Tgl. Hidden",   Some("^H"),   MenuAction::ToggleHidden),
+        ("Reload",        Some("^R"),   MenuAction::Reload),
+    ],
+    // 2 – Disk
+    &[
+        ("Go to Path..",  None,         MenuAction::GoToPath),
+    ],
+    // 3 – Selection
+    &[
+        ("Select..",      Some("+"),    MenuAction::SelectPattern),
+        ("Deselect..",    Some("-"),    MenuAction::DeselectPattern),
+        ("Invert",        Some("*"),    MenuAction::InvertSelection),
+    ],
+    // 4 – Tools
+    &[
+        ("Search..",      Some("A-F7"), MenuAction::SearchFiles),
+        ("Dir History",   Some("^D"),   MenuAction::DirHistory),
+    ],
+    // 5 – Options
+    &[
+        ("Tgl. F-Key Bar", None,        MenuAction::ToggleFBar),
+        ("Save Config",    None,        MenuAction::SaveConfig),
+    ],
+    // 6 – Help
+    &[
+        ("Help",           Some("F1"),  MenuAction::Help),
+        ("About KKC",      None,        MenuAction::About),
+    ],
+];
 
 // ---------------------------------------------------------------------------
 // Dialogs
@@ -86,6 +201,8 @@ pub enum InputAction {
     SelectPattern,
     /// Wildcard deselect (-)
     DeselectPattern,
+    /// Navigate active panel to typed path
+    GoToPath,
 }
 
 impl InputDialog {
@@ -242,6 +359,10 @@ impl App {
 
     pub fn switch_panel(&mut self) {
         self.active = self.active.other();
+    }
+
+    pub fn swap_panels(&mut self) {
+        std::mem::swap(&mut self.left, &mut self.right);
     }
 
     pub fn push_dir_history(&mut self, path: PathBuf) {
@@ -403,6 +524,7 @@ impl App {
     pub fn open_viewer(&mut self) {
         if let Some(entry) = self.active_panel().current_entry() {
             if entry.is_dir || entry.name == ".." {
+                self.status.text = "Cannot view a directory".into();
                 return;
             }
             match Viewer::open(&entry.path, self.config.viewer.word_wrap) {
@@ -436,6 +558,10 @@ impl App {
             running: false,
             start_dir: start,
         });
+    }
+
+    pub fn open_help(&mut self) {
+        self.mode = AppMode::Help(HelpState::load());
     }
 
     pub fn run_search(&mut self) {

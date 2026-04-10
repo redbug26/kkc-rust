@@ -1,4 +1,5 @@
-use crate::app::{ActivePanel, App, AppMode, ConfirmDialog, InputDialog, SearchState};
+use crate::app::{ActivePanel, App, AppMode, ConfirmDialog, InputDialog, MenuState, MenuAction, SearchState, MENU_DATA, MENU_HEADERS};
+use crate::help::HelpView;
 use crate::config::SortMode;
 use crate::file_ops::format_size;
 use crate::file_types::FileCategory;
@@ -50,6 +51,15 @@ const CLR_FKEY_NUM_BG: Color = Color::Rgb(241, 228, 193);
 const CLR_BUTTON_BG: Color = Color::Rgb(181, 160, 132);
 const CLR_BUTTON_FG: Color = Color::Rgb(255, 244, 114);
 
+const CLR_MENU_BAR_BG: Color = Color::Rgb(54, 42, 30);
+const CLR_MENU_BAR_FG: Color = Color::Rgb(241, 228, 193);
+const CLR_MENU_SEL_BG: Color = Color::Rgb(241, 228, 193);
+const CLR_MENU_SEL_FG: Color = Color::Black;
+const CLR_MENU_DD_BG: Color = Color::Rgb(44, 34, 24);
+const CLR_MENU_DD_FG: Color = Color::Rgb(241, 228, 193);
+const CLR_MENU_DD_SEP: Color = Color::Rgb(118, 95, 70);
+const CLR_MENU_BORDER: Color = Color::Rgb(180, 148, 108);
+
 // ---------------------------------------------------------------------------
 // Entry style by category
 // ---------------------------------------------------------------------------
@@ -92,8 +102,8 @@ pub fn render(f: &mut Frame, app: &App) {
             render_viewer(f, v, true, f.area());
             return;
         }
-        AppMode::Help => {
-            render_help(f, f.area());
+        AppMode::Help(state) => {
+            render_help(f, state, f.area());
             return;
         }
         _ => {}
@@ -146,6 +156,7 @@ pub fn render(f: &mut Frame, app: &App) {
         AppMode::Input(dlg) => render_input(f, dlg, f.area()),
         AppMode::SearchPanel(s) => render_search(f, s, f.area()),
         AppMode::DirHistory => render_dir_history(f, app, f.area()),
+        AppMode::Menu(ms) => render_menu(f, ms, f.area()),
         AppMode::QuickSearch => {
             let qs = &app.active_panel().quicksearch;
             if !qs.is_empty() {
@@ -444,6 +455,103 @@ fn render_menu_button(f: &mut Frame, area: Rect, label: &str) {
             .style(Style::default().fg(CLR_BUTTON_FG).bg(CLR_BUTTON_BG).add_modifier(Modifier::BOLD)),
         inner,
     );
+}
+
+// ---------------------------------------------------------------------------
+// Menu bar + dropdown (F2)
+// ---------------------------------------------------------------------------
+
+fn render_menu(f: &mut Frame, state: &MenuState, area: Rect) {
+    // ── top bar ────────────────────────────────────────────────────────────
+    let bar_area = Rect { x: area.x, y: area.y, width: area.width, height: 1 };
+
+    let mut spans = vec![Span::styled(" ", Style::default().bg(CLR_MENU_BAR_BG))];
+    for (i, header) in MENU_HEADERS.iter().enumerate() {
+        let style = if i == state.bar_pos && !state.open {
+            Style::default().bg(CLR_MENU_SEL_BG).fg(CLR_MENU_SEL_FG).add_modifier(Modifier::BOLD)
+        } else if i == state.bar_pos {
+            Style::default().bg(CLR_MENU_SEL_BG).fg(CLR_MENU_SEL_FG).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().bg(CLR_MENU_BAR_BG).fg(CLR_MENU_BAR_FG)
+        };
+        spans.push(Span::styled(format!(" {} ", header), style));
+        spans.push(Span::styled("  ", Style::default().bg(CLR_MENU_BAR_BG)));
+    }
+    f.render_widget(
+        Paragraph::new(Line::from(spans)).style(Style::default().bg(CLR_MENU_BAR_BG)),
+        bar_area,
+    );
+
+    if !state.open {
+        return;
+    }
+
+    // ── dropdown ───────────────────────────────────────────────────────────
+    let items = MENU_DATA[state.bar_pos];
+
+    // Compute dropdown x: 1 (leading) + sum of (" header  ") widths preceding
+    let dd_x: u16 = {
+        let mut x = 1u16;
+        for i in 0..state.bar_pos {
+            x += MENU_HEADERS[i].len() as u16 + 4; // " header  "
+        }
+        x
+    };
+
+    // Width: widest label + key hint + padding
+    let max_label = items.iter().map(|(l, _, _)| l.len()).max().unwrap_or(6);
+    let max_key = items.iter().filter_map(|(_, k, _)| *k).map(|k| k.len()).max().unwrap_or(0);
+    let inner_w = (max_label + max_key + 4).max(18) as u16;
+    let dd_width = inner_w + 2; // borders
+    let dd_height = items.len() as u16 + 2;
+
+    // Clamp so it doesn't disappear off the right edge
+    let dd_x_clamped = dd_x.min(area.width.saturating_sub(dd_width));
+    let dd_area = Rect {
+        x: area.x + dd_x_clamped,
+        y: area.y + 1,
+        width: dd_width.min(area.width),
+        height: dd_height.min(area.height.saturating_sub(1)),
+    };
+
+    f.render_widget(Clear, dd_area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(CLR_MENU_BORDER))
+        .style(Style::default().bg(CLR_MENU_DD_BG));
+    let inner = block.inner(dd_area);
+    f.render_widget(block, dd_area);
+
+    let avail = inner.width as usize;
+    for (idx, (label, key_hint, action)) in items.iter().enumerate() {
+        if idx as u16 >= inner.height {
+            break;
+        }
+        let row = Rect { x: inner.x, y: inner.y + idx as u16, width: inner.width, height: 1 };
+
+        if *action == MenuAction::Separator {
+            let sep: String = std::iter::repeat('─').take(avail).collect();
+            f.render_widget(
+                Paragraph::new(sep).style(Style::default().fg(CLR_MENU_DD_SEP).bg(CLR_MENU_DD_BG)),
+                row,
+            );
+        } else {
+            let style = if idx == state.item_pos {
+                Style::default().bg(CLR_MENU_SEL_BG).fg(CLR_MENU_SEL_FG).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().bg(CLR_MENU_DD_BG).fg(CLR_MENU_DD_FG)
+            };
+            let key_text = key_hint.unwrap_or("");
+            // " label .......... key "
+            let used = label.len() + key_text.len() + 2; // leading " " + trailing " "
+            let pad = avail.saturating_sub(used);
+            let text = format!(" {}{}{} ", label, " ".repeat(pad), key_text);
+            f.render_widget(
+                Paragraph::new(truncate_str(&text, avail)).style(style),
+                row,
+            );
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -903,69 +1011,123 @@ fn render_quicksearch_label(f: &mut Frame, qs: &str, panels_area: Rect) {
 // Help overlay
 // ---------------------------------------------------------------------------
 
-fn render_help(f: &mut Frame, area: Rect) {
-    let width = 70u16.min(area.width.saturating_sub(2));
-    let height = area.height.saturating_sub(4);
-    let x = (area.width.saturating_sub(width)) / 2 + area.x;
-    let y = 2 + area.y;
-    let popup = Rect { x, y, width, height };
+fn render_help(f: &mut Frame, state: &crate::help::HelpState, area: Rect) {
+    let popup = Rect {
+        x: area.x + 1,
+        y: area.y + 1,
+        width: area.width.saturating_sub(2),
+        height: area.height.saturating_sub(2),
+    };
 
     f.render_widget(Clear, popup);
+    let title = match state.view {
+        HelpView::Index { .. } => " KKC-DOS Help Index ",
+        HelpView::Topics { section, .. } => {
+            let title = &state.system.sections[section].title;
+            return render_help_with_title(f, popup, title, state);
+        }
+        HelpView::Page { topic, .. } => {
+            let title = &state.system.topics[topic].title;
+            return render_help_with_title(f, popup, title, state);
+        }
+    };
+    render_help_with_title(f, popup, title, state);
+}
+
+fn render_help_with_title(
+    f: &mut Frame,
+    popup: Rect,
+    title: &str,
+    state: &crate::help::HelpState,
+) {
     let block = Block::default()
-        .title(" KKC Help ")
+        .title(format!(" {} ", title))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_style(Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG))
+        .style(Style::default().bg(Color::Black));
     let inner = block.inner(popup);
     f.render_widget(block, popup);
 
-    let text = vec![
-        Line::from(Span::styled("Navigation", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
-        Line::from("  ↑/↓         Move cursor"),
-        Line::from("  PgUp/PgDn   Page up/down"),
-        Line::from("  Home/End     First/last entry"),
-        Line::from("  Tab          Switch panel"),
-        Line::from("  Enter        Open file / enter directory"),
-        Line::from("  Backspace    Go to parent directory"),
-        Line::from(""),
-        Line::from(Span::styled("Selection", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
-        Line::from("  Insert       Select/deselect file"),
-        Line::from("  +            Select by wildcard"),
-        Line::from("  -            Deselect by wildcard"),
-        Line::from("  *            Invert selection"),
-        Line::from(""),
-        Line::from(Span::styled("Files", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
-        Line::from("  F3           View file"),
-        Line::from("  F4           Edit file (external editor)"),
-        Line::from("  F5           Copy to other panel"),
-        Line::from("  F6           Move to other panel"),
-        Line::from("  F7           Create directory"),
-        Line::from("  F8           Delete"),
-        Line::from("  Shift-F6     Rename"),
-        Line::from(""),
-        Line::from(Span::styled("Sorting", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
-        Line::from("  Ctrl-F1      Sort by name"),
-        Line::from("  Ctrl-F2      Sort by extension"),
-        Line::from("  Ctrl-F3      Sort by date"),
-        Line::from("  Ctrl-F4      Sort by size"),
-        Line::from("  Ctrl-F5      Unsorted"),
-        Line::from(""),
-        Line::from(Span::styled("Other", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
-        Line::from("  Alt-F7       Search"),
-        Line::from("  Ctrl-D       Directory history"),
-        Line::from("  Ctrl-R       Reload panels"),
-        Line::from("  Ctrl-H       Toggle hidden files"),
-        Line::from("  F10 / q      Quit"),
-        Line::from("  F1           This help"),
-        Line::from(""),
-        Line::from(Span::styled("  Press any key to close", Style::default().fg(Color::DarkGray))),
-    ];
+    if inner.height < 3 {
+        return;
+    }
 
-    f.render_widget(
-        Paragraph::new(text)
-            .style(Style::default().fg(Color::White))
-            .wrap(Wrap { trim: false }),
-        inner,
-    );
+    let body = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: inner.width,
+        height: inner.height.saturating_sub(1),
+    };
+    let footer = Rect {
+        x: inner.x,
+        y: inner.y + inner.height.saturating_sub(1),
+        width: inner.width,
+        height: 1,
+    };
+
+    match state.view {
+        HelpView::Index { cursor } => {
+            let items: Vec<ListItem> = state
+                .system
+                .sections
+                .iter()
+                .enumerate()
+                .map(|(idx, section)| {
+                    let style = if idx == cursor {
+                        Style::default().fg(Color::Black).bg(CLR_SELECTED).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::White)
+                    };
+                    ListItem::new(Line::from(Span::styled(format!(" {}", section.title), style)))
+                })
+                .collect();
+            f.render_widget(List::new(items), body);
+            f.render_widget(
+                Paragraph::new(" Esc/F10:Close  Enter:Open topic group ")
+                    .style(Style::default().fg(Color::DarkGray)),
+                footer,
+            );
+        }
+        HelpView::Topics { section, cursor } => {
+            let items: Vec<ListItem> = state.system.sections[section]
+                .topics
+                .iter()
+                .enumerate()
+                .map(|(idx, topic_idx)| {
+                    let style = if idx == cursor {
+                        Style::default().fg(Color::Black).bg(CLR_SELECTED).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::White)
+                    };
+                    ListItem::new(Line::from(Span::styled(
+                        format!(" {}", state.system.topics[*topic_idx].title),
+                        style,
+                    )))
+                })
+                .collect();
+            f.render_widget(List::new(items), body);
+            f.render_widget(
+                Paragraph::new(" Esc:Close  Backspace:Back  Enter:Open page ")
+                    .style(Style::default().fg(Color::DarkGray)),
+                footer,
+            );
+        }
+        HelpView::Page { topic, scroll, selected_link } => {
+            let topic = &state.system.topics[topic];
+            f.render_widget(
+                Paragraph::new(topic.to_render_lines(selected_link))
+                    .style(Style::default().fg(Color::White))
+                    .scroll((scroll, 0))
+                    .wrap(Wrap { trim: false }),
+                body,
+            );
+            f.render_widget(
+                Paragraph::new(" Esc:Close  Backspace:Back  Up/Down/PgUp/PgDn:Scroll  Tab:Next link  Enter:Open ")
+                    .style(Style::default().fg(Color::DarkGray)),
+                footer,
+            );
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

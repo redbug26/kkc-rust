@@ -1,7 +1,15 @@
-use crate::app::{App, AppMode, ConfirmAction, InputAction, InputDialog};
+use crate::app::{
+    App, AppMode, ConfirmAction, InputAction, InputDialog, MenuAction, MenuState,
+    MENU_DATA, MENU_HEADERS,
+};
 use crate::config::SortMode;
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::{
+    event::{DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers},
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
 use anyhow::Result;
+use std::io;
 
 pub fn handle_event(app: &mut App, event: Event) -> Result<bool> {
     let Event::Key(key) = event else {
@@ -9,10 +17,7 @@ pub fn handle_event(app: &mut App, event: Event) -> Result<bool> {
     };
 
     match &app.mode {
-        AppMode::Help => {
-            app.mode = AppMode::Browse;
-            return Ok(false);
-        }
+        AppMode::Help(_) => return handle_help(app, key),
         AppMode::Viewer(_) => return handle_viewer(app, key),
         AppMode::ViewerSearching(_) => return handle_viewer_searching(app, key),
         AppMode::Confirm(_) => return handle_confirm(app, key),
@@ -20,6 +25,7 @@ pub fn handle_event(app: &mut App, event: Event) -> Result<bool> {
         AppMode::SearchPanel(_) => return handle_search(app, key),
         AppMode::DirHistory => return handle_dir_history(app, key),
         AppMode::QuickSearch => return handle_quicksearch(app, key),
+        AppMode::Menu(_) => return handle_menu(app, key),
         AppMode::Browse => {}
     }
 
@@ -146,7 +152,12 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
 
         // --- F keys ---
         KeyCode::F(1) => {
-            app.mode = AppMode::Help;
+            app.open_help();
+        }
+        KeyCode::F(2) => {
+            let mut ms = MenuState::new();
+            ms.open = false;
+            app.mode = AppMode::Menu(ms);
         }
         KeyCode::F(3) => {
             app.open_viewer();
@@ -223,8 +234,17 @@ fn launch_editor(app: &mut App) -> Result<()> {
     let editor = app.config.editor.clone();
     let path = entry.path.clone();
 
+    // Restore normal terminal before handing control to an external editor.
+    disable_raw_mode()?;
+    execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture)?;
+
     use std::process::Command;
-    let _ = Command::new(&editor).arg(&path).spawn().and_then(|mut c| c.wait());
+    let _ = Command::new(&editor).arg(&path).status();
+
+    // Re-enter TUI mode once the editor exits.
+    enable_raw_mode()?;
+    execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
+
     app.reload_panels();
     Ok(())
 }
@@ -460,6 +480,14 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                 InputAction::DeselectPattern => {
                     app.active_panel_mut().select_pattern(&value, false);
                 }
+                InputAction::GoToPath => {
+                    let path = std::path::PathBuf::from(&value);
+                    if path.is_dir() {
+                        app.enter_dir(path)?;
+                    } else {
+                        app.status.text = format!("Not a directory: {}", value);
+                    }
+                }
             }
         }
         KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -575,5 +603,305 @@ fn handle_dir_history(app: &mut App, key: KeyEvent) -> Result<bool> {
         }
         _ => {}
     }
+    Ok(false)
+}
+
+// ---------------------------------------------------------------------------
+// Menu (F2)
+// ---------------------------------------------------------------------------
+
+fn handle_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
+    let (bar_pos, open, item_pos) = {
+        let AppMode::Menu(ref s) = app.mode else { return Ok(false); };
+        (s.bar_pos, s.open, s.item_pos)
+    };
+
+    match key.code {
+        KeyCode::Esc => {
+            app.mode = AppMode::Browse;
+        }
+        KeyCode::Left => {
+            let new_pos = bar_pos.saturating_sub(1);
+            if let AppMode::Menu(ref mut s) = app.mode {
+                s.bar_pos = new_pos;
+                s.item_pos = first_selectable(MENU_DATA[new_pos]);
+            }
+        }
+        KeyCode::Right => {
+            let new_pos = (bar_pos + 1).min(MENU_HEADERS.len() - 1);
+            if let AppMode::Menu(ref mut s) = app.mode {
+                s.bar_pos = new_pos;
+                s.item_pos = first_selectable(MENU_DATA[new_pos]);
+            }
+        }
+        KeyCode::Down if !open => {
+            if let AppMode::Menu(ref mut s) = app.mode {
+                s.open = true;
+                s.item_pos = first_selectable(MENU_DATA[bar_pos]);
+            }
+        }
+        KeyCode::Enter if !open => {
+            if let AppMode::Menu(ref mut s) = app.mode {
+                s.open = true;
+                s.item_pos = first_selectable(MENU_DATA[bar_pos]);
+            }
+        }
+        KeyCode::Up if open => {
+            let new_pos = prev_selectable(MENU_DATA[bar_pos], item_pos);
+            if let AppMode::Menu(ref mut s) = app.mode {
+                s.item_pos = new_pos;
+            }
+        }
+        KeyCode::Down if open => {
+            let new_pos = next_selectable(MENU_DATA[bar_pos], item_pos);
+            if let AppMode::Menu(ref mut s) = app.mode {
+                s.item_pos = new_pos;
+            }
+        }
+        KeyCode::Enter if open => {
+            let action = MENU_DATA[bar_pos][item_pos].2;
+            app.mode = AppMode::Browse;
+            return execute_menu_action(app, action);
+        }
+        _ => {}
+    }
+    Ok(false)
+}
+
+fn first_selectable(items: &[crate::app::MenuEntry]) -> usize {
+    items
+        .iter()
+        .position(|(_, _, a)| *a != MenuAction::Separator)
+        .unwrap_or(0)
+}
+
+fn next_selectable(items: &[crate::app::MenuEntry], current: usize) -> usize {
+    let n = items.len();
+    let mut pos = (current + 1) % n;
+    let start = pos;
+    loop {
+        if items[pos].2 != MenuAction::Separator {
+            break;
+        }
+        pos = (pos + 1) % n;
+        if pos == start {
+            break;
+        }
+    }
+    pos
+}
+
+fn prev_selectable(items: &[crate::app::MenuEntry], current: usize) -> usize {
+    let n = items.len();
+    let mut pos = if current == 0 { n - 1 } else { current - 1 };
+    let start = pos;
+    loop {
+        if items[pos].2 != MenuAction::Separator {
+            break;
+        }
+        pos = if pos == 0 { n - 1 } else { pos - 1 };
+        if pos == start {
+            break;
+        }
+    }
+    pos
+}
+
+fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<bool> {
+    match action {
+        MenuAction::ViewFile => {
+            app.open_viewer();
+        }
+        MenuAction::EditFile => {
+            launch_editor(app)?;
+        }
+        MenuAction::CopyFile => {
+            app.cmd_copy()?;
+        }
+        MenuAction::MoveFile => {
+            app.cmd_move()?;
+        }
+        MenuAction::MkDir => {
+            start_mkdir(app);
+        }
+        MenuAction::RenameFile => {
+            start_rename(app);
+        }
+        MenuAction::DeleteFile => {
+            app.cmd_delete();
+        }
+        MenuAction::Quit => {
+            return confirm_quit(app);
+        }
+        MenuAction::SwapPanels => {
+            app.swap_panels();
+            app.status.text = "Panels swapped".into();
+        }
+        MenuAction::SortName => {
+            app.set_sort(SortMode::Name);
+        }
+        MenuAction::SortExtension => {
+            app.set_sort(SortMode::Extension);
+        }
+        MenuAction::SortDate => {
+            app.set_sort(SortMode::Date);
+        }
+        MenuAction::SortSize => {
+            app.set_sort(SortMode::Size);
+        }
+        MenuAction::SortUnsorted => {
+            app.set_sort(SortMode::Unsorted);
+        }
+        MenuAction::ToggleHidden => {
+            let p = app.active_panel_mut();
+            p.show_hidden = !p.show_hidden;
+            let _ = p.reload();
+        }
+        MenuAction::Reload => {
+            app.reload_panels();
+            app.status.text = "Reloaded".into();
+        }
+        MenuAction::GoToPath => {
+            let current = app.active_panel().path.to_string_lossy().into_owned();
+            let cursor = current.len();
+            app.mode = AppMode::Input(InputDialog {
+                title: "Go to Path".into(),
+                prompt: "Path:".into(),
+                value: current,
+                cursor,
+                action: InputAction::GoToPath,
+            });
+        }
+        MenuAction::SelectPattern => {
+            app.mode = open_wildcard_dialog("Select pattern:", true);
+        }
+        MenuAction::DeselectPattern => {
+            app.mode = open_wildcard_dialog("Deselect pattern:", false);
+        }
+        MenuAction::InvertSelection => {
+            app.active_panel_mut().invert_selection();
+        }
+        MenuAction::SearchFiles => {
+            app.open_search();
+        }
+        MenuAction::DirHistory => {
+            app.history_cursor = 0;
+            app.mode = AppMode::DirHistory;
+        }
+        MenuAction::ToggleFBar => {
+            app.config.show_fkey_bar = !app.config.show_fkey_bar;
+        }
+        MenuAction::SaveConfig => {
+            match app.save_config() {
+                Ok(_) => app.status.text = "Config saved".into(),
+                Err(e) => app.status.text = format!("Save error: {}", e),
+            }
+        }
+        MenuAction::Help => {
+            app.open_help();
+        }
+        MenuAction::About => {
+            app.status.text = format!(
+                "KKC {} \u{2014} Rust reimplementation of KKC-DOS",
+                env!("CARGO_PKG_VERSION")
+            );
+        }
+        MenuAction::Separator => {}
+    }
+    Ok(false)
+}
+
+fn handle_help(app: &mut App, key: KeyEvent) -> Result<bool> {
+    use crate::help::HelpView;
+
+    let Some(state) = (match &mut app.mode {
+        AppMode::Help(state) => Some(state),
+        _ => None,
+    }) else {
+        return Ok(false);
+    };
+
+    match state.view {
+        HelpView::Index { ref mut cursor } => match key.code {
+            KeyCode::Esc | KeyCode::F(10) => app.mode = AppMode::Browse,
+            KeyCode::Up => *cursor = cursor.saturating_sub(1),
+            KeyCode::Down => {
+                let max = state.system.sections.len().saturating_sub(1);
+                *cursor = (*cursor + 1).min(max);
+            }
+            KeyCode::Home => *cursor = 0,
+            KeyCode::End => *cursor = state.system.sections.len().saturating_sub(1),
+            KeyCode::Enter => {
+                let section = *cursor;
+                let prev = state.view;
+                state.history.push(prev);
+                state.view = HelpView::Topics { section, cursor: 0 };
+            }
+            _ => {}
+        },
+        HelpView::Topics { section, ref mut cursor } => match key.code {
+            KeyCode::Esc => {
+                if !state.back() {
+                    app.mode = AppMode::Browse;
+                }
+            }
+            KeyCode::Backspace => {
+                let _ = state.back();
+            }
+            KeyCode::Up => *cursor = cursor.saturating_sub(1),
+            KeyCode::Down => {
+                let max = state.system.sections[section].topics.len().saturating_sub(1);
+                *cursor = (*cursor + 1).min(max);
+            }
+            KeyCode::Home => *cursor = 0,
+            KeyCode::End => *cursor = state.system.sections[section].topics.len().saturating_sub(1),
+            KeyCode::Enter => {
+                let topic = state.system.sections[section].topics[*cursor];
+                let prev = state.view;
+                state.history.push(prev);
+                state.view = HelpView::Page { topic, scroll: 0, selected_link: 0 };
+            }
+            _ => {}
+        },
+        HelpView::Page { topic, ref mut scroll, ref mut selected_link } => match key.code {
+            KeyCode::Esc => {
+                if !state.back() {
+                    app.mode = AppMode::Browse;
+                }
+            }
+            KeyCode::Backspace => {
+                let _ = state.back();
+            }
+            KeyCode::Up => *scroll = scroll.saturating_sub(1),
+            KeyCode::Down => *scroll = scroll.saturating_add(1),
+            KeyCode::PageUp => *scroll = scroll.saturating_sub(12),
+            KeyCode::PageDown => *scroll = scroll.saturating_add(12),
+            KeyCode::Home => *scroll = 0,
+            KeyCode::Tab => {
+                let count = state.system.topics[topic].link_count();
+                if count > 0 {
+                    *selected_link = (*selected_link + 1) % count;
+                }
+            }
+            KeyCode::BackTab => {
+                let count = state.system.topics[topic].link_count();
+                if count > 0 {
+                    *selected_link = if *selected_link == 0 { count - 1 } else { *selected_link - 1 };
+                }
+            }
+            KeyCode::Enter => {
+                let target = state.system.topics[topic]
+                    .selected_link_target(*selected_link)
+                    .map(str::to_string);
+                if let Some(target) = target {
+                    if !state.open_topic_by_name(&target) {
+                        app.status.text = format!("Unknown help topic: {}", target);
+                    }
+                }
+            }
+            _ => {}
+        },
+    }
+
     Ok(false)
 }
