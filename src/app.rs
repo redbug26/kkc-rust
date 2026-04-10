@@ -3,7 +3,7 @@ use crate::file_ops;
 use crate::help::HelpState;
 use crate::panel::Panel;
 use crate::search::{search, SearchQuery, SearchResult};
-use crate::viewer::Viewer;
+use crate::viewer::{EncodingMode, LineFeedMode, MaskKind, ViewMode, Viewer};
 use anyhow::Result;
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -41,6 +41,8 @@ pub enum AppMode {
     Viewer(Viewer),
     /// Viewer with the '/' search bar active.
     ViewerSearching(Viewer),
+    /// Viewer with a popup choice menu.
+    ViewerMenu(Viewer, ViewerMenuState),
     /// Search panel (Alt-F7).
     SearchPanel(SearchState),
     /// Confirmation dialog.
@@ -105,6 +107,60 @@ pub enum MenuAction {
     SaveConfig,
     Help,
     About,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewerMenuKind {
+    Mode,
+    LineFeed,
+    Preproc,
+    Encoding,
+    Mask,
+}
+
+#[derive(Debug, Clone)]
+pub struct ViewerMenuState {
+    pub kind: ViewerMenuKind,
+    pub cursor: usize,
+    pub param: u8,
+}
+
+impl ViewerMenuState {
+    pub fn new(kind: ViewerMenuKind, viewer: &Viewer) -> Self {
+        let cursor = match kind {
+            ViewerMenuKind::Mode => match viewer.mode {
+                ViewMode::Text => 0,
+                ViewMode::Hex => 1,
+                ViewMode::Ansi => 2,
+                ViewMode::Html => 3,
+            },
+            ViewerMenuKind::LineFeed => match viewer.line_feed {
+                LineFeedMode::DosCrLf => 0,
+                LineFeedMode::UnixLf => 1,
+                LineFeedMode::MacCr => 2,
+                LineFeedMode::Mixed => 3,
+            },
+            ViewerMenuKind::Preproc => 0,
+            ViewerMenuKind::Encoding => match viewer.encoding {
+                EncodingMode::Plain => 0,
+                EncodingMode::Cp437 => 1,
+            },
+            ViewerMenuKind::Mask => {
+                if !viewer.mask_enabled {
+                    4
+                } else {
+                    match viewer.mask {
+                        MaskKind::C => 0,
+                        MaskKind::Pascal => 1,
+                        MaskKind::Assembler => 2,
+                        MaskKind::Ketchup => 3,
+                    }
+                }
+            }
+        };
+        let param = viewer.preproc_last_param().unwrap_or(0);
+        Self { kind, cursor, param }
+    }
 }
 
 pub type MenuEntry = (&'static str, Option<&'static str>, MenuAction);

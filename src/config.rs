@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 /// Returns the ProjectDirs handle for KKC.
 pub fn project_dirs() -> Result<ProjectDirs> {
-    ProjectDirs::from("com", "redbug26", "kkc")
+    ProjectDirs::from("be", "kyuran", "kkc")
         .context("Could not determine project directories")
 }
 

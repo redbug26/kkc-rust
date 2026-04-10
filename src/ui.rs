@@ -1,4 +1,4 @@
-use crate::app::{ActivePanel, App, AppMode, ConfirmDialog, InputDialog, MenuState, MenuAction, SearchState, MENU_DATA, MENU_HEADERS};
+use crate::app::{ActivePanel, App, AppMode, ConfirmDialog, InputDialog, MenuState, MenuAction, SearchState, ViewerMenuKind, ViewerMenuState, MENU_DATA, MENU_HEADERS};
 use crate::help::HelpView;
 use crate::config::SortMode;
 use crate::file_ops::format_size;
@@ -100,6 +100,11 @@ pub fn render(f: &mut Frame, app: &App) {
         }
         AppMode::ViewerSearching(v) => {
             render_viewer(f, v, true, f.area());
+            return;
+        }
+        AppMode::ViewerMenu(v, menu) => {
+            render_viewer(f, v, false, f.area());
+            render_viewer_menu(f, v, menu, f.area());
             return;
         }
         AppMode::Help(state) => {
@@ -273,7 +278,7 @@ fn render_panel(
             let size_str = if entry.name == ".." {
                 format!("{:>width$}", "↑ up-dir ↑", width = size_w)
             } else if entry.is_dir {
-                format!("{:>width$}", "⌦sub-dir⌫", width = size_w)
+                format!("{:>width$}", "⌦sub--dir⌫", width = size_w)
             } else {
                 format!("{:>width$}", format_dos_number(entry.size), width = size_w)
             };
@@ -597,23 +602,78 @@ fn render_fkey_bar(f: &mut Frame, area: Rect) {
 // Viewer
 // ---------------------------------------------------------------------------
 
-fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
-    let mode_label = match v.mode {
-        ViewMode::Text => "Text",
-        ViewMode::Hex => "Hex",
+fn viewer_area(v: &Viewer, area: Rect) -> Rect {
+    if v.zoomed {
+        return area;
+    }
+
+    let max_width = match v.mode {
+        ViewMode::Hex => 80u16,
+        ViewMode::Html => 82u16,
+        _ => v
+            .current_plain_lines()
+            .iter()
+            .map(|line| line.chars().count() as u16)
+            .max()
+            .unwrap_or(40)
+            .clamp(40, area.width.saturating_sub(4).max(40)),
     };
+    let width = (max_width + 2).min(area.width);
+    let height = (v.line_count() as u16 + 3).clamp(8, area.height);
+    Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    }
+}
+
+fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
+    let area = viewer_area(v, area);
     let file_name = v.path.file_name().unwrap_or_default().to_string_lossy();
     let match_info = if !v.search.is_empty() {
         format!(" [{}/{}]", v.match_pos + 1, v.matches.len())
     } else {
         String::new()
     };
+    let col_info = if matches!(v.mode, ViewMode::Text | ViewMode::Ansi) && !v.wrap && v.hscroll > 0 {
+        format!(" Col:{} ", v.hscroll)
+    } else {
+        String::new()
+    };
+    let lf_info = if matches!(v.mode, ViewMode::Text | ViewMode::Ansi) {
+        format!(" LF:{} ", v.line_feed_label())
+    } else {
+        String::new()
+    };
+    let pre_info = if matches!(v.mode, ViewMode::Text | ViewMode::Ansi) {
+        format!(" Pre:{} ", v.preproc_label())
+    } else {
+        String::new()
+    };
+    let enc_info = if matches!(v.mode, ViewMode::Text | ViewMode::Ansi | ViewMode::Hex) {
+        format!(" Enc:{} ", v.encoding_label())
+    } else {
+        String::new()
+    };
+    let mask_info = if matches!(v.mode, ViewMode::Text | ViewMode::Ansi) {
+        format!(" Mask:{} ", v.mask_label())
+    } else {
+        String::new()
+    };
+    let zoom_info = format!(" Zoom:{} ", v.zoom_label());
     let title = format!(
-        " {} [{}] {}/{}{} ",
+        " {} [{}] {}/{}{}{}{}{}{}{}{} ",
         file_name,
-        mode_label,
+        v.mode_label(),
         v.scroll + 1,
-        v.lines.len().max(1),
+        v.line_count(),
+        lf_info,
+        pre_info,
+        enc_info,
+        mask_info,
+        zoom_info,
+        col_info,
         match_info,
     );
 
@@ -635,34 +695,39 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
     let width = inner.width as usize;
 
     let search_lower = v.search.to_lowercase();
-
     let items: Vec<Line> = v
-        .lines
-        .iter()
+        .render_lines(width)
+        .into_iter()
         .skip(v.scroll)
         .take(height)
         .enumerate()
         .map(|(rel_idx, line)| {
             let abs_idx = v.scroll + rel_idx;
-            let is_match = !search_lower.is_empty()
-                && line.to_lowercase().contains(&search_lower);
-            let is_current_match = is_match
-                && v.matches.get(v.match_pos).copied() == Some(abs_idx);
+            let plain = line
+                .spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>();
+            let is_match = !search_lower.is_empty() && plain.to_lowercase().contains(&search_lower);
+            let is_current_match = is_match && v.matches.get(v.match_pos).copied() == Some(abs_idx);
 
-            let style = if is_current_match {
-                Style::default().fg(Color::Black).bg(Color::Yellow)
-            } else if is_match {
-                Style::default().fg(Color::Black).bg(Color::LightYellow)
+            if is_current_match {
+                Line::from(vec![Span::styled(
+                    truncate_str(&plain, width),
+                    Style::default().fg(Color::Black).bg(Color::Yellow),
+                )])
+            } else if is_match && !matches!(v.mode, ViewMode::Html) {
+                Line::from(vec![Span::styled(
+                    truncate_str(&plain, width),
+                    Style::default().fg(Color::Black).bg(Color::LightYellow),
+                )])
             } else {
-                Style::default().fg(Color::White)
-            };
-
-            let display = truncate_str(line, width);
-            Line::from(Span::styled(display, style))
+                line
+            }
         })
         .collect();
 
-    if v.wrap && matches!(v.mode, ViewMode::Text) {
+    if v.wrap && matches!(v.mode, ViewMode::Text | ViewMode::Ansi | ViewMode::Html) {
         f.render_widget(Paragraph::new(items).wrap(Wrap { trim: false }), inner);
     } else {
         let list = List::new(items.into_iter().map(ListItem::new).collect::<Vec<_>>());
@@ -695,7 +760,7 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
         f.set_cursor_position((cx, area.y + area.height - 1));
     } else {
         // Normal help bar
-        let help = Paragraph::new(" Esc:Close  Tab:Hex/Text  /:Search  n:Next  N:Prev  Home/End ")
+        let help = Paragraph::new(" F10:Close  F2:Wrap  F3:LnFeed  F4:Mode  F5:Zoom  F6:Prepro  F7:Search  F8:Enc  F9:Mask ")
             .style(Style::default().fg(Color::Black).bg(Color::Cyan));
         let bar_area = Rect {
             x: area.x,
@@ -704,6 +769,108 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
             height: 1,
         };
         f.render_widget(help, bar_area);
+    }
+}
+
+fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, area: Rect) {
+    let items: Vec<String> = match menu.kind {
+        ViewerMenuKind::Mode => vec!["Text", "Binary", "Ansi", "Html"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        ViewerMenuKind::LineFeed => vec!["DOS (CR/LF)", "Unix (LF)", "Mac (CR)", "Mixed"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        ViewerMenuKind::Preproc => {
+            let mut items = Vec::new();
+            for idx in 0..viewer.preproc_len() {
+                if let Some(label) = viewer.preproc_item_label(idx) {
+                    items.push(label);
+                }
+            }
+            if viewer.preproc_len() > 0 {
+                items.push("────────".into());
+            }
+            items.extend([
+                "Add XOR".into(),
+                "Add AND".into(),
+                "Add OR".into(),
+                "Add NEG".into(),
+                "Add ROR".into(),
+                "Add ADD".into(),
+                "Add Latin".into(),
+                "Add Elite".into(),
+                "Clear All".into(),
+            ]);
+            items
+        }
+        ViewerMenuKind::Encoding => vec!["Plain ASCII".into(), "DOS CP437".into()],
+        ViewerMenuKind::Mask => vec!["C Style", "Pascal Style", "Assembler Style", "Ketchup Style", "Mask OFF"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+    };
+
+    let title = match menu.kind {
+        ViewerMenuKind::Mode => " Change Viewer ",
+        ViewerMenuKind::LineFeed => " Change Line Feed ",
+        ViewerMenuKind::Preproc => " Preprocess ",
+        ViewerMenuKind::Encoding => " Character Set ",
+        ViewerMenuKind::Mask => " Change Mask ",
+    };
+
+    let width = items.iter().map(|s| s.len()).max().unwrap_or(10) as u16 + 6;
+    let extra = if menu.kind == ViewerMenuKind::Preproc { 3 } else { 0 };
+    let height = items.len() as u16 + 2 + extra;
+    let popup = Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    };
+
+    f.render_widget(Clear, popup);
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(CLR_PANEL_BORDER))
+        .style(Style::default().bg(CLR_MENU_DD_BG));
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    let list_items = items
+        .iter()
+        .enumerate()
+        .map(|(idx, item)| {
+            let is_separator = menu.kind == ViewerMenuKind::Preproc && viewer.preproc_len() > 0 && idx == viewer.preproc_len();
+            let style = if is_separator {
+                Style::default().fg(CLR_MENU_DD_SEP).bg(CLR_MENU_DD_BG)
+            } else if idx == menu.cursor {
+                Style::default().fg(CLR_MENU_SEL_FG).bg(CLR_MENU_SEL_BG).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
+            };
+            ListItem::new(Line::from(Span::styled(format!(" {}", item), style)))
+        })
+        .collect::<Vec<_>>();
+
+    let list_height = inner.height.saturating_sub(extra);
+    let list_area = Rect { x: inner.x, y: inner.y, width: inner.width, height: list_height };
+    f.render_widget(List::new(list_items), list_area);
+
+    if menu.kind == ViewerMenuKind::Preproc {
+        let info_area = Rect {
+            x: inner.x,
+            y: inner.y + list_height,
+            width: inner.width,
+            height: inner.height.saturating_sub(list_height),
+        };
+        let info = format!(" Param:0x{:02X}  \u{2190}/\u{2192}:Edit  Ctrl+\u{2191}/\u{2193}:Move  Del:Remove ", menu.param);
+        f.render_widget(
+            Paragraph::new(info).style(Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)),
+            info_area,
+        );
     }
 }
 
