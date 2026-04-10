@@ -1,3 +1,4 @@
+use crate::archive;
 use crate::config::SortMode;
 use crate::file_types::FileCategory;
 use anyhow::{Context, Result};
@@ -96,6 +97,13 @@ pub struct Panel {
     pub show_hidden: bool,
     /// Incremental name filter typed by the user.
     pub quicksearch: String,
+    archive: Option<ArchiveMount>,
+}
+
+#[derive(Debug)]
+struct ArchiveMount {
+    archive_path: PathBuf,
+    temp_root: PathBuf,
 }
 
 impl Panel {
@@ -108,6 +116,7 @@ impl Panel {
             sort,
             show_hidden,
             quicksearch: String::new(),
+            archive: None,
         };
         let _ = p.reload();
         p
@@ -152,10 +161,14 @@ impl Panel {
     }
 
     fn parent_entry(&self) -> Option<Entry> {
-        let parent = self.path.parent()?;
+        let parent = if self.is_archive_root() {
+            self.archive.as_ref()?.archive_path.parent()?.to_path_buf()
+        } else {
+            self.path.parent()?.to_path_buf()
+        };
         Some(Entry {
             name: "..".into(),
-            path: parent.to_path_buf(),
+            path: parent,
             is_dir: true,
             is_symlink: false,
             size: 0,
@@ -313,6 +326,9 @@ impl Panel {
     // -----------------------------------------------------------------------
 
     pub fn enter_dir(&mut self, path: PathBuf) -> Result<()> {
+        if self.archive.is_some() && !self.is_inside_archive_temp(&path) {
+            self.clear_archive_mount();
+        }
         self.path = path;
         self.cursor = 0;
         self.scroll = 0;
@@ -321,6 +337,88 @@ impl Panel {
         // from the previous directory when reloading.
         self.entries.clear();
         self.reload()
+    }
+
+    pub fn enter_archive(&mut self, archive_path: PathBuf) -> Result<()> {
+        self.clear_archive_mount();
+        let temp_root = archive::extract_archive_to_temp(&archive_path)?;
+        self.archive = Some(ArchiveMount {
+            archive_path,
+            temp_root: temp_root.clone(),
+        });
+        self.path = temp_root;
+        self.cursor = 0;
+        self.scroll = 0;
+        self.quicksearch.clear();
+        self.entries.clear();
+        self.reload()
+    }
+
+    pub fn leave_archive(&mut self) -> Option<(PathBuf, String)> {
+        let mount = self.archive.take()?;
+        let parent = mount.archive_path.parent()?.to_path_buf();
+        let archive_name = mount
+            .archive_path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        self.path = parent.clone();
+        self.cursor = 0;
+        self.scroll = 0;
+        self.quicksearch.clear();
+        self.entries.clear();
+        let _ = self.reload();
+        let _ = fs::remove_dir_all(mount.temp_root);
+        Some((parent, archive_name))
+    }
+
+    pub fn display_path(&self) -> String {
+        if let Some(mount) = &self.archive {
+            let rel = self.path.strip_prefix(&mount.temp_root).unwrap_or(Path::new(""));
+            if rel.as_os_str().is_empty() {
+                mount.archive_path.to_string_lossy().into_owned()
+            } else {
+                format!("{}{}", mount.archive_path.display(), format!("/{}", rel.display()))
+            }
+        } else {
+            self.path.to_string_lossy().into_owned()
+        }
+    }
+
+    pub fn persisted_path(&self) -> PathBuf {
+        if let Some(mount) = &self.archive {
+            mount.archive_path
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| self.path.clone())
+        } else {
+            self.path.clone()
+        }
+    }
+
+    pub fn is_archive_view(&self) -> bool {
+        self.archive.is_some()
+    }
+
+    pub fn is_archive_root(&self) -> bool {
+        self.archive
+            .as_ref()
+            .map(|mount| self.path == mount.temp_root)
+            .unwrap_or(false)
+    }
+
+    fn is_inside_archive_temp(&self, path: &Path) -> bool {
+        self.archive
+            .as_ref()
+            .map(|mount| path.starts_with(&mount.temp_root))
+            .unwrap_or(false)
+    }
+
+    fn clear_archive_mount(&mut self) {
+        if let Some(mount) = self.archive.take() {
+            let _ = fs::remove_dir_all(mount.temp_root);
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -364,6 +462,12 @@ impl Panel {
 
     pub fn current_entry(&self) -> Option<&Entry> {
         self.entries.get(self.cursor)
+    }
+}
+
+impl Drop for Panel {
+    fn drop(&mut self) {
+        self.clear_archive_mount();
     }
 }
 

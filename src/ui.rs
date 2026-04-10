@@ -189,7 +189,8 @@ fn render_panel(
         Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)
     };
 
-    let title_text = truncate_path(&panel.path.to_string_lossy(), area.width.saturating_sub(4) as usize);
+    let display_path = panel.display_path();
+    let title_text = truncate_path(&display_path, area.width.saturating_sub(4) as usize);
     let title = format!(" {} ", title_text);
 
     let block = Block::default()

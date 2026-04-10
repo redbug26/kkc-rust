@@ -1,3 +1,4 @@
+use crate::archive::supports_archive_navigation;
 use crate::app::{
     App, AppMode, ConfirmAction, InputAction, InputDialog, MenuAction, MenuState,
     ViewerMenuKind, ViewerMenuState,
@@ -208,6 +209,10 @@ fn handle_enter(app: &mut App) -> Result<()> {
         app.go_parent()?;
     } else if entry.is_dir {
         app.enter_dir(entry.path.clone())?;
+    } else if supports_archive_navigation(&entry.path) {
+        if let Err(e) = app.enter_archive(entry.path.clone()) {
+            app.status.text = format!("Cannot enter archive: {}", e);
+        }
     } else {
         // Open with system default
         if let Err(e) = open::that(&entry.path) {
@@ -231,6 +236,10 @@ fn confirm_quit(app: &mut App) -> Result<bool> {
 }
 
 fn launch_editor(app: &mut App) -> Result<()> {
+    if app.active_panel().is_archive_view() {
+        app.status.text = "Editing in archive is not supported".into();
+        return Ok(());
+    }
     let entry = match app.active_panel().current_entry() {
         Some(e) if !e.is_dir && e.name != ".." => e.clone(),
         _ => return Ok(()),
@@ -255,6 +264,10 @@ fn launch_editor(app: &mut App) -> Result<()> {
 }
 
 fn start_rename(app: &mut App) {
+    if app.active_panel().is_archive_view() {
+        app.status.text = "Rename in archive is not supported".into();
+        return;
+    }
     if let Some(entry) = app.active_panel().current_entry() {
         if entry.name == ".." {
             return;
@@ -272,6 +285,10 @@ fn start_rename(app: &mut App) {
 }
 
 fn start_mkdir(app: &mut App) {
+    if app.active_panel().is_archive_view() {
+        app.status.text = "Create directory in archive is not supported".into();
+        return;
+    }
     let current = app.active_panel().path.clone();
     app.mode = AppMode::Input(InputDialog {
         title: "Create Directory".into(),
@@ -1048,7 +1065,7 @@ fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<bool> {
             app.status.text = "Reloaded".into();
         }
         MenuAction::GoToPath => {
-            let current = app.active_panel().path.to_string_lossy().into_owned();
+            let current = app.active_panel().display_path();
             let cursor = current.len();
             app.mode = AppMode::Input(InputDialog {
                 title: "Go to Path".into(),

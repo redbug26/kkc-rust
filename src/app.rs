@@ -436,7 +436,30 @@ impl App {
         self.active_panel_mut().enter_dir(path)
     }
 
+    pub fn enter_archive(&mut self, path: PathBuf) -> Result<()> {
+        self.push_dir_history(path.clone());
+        self.active_panel_mut().enter_archive(path)
+    }
+
     pub fn go_parent(&mut self) -> Result<()> {
+        if self.active_panel().is_archive_root() {
+            if let Some((parent, archive_name)) = self.active_panel_mut().leave_archive() {
+                self.push_dir_history(parent);
+                if let Some(idx) = self
+                    .active_panel()
+                    .entries
+                    .iter()
+                    .position(|e| e.name == archive_name)
+                {
+                    let panel = self.active_panel_mut();
+                    panel.cursor = idx;
+                    if panel.cursor < panel.scroll {
+                        panel.scroll = panel.cursor;
+                    }
+                }
+            }
+            return Ok(());
+        }
         let current = self.active_panel().path.clone();
         if let Some(parent) = current.parent() {
             let parent = parent.to_path_buf();
@@ -473,6 +496,10 @@ impl App {
     // -----------------------------------------------------------------------
 
     pub fn cmd_copy(&mut self) -> Result<()> {
+        if self.other_panel().is_archive_view() {
+            self.status.text = "Copy to archive is not supported".into();
+            return Ok(());
+        }
         let sources: Vec<PathBuf> = self
             .active_panel()
             .effective_selection()
@@ -501,6 +528,10 @@ impl App {
     }
 
     pub fn cmd_move(&mut self) -> Result<()> {
+        if self.active_panel().is_archive_view() || self.other_panel().is_archive_view() {
+            self.status.text = "Move in archive is not supported".into();
+            return Ok(());
+        }
         let sources: Vec<PathBuf> = self
             .active_panel()
             .effective_selection()
@@ -529,6 +560,10 @@ impl App {
     }
 
     pub fn cmd_delete_confirmed(&mut self, paths: Vec<PathBuf>) -> Result<()> {
+        if self.active_panel().is_archive_view() {
+            self.status.text = "Delete in archive is not supported".into();
+            return Ok(());
+        }
         let mut errors = Vec::new();
         for p in &paths {
             if let Err(e) = file_ops::delete_entry(p) {
@@ -607,7 +642,7 @@ impl App {
     // -----------------------------------------------------------------------
 
     pub fn open_search(&mut self) {
-        let start = self.active_panel().path.clone();
+        let start = self.active_panel().persisted_path();
         self.mode = AppMode::SearchPanel(SearchState {
             query: String::new(),
             content_query: String::new(),
@@ -660,10 +695,10 @@ impl App {
     // -----------------------------------------------------------------------
 
     pub fn save_config(&mut self) -> Result<()> {
-        self.config.left.path = self.left.path.clone();
+        self.config.left.path = self.left.persisted_path();
         self.config.left.sort = self.left.sort;
         self.config.left.show_hidden = self.left.show_hidden;
-        self.config.right.path = self.right.path.clone();
+        self.config.right.path = self.right.persisted_path();
         self.config.right.sort = self.right.sort;
         self.config.right.show_hidden = self.right.show_hidden;
         self.config.save()
