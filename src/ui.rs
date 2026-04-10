@@ -629,7 +629,19 @@ fn viewer_area(v: &Viewer, area: Rect) -> Rect {
 }
 
 fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
-    let area = viewer_area(v, area);
+    let footer_area = Rect {
+        x: area.x,
+        y: area.y + area.height.saturating_sub(1),
+        width: area.width,
+        height: 1,
+    };
+    let viewer_host = Rect {
+        x: area.x,
+        y: area.y,
+        width: area.width,
+        height: area.height.saturating_sub(1),
+    };
+    let area = viewer_area(v, viewer_host);
     let file_name = v.path.file_name().unwrap_or_default().to_string_lossy();
     let match_info = if !v.search.is_empty() {
         format!(" [{}/{}]", v.match_pos + 1, v.matches.len())
@@ -677,19 +689,12 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
         match_info,
     );
 
-    // Reserve last line for search bar when searching
-    let content_area = if searching {
-        Rect { height: area.height.saturating_sub(1), ..area }
-    } else {
-        area
-    };
-
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(CLR_PANEL_BORDER));
-    let inner = block.inner(content_area);
-    f.render_widget(block, content_area);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
 
     let height = inner.height as usize;
     let width = inner.width as usize;
@@ -735,13 +740,6 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
     }
 
     if searching {
-        // Live search bar at the very bottom
-        let bar_area = Rect {
-            x: area.x,
-            y: area.y + area.height - 1,
-            width: area.width,
-            height: 1,
-        };
         let label = format!(" Search: {}_ ", v.search);
         let found_count = v.matches.len();
         let found_label = if v.search.is_empty() {
@@ -753,22 +751,14 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
         f.render_widget(
             Paragraph::new(bar_text)
                 .style(Style::default().fg(Color::Black).bg(Color::LightYellow)),
-            bar_area,
+            footer_area,
         );
-        // Show cursor
-        let cx = (area.x + 9 + v.search.len() as u16).min(area.x + area.width - 1);
-        f.set_cursor_position((cx, area.y + area.height - 1));
+        let cx = (footer_area.x + 9 + v.search.len() as u16).min(footer_area.x + footer_area.width - 1);
+        f.set_cursor_position((cx, footer_area.y));
     } else {
-        // Normal help bar
         let help = Paragraph::new(" F10:Close  F2:Wrap  F3:LnFeed  F4:Mode  F5:Zoom  F6:Prepro  F7:Search  F8:Enc  F9:Mask ")
             .style(Style::default().fg(Color::Black).bg(Color::Cyan));
-        let bar_area = Rect {
-            x: area.x,
-            y: area.y + area.height - 1,
-            width: area.width,
-            height: 1,
-        };
-        f.render_widget(help, bar_area);
+        f.render_widget(help, footer_area);
     }
 }
 
