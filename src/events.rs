@@ -201,7 +201,9 @@ fn handle_enter(app: &mut App) -> Result<()> {
         None => return Ok(()),
     };
 
-    if entry.is_dir || entry.name == ".." {
+    if entry.name == ".." {
+        app.go_parent()?;
+    } else if entry.is_dir {
         app.enter_dir(entry.path.clone())?;
     } else {
         // Open with system default

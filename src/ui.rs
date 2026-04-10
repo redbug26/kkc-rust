@@ -214,13 +214,7 @@ fn render_panel(
         x: inner.x,
         y: inner.y + 1,
         width: inner.width,
-        height: inner.height.saturating_sub(3),
-    };
-    let separator_area = Rect {
-        x: inner.x,
-        y: inner.y + inner.height - 2,
-        width: inner.width,
-        height: 1,
+        height: inner.height.saturating_sub(2),
     };
     let footer_area = Rect {
         x: inner.x,
@@ -237,10 +231,6 @@ fn render_panel(
     let time_w = 5usize;
     let name_w = (inner.width as usize)
         .saturating_sub(size_w + date_w + time_w + 3);
-
-    let sep1_x = inner.x + name_w as u16;
-    let sep2_x = sep1_x + 1 + size_w as u16;
-    let sep3_x = sep2_x + 1 + date_w as u16;
 
     let header_line = Line::from(vec![
         Span::styled(format!("{:^width$}", "Name", width = name_w), Style::default().fg(CLR_HEADER_FG).bg(CLR_HEADER_BG).add_modifier(Modifier::BOLD)),
@@ -260,7 +250,7 @@ fn render_panel(
         .skip(panel.scroll)
         .take(list_height)
         .map(|(idx, entry)| {
-            let is_cursor = idx == panel.cursor;
+            let is_cursor = active && idx == panel.cursor;
             let fg = if is_cursor {
                 CLR_CURSOR_FG
             } else if entry.selected {
@@ -281,11 +271,9 @@ fn render_panel(
             let name_str = truncate_str(&name_str, name_w);
 
             let size_str = if entry.name == ".." {
-                format!("{:>width$}", "UP-DIR", width = size_w)
+                format!("{:>width$}", "↑ up-dir ↑", width = size_w)
             } else if entry.is_dir {
-                format!("{:>width$}", "SUB-DIR", width = size_w)
-            } else if entry.name == ".." {
-                format!("{:>width$}", "UP-DIR", width = size_w)
+                format!("{:>width$}", "⌦sub-dir⌫", width = size_w)
             } else {
                 format!("{:>width$}", format_dos_number(entry.size), width = size_w)
             };
@@ -337,8 +325,6 @@ fn render_panel(
         );
     }
 
-    render_panel_separator(f, separator_area, inner.width, sep1_x - inner.x, sep2_x - inner.x, sep3_x - inner.x, border_style.fg.unwrap_or(CLR_PANEL_BORDER));
-
     // Footer (selection info)
     if inner.height > 1 {
         let sel_count = panel.selected_count();
@@ -364,36 +350,6 @@ fn render_panel(
             footer_area,
         );
     }
-}
-
-fn render_panel_separator(
-    f: &mut Frame,
-    area: Rect,
-    width: u16,
-    sep1: u16,
-    sep2: u16,
-    sep3: u16,
-    color: Color,
-) {
-    if area.width == 0 || area.height == 0 || width == 0 {
-        return;
-    }
-
-    let mut chars = vec!['─'; width as usize];
-    chars[0] = '├';
-    chars[width.saturating_sub(1) as usize] = '┤';
-
-    for sep in [sep1, sep2, sep3] {
-        if sep < width {
-            chars[sep as usize] = '┴';
-        }
-    }
-
-    let text: String = chars.into_iter().collect();
-    f.render_widget(
-        Paragraph::new(text).style(Style::default().fg(color).bg(CLR_PANEL_BG)),
-        area,
-    );
 }
 
 fn render_center_buttons(f: &mut Frame, area: Rect) {

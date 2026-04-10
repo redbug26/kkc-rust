@@ -384,7 +384,6 @@ impl App {
         let current = self.active_panel().path.clone();
         if let Some(parent) = current.parent() {
             let parent = parent.to_path_buf();
-            // Set cursor to the directory we just left
             let old_name = current
                 .file_name()
                 .unwrap_or_default()
@@ -398,7 +397,11 @@ impl App {
                 .iter()
                 .position(|e| e.name == old_name)
             {
-                self.active_panel_mut().cursor = idx;
+                let panel = self.active_panel_mut();
+                panel.cursor = idx;
+                if panel.cursor < panel.scroll {
+                    panel.scroll = panel.cursor;
+                }
             }
         }
         Ok(())

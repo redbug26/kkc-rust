@@ -317,6 +317,9 @@ impl Panel {
         self.cursor = 0;
         self.scroll = 0;
         self.quicksearch.clear();
+        // Changing directory is a fresh listing; do not preserve a filename
+        // from the previous directory when reloading.
+        self.entries.clear();
         self.reload()
     }
 

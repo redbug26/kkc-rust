@@ -10,7 +10,7 @@ mod ui;
 mod viewer;
 
 use anyhow::Result;
-use app::App;
+use app::{App, AppMode};
 use config::Config;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture},
@@ -26,7 +26,9 @@ fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
-    Ok(Terminal::new(backend)?)
+    let mut terminal = Terminal::new(backend)?;
+    terminal.hide_cursor()?;
+    Ok(terminal)
 }
 
 fn teardown_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
@@ -48,14 +50,19 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
         // Draw (clamp_scroll first)
         {
             let area = terminal.size()?;
-            let panel_h = area.height.saturating_sub(3) as usize;
-            let inner_h = panel_h.saturating_sub(2);
+            let reserved_rows = if app.config.show_fkey_bar { 7 } else { 6 };
+            let visible_rows = area.height.saturating_sub(reserved_rows) as usize;
 
-            app.left.clamp_scroll(inner_h.max(1));
-            app.right.clamp_scroll(inner_h.max(1));
+            app.left.clamp_scroll(visible_rows.max(1));
+            app.right.clamp_scroll(visible_rows.max(1));
         }
 
         terminal.draw(|f| ui::render(f, &app))?;
+
+        match app.mode {
+            AppMode::Input(_) | AppMode::ViewerSearching(_) => terminal.show_cursor()?,
+            _ => terminal.hide_cursor()?,
+        }
 
         // Poll for input (~60 fps)
         if event::poll(Duration::from_millis(16))? {
