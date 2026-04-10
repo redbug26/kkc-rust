@@ -1,6 +1,6 @@
 use crate::archive::supports_archive_navigation;
 use crate::app::{
-    App, AppMode, ConfirmAction, InputAction, InputDialog, MenuAction, MenuState,
+    App, AppMode, ConfigState, ConfirmAction, InputAction, InputDialog, MenuAction, MenuState,
     ViewerMenuKind, ViewerMenuState,
     MENU_DATA, MENU_HEADERS,
 };
@@ -30,6 +30,7 @@ pub fn handle_event(app: &mut App, event: Event) -> Result<bool> {
         AppMode::DirHistory => return handle_dir_history(app, key),
         AppMode::QuickSearch => return handle_quicksearch(app, key),
         AppMode::Menu(_) => return handle_menu(app, key),
+        AppMode::Config(_) => return handle_config(app, key),
         AppMode::Browse => {}
     }
 
@@ -267,6 +268,9 @@ fn launch_editor(app: &mut App) -> Result<()> {
     enable_raw_mode()?;
     execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
 
+    // Ratatui's buffer is stale after leaving/re-entering the alternate screen;
+    // signal the main loop to call terminal.clear() before the next draw.
+    app.needs_clear = true;
     app.reload_panels();
     Ok(())
 }
@@ -1153,6 +1157,10 @@ fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<bool> {
         MenuAction::ToggleFBar => {
             app.config.show_fkey_bar = !app.config.show_fkey_bar;
         }
+        MenuAction::Setup => {
+            let cs = ConfigState::from_config(&app.config);
+            app.mode = AppMode::Config(cs);
+        }
         MenuAction::SaveConfig => {
             match app.save_config() {
                 Ok(_) => app.status.text = "Config saved".into(),
@@ -1169,6 +1177,102 @@ fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<bool> {
             );
         }
         MenuAction::Separator => {}
+    }
+    Ok(false)
+}
+
+// ---------------------------------------------------------------------------
+// Config screen
+// ---------------------------------------------------------------------------
+
+fn handle_config(app: &mut App, key: KeyEvent) -> Result<bool> {
+    let AppMode::Config(ref mut cs) = app.mode else { return Ok(false); };
+
+    let total = ConfigState::NUM_TOTAL;    // 8 booleans + 3 text + OK + Cancel
+    let n_bool = ConfigState::NUM_CHECKBOXES; // 8
+    let n_text = 3;
+    let ok_idx     = n_bool + n_text;      // 11
+    let cancel_idx = n_bool + n_text + 1;  // 12
+
+    match key.code {
+        KeyCode::Esc => {
+            app.mode = AppMode::Browse;
+        }
+
+        // Navigate rows
+        KeyCode::Up | KeyCode::BackTab => {
+            if let AppMode::Config(ref mut cs) = app.mode {
+                if cs.cursor > 0 { cs.cursor -= 1; }
+            }
+        }
+        KeyCode::Down | KeyCode::Tab => {
+            if let AppMode::Config(ref mut cs) = app.mode {
+                if cs.cursor + 1 < total { cs.cursor += 1; }
+            }
+        }
+
+        // Toggle checkbox or activate button
+        KeyCode::Char(' ') | KeyCode::Enter => {
+            let cursor = cs.cursor;
+            match cursor {
+                0 => cs.confirm_exit     = !cs.confirm_exit,
+                1 => cs.confirm_delete   = !cs.confirm_delete,
+                2 => cs.auto_reload      = !cs.auto_reload,
+                3 => cs.insert_moves_down = !cs.insert_moves_down,
+                4 => cs.select_dirs      = !cs.select_dirs,
+                5 => cs.show_hidden      = !cs.show_hidden,
+                6 => cs.color_by_type    = !cs.color_by_type,
+                7 => cs.show_fkey_bar    = !cs.show_fkey_bar,
+                // text fields: Enter moves focus to next
+                8 | 9 | 10 => {
+                    if let AppMode::Config(ref mut cs) = app.mode {
+                        if cs.cursor + 1 < total { cs.cursor += 1; }
+                    }
+                }
+                c if c == ok_idx => {
+                    // Apply & save
+                    let cs_clone = cs.clone();
+                    app.mode = AppMode::Browse;
+                    cs_clone.apply_to(&mut app.config);
+                    // Sync hidden flag on live panels
+                    app.left.show_hidden = app.config.left.show_hidden;
+                    app.right.show_hidden = app.config.right.show_hidden;
+                    let _ = app.left.reload();
+                    let _ = app.right.reload();
+                    match app.save_config() {
+                        Ok(_) => app.status.text = "Config saved".into(),
+                        Err(e) => app.status.text = format!("Save error: {}", e),
+                    }
+                }
+                c if c == cancel_idx => {
+                    app.mode = AppMode::Browse;
+                }
+                _ => {}
+            }
+        }
+
+        // Text field editing
+        KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if let AppMode::Config(ref mut cs) = app.mode {
+                match cs.cursor {
+                    8  => cs.editor.push(ch),
+                    9  => cs.pager.push(ch),
+                    10 => cs.dir_history_max.push(ch),
+                    _  => {}
+                }
+            }
+        }
+        KeyCode::Backspace => {
+            if let AppMode::Config(ref mut cs) = app.mode {
+                match cs.cursor {
+                    8  => { cs.editor.pop(); }
+                    9  => { cs.pager.pop(); }
+                    10 => { cs.dir_history_max.pop(); }
+                    _  => {}
+                }
+            }
+        }
+        _ => {}
     }
     Ok(false)
 }

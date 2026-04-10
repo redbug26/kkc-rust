@@ -1,4 +1,4 @@
-use crate::app::{ActivePanel, App, AppMode, ConfirmAction, ConfirmDialog, InputDialog, MenuState, MenuAction, SearchState, ViewerMenuKind, ViewerMenuState, MENU_DATA, MENU_HEADERS};
+use crate::app::{ActivePanel, App, AppMode, ConfigState, ConfirmAction, ConfirmDialog, InputDialog, MenuState, MenuAction, SearchState, ViewerMenuKind, ViewerMenuState, MENU_DATA, MENU_HEADERS};
 use crate::help::HelpView;
 use crate::idf::{probe_path, IdfKind};
 use crate::config::SortMode;
@@ -191,6 +191,7 @@ pub fn render(f: &mut Frame, app: &App) {
         AppMode::Input(dlg) => render_input(f, dlg, f.area()),
         AppMode::SearchPanel(s) => render_search(f, s, f.area()),
         AppMode::DirHistory => render_dir_history(f, app, f.area()),
+        AppMode::Config(cs) => render_config(f, cs, f.area()),
         AppMode::Menu(ms) => render_menu(f, ms, f.area()),
         AppMode::QuickSearch => {
             render_quicksearch_palette(f, app, f.area());
@@ -1765,4 +1766,160 @@ fn format_mode(mode: u32) -> String {
     .map(|(bit, ch)| if mode & bit != 0 { *ch } else { '-' })
     .collect();
     chars.into_iter().collect()
+}
+
+// ---------------------------------------------------------------------------
+// Config / Setup screen
+// ---------------------------------------------------------------------------
+
+fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
+    const W: u16 = 58;
+    const H: u16 = 22;
+    let x = area.x + (area.width.saturating_sub(W)) / 2;
+    let y = area.y + (area.height.saturating_sub(H)) / 2;
+    let popup = Rect { x, y, width: W, height: H };
+
+    // Shadow
+    let sh = Rect { x: popup.x + 2, y: popup.y + 1, width: W, height: H };
+    if sh.right() <= area.right() && sh.bottom() <= area.bottom() {
+        f.render_widget(
+            Block::default().style(Style::default().bg(Color::Rgb(20, 15, 10))),
+            sh,
+        );
+    }
+
+    f.render_widget(Clear, popup);
+
+    // Outer box
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG))
+        .title(Span::styled(" Setup ", Style::default().fg(CLR_BUTTON_FG).bg(CLR_APP_BG).add_modifier(Modifier::BOLD)))
+        .style(Style::default().bg(CLR_APP_BG));
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    // ── Checkboxes ────────────────────────────────────────────────────────
+    const LABELS: [&str; 8] = [
+        "Confirm exit",
+        "Confirm delete",
+        "Auto reload",
+        "Insert moves down",
+        "Select directories",
+        "Show hidden files",
+        "Color by type",
+        "Show F-key bar",
+    ];
+    let values = [
+        cs.confirm_exit,
+        cs.confirm_delete,
+        cs.auto_reload,
+        cs.insert_moves_down,
+        cs.select_dirs,
+        cs.show_hidden,
+        cs.color_by_type,
+        cs.show_fkey_bar,
+    ];
+
+    for (i, (label, val)) in LABELS.iter().zip(values.iter()).enumerate() {
+        let row = inner.y + i as u16;
+        if row >= inner.y + inner.height { break; }
+        let tick = if *val { "X" } else { " " };
+        let text = format!("  [{}] {}", tick, label);
+        let selected = cs.cursor == i;
+        let style = if selected {
+            Style::default().fg(Color::Black).bg(CLR_CURSOR_BG).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Rgb(50, 36, 22)).bg(CLR_APP_BG)
+        };
+        let padded = format!("{:<width$}", text, width = (inner.width) as usize);
+        f.render_widget(
+            Paragraph::new(padded).style(style),
+            Rect { x: inner.x, y: row, width: inner.width, height: 1 },
+        );
+    }
+
+    // ── Separator ──────────────────────────────────────────────────────────
+    let sep_y = inner.y + 8;
+    if sep_y < inner.y + inner.height {
+        let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
+        f.render_widget(
+            Paragraph::new(sep).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
+            Rect { x: inner.x, y: sep_y, width: inner.width, height: 1 },
+        );
+    }
+
+    // ── Text fields ────────────────────────────────────────────────────────
+    const TEXT_LABELS: [(&str, usize); 3] = [
+        ("Editor",       8),
+        ("Pager",        9),
+        ("History max", 10),
+    ];
+    let text_values = [cs.editor.as_str(), cs.pager.as_str(), cs.dir_history_max.as_str()];
+
+    for (row_offset, ((label, cursor_idx), value)) in TEXT_LABELS.iter().zip(text_values.iter()).enumerate() {
+        let row = inner.y + 9 + row_offset as u16 * 3;
+        if row + 1 >= inner.y + inner.height { break; }
+        let selected = cs.cursor == *cursor_idx;
+
+        // Label row
+        let label_style = Style::default().fg(Color::Rgb(80, 60, 40)).bg(CLR_APP_BG);
+        f.render_widget(
+            Paragraph::new(format!("  {}:", label)).style(label_style),
+            Rect { x: inner.x, y: row, width: inner.width, height: 1 },
+        );
+
+        // Input row
+        let field_w = inner.width.saturating_sub(4);
+        let input_bg = if selected { CLR_CURSOR_BG } else { Color::Rgb(160, 140, 115) };
+        let input_fg = if selected { Color::Black } else { Color::Rgb(40, 28, 18) };
+        let padded = format!("{:<width$}", value, width = field_w as usize);
+        let display = if padded.len() > field_w as usize {
+            padded[padded.len() - field_w as usize..].to_string()
+        } else {
+            padded
+        };
+        f.render_widget(
+            Paragraph::new(display).style(Style::default().fg(input_fg).bg(input_bg)),
+            Rect { x: inner.x + 2, y: row + 1, width: field_w, height: 1 },
+        );
+    }
+
+    // ── Bottom separator ───────────────────────────────────────────────────
+    let bot_sep_y = inner.y + inner.height.saturating_sub(3);
+    if bot_sep_y < inner.y + inner.height {
+        let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
+        f.render_widget(
+            Paragraph::new(sep).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
+            Rect { x: inner.x, y: bot_sep_y, width: inner.width, height: 1 },
+        );
+    }
+
+    // ── OK / Cancel buttons ────────────────────────────────────────────────
+    let ok_idx     = ConfigState::NUM_CHECKBOXES + 3;     // 11
+    let cancel_idx = ConfigState::NUM_CHECKBOXES + 3 + 1; // 12
+    let btn_y = inner.y + inner.height.saturating_sub(2);
+    let btn_w: u16 = 10;
+    let gap: u16 = 4;
+    let btn_x = inner.x + (inner.width.saturating_sub(btn_w * 2 + gap)) / 2;
+
+    let ok_style = if cs.cursor == ok_idx {
+        Style::default().fg(Color::Black).bg(CLR_PANEL_BORDER).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::Rgb(80, 60, 40)).bg(CLR_APP_BG)
+    };
+    let cancel_style = if cs.cursor == cancel_idx {
+        Style::default().fg(Color::Black).bg(CLR_PANEL_BORDER).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::Rgb(80, 60, 40)).bg(CLR_APP_BG)
+    };
+
+    f.render_widget(
+        Paragraph::new("  [ OK ]  ").style(ok_style),
+        Rect { x: btn_x, y: btn_y, width: btn_w, height: 1 },
+    );
+    f.render_widget(
+        Paragraph::new(" [Cancel] ").style(cancel_style),
+        Rect { x: btn_x + btn_w + gap, y: btn_y, width: btn_w, height: 1 },
+    );
 }

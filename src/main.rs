@@ -59,6 +59,13 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
             app.right.clamp_scroll(visible_rows.max(1));
         }
 
+        // After spawning an external program the alternate screen is blank and
+        // ratatui's buffer is stale — clear it so the next draw is unconditional.
+        if app.needs_clear {
+            app.needs_clear = false;
+            terminal.clear()?;
+        }
+
         terminal.draw(|f| ui::render(f, &app))?;
 
         match app.mode {

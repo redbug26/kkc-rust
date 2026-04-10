@@ -57,6 +57,76 @@ pub enum AppMode {
     Help(HelpState),
     /// Menu bar / dropdown (F2).
     Menu(MenuState),
+    /// Configuration screen (Options > Setup).
+    Config(ConfigState),
+}
+
+// ---------------------------------------------------------------------------
+// Config screen
+// ---------------------------------------------------------------------------
+
+/// State for the full configuration screen.
+#[derive(Debug, Clone)]
+pub struct ConfigState {
+    // checkboxes
+    pub confirm_exit:     bool,
+    pub confirm_delete:   bool,
+    pub auto_reload:      bool,
+    pub insert_moves_down: bool,
+    pub select_dirs:      bool,
+    pub show_hidden:      bool,
+    pub color_by_type:    bool,
+    pub show_fkey_bar:    bool,
+    // text fields
+    pub editor:           String,
+    pub pager:            String,
+    pub dir_history_max:  String,
+    // cursor inside the form (0-based, covers checkboxes then text fields)
+    pub cursor:           usize,
+}
+
+impl ConfigState {
+    pub fn from_config(cfg: &crate::config::Config) -> Self {
+        Self {
+            confirm_exit:     cfg.confirm_exit,
+            confirm_delete:   cfg.confirm_delete,
+            auto_reload:      cfg.auto_reload,
+            insert_moves_down: cfg.insert_moves_down,
+            select_dirs:      cfg.select_dirs,
+            show_hidden:      cfg.left.show_hidden,
+            color_by_type:    cfg.color_by_type,
+            show_fkey_bar:    cfg.show_fkey_bar,
+            editor:           cfg.editor.clone(),
+            pager:            cfg.pager.clone(),
+            dir_history_max:  cfg.dir_history_max.to_string(),
+            cursor:           0,
+        }
+    }
+
+    /// Apply the form values back into a Config.
+    pub fn apply_to(&self, cfg: &mut crate::config::Config) {
+        cfg.confirm_exit     = self.confirm_exit;
+        cfg.confirm_delete   = self.confirm_delete;
+        cfg.auto_reload      = self.auto_reload;
+        cfg.insert_moves_down = self.insert_moves_down;
+        cfg.select_dirs      = self.select_dirs;
+        cfg.left.show_hidden = self.show_hidden;
+        cfg.right.show_hidden = self.show_hidden;
+        cfg.color_by_type    = self.color_by_type;
+        cfg.show_fkey_bar    = self.show_fkey_bar;
+        if !self.editor.trim().is_empty() {
+            cfg.editor = self.editor.trim().to_owned();
+        }
+        if !self.pager.trim().is_empty() {
+            cfg.pager = self.pager.trim().to_owned();
+        }
+        if let Ok(n) = self.dir_history_max.trim().parse::<usize>() {
+            if n > 0 { cfg.dir_history_max = n; }
+        }
+    }
+
+    pub const NUM_CHECKBOXES: usize = 8;
+    pub const NUM_TOTAL: usize = 13; // 8 + 3 + OK + Cancel
 }
 
 // ---------------------------------------------------------------------------
@@ -107,6 +177,7 @@ pub enum MenuAction {
     DirHistory,
     ToggleFBar,
     SaveConfig,
+    Setup,
     Help,
     About,
 }
@@ -215,8 +286,9 @@ pub static MENU_DATA: &[&[MenuEntry]] = &[
     ],
     // 5 – Options
     &[
-        ("Tgl. F-Key Bar", None,        MenuAction::ToggleFBar),
-        ("Save Config",    None,        MenuAction::SaveConfig),
+        ("Setup..",         None,        MenuAction::Setup),
+        ("Tgl. F-Key Bar",  None,        MenuAction::ToggleFBar),
+        ("Save Config",     None,        MenuAction::SaveConfig),
     ],
     // 6 – Help
     &[
@@ -351,6 +423,9 @@ pub struct App {
     pub status: StatusMessage,
     pub dir_history: VecDeque<PathBuf>,
     pub history_cursor: usize,
+    /// Set to true after spawning an external program so the main loop can
+    /// call terminal.clear() before the next draw.
+    pub needs_clear: bool,
 }
 
 impl App {
@@ -383,6 +458,7 @@ impl App {
             status: StatusMessage::default(),
             dir_history: history,
             history_cursor: 0,
+            needs_clear: false,
         }
     }
 
