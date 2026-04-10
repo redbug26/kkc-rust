@@ -97,6 +97,8 @@ pub struct Panel {
     pub show_hidden: bool,
     /// Incremental name filter typed by the user.
     pub quicksearch: String,
+    /// Which match inside the filtered list is highlighted (0-based).
+    pub qs_match_pos: usize,
     archive: Option<ArchiveMount>,
 }
 
@@ -116,6 +118,7 @@ impl Panel {
             sort,
             show_hidden,
             quicksearch: String::new(),
+            qs_match_pos: 0,
             archive: None,
         };
         let _ = p.reload();
@@ -437,15 +440,61 @@ impl Panel {
         self.quicksearch.clear();
     }
 
-    /// Returns the index of the first entry whose name starts with `quicksearch`.
-    pub fn quicksearch_index(&self) -> Option<usize> {
+    /// Returns sorted indices of entries whose names contain ALL whitespace-separated
+    /// tokens of `quicksearch` (case-insensitive, AND logic).
+    /// Entries where the *first* token starts the name come first.
+    pub fn quicksearch_matches(&self) -> Vec<usize> {
         if self.quicksearch.is_empty() {
-            return None;
+            return vec![];
         }
-        let qs = self.quicksearch.to_lowercase();
-        self.entries
+        let tokens: Vec<String> = self
+            .quicksearch
+            .split_whitespace()
+            .map(|t| t.to_lowercase())
+            .collect();
+        if tokens.is_empty() {
+            return vec![];
+        }
+        let first = &tokens[0];
+        let rest = &tokens[1..];
+
+        let matches_all = |name: &str| -> bool {
+            let low = name.to_lowercase();
+            rest.iter().all(|t| low.contains(t.as_str()))
+        };
+
+        // Priority 1: first token is a prefix of the name
+        let mut starts: Vec<usize> = self
+            .entries
             .iter()
-            .position(|e| e.name.to_lowercase().starts_with(&qs))
+            .enumerate()
+            .filter(|(_, e)| {
+                let low = e.name.to_lowercase();
+                low.starts_with(first.as_str()) && matches_all(&e.name)
+            })
+            .map(|(i, _)| i)
+            .collect();
+
+        // Priority 2: first token appears anywhere else
+        let mut contains: Vec<usize> = self
+            .entries
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| {
+                let low = e.name.to_lowercase();
+                low.contains(first.as_str()) && !low.starts_with(first.as_str()) && matches_all(&e.name)
+            })
+            .map(|(i, _)| i)
+            .collect();
+
+        starts.append(&mut contains);
+        starts
+    }
+
+    /// Returns the index of the first entry whose name starts with `quicksearch`.
+    #[allow(dead_code)]
+    pub fn quicksearch_index(&self) -> Option<usize> {
+        self.quicksearch_matches().into_iter().next()
     }
 
     // -----------------------------------------------------------------------

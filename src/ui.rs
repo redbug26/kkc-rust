@@ -1,4 +1,4 @@
-use crate::app::{ActivePanel, App, AppMode, ConfirmDialog, InputDialog, MenuState, MenuAction, SearchState, ViewerMenuKind, ViewerMenuState, MENU_DATA, MENU_HEADERS};
+use crate::app::{ActivePanel, App, AppMode, ConfirmAction, ConfirmDialog, InputDialog, MenuState, MenuAction, SearchState, ViewerMenuKind, ViewerMenuState, MENU_DATA, MENU_HEADERS};
 use crate::help::HelpView;
 use crate::idf::{probe_path, IdfKind};
 use crate::config::SortMode;
@@ -60,6 +60,20 @@ const CLR_MENU_DD_BG: Color = Color::Rgb(44, 34, 24);
 const CLR_MENU_DD_FG: Color = Color::Rgb(241, 228, 193);
 const CLR_MENU_DD_SEP: Color = Color::Rgb(118, 95, 70);
 const CLR_MENU_BORDER: Color = Color::Rgb(180, 148, 108);
+
+// Quick-palette (VSCode-style)
+const CLR_QS_BG: Color = Color::Rgb(30, 30, 30);
+const CLR_QS_BORDER: Color = Color::Rgb(80, 80, 80);
+const CLR_QS_INPUT_BG: Color = Color::Rgb(58, 58, 58);
+const CLR_QS_INPUT_FG: Color = Color::White;
+const CLR_QS_SEP: Color = Color::Rgb(70, 70, 70);
+const CLR_QS_LIST_FG: Color = Color::Rgb(200, 200, 200);
+const CLR_QS_SEL_BG: Color = Color::Rgb(40, 79, 135);
+const CLR_QS_SEL_FG: Color = Color::White;
+const CLR_QS_MATCH_HI: Color = Color::Rgb(255, 197, 61);
+const CLR_QS_MATCH_HI_SEL: Color = Color::Rgb(255, 230, 120);
+const CLR_QS_NO_MATCH: Color = Color::Rgb(130, 130, 130);
+const CLR_QS_DIR_FG: Color = Color::Rgb(86, 156, 214);
 
 // ---------------------------------------------------------------------------
 // Entry style by category
@@ -179,10 +193,7 @@ pub fn render(f: &mut Frame, app: &App) {
         AppMode::DirHistory => render_dir_history(f, app, f.area()),
         AppMode::Menu(ms) => render_menu(f, ms, f.area()),
         AppMode::QuickSearch => {
-            let qs = &app.active_panel().quicksearch;
-            if !qs.is_empty() {
-                render_quicksearch_label(f, qs, panels_area);
-            }
+            render_quicksearch_palette(f, app, f.area());
         }
         _ => {}
     }
@@ -997,26 +1008,163 @@ fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, ar
 // ---------------------------------------------------------------------------
 
 fn render_confirm(f: &mut Frame, dlg: &ConfirmDialog, area: Rect) {
-    let width = 50u16.min(area.width.saturating_sub(4));
-    let height = 7u16;
-    let x = (area.width.saturating_sub(width)) / 2 + area.x;
-    let y = (area.height.saturating_sub(height)) / 2 + area.y;
-    let popup = Rect { x, y, width, height };
+    match &dlg.action {
+        ConfirmAction::Quit => render_confirm_quit(f, area),
+        ConfirmAction::Delete(paths) => render_confirm_delete(f, &dlg.message, paths.len(), area),
+    }
+}
 
+// ---------------------------------------------------------------------------
+// Quit dialog
+// ---------------------------------------------------------------------------
+
+fn render_confirm_quit(f: &mut Frame, area: Rect) {
+    const W: u16 = 38;
+    const H: u16 = 11;
+    let x = (area.width.saturating_sub(W)) / 2 + area.x;
+    let y = (area.height.saturating_sub(H)) / 2 + area.y;
+    let popup = Rect { x, y, width: W, height: H };
+
+    // Shadow
+    let sh = Rect { x: popup.x + 2, y: popup.y + 1, width: W, height: H };
+    if sh.x + sh.width <= area.x + area.width && sh.y + sh.height <= area.y + area.height {
+        f.render_widget(
+            Block::default().style(Style::default().bg(Color::Rgb(20, 15, 10))),
+            sh,
+        );
+    }
     f.render_widget(Clear, popup);
+
     let block = Block::default()
-        .title(format!(" {} ", dlg.title))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Red));
+        .border_style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG))
+        .style(Style::default().bg(CLR_APP_BG));
     let inner = block.inner(popup);
     f.render_widget(block, popup);
 
-    let text = format!("\n{}\n\n   [Y] Yes    [N] No", dlg.message);
+    // Title band
+    let logo_area = Rect { x: inner.x, y: inner.y, width: inner.width, height: 1 };
     f.render_widget(
-        Paragraph::new(text)
+        Paragraph::new(" KK Commander ")
             .alignment(Alignment::Center)
-            .style(Style::default().fg(Color::White)),
-        inner,
+            .style(Style::default().fg(CLR_BUTTON_FG).bg(CLR_STATUS_BG).add_modifier(Modifier::BOLD)),
+        logo_area,
+    );
+
+    // Top separator
+    let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
+    f.render_widget(
+        Paragraph::new(sep.clone()).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
+        Rect { x: inner.x, y: inner.y + 1, width: inner.width, height: 1 },
+    );
+
+    // Message
+    f.render_widget(
+        Paragraph::new("\nDo you really want to quit?")
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::Rgb(50, 36, 22)).bg(CLR_APP_BG)),
+        Rect { x: inner.x, y: inner.y + 2, width: inner.width, height: 3 },
+    );
+
+    // Bottom separator
+    f.render_widget(
+        Paragraph::new(sep).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
+        Rect { x: inner.x, y: inner.y + 5, width: inner.width, height: 1 },
+    );
+
+    // Buttons
+    let btn_y = inner.y + 7;
+    let yes_w: u16 = 11;
+    let no_w: u16 = 11;
+    let gap: u16 = 4;
+    let btn_x = inner.x + (inner.width.saturating_sub(yes_w + gap + no_w)) / 2;
+
+    f.render_widget(
+        Paragraph::new("  [ Yes ]  ")
+            .style(Style::default().fg(Color::Black).bg(CLR_PANEL_BORDER).add_modifier(Modifier::BOLD)),
+        Rect { x: btn_x, y: btn_y, width: yes_w, height: 1 },
+    );
+    f.render_widget(
+        Paragraph::new("  [  No ]  ")
+            .style(Style::default().fg(Color::Rgb(80, 60, 40)).bg(CLR_APP_BG)),
+        Rect { x: btn_x + yes_w + gap, y: btn_y, width: no_w, height: 1 },
+    );
+
+    // Key hints
+    f.render_widget(
+        Paragraph::new("Y / Enter  ·  N / Esc")
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::Rgb(120, 90, 60)).bg(CLR_APP_BG)),
+        Rect { x: inner.x, y: inner.y + 8, width: inner.width, height: 1 },
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Delete confirm dialog
+// ---------------------------------------------------------------------------
+
+fn render_confirm_delete(f: &mut Frame, message: &str, count: usize, area: Rect) {
+    const W: u16 = 44;
+    const H: u16 = 9;
+    let x = (area.width.saturating_sub(W)) / 2 + area.x;
+    let y = (area.height.saturating_sub(H)) / 2 + area.y;
+    let popup = Rect { x, y, width: W, height: H };
+    f.render_widget(Clear, popup);
+
+    let title = Span::styled(
+        " Delete ",
+        Style::default().fg(Color::Rgb(255, 100, 80)).add_modifier(Modifier::BOLD),
+    );
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Rgb(180, 60, 40)))
+        .style(Style::default().bg(Color::Rgb(38, 18, 14)));
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    // Warning header
+    let icon_label = if count == 1 { "\u{26a0}  Delete this item?" } else { "\u{26a0}  Delete these items?" };
+    f.render_widget(
+        Paragraph::new(icon_label)
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::Rgb(255, 160, 60)).bg(Color::Rgb(38, 18, 14)).add_modifier(Modifier::BOLD)),
+        Rect { x: inner.x, y: inner.y, width: inner.width, height: 1 },
+    );
+
+    // Message
+    let short_msg = truncate_str(message, inner.width as usize);
+    f.render_widget(
+        Paragraph::new(short_msg)
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::Rgb(240, 200, 180)).bg(Color::Rgb(38, 18, 14))),
+        Rect { x: inner.x, y: inner.y + 2, width: inner.width, height: 2 },
+    );
+
+    // Buttons
+    let btn_y = inner.y + 5;
+    let yes_w: u16 = 13;
+    let no_w: u16 = 13;
+    let gap: u16 = 4;
+    let btn_x = inner.x + (inner.width.saturating_sub(yes_w + gap + no_w)) / 2;
+
+    f.render_widget(
+        Paragraph::new("  [ Delete ]  ")
+            .style(Style::default().fg(Color::White).bg(Color::Rgb(160, 40, 30)).add_modifier(Modifier::BOLD)),
+        Rect { x: btn_x, y: btn_y, width: yes_w, height: 1 },
+    );
+    f.render_widget(
+        Paragraph::new("  [ Cancel ]  ")
+            .style(Style::default().fg(Color::Rgb(180, 140, 120)).bg(Color::Rgb(38, 18, 14))),
+        Rect { x: btn_x + yes_w + gap, y: btn_y, width: no_w, height: 1 },
+    );
+
+    // Hints
+    f.render_widget(
+        Paragraph::new("Y / Enter  ·  N / Esc")
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::Rgb(130, 90, 70)).bg(Color::Rgb(38, 18, 14))),
+        Rect { x: inner.x, y: btn_y + 1, width: inner.width, height: 1 },
     );
 }
 
@@ -1229,23 +1377,207 @@ fn render_dir_history(f: &mut Frame, app: &App, area: Rect) {
 }
 
 // ---------------------------------------------------------------------------
-// Quicksearch label
+// ---------------------------------------------------------------------------
+// Quick-palette (VSCode style)
 // ---------------------------------------------------------------------------
 
-fn render_quicksearch_label(f: &mut Frame, qs: &str, panels_area: Rect) {
-    let label = format!(" Search: {} ", qs);
-    let w = label.len() as u16 + 2;
-    let area = Rect {
-        x: panels_area.x + panels_area.width / 2 - w / 2,
-        y: panels_area.y + panels_area.height - 3,
-        width: w.min(panels_area.width),
-        height: 1,
+/// Build a `Line` with each whitespace-separated token highlighted in the name.
+fn highlight_tokens<'a>(
+    name: &'a str,
+    tokens: &[String],
+    base_fg: Color,
+    base_bg: Color,
+    hi_fg: Color,
+) -> Line<'a> {
+    // Build a boolean mask: which byte positions are highlighted
+    let name_lower = name.to_lowercase();
+    let mut mask = vec![false; name.len()];
+    for token in tokens {
+        if token.is_empty() {
+            continue;
+        }
+        let mut search_from = 0;
+        while search_from < name_lower.len() {
+            if let Some(pos) = name_lower[search_from..].find(token.as_str()) {
+                let abs = search_from + pos;
+                let end = abs + token.len();
+                for b in abs..end.min(mask.len()) {
+                    mask[b] = true;
+                }
+                search_from = abs + 1;
+            } else {
+                break;
+            }
+        }
+    }
+
+    // Walk the name char by char, grouping consecutive same-style chars into spans
+    let mut spans: Vec<Span<'a>> = Vec::new();
+    let mut seg_start = 0;
+    let mut current_hi = mask.first().copied().unwrap_or(false);
+    let base = Style::default().fg(base_fg).bg(base_bg);
+    let hi   = Style::default().fg(hi_fg).bg(base_bg).add_modifier(Modifier::BOLD);
+
+    for (byte_pos, ch) in name.char_indices() {
+        let this_hi = mask[byte_pos];
+        if this_hi != current_hi {
+            let slice: String = name[seg_start..byte_pos].to_owned();
+            spans.push(Span::styled(slice, if current_hi { hi } else { base }));
+            seg_start = byte_pos;
+            current_hi = this_hi;
+        }
+        let _ = ch; // consumed by char_indices
+    }
+    // Push the last segment
+    let tail: String = name[seg_start..].to_owned();
+    spans.push(Span::styled(tail, if current_hi { hi } else { base }));
+
+    Line::from(spans)
+}
+
+fn render_quicksearch_palette(f: &mut Frame, app: &App, area: Rect) {
+    let panel = app.active_panel();
+    let query = &panel.quicksearch;
+    let matches = panel.quicksearch_matches();
+    let qs_pos = panel.qs_match_pos;
+    let total = matches.len();
+
+    // Dimensions: 62% wide, near the top (like VSCode)
+    let palette_w = ((area.width as u32 * 62 / 100) as u16)
+        .max(44)
+        .min(area.width.saturating_sub(4));
+    let visible_items = (total as u16).min(14);
+    // input row + separator + items (at least 3 for aesthetics) + borders
+    let palette_h = (1 + 1 + visible_items.max(3) + 2).min(area.height.saturating_sub(3));
+
+    let x = (area.width.saturating_sub(palette_w)) / 2 + area.x;
+    let y = area.y + 2;
+    let popup = Rect { x, y, width: palette_w, height: palette_h };
+
+    f.render_widget(Clear, popup);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(CLR_QS_BORDER))
+        .style(Style::default().bg(CLR_QS_BG));
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    if inner.height < 2 {
+        return;
+    }
+
+    // ── input field ────────────────────────────────────────────────────────
+    let input_area = Rect { x: inner.x, y: inner.y, width: inner.width, height: 1 };
+    let sep_area   = Rect { x: inner.x, y: inner.y + 1, width: inner.width, height: 1 };
+    let list_area  = Rect { x: inner.x, y: inner.y + 2, width: inner.width, height: inner.height.saturating_sub(2) };
+
+    // counter hint on the right side of the input (e.g. "3/47")
+    let count_hint = if !query.is_empty() && total > 0 {
+        format!(" {}/{} ", qs_pos + 1, total)
+    } else if !query.is_empty() {
+        " 0/0 ".to_owned()
+    } else {
+        String::new()
     };
+    let hint_w = count_hint.len() as u16;
+    let input_inner_w = inner.width.saturating_sub(hint_w) as usize;
+    let input_text = format!(" \u{2315} {}\u{2581}", query);
+    let input_row = Line::from(vec![
+        Span::styled(
+            truncate_str(&input_text, input_inner_w),
+            Style::default().fg(CLR_QS_INPUT_FG).bg(CLR_QS_INPUT_BG),
+        ),
+        Span::styled(
+            count_hint,
+            Style::default().fg(CLR_QS_NO_MATCH).bg(CLR_QS_INPUT_BG),
+        ),
+    ]);
     f.render_widget(
-        Paragraph::new(label)
-            .style(Style::default().fg(Color::Black).bg(Color::Yellow)),
-        area,
+        Paragraph::new(input_row).style(Style::default().bg(CLR_QS_INPUT_BG)),
+        input_area,
     );
+
+    let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
+    f.render_widget(
+        Paragraph::new(sep).style(Style::default().fg(CLR_QS_SEP).bg(CLR_QS_BG)),
+        sep_area,
+    );
+
+    // ── match list ─────────────────────────────────────────────────────────
+    if total == 0 && !query.is_empty() {
+        f.render_widget(
+            Paragraph::new(" No match")
+                .style(Style::default().fg(CLR_QS_NO_MATCH).bg(CLR_QS_BG)),
+            list_area,
+        );
+        return;
+    }
+
+    let list_h = list_area.height as usize;
+
+    // Keep qs_pos inside the visible window
+    let scroll: usize = if qs_pos >= list_h {
+        qs_pos - list_h + 1
+    } else {
+        0
+    };
+
+    let tokens: Vec<String> = query
+        .split_whitespace()
+        .map(|t| t.to_lowercase())
+        .collect();
+    let items: Vec<ListItem> = matches
+        .iter()
+        .enumerate()
+        .skip(scroll)
+        .take(list_h)
+        .map(|(match_idx, &entry_idx)| {
+            let entry = &panel.entries[entry_idx];
+            let is_sel = match_idx == qs_pos;
+            let (bg, fg, hi) = if is_sel {
+                (CLR_QS_SEL_BG, CLR_QS_SEL_FG, CLR_QS_MATCH_HI_SEL)
+            } else if entry.is_dir {
+                (CLR_QS_BG, CLR_QS_DIR_FG, CLR_QS_MATCH_HI)
+            } else {
+                (CLR_QS_BG, CLR_QS_LIST_FG, CLR_QS_MATCH_HI)
+            };
+
+            let icon = if entry.is_dir { " \u{25b6} " } else { "   " };
+            let name_line = highlight_tokens(&entry.name, &tokens, fg, bg, hi);
+            let icon_span = vec![Span::styled(icon, Style::default().fg(fg).bg(bg))];
+            let mut all_spans = icon_span;
+            all_spans.extend(name_line.spans);
+
+            ListItem::new(Line::from(all_spans))
+        })
+        .collect();
+
+    // Reserve the rightmost column for the scrollbar when the list overflows
+    let (render_area, sb_area) = if total > list_h {
+        let list_w = list_area.width.saturating_sub(1);
+        (
+            Rect { width: list_w, ..list_area },
+            Some(Rect { x: list_area.x + list_w, y: list_area.y, width: 1, height: list_area.height }),
+        )
+    } else {
+        (list_area, None)
+    };
+
+    f.render_widget(List::new(items).style(Style::default().bg(CLR_QS_BG)), render_area);
+
+    if let Some(sb) = sb_area {
+        let mut sb_state = ScrollbarState::new(total).position(scroll);
+        f.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .thumb_style(Style::default().fg(CLR_QS_BORDER))
+                .track_style(Style::default().bg(CLR_QS_BG))
+                .begin_symbol(None)
+                .end_symbol(None),
+            sb,
+            &mut sb_state,
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

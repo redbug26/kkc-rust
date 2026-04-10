@@ -49,8 +49,12 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
     if !ctrl && !alt && !shift {
         if let KeyCode::Char(ch) = key.code {
             if ch.is_alphanumeric() || ch == '.' || ch == '_' || ch == '-' {
-                app.active_panel_mut().quicksearch_append(ch);
-                if let Some(idx) = app.active_panel().quicksearch_index() {
+                let p = app.active_panel_mut();
+                p.quicksearch.clear();
+                p.qs_match_pos = 0;
+                p.quicksearch_append(ch);
+                let first = app.active_panel().quicksearch_matches().into_iter().next();
+                if let Some(idx) = first {
                     app.active_panel_mut().cursor = idx;
                 }
                 app.mode = AppMode::QuickSearch;
@@ -318,32 +322,83 @@ fn open_wildcard_dialog(prompt: &str, select: bool) -> AppMode {
 }
 
 // ---------------------------------------------------------------------------
-// QuickSearch mode
+// QuickSearch palette mode (VSCode-style)
 // ---------------------------------------------------------------------------
 
 fn handle_quicksearch(app: &mut App, key: KeyEvent) -> Result<bool> {
     match key.code {
-        KeyCode::Esc | KeyCode::Enter => {
+        // Confirm: jump to highlighted match
+        KeyCode::Enter => {
+            let entry_idx = {
+                let p = app.active_panel();
+                p.quicksearch_matches().get(p.qs_match_pos).copied()
+            };
             app.active_panel_mut().quicksearch_clear();
+            app.active_panel_mut().qs_match_pos = 0;
+            if let Some(idx) = entry_idx {
+                app.active_panel_mut().cursor = idx;
+            }
             app.mode = AppMode::Browse;
         }
+        // Cancel: restore original cursor
+        KeyCode::Esc => {
+            app.active_panel_mut().quicksearch_clear();
+            app.active_panel_mut().qs_match_pos = 0;
+            app.mode = AppMode::Browse;
+        }
+        // Navigate UP in the filtered list
+        KeyCode::Up => {
+            let p = app.active_panel_mut();
+            if p.qs_match_pos > 0 {
+                p.qs_match_pos -= 1;
+            }
+            let entry_idx = app.active_panel().quicksearch_matches()
+                .get(app.active_panel().qs_match_pos)
+                .copied();
+            if let Some(idx) = entry_idx {
+                app.active_panel_mut().cursor = idx;
+            }
+        }
+        // Navigate DOWN in the filtered list
+        KeyCode::Down => {
+            let matches_len = app.active_panel().quicksearch_matches().len();
+            let p = app.active_panel_mut();
+            if p.qs_match_pos + 1 < matches_len {
+                p.qs_match_pos += 1;
+            }
+            let entry_idx = app.active_panel().quicksearch_matches()
+                .get(app.active_panel().qs_match_pos)
+                .copied();
+            if let Some(idx) = entry_idx {
+                app.active_panel_mut().cursor = idx;
+            }
+        }
+        // Delete last char
         KeyCode::Backspace => {
             app.active_panel_mut().quicksearch_pop();
+            app.active_panel_mut().qs_match_pos = 0;
             if app.active_panel().quicksearch.is_empty() {
                 app.mode = AppMode::Browse;
-            } else if let Some(idx) = app.active_panel().quicksearch_index() {
-                app.active_panel_mut().cursor = idx;
+            } else {
+                let first = app.active_panel().quicksearch_matches().into_iter().next();
+                if let Some(idx) = first {
+                    app.active_panel_mut().cursor = idx;
+                }
             }
         }
+        // Append char to query
         KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.active_panel_mut().quicksearch_append(ch);
-            if let Some(idx) = app.active_panel().quicksearch_index() {
+            app.active_panel_mut().qs_match_pos = 0;
+            let first = app.active_panel().quicksearch_matches().into_iter().next();
+            if let Some(idx) = first {
                 app.active_panel_mut().cursor = idx;
             }
         }
+        // Any other key: close palette and pass through
         _ => {
-            // Pass through navigation keys
             app.active_panel_mut().quicksearch_clear();
+            app.active_panel_mut().qs_match_pos = 0;
             app.mode = AppMode::Browse;
             return handle_browse(app, key);
         }

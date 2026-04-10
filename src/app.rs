@@ -231,6 +231,7 @@ pub static MENU_DATA: &[&[MenuEntry]] = &[
 
 #[derive(Debug, Clone)]
 pub struct ConfirmDialog {
+    #[allow(dead_code)]
     pub title: String,
     pub message: String,
     pub action: ConfirmAction,
