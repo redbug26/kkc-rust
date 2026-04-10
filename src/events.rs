@@ -90,6 +90,10 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
     // Alt-modified keys
     if alt && !ctrl && !shift {
         match key.code {
+            KeyCode::F(4) => {
+                app.open_file_id_view();
+                return Ok(false);
+            }
             KeyCode::F(7) => {
                 app.open_search();
                 return Ok(false);

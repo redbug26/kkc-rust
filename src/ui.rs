@@ -1,5 +1,6 @@
 use crate::app::{ActivePanel, App, AppMode, ConfirmDialog, InputDialog, MenuState, MenuAction, SearchState, ViewerMenuKind, ViewerMenuState, MENU_DATA, MENU_HEADERS};
 use crate::help::HelpView;
+use crate::idf::{probe_path, IdfKind};
 use crate::config::SortMode;
 use crate::file_ops::format_size;
 use crate::file_types::FileCategory;
@@ -135,6 +136,7 @@ pub fn render(f: &mut Frame, app: &App) {
     let panels_area = main_vert[0];
     let status_area = main_vert[1];
 
+    let left_active = app.active == ActivePanel::Left;
     let panel_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -144,11 +146,25 @@ pub fn render(f: &mut Frame, app: &App) {
         ])
         .split(panels_area);
 
-    let left_active = app.active == ActivePanel::Left;
-
-    render_panel(f, &app.left, panel_chunks[0], left_active, app.config.color_by_type);
+    render_panel_or_file_id(
+        f,
+        app,
+        &app.left,
+        panel_chunks[0],
+        left_active,
+        app.config.color_by_type,
+        app.file_id_preview && !left_active,
+    );
     render_center_buttons(f, panel_chunks[1]);
-    render_panel(f, &app.right, panel_chunks[2], !left_active, app.config.color_by_type);
+    render_panel_or_file_id(
+        f,
+        app,
+        &app.right,
+        panel_chunks[2],
+        !left_active,
+        app.config.color_by_type,
+        app.file_id_preview && left_active,
+    );
     render_status(f, app, status_area);
 
     if has_fbar {
@@ -358,50 +374,134 @@ fn render_panel(
     }
 }
 
-fn render_center_buttons(f: &mut Frame, area: Rect) {
-    f.render_widget(Block::default().style(Style::default().bg(CLR_APP_BG)), area);
+fn render_panel_or_file_id(
+    f: &mut Frame,
+    app: &App,
+    panel: &crate::panel::Panel,
+    area: Rect,
+    active: bool,
+    color_by_type: bool,
+    show_file_id: bool,
+) {
+    if show_file_id {
+        render_file_id_panel(f, app, area);
+    } else {
+        render_panel(f, panel, area, active, color_by_type);
+    }
+}
 
-    if area.height < 8 || area.width < 9 {
+fn render_file_id_panel(f: &mut Frame, app: &App, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG))
+        .style(Style::default().bg(CLR_PANEL_BG))
+        .title(Span::styled(" FileID ", Style::default().fg(CLR_PANEL_TITLE).bg(CLR_APP_BG)));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    if inner.height == 0 {
         return;
     }
 
-    let slots = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Length(3),
-            Constraint::Length(2),
-            Constraint::Length(3),
-            Constraint::Length(2),
-            Constraint::Length(3),
-            Constraint::Length(2),
-            Constraint::Length(3),
-            Constraint::Length(2),
-            Constraint::Length(3),
-            Constraint::Length(2),
-            Constraint::Length(3),
-            Constraint::Min(0),
-            Constraint::Length(3),
-        ])
-        .split(area);
+    let text = app.build_file_id_preview();
+    let lines = text
+        .lines()
+        .map(|line| Line::from(Span::styled(line.to_string(), Style::default().fg(CLR_TEXT))))
+        .collect::<Vec<_>>();
 
-    for (slot, label) in [
-        (slots[1], "ChgDrive"),
-        (slots[3], "Swap"),
-        (slots[5], "Go Trash"),
-        (slots[7], "QuickDir"),
-        (slots[9], "Select"),
-        (slots[11], "Info"),
-    ] {
-        render_menu_button(f, slot, label);
+    f.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .scroll((0, 0))
+            .style(Style::default().bg(CLR_PANEL_BG)),
+        inner,
+    );
+}
+
+fn render_center_buttons(f: &mut Frame, area: Rect) {
+    f.render_widget(Block::default().style(Style::default().bg(CLR_APP_BG)), area);
+
+    if area.height == 0 || area.width < 9 {
+        return;
     }
 
-    let now = Local::now().format("%H:%M:%S").to_string();
-    render_menu_button(f, slots[13], &now);
+    let mut labels = vec![
+        "ChgDrive".to_string(),
+        "Swap".to_string(),
+        "Go Trash".to_string(),
+        "QuickDir".to_string(),
+        "Select".to_string(),
+        "Info".to_string(),
+        Local::now().format("%H:%M:%S").to_string(),
+    ];
+
+    let button_count = labels.len() as u16;
+    let button_h = if area.height >= button_count * 3 {
+        3
+    } else if area.height >= button_count * 2 {
+        2
+    } else {
+        1
+    };
+    let total_button_h = button_count * button_h;
+    if total_button_h > area.height {
+        let skip = (total_button_h - area.height) as usize;
+        if skip >= labels.len() {
+            return;
+        }
+        labels.drain(0..skip);
+    }
+
+    let button_count = labels.len() as u16;
+    let total_button_h = button_count * button_h;
+    let gaps = button_count.saturating_add(1);
+    let free = area.height.saturating_sub(total_button_h);
+    let base_gap = free / gaps.max(1);
+    let extra_gap = free % gaps.max(1);
+
+    let mut y = area.y + base_gap;
+    for (idx, label) in labels.iter().enumerate() {
+        if idx < extra_gap as usize {
+            y += 1;
+        }
+        let slot = Rect {
+            x: area.x,
+            y,
+            width: area.width,
+            height: button_h.min(area.y + area.height - y),
+        };
+        render_menu_button(f, slot, label);
+        y = y.saturating_add(button_h).saturating_add(base_gap);
+        if idx + 1 < button_count as usize && idx + 1 < extra_gap as usize {
+            y += 1;
+        }
+    }
 }
 
 fn render_menu_button(f: &mut Frame, area: Rect, label: &str) {
     if area.height == 0 || area.width == 0 {
+        return;
+    }
+
+    let text = truncate_str(label, area.width.saturating_sub(2).max(1) as usize);
+    if area.height < 3 {
+        let top_pad = area.height.saturating_sub(1) / 2;
+        let text_area = Rect {
+            x: area.x,
+            y: area.y + top_pad,
+            width: area.width,
+            height: 1,
+        };
+        f.render_widget(
+            Block::default().style(Style::default().bg(CLR_BUTTON_BG)),
+            area,
+        );
+        f.render_widget(
+            Paragraph::new(text)
+                .alignment(Alignment::Center)
+                .style(Style::default().fg(CLR_BUTTON_FG).bg(CLR_BUTTON_BG).add_modifier(Modifier::BOLD)),
+            text_area,
+        );
         return;
     }
 
@@ -411,11 +511,18 @@ fn render_menu_button(f: &mut Frame, area: Rect, label: &str) {
         .style(Style::default().bg(CLR_BUTTON_BG));
     let inner = block.inner(area);
     f.render_widget(block, area);
+    let top_pad = inner.height.saturating_sub(1) / 2;
+    let text_area = Rect {
+        x: inner.x,
+        y: inner.y + top_pad,
+        width: inner.width,
+        height: 1,
+    };
     f.render_widget(
-        Paragraph::new(label)
+        Paragraph::new(text)
             .alignment(Alignment::Center)
             .style(Style::default().fg(CLR_BUTTON_FG).bg(CLR_BUTTON_BG).add_modifier(Modifier::BOLD)),
-        inner,
+        text_area,
     );
 }
 
@@ -522,15 +629,35 @@ fn render_menu(f: &mut Frame, state: &MenuState, area: Rect) {
 
 fn render_status(f: &mut Frame, app: &App, area: Rect) {
     let entry_info = if let Some(e) = app.active_panel().current_entry() {
-        let kind = if e.is_symlink {
-            "symlink"
-        } else if e.is_dir {
-            "dir"
+        if e.name == ".." {
+            let mode_str = format_mode(e.mode);
+            format!("Up directory  {}  dir", mode_str)
+        } else if let Some(info) = probe_path(&e.path) {
+            let prefix = match info.kind {
+                IdfKind::Module => "MOD",
+                IdfKind::Sample => "SMP",
+                IdfKind::Archive => "ARC",
+                IdfKind::Bitmap => "PIC",
+                IdfKind::Animation => "ANI",
+                IdfKind::Other => "IDF",
+            };
+            let detail = info
+                .title
+                .clone()
+                .or_else(|| info.extra.first().cloned())
+                .unwrap_or(info.detail);
+            format!("{:<3}  {:<24} {}", prefix, info.format, detail)
         } else {
-            "file"
-        };
-        let mode_str = format_mode(e.mode);
-        format!("{}  {}  {}", e.name, mode_str, kind)
+            let kind = if e.is_symlink {
+                "symlink"
+            } else if e.is_dir {
+                "dir"
+            } else {
+                "file"
+            };
+            let mode_str = format_mode(e.mode);
+            format!("{}  {}  {}", e.name, mode_str, kind)
+        }
     } else {
         String::new()
     };

@@ -1,10 +1,12 @@
 use crate::config::{Config, SortMode};
 use crate::file_ops;
 use crate::help::HelpState;
+use crate::idf::render_idf_card;
 use crate::panel::Panel;
 use crate::search::{search, SearchQuery, SearchResult};
 use crate::viewer::{EncodingMode, LineFeedMode, MaskKind, ViewMode, Viewer};
 use anyhow::Result;
+use std::fs;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 
@@ -343,6 +345,7 @@ pub struct App {
     pub left: Panel,
     pub right: Panel,
     pub active: ActivePanel,
+    pub file_id_preview: bool,
     pub mode: AppMode,
     pub status: StatusMessage,
     pub dir_history: VecDeque<PathBuf>,
@@ -369,6 +372,7 @@ impl App {
             left,
             right,
             active: ActivePanel::Left,
+            file_id_preview: false,
             mode: AppMode::Browse,
             status: StatusMessage::default(),
             dir_history: history,
@@ -626,6 +630,30 @@ impl App {
                 Err(e) => self.status.text = format!("Cannot open viewer: {}", e),
             }
         }
+    }
+
+    pub fn open_file_id_view(&mut self) {
+        self.file_id_preview = !self.file_id_preview;
+    }
+
+    pub fn build_file_id_preview(&self) -> String {
+        if let Some(path) = self.active_panel().find_file_id_path() {
+            if let Ok(bytes) = fs::read(&path) {
+                return String::from_utf8_lossy(&bytes)
+                    .replace("\r\n", "\n")
+                    .replace('\r', "\n")
+                    .replace('\t', "    ");
+            }
+        }
+
+        let Some(entry) = self.active_panel().current_entry() else {
+            return "No FILE_ID.DIZ.".into();
+        };
+        if entry.name == ".." {
+            return "No FILE_ID.DIZ.".into();
+        }
+
+        render_idf_card(&entry.path).unwrap_or_else(|| "No FILE_ID.DIZ.".into())
     }
 
     // -----------------------------------------------------------------------

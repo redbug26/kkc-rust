@@ -463,6 +463,23 @@ impl Panel {
     pub fn current_entry(&self) -> Option<&Entry> {
         self.entries.get(self.cursor)
     }
+
+    pub fn find_file_id_path(&self) -> Option<PathBuf> {
+        let mut bases = Vec::new();
+        if let Some(entry) = self.current_entry() {
+            if entry.name != ".." && entry.is_dir {
+                bases.push(entry.path.clone());
+            }
+        }
+        bases.push(self.path.clone());
+
+        for base in bases {
+            if let Some(found) = find_file_id_in_dir(&base) {
+                return Some(found);
+            }
+        }
+        None
+    }
 }
 
 impl Drop for Panel {
@@ -481,6 +498,25 @@ fn ext_of(name: &str) -> String {
         .and_then(|s| s.to_str())
         .unwrap_or("")
         .to_lowercase()
+}
+
+fn find_file_id_in_dir(dir: &Path) -> Option<PathBuf> {
+    for name in ["FILE_ID.DIZ", "file_id.diz", "File_id.diz", "FILE_ID.ANS", "file_id.ans"] {
+        let path = dir.join(name);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    let rd = fs::read_dir(dir).ok()?;
+    rd.filter_map(|res| res.ok()).find_map(|entry| {
+        let name = entry.file_name();
+        let lower = name.to_string_lossy().to_ascii_lowercase();
+        if lower == "file_id.diz" || lower == "file_id.ans" {
+            Some(entry.path())
+        } else {
+            None
+        }
+    })
 }
 
 /// Very simple glob: `*` matches anything, `?` matches one char.

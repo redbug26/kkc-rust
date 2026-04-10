@@ -5,6 +5,7 @@ mod events;
 mod file_ops;
 mod file_types;
 mod help;
+mod idf;
 mod panel;
 mod search;
 mod ui;
