@@ -117,6 +117,9 @@ pub fn list_dir(profile: &SftpProfile, cwd: &str, show_hidden: bool) -> Result<V
     let mut entries = Vec::new();
     for line in out.lines() {
         if let Some(entry) = parse_ls_line(line) {
+            if entry.name == "." || entry.name == ".." {
+                continue;
+            }
             if !show_hidden && entry.name.starts_with('.') {
                 continue;
             }

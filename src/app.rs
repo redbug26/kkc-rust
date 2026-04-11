@@ -11,8 +11,15 @@ use crate::remote::{
 use crate::search::{search, SearchQuery, SearchResult};
 use crate::viewer::{EncodingMode, LineFeedMode, MaskKind, ViewMode, Viewer};
 use anyhow::Result;
+use crossterm::{
+    cursor::MoveTo,
+    queue,
+    style::{Print, ResetColor, SetBackgroundColor, SetForegroundColor},
+    terminal::{size, Clear, ClearType},
+};
 use std::collections::VecDeque;
 use std::fs;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 // ---------------------------------------------------------------------------
@@ -669,7 +676,13 @@ impl App {
 
     pub fn enter_dir(&mut self, path: PathBuf) -> Result<()> {
         self.push_dir_history(path.clone());
-        self.active_panel_mut().enter_dir(path)
+        if self.active_panel().is_remote_view() {
+            self.run_with_busy("Remote: changing directory...", |app| {
+                app.active_panel_mut().enter_dir(path)
+            })
+        } else {
+            self.active_panel_mut().enter_dir(path)
+        }
     }
 
     pub fn enter_archive(&mut self, path: PathBuf) -> Result<()> {
@@ -679,7 +692,9 @@ impl App {
 
     pub fn connect_sftp(&mut self, profile: SftpProfile) -> Result<()> {
         self.file_id_preview = false;
-        self.active_panel_mut().enter_remote(profile)
+        self.run_with_busy("Remote: connecting...", |app| {
+            app.active_panel_mut().enter_remote(profile)
+        })
     }
 
     pub fn save_remote_profile(&mut self, profile: SftpProfile) -> Result<()> {
@@ -691,7 +706,9 @@ impl App {
         if self.active_panel().is_remote_view() {
             let current = self.active_panel().path.clone();
             let parent = current.parent().unwrap_or(std::path::Path::new("/")).to_path_buf();
-            self.active_panel_mut().enter_dir(parent)?;
+            self.run_with_busy("Remote: changing directory...", |app| {
+                app.active_panel_mut().enter_dir(parent)
+            })?;
             return Ok(());
         }
         if self.active_panel().is_archive_root() {
@@ -762,8 +779,14 @@ impl App {
             return Ok(());
         }
         let mut errors = Vec::new();
+        let needs_busy = self.active_panel().is_remote_view() || self.other_panel().is_remote_view();
         for entry in &sources {
-            if let Err(e) = self.copy_between_panels(entry) {
+            let result = if needs_busy {
+                self.run_with_busy("Remote: copying...", |app| app.copy_between_panels(entry))
+            } else {
+                self.copy_between_panels(entry)
+            };
+            if let Err(e) = result {
                 errors.push(format!("{}: {}", entry.name, e));
             }
         }
@@ -793,8 +816,14 @@ impl App {
             return Ok(());
         }
         let mut errors = Vec::new();
+        let needs_busy = self.active_panel().is_remote_view() || self.other_panel().is_remote_view();
         for entry in &sources {
-            if let Err(e) = self.move_between_panels(entry) {
+            let result = if needs_busy {
+                self.run_with_busy("Remote: moving...", |app| app.move_between_panels(entry))
+            } else {
+                self.move_between_panels(entry)
+            };
+            if let Err(e) = result {
                 errors.push(format!("{}: {}", entry.name, e));
             }
         }
@@ -834,7 +863,10 @@ impl App {
     pub fn cmd_delete_remote_confirmed(&mut self, targets: Vec<RemoteDeleteTarget>) -> Result<()> {
         let mut errors = Vec::new();
         for target in &targets {
-            if let Err(e) = remote_delete_path(&target.profile, &target.path, target.is_dir) {
+            let result = self.run_with_busy("Remote: deleting...", |_| {
+                remote_delete_path(&target.profile, &target.path, target.is_dir)
+            });
+            if let Err(e) = result {
                 errors.push(format!("{}: {}", target.path, e));
             }
         }
@@ -906,7 +938,7 @@ impl App {
     // -----------------------------------------------------------------------
 
     pub fn open_viewer(&mut self) {
-        if let Some(entry) = self.active_panel().current_entry() {
+        if let Some(entry) = self.active_panel().current_entry().cloned() {
             if entry.is_dir || entry.name == ".." {
                 self.status.text = "Cannot view a directory".into();
                 return;
@@ -916,7 +948,9 @@ impl App {
                     self.status.text = "Remote profile missing".into();
                     return;
                 };
-                match download_to_temp(&profile, &entry.path.to_string_lossy(), false) {
+                match self.run_with_busy("Remote: downloading file...", |_| {
+                    download_to_temp(&profile, &entry.path.to_string_lossy(), false)
+                }) {
                     Ok(path) => path,
                     Err(e) => {
                         self.status.text = format!("Remote download failed: {}", e);
@@ -955,6 +989,20 @@ impl App {
         }
 
         render_idf_card(&entry.path).unwrap_or_else(|| "No FILE_ID.DIZ.".into())
+    }
+
+    pub fn run_with_busy<T, F>(&mut self, message: &str, op: F) -> Result<T>
+    where
+        F: FnOnce(&mut Self) -> Result<T>,
+    {
+        let previous_status = self.status.text.clone();
+        self.status.text = message.to_string();
+        let _ = draw_busy_status(message, self.config.show_fkey_bar);
+        let result = op(self);
+        if self.status.text == message {
+            self.status.text = previous_status;
+        }
+        result
     }
 
     fn copy_between_panels(&self, entry: &crate::panel::Entry) -> Result<()> {
@@ -1144,4 +1192,29 @@ fn same_remote_target(a: &SftpProfile, b: &SftpProfile) -> bool {
         && a.host == b.host
         && a.user == b.user
         && a.port == b.port
+}
+
+fn draw_busy_status(message: &str, has_fkey_bar: bool) -> Result<()> {
+    let (_, rows) = size()?;
+    if rows == 0 {
+        return Ok(());
+    }
+    let status_row = if has_fkey_bar {
+        rows.saturating_sub(2)
+    } else {
+        rows.saturating_sub(1)
+    };
+    let mut stdout = io::stdout();
+    let line = format!(" {} ", message);
+    queue!(
+        stdout,
+        MoveTo(0, status_row),
+        SetForegroundColor(crossterm::style::Color::Rgb { r: 244, g: 235, b: 208 }),
+        SetBackgroundColor(crossterm::style::Color::Rgb { r: 125, g: 107, b: 92 }),
+        Clear(ClearType::CurrentLine),
+        Print(line),
+        ResetColor,
+    )?;
+    stdout.flush()?;
+    Ok(())
 }

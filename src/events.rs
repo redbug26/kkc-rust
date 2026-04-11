@@ -241,7 +241,9 @@ fn handle_enter(app: &mut App) -> Result<()> {
                 app.status.text = "Remote profile missing".into();
                 return Ok(());
             };
-            match download_to_temp(&profile, &entry.path.to_string_lossy(), false) {
+            match app.run_with_busy("Remote: downloading file...", |_| {
+                download_to_temp(&profile, &entry.path.to_string_lossy(), false)
+            }) {
                 Ok(path) => path,
                 Err(e) => {
                     app.status.text = format!("Remote download failed: {}", e);
@@ -342,7 +344,9 @@ fn launch_editor(app: &mut App) -> Result<()> {
             app.status.text = "Remote profile missing".into();
             return Ok(());
         };
-        match download_to_temp(&profile, &entry.path.to_string_lossy(), false) {
+        match app.run_with_busy("Remote: downloading file...", |_| {
+            download_to_temp(&profile, &entry.path.to_string_lossy(), false)
+        }) {
             Ok(path) => path,
             Err(e) => {
                 app.status.text = format!("Remote download failed: {}", e);
@@ -365,7 +369,9 @@ fn launch_editor(app: &mut App) -> Result<()> {
         && let Some(parent) = entry.path.parent()
     {
         let remote_dir = parent.to_string_lossy().into_owned();
-        if let Err(e) = upload_into_dir(&profile, &path, &remote_dir, false) {
+        if let Err(e) = app.run_with_busy("Remote: uploading file...", |_| {
+            upload_into_dir(&profile, &path, &remote_dir, false).map(|_| ())
+        }) {
             app.status.text = format!("Remote upload failed: {}", e);
         }
     }
@@ -970,7 +976,9 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                         return Ok(false);
                     };
                     let dst = join_remote(&parent.to_string_lossy(), &value);
-                    match remote_rename_path(&profile, &path, &dst) {
+                    match app.run_with_busy("Remote: renaming...", |_| {
+                        remote_rename_path(&profile, &path, &dst)
+                    }) {
                         Ok(_) => {
                             app.status.text = format!("Renamed to '{}'", value);
                             if app.config.auto_reload {
@@ -982,7 +990,9 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                 }
                 InputAction::RemoteMkdir { profile, parent } => {
                     let path = join_remote(&parent, &value);
-                    match remote_make_dir(&profile, &path) {
+                    match app.run_with_busy("Remote: creating directory...", |_| {
+                        remote_make_dir(&profile, &path)
+                    }) {
                         Ok(_) => {
                             app.status.text = format!("Created directory '{}'", value);
                             if app.config.auto_reload {

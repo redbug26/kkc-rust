@@ -1236,9 +1236,13 @@ fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, area: Rect) 
     };
     f.render_widget(Clear, popup);
     let block = Block::default()
-        .title(" Remote SFTP ")
+        .title(Span::styled(
+            " Remote SFTP ",
+            Style::default().fg(CLR_MENU_BAR_FG).bg(CLR_MENU_DD_BG).add_modifier(Modifier::BOLD),
+        ))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_PANEL_BORDER));
+        .border_style(Style::default().fg(CLR_MENU_BORDER).bg(CLR_MENU_DD_BG))
+        .style(Style::default().bg(CLR_MENU_DD_BG));
     let inner = block.inner(popup);
     f.render_widget(block, popup);
     if inner.height < 2 {
@@ -1322,35 +1326,44 @@ fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: Rect) {
     };
     f.render_widget(Clear, popup);
     let block = Block::default()
-        .title(" Add SFTP Server ")
+        .title(Span::styled(
+            " Add SFTP Server ",
+            Style::default().fg(CLR_MENU_BAR_FG).bg(CLR_MENU_DD_BG).add_modifier(Modifier::BOLD),
+        ))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_PANEL_BORDER));
+        .border_style(Style::default().fg(CLR_MENU_BORDER).bg(CLR_MENU_DD_BG))
+        .style(Style::default().bg(CLR_MENU_DD_BG));
     let inner = block.inner(popup);
     f.render_widget(block, popup);
     let labels = ["Name", "Host", "User", "Port", "Path", "Identity"];
     let mut lines = Vec::new();
     for (idx, label) in labels.iter().enumerate() {
         let selected = state.cursor == idx;
-        let style = if selected {
-            Style::default().fg(Color::Black).bg(Color::White)
+        let label_style = if selected {
+            Style::default().fg(CLR_MENU_SEL_FG).bg(CLR_MENU_SEL_BG).add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(CLR_TEXT)
+            Style::default().fg(CLR_HEADER_FG).bg(CLR_MENU_DD_BG)
+        };
+        let value_style = if selected {
+            Style::default().fg(CLR_MENU_SEL_FG).bg(CLR_MENU_SEL_BG).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
         };
         lines.push(Line::from(vec![
-            Span::styled(format!("{:<9}", format!("{label}:")), Style::default().fg(CLR_HEADER_FG)),
-            Span::styled(state.fields[idx].clone(), style),
+            Span::styled(format!("{:<9}", format!("{label}:")), label_style),
+            Span::styled(state.fields[idx].clone(), value_style),
         ]));
     }
     lines.push(Line::default());
     let save_style = if state.cursor == RemoteEditState::SAVE {
         Style::default().fg(CLR_MENU_SEL_FG).bg(CLR_MENU_SEL_BG).add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(CLR_BUTTON_FG)
+        Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
     };
     let cancel_style = if state.cursor == RemoteEditState::CANCEL {
         Style::default().fg(CLR_MENU_SEL_FG).bg(CLR_MENU_SEL_BG).add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(CLR_BUTTON_FG)
+        Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
     };
     lines.push(Line::from(vec![
         Span::styled(" [ Save ] ", save_style),
@@ -1360,9 +1373,12 @@ fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: Rect) {
     lines.push(Line::default());
     lines.push(Line::from(Span::styled(
         " Tab/Shift-Tab:Next  Enter:Select  Esc:Cancel ",
-        Style::default().fg(CLR_UNKNOWN),
+        Style::default().fg(CLR_UNKNOWN).bg(CLR_MENU_DD_BG),
     )));
-    f.render_widget(Paragraph::new(lines), inner);
+    f.render_widget(
+        Paragraph::new(lines).style(Style::default().bg(CLR_MENU_DD_BG)),
+        inner,
+    );
     if state.cursor < 6 {
         let cursor_x = (inner.x + 9 + state.input_cursor as u16).min(inner.x + inner.width.saturating_sub(2));
         let cursor_y = inner.y + state.cursor as u16;
