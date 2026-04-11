@@ -65,8 +65,8 @@ pub enum AppMode {
     Confirm(ConfirmDialog),
     /// Single-line text input dialog.
     Input(InputDialog),
-    /// Directory history popup.
-    DirHistory,
+    /// Directory bookmarks popup.
+    DirBookmarks,
     /// Help overlay.
     Help(HelpState),
     /// Menu bar / dropdown (F2).
@@ -365,7 +365,7 @@ pub enum MenuAction {
     DeselectPattern,
     InvertSelection,
     SearchFiles,
-    DirHistory,
+    DirBookmarks,
     ToggleFBar,
     SaveConfig,
     Setup,
@@ -475,7 +475,7 @@ pub static MENU_DATA: &[&[MenuEntry]] = &[
     // 4 – Tools
     &[
         ("Search..",      Some("A-F7"), MenuAction::SearchFiles),
-        ("Dir History",   Some("^D"),   MenuAction::DirHistory),
+        ("Bookmarks",     Some("^D"),   MenuAction::DirBookmarks),
     ],
     // 5 – Options
     &[
@@ -635,8 +635,11 @@ pub struct App {
     pub status: StatusMessage,
     pub dir_history: VecDeque<PathBuf>,
     pub history_cursor: usize,
+    pub bookmarks: Vec<PathBuf>,
+    pub bookmark_cursor: usize,
     remote_connect_task: Option<RemoteConnectTask>,
     remote_connect_return: Option<RemoteConnectState>,
+    pending_remote_cwd: Option<String>,
     copy_scan: Option<CopyScanTask>,
     copy_task: Option<CopyTask>,
     /// Set to true after spawning an external program so the main loop can
@@ -668,6 +671,15 @@ impl App {
         restore_remote_panel(&mut left, &config.left, &profiles);
         restore_remote_panel(&mut right, &config.right, &profiles);
 
+        let bookmarks = {
+            let mut bm = config.bookmarks.clone();
+            let home = directories::UserDirs::new()
+                .map(|u| u.home_dir().to_path_buf())
+                .unwrap_or_else(|| PathBuf::from("/"));
+            if bm.is_empty() { bm.push(home); }
+            bm
+        };
+
         App {
             config,
             left,
@@ -678,8 +690,11 @@ impl App {
             status: StatusMessage::default(),
             dir_history: history,
             history_cursor: 0,
+            bookmarks,
+            bookmark_cursor: 0,
             remote_connect_task: None,
             remote_connect_return: None,
+            pending_remote_cwd: None,
             copy_scan: None,
             copy_task: None,
             needs_clear: false,
@@ -790,6 +805,11 @@ impl App {
 
     pub fn enter_dir(&mut self, path: PathBuf) -> Result<()> {
         self.push_dir_history(path.clone());
+        if self.active_panel().is_remote_view() && path.is_dir() {
+            // Local path selected while on a remote panel — disconnect first.
+            self.active_panel_mut().disconnect();
+            return self.active_panel_mut().enter_dir(path);
+        }
         if self.active_panel().is_remote_view() {
             self.run_with_busy("Remote: changing directory...", |app| {
                 app.active_panel_mut().enter_dir(path)
@@ -805,8 +825,25 @@ impl App {
     }
 
     pub fn start_remote_connect(&mut self, profile: RemoteProfile, return_state: RemoteConnectState) {
+        self.pending_remote_cwd = None;
         self.file_id_preview = false;
         self.remote_connect_return = Some(return_state);
+        let protocol_label = match profile.kind {
+            RemoteKind::Sftp(_) => "SFTP",
+            RemoteKind::Imap(_) => "IMAP",
+        };
+        self.remote_connect_task = Some(spawn_remote_connect_task(profile.clone(), self.active_panel().show_hidden));
+        self.mode = AppMode::RemoteConnecting(RemoteConnectingState {
+            profile_name: profile.name,
+            protocol_label,
+            phase: "Preparing connection...".into(),
+        });
+    }
+
+    pub fn start_remote_connect_with_cwd(&mut self, profile: RemoteProfile, target_cwd: String) {
+        self.pending_remote_cwd = Some(target_cwd);
+        self.file_id_preview = false;
+        self.remote_connect_return = None;
         let protocol_label = match profile.kind {
             RemoteKind::Sftp(_) => "SFTP",
             RemoteKind::Imap(_) => "IMAP",
@@ -923,6 +960,9 @@ impl App {
                 RemoteConnectMessage::Progress(_) => {}
                 RemoteConnectMessage::Connected { profile, cwd, entries } => {
                     self.active_panel_mut().mount_remote_prefetched(profile, cwd, entries);
+                    if let Some(target) = self.pending_remote_cwd.take() {
+                        let _ = self.active_panel_mut().enter_dir(PathBuf::from(target));
+                    }
                     self.remote_connect_return = None;
                     self.mode = AppMode::Browse;
                 }
@@ -1417,6 +1457,7 @@ impl App {
         self.config.right.sort = self.right.sort;
         self.config.right.show_hidden = self.right.show_hidden;
         self.config.dir_history = self.dir_history.iter().cloned().collect();
+        self.config.bookmarks = self.bookmarks.clone();
         self.config.save()
     }
 }

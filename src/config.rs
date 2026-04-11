@@ -168,6 +168,11 @@ pub struct Config {
     #[serde(default)]
     pub dir_history: Vec<PathBuf>,
 
+    // --- Bookmarks ---
+    /// User-defined directory bookmarks.
+    #[serde(default = "default_bookmarks")]
+    pub bookmarks: Vec<PathBuf>,
+
     /// File-type associations (extension → opener commands).
     #[serde(default)]
     pub file_assoc: Vec<FileAssoc>,
@@ -196,6 +201,7 @@ impl Default for Config {
             viewer: ViewerConfig::default(),
             dir_history_max: 32,
             dir_history: Vec::new(),
+            bookmarks: default_bookmarks(),
             file_assoc: Vec::new(),
         }
     }
@@ -257,3 +263,7 @@ fn default_pager() -> String {
 const fn t() -> bool { true }
 const fn tab_default() -> usize { 4 }
 const fn history_max() -> usize { 32 }
+
+fn default_bookmarks() -> Vec<PathBuf> {
+    vec![dirs_home()]
+}

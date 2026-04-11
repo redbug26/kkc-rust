@@ -194,7 +194,7 @@ pub fn render(f: &mut Frame, app: &App) {
         AppMode::CopyDialog(state) => render_copy_dialog(f, state, f.area()),
         AppMode::CopyProgress(state) => render_copy_progress(f, state, f.area()),
         AppMode::SearchPanel(s) => render_search(f, s, f.area()),
-        AppMode::DirHistory => render_dir_history(f, app, f.area()),
+        AppMode::DirBookmarks => render_dir_bookmarks(f, app, f.area()),
         AppMode::Config(cs) => render_config(f, cs, f.area()),
         AppMode::Opener(s) => render_opener(f, s, f.area()),
         AppMode::AssocEditor(s) => render_assoc_editor(f, s, f.area()),
@@ -1773,39 +1773,78 @@ fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
 // Directory history
 // ---------------------------------------------------------------------------
 
-fn render_dir_history(f: &mut Frame, app: &App, area: Rect) {
-    let width = 60u16.min(area.width.saturating_sub(4));
-    let height = (app.dir_history.len() as u16 + 4).min(area.height.saturating_sub(4));
+fn render_dir_bookmarks(f: &mut Frame, app: &App, area: Rect) {
+    let list_h = app.bookmarks.len().max(1) as u16;
+    // 2 border + 1 hint line + list
+    let height = (list_h + 3).min(area.height.saturating_sub(4));
+    let width = 64u16.min(area.width.saturating_sub(4));
     let x = (area.width.saturating_sub(width)) / 2 + area.x;
     let y = (area.height.saturating_sub(height)) / 2 + area.y;
     let popup = Rect { x, y, width, height };
 
     f.render_widget(Clear, popup);
+
     let block = Block::default()
-        .title(" Directory History ")
+        .title(" Bookmarks ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_style(Style::default().fg(CLR_MENU_BORDER))
+        .style(Style::default().bg(CLR_MENU_DD_BG));
     let inner = block.inner(popup);
     f.render_widget(block, popup);
 
-    let items: Vec<ListItem> = app
-        .dir_history
-        .iter()
-        .enumerate()
-        .map(|(i, p)| {
-            let style = if i == app.history_cursor {
-                Style::default().fg(Color::Black).bg(Color::Cyan)
-            } else {
-                Style::default().fg(Color::White)
-            };
-            ListItem::new(Line::from(Span::styled(
-                truncate_str(&p.to_string_lossy(), inner.width as usize),
-                style,
-            )))
-        })
-        .collect();
+    // List + hint line
+    let [list_area, hint_area] =
+        Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(inner);
 
-    f.render_widget(List::new(items), inner);
+    // Bookmark list
+    let max_w = list_area.width as usize;
+    let items: Vec<ListItem> = if app.bookmarks.is_empty() {
+        vec![ListItem::new(Line::from(Span::styled(
+            "(no bookmarks — press 'a' to add current dir)",
+            Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG),
+        )))]
+    } else {
+        app.bookmarks
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let s = p.to_string_lossy();
+                let is_remote = s.starts_with("remote://");
+                let label = if is_remote {
+                    let rest = &s["remote://".len()..];
+                    format!(" \u{2039}remote\u{203a} {}", truncate_str(rest, max_w.saturating_sub(11)))
+                } else {
+                    format!(" {}", truncate_str(&s, max_w.saturating_sub(1)))
+                };
+                let style = if i == app.bookmark_cursor {
+                    Style::default().fg(CLR_MENU_SEL_FG).bg(CLR_MENU_SEL_BG).add_modifier(Modifier::BOLD)
+                } else if !is_remote && !p.is_dir() {
+                    Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG).add_modifier(Modifier::DIM)
+                } else {
+                    Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
+                };
+                ListItem::new(Line::from(Span::styled(label, style)))
+            })
+            .collect()
+    };
+    f.render_widget(List::new(items).style(Style::default().bg(CLR_MENU_DD_BG)), list_area);
+
+    // Hint
+    let key_style = Style::default().fg(CLR_HEADER_FG).bg(CLR_MENU_DD_BG).add_modifier(Modifier::BOLD);
+    let txt_style = Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG);
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(" Enter", key_style),
+            Span::styled(":Go  ", txt_style),
+            Span::styled("a", key_style),
+            Span::styled(":Add  ", txt_style),
+            Span::styled("Del", key_style),
+            Span::styled(":Remove  ", txt_style),
+            Span::styled("Esc", key_style),
+            Span::styled(":Cancel", txt_style),
+        ])).style(Style::default().bg(CLR_MENU_DD_BG)),
+        hint_area,
+    );
 }
 
 // ---------------------------------------------------------------------------
