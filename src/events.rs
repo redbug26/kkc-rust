@@ -6,6 +6,10 @@ use crate::app::{
     MENU_DATA, MENU_HEADERS,
 };
 use crate::config::SortMode;
+use crate::remote::{
+    download_to_temp, join_remote, make_dir as remote_make_dir, rename_path as remote_rename_path,
+    upload_into_dir,
+};
 use crate::viewer::{EncodingMode, LineFeedMode, MaskKind, PreprocOpKind, ViewMode};
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers},
@@ -34,6 +38,8 @@ pub fn handle_event(app: &mut App, event: Event) -> Result<bool> {
         AppMode::Config(_) => return handle_config(app, key),
         AppMode::Opener(_) => return handle_opener(app, key),
         AppMode::AssocEditor(_) => return handle_assoc_editor(app, key),
+        AppMode::RemoteConnect(_) => return handle_remote_connect(app, key),
+        AppMode::RemoteEdit(_) => return handle_remote_edit(app, key),
         AppMode::Browse => {}
     }
 
@@ -89,6 +95,10 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
             KeyCode::Char('d') => {
                 app.history_cursor = 0;
                 app.mode = AppMode::DirHistory;
+                return Ok(false);
+            }
+            KeyCode::Char('f') => {
+                app.open_remote_connect();
                 return Ok(false);
             }
             _ => {}
@@ -226,6 +236,21 @@ fn handle_enter(app: &mut App) -> Result<()> {
             app.status.text = format!("Cannot enter archive: {}", e);
         }
     } else {
+        let launch_path = if app.active_panel().is_remote_view() {
+            let Some(profile) = app.active_panel().remote_profile() else {
+                app.status.text = "Remote profile missing".into();
+                return Ok(());
+            };
+            match download_to_temp(&profile, &entry.path.to_string_lossy(), false) {
+                Ok(path) => path,
+                Err(e) => {
+                    app.status.text = format!("Remote download failed: {}", e);
+                    return Ok(());
+                }
+            }
+        } else {
+            entry.path.clone()
+        };
         // Check registered openers first
         let ext = entry.path.extension()
             .and_then(|e| e.to_str())
@@ -234,19 +259,19 @@ fn handle_enter(app: &mut App) -> Result<()> {
         match openers.len() {
             0 => {
                 // No association: fall back to system default
-                if let Err(e) = open::that(&entry.path) {
+                if let Err(e) = open::that(&launch_path) {
                     app.status.text = format!("Cannot open: {}", e);
                 }
             }
             1 => {
-                launch_external(app, &openers[0], &entry.path)?;
+                launch_external(app, &openers[0], &launch_path)?;
             }
             _ => {
                 // Multiple openers: show picker
                 app.mode = AppMode::Opener(OpenerState {
                     items: openers,
                     cursor: 0,
-                    path: entry.path.clone(),
+                    path: launch_path,
                 });
             }
         }
@@ -312,7 +337,21 @@ fn launch_editor(app: &mut App) -> Result<()> {
     };
 
     let editor = app.config.editor.clone();
-    let path = entry.path.clone();
+    let path = if app.active_panel().is_remote_view() {
+        let Some(profile) = app.active_panel().remote_profile() else {
+            app.status.text = "Remote profile missing".into();
+            return Ok(());
+        };
+        match download_to_temp(&profile, &entry.path.to_string_lossy(), false) {
+            Ok(path) => path,
+            Err(e) => {
+                app.status.text = format!("Remote download failed: {}", e);
+                return Ok(());
+            }
+        }
+    } else {
+        entry.path.clone()
+    };
 
     // Restore normal terminal before handing control to an external editor.
     disable_raw_mode()?;
@@ -320,6 +359,16 @@ fn launch_editor(app: &mut App) -> Result<()> {
 
     use std::process::Command;
     let _ = Command::new(&editor).arg(&path).status();
+
+    if app.active_panel().is_remote_view()
+        && let Some(profile) = app.active_panel().remote_profile()
+        && let Some(parent) = entry.path.parent()
+    {
+        let remote_dir = parent.to_string_lossy().into_owned();
+        if let Err(e) = upload_into_dir(&profile, &path, &remote_dir, false) {
+            app.status.text = format!("Remote upload failed: {}", e);
+        }
+    }
 
     // Re-enter TUI mode once the editor exits.
     enable_raw_mode()?;
@@ -343,12 +392,20 @@ fn start_rename(app: &mut App) {
         }
         let path = entry.path.clone();
         let name = entry.name.clone();
+        let action = if let Some(profile) = app.active_panel().remote_profile() {
+            InputAction::RemoteRename {
+                profile,
+                path: path.to_string_lossy().into_owned(),
+            }
+        } else {
+            InputAction::Rename(path)
+        };
         app.mode = AppMode::Input(InputDialog {
             title: "Rename".into(),
             prompt: "New name:".into(),
             value: name.clone(),
             cursor: name.len(),
-            action: InputAction::Rename(path),
+            action,
         });
     }
 }
@@ -358,13 +415,20 @@ fn start_mkdir(app: &mut App) {
         app.status.text = "Create directory in archive is not supported".into();
         return;
     }
-    let current = app.active_panel().path.clone();
+    let action = if let Some(profile) = app.active_panel().remote_profile() {
+        InputAction::RemoteMkdir {
+            profile,
+            parent: app.active_panel().remote_cwd().unwrap_or("/").to_string(),
+        }
+    } else {
+        InputAction::Mkdir(app.active_panel().path.clone())
+    };
     app.mode = AppMode::Input(InputDialog {
         title: "Create Directory".into(),
         prompt: "Directory name:".into(),
         value: String::new(),
         cursor: 0,
-        action: InputAction::Mkdir(current),
+        action,
     });
 }
 
@@ -846,6 +910,9 @@ fn handle_confirm(app: &mut App, key: KeyEvent) -> Result<bool> {
                 ConfirmAction::Delete(paths) => {
                     app.cmd_delete_confirmed(paths)?;
                 }
+                ConfirmAction::DeleteRemote(targets) => {
+                    app.cmd_delete_remote_confirmed(targets)?;
+                }
             }
         }
         KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
@@ -888,6 +955,34 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                 }
                 InputAction::Mkdir(parent) => {
                     match crate::file_ops::make_dir(&parent, &value) {
+                        Ok(_) => {
+                            app.status.text = format!("Created directory '{}'", value);
+                            if app.config.auto_reload {
+                                app.reload_panels();
+                            }
+                        }
+                        Err(e) => app.status.text = format!("mkdir error: {}", e),
+                    }
+                }
+                InputAction::RemoteRename { profile, path } => {
+                    let Some(parent) = std::path::Path::new(&path).parent() else {
+                        app.status.text = "Rename error: invalid remote path".into();
+                        return Ok(false);
+                    };
+                    let dst = join_remote(&parent.to_string_lossy(), &value);
+                    match remote_rename_path(&profile, &path, &dst) {
+                        Ok(_) => {
+                            app.status.text = format!("Renamed to '{}'", value);
+                            if app.config.auto_reload {
+                                app.reload_panels();
+                            }
+                        }
+                        Err(e) => app.status.text = format!("Rename error: {}", e),
+                    }
+                }
+                InputAction::RemoteMkdir { profile, parent } => {
+                    let path = join_remote(&parent, &value);
+                    match remote_make_dir(&profile, &path) {
                         Ok(_) => {
                             app.status.text = format!("Created directory '{}'", value);
                             if app.config.auto_reload {
@@ -1484,6 +1579,114 @@ fn handle_assoc_editor(app: &mut App, key: KeyEvent) -> Result<bool> {
             let mut new_s = AssocEditorState::from_config(&app.config);
             new_s.cursor = new_cursor;
             app.mode = AppMode::AssocEditor(new_s);
+        }
+        _ => {}
+    }
+    Ok(false)
+}
+
+fn handle_remote_connect(app: &mut App, key: KeyEvent) -> Result<bool> {
+    let len = if let AppMode::RemoteConnect(ref s) = app.mode { s.items.len() } else { 0 };
+    match key.code {
+        KeyCode::Esc => app.mode = AppMode::Browse,
+        KeyCode::Up => {
+            if let AppMode::RemoteConnect(ref mut s) = app.mode {
+                s.cursor = s.cursor.saturating_sub(1);
+            }
+        }
+        KeyCode::Down => {
+            if let AppMode::RemoteConnect(ref mut s) = app.mode {
+                s.cursor = (s.cursor + 1).min(len.saturating_sub(1));
+            }
+        }
+        KeyCode::F(7) => {
+            app.open_remote_add();
+        }
+        KeyCode::Enter => {
+            let profile = if let AppMode::RemoteConnect(ref s) = app.mode {
+                s.items.get(s.cursor).cloned()
+            } else {
+                None
+            };
+            if let Some(profile) = profile {
+                match app.connect_sftp(profile) {
+                    Ok(()) => app.mode = AppMode::Browse,
+                    Err(e) => {
+                        app.status.text = format!("SFTP connect failed: {}", e);
+                        app.mode = AppMode::Browse;
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(false)
+}
+
+fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
+    let AppMode::RemoteEdit(ref mut s) = app.mode else { return Ok(false); };
+    match key.code {
+        KeyCode::Esc => app.mode = AppMode::RemoteConnect(crate::app::RemoteConnectState::load()),
+        KeyCode::Tab | KeyCode::Down => {
+            s.cursor = (s.cursor + 1).min(crate::app::RemoteEditState::CANCEL);
+            s.sync_cursor();
+        }
+        KeyCode::BackTab | KeyCode::Up => {
+            s.cursor = s.cursor.saturating_sub(1);
+            s.sync_cursor();
+        }
+        KeyCode::Left => {
+            if s.cursor < 6 && s.input_cursor > 0 {
+                s.input_cursor -= 1;
+            }
+        }
+        KeyCode::Right => {
+            if s.cursor < 6 {
+                s.input_cursor = (s.input_cursor + 1).min(s.current_value().map(|v| v.len()).unwrap_or(0));
+            }
+        }
+        KeyCode::Backspace => {
+            let pos = s.input_cursor;
+            if s.cursor < 6 && pos > 0 {
+                if let Some(value) = s.current_value_mut() {
+                    value.remove(pos - 1);
+                }
+                s.input_cursor -= 1;
+            }
+        }
+        KeyCode::Delete => {
+            if s.cursor < 6 {
+                let pos = s.input_cursor;
+                if let Some(value) = s.current_value_mut() && pos < value.len() {
+                    value.remove(pos);
+                }
+            }
+        }
+        KeyCode::Char(ch) => {
+            if s.cursor < 6 && !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) {
+                let pos = s.input_cursor;
+                if let Some(value) = s.current_value_mut() {
+                    value.insert(pos, ch);
+                    s.input_cursor += ch.len_utf8();
+                }
+            }
+        }
+        KeyCode::Enter => {
+            if s.cursor == crate::app::RemoteEditState::CANCEL {
+                app.mode = AppMode::RemoteConnect(crate::app::RemoteConnectState::load());
+            } else if s.cursor == crate::app::RemoteEditState::SAVE {
+                if let Some(profile) = s.build_profile() {
+                    match app.save_remote_profile(profile) {
+                        Ok(()) => app.mode = AppMode::RemoteConnect(crate::app::RemoteConnectState::load()),
+                        Err(e) => app.status.text = format!("Cannot save connection: {}", e),
+                    }
+                } else {
+                    app.status.text = "Connection name is required".into();
+                }
+            } else {
+                s.cursor = (s.cursor + 1).min(crate::app::RemoteEditState::CANCEL);
+                s.sync_cursor();
+            }
         }
         _ => {}
     }

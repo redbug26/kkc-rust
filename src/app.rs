@@ -3,12 +3,17 @@ use crate::file_ops;
 use crate::help::HelpState;
 use crate::idf::render_idf_card;
 use crate::panel::Panel;
+use crate::remote::{
+    SftpProfile, delete_path as remote_delete_path, download_into_dir, download_to_temp,
+    join_remote, load_profiles, rename_path as remote_rename_path, save_profile,
+    upload_into_dir,
+};
 use crate::search::{search, SearchQuery, SearchResult};
 use crate::viewer::{EncodingMode, LineFeedMode, MaskKind, ViewMode, Viewer};
 use anyhow::Result;
-use std::fs;
 use std::collections::VecDeque;
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 // ---------------------------------------------------------------------------
 // Which panel is active
@@ -63,6 +68,10 @@ pub enum AppMode {
     Opener(OpenerState),
     /// File-type association editor (Options > Associations).
     AssocEditor(AssocEditorState),
+    /// Remote connection picker (Ctrl-F).
+    RemoteConnect(RemoteConnectState),
+    /// Add a new remote connection.
+    RemoteEdit(RemoteEditState),
 }
 
 // ---------------------------------------------------------------------------
@@ -155,6 +164,80 @@ pub struct AssocEditorState {
     /// (extension, openers) pairs – mirrors config.file_assoc.
     pub assocs: Vec<(String, Vec<String>)>,
     pub cursor: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct RemoteConnectState {
+    pub items: Vec<SftpProfile>,
+    pub cursor: usize,
+}
+
+impl RemoteConnectState {
+    pub fn load() -> Self {
+        Self {
+            items: load_profiles().unwrap_or_default(),
+            cursor: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RemoteEditState {
+    pub fields: [String; 6],
+    pub cursor: usize,
+    pub input_cursor: usize,
+}
+
+impl RemoteEditState {
+    pub const NAME: usize = 0;
+    pub const HOST: usize = 1;
+    pub const USER: usize = 2;
+    pub const PORT: usize = 3;
+    pub const PATH: usize = 4;
+    pub const IDENTITY: usize = 5;
+    pub const SAVE: usize = 6;
+    pub const CANCEL: usize = 7;
+
+    pub fn new() -> Self {
+        Self {
+            fields: Default::default(),
+            cursor: 0,
+            input_cursor: 0,
+        }
+    }
+
+    pub fn current_value(&self) -> Option<&String> {
+        self.fields.get(self.cursor)
+    }
+
+    pub fn current_value_mut(&mut self) -> Option<&mut String> {
+        self.fields.get_mut(self.cursor)
+    }
+
+    pub fn sync_cursor(&mut self) {
+        self.input_cursor = self.current_value().map(|s| s.len()).unwrap_or(0);
+    }
+
+    pub fn build_profile(&self) -> Option<SftpProfile> {
+        let name = self.fields[Self::NAME].trim();
+        if name.is_empty() {
+            return None;
+        }
+        let port = if self.fields[Self::PORT].trim().is_empty() {
+            None
+        } else {
+            self.fields[Self::PORT].trim().parse::<u16>().ok()
+        };
+        Some(SftpProfile {
+            name: name.to_string(),
+            host: trim_opt(&self.fields[Self::HOST]),
+            user: trim_opt(&self.fields[Self::USER]),
+            port,
+            path: trim_opt(&self.fields[Self::PATH]),
+            identity_file: trim_opt(&self.fields[Self::IDENTITY]),
+            source: crate::remote::RemoteSource::UserToml,
+        })
+    }
 }
 
 impl AssocEditorState {
@@ -354,6 +437,14 @@ pub struct ConfirmDialog {
 pub enum ConfirmAction {
     Quit,
     Delete(Vec<PathBuf>),
+    DeleteRemote(Vec<RemoteDeleteTarget>),
+}
+
+#[derive(Debug, Clone)]
+pub struct RemoteDeleteTarget {
+    pub profile: SftpProfile,
+    pub path: String,
+    pub is_dir: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -369,6 +460,8 @@ pub struct InputDialog {
 pub enum InputAction {
     Rename(PathBuf),
     Mkdir(PathBuf),
+    RemoteRename { profile: SftpProfile, path: String },
+    RemoteMkdir { profile: SftpProfile, parent: String },
     /// Wildcard select (+)
     SelectPattern,
     /// Wildcard deselect (-)
@@ -556,6 +649,14 @@ impl App {
         std::mem::swap(&mut self.left, &mut self.right);
     }
 
+    pub fn open_remote_connect(&mut self) {
+        self.mode = AppMode::RemoteConnect(RemoteConnectState::load());
+    }
+
+    pub fn open_remote_add(&mut self) {
+        self.mode = AppMode::RemoteEdit(RemoteEditState::new());
+    }
+
     pub fn push_dir_history(&mut self, path: PathBuf) {
         // Avoid duplicates at front
         if self.dir_history.front() != Some(&path) {
@@ -576,7 +677,23 @@ impl App {
         self.active_panel_mut().enter_archive(path)
     }
 
+    pub fn connect_sftp(&mut self, profile: SftpProfile) -> Result<()> {
+        self.file_id_preview = false;
+        self.active_panel_mut().enter_remote(profile)
+    }
+
+    pub fn save_remote_profile(&mut self, profile: SftpProfile) -> Result<()> {
+        save_profile(&profile)?;
+        Ok(())
+    }
+
     pub fn go_parent(&mut self) -> Result<()> {
+        if self.active_panel().is_remote_view() {
+            let current = self.active_panel().path.clone();
+            let parent = current.parent().unwrap_or(std::path::Path::new("/")).to_path_buf();
+            self.active_panel_mut().enter_dir(parent)?;
+            return Ok(());
+        }
         if self.active_panel().is_archive_root() {
             if let Some((parent, archive_name)) = self.active_panel_mut().leave_archive() {
                 self.push_dir_history(parent);
@@ -631,24 +748,23 @@ impl App {
     // -----------------------------------------------------------------------
 
     pub fn cmd_copy(&mut self) -> Result<()> {
-        if self.other_panel().is_archive_view() {
-            self.status.text = "Copy to archive is not supported".into();
+        if self.active_panel().is_archive_view() || self.other_panel().is_archive_view() {
+            self.status.text = "Copy in archive is not supported".into();
             return Ok(());
         }
-        let sources: Vec<PathBuf> = self
+        let sources = self
             .active_panel()
             .effective_selection()
             .iter()
-            .map(|e| e.path.clone())
-            .collect();
+            .map(|e| (*e).clone())
+            .collect::<Vec<_>>();
         if sources.is_empty() {
             return Ok(());
         }
-        let dst = self.other_panel().path.clone();
         let mut errors = Vec::new();
-        for src in &sources {
-            if let Err(e) = file_ops::copy_entry(src, &dst, None) {
-                errors.push(format!("{}: {}", src.display(), e));
+        for entry in &sources {
+            if let Err(e) = self.copy_between_panels(entry) {
+                errors.push(format!("{}: {}", entry.name, e));
             }
         }
         if self.config.auto_reload {
@@ -667,20 +783,19 @@ impl App {
             self.status.text = "Move in archive is not supported".into();
             return Ok(());
         }
-        let sources: Vec<PathBuf> = self
+        let sources = self
             .active_panel()
             .effective_selection()
             .iter()
-            .map(|e| e.path.clone())
-            .collect();
+            .map(|e| (*e).clone())
+            .collect::<Vec<_>>();
         if sources.is_empty() {
             return Ok(());
         }
-        let dst = self.other_panel().path.clone();
         let mut errors = Vec::new();
-        for src in &sources {
-            if let Err(e) = file_ops::move_entry(src, &dst) {
-                errors.push(format!("{}: {}", src.display(), e));
+        for entry in &sources {
+            if let Err(e) = self.move_between_panels(entry) {
+                errors.push(format!("{}: {}", entry.name, e));
             }
         }
         if self.config.auto_reload {
@@ -716,31 +831,71 @@ impl App {
         Ok(())
     }
 
+    pub fn cmd_delete_remote_confirmed(&mut self, targets: Vec<RemoteDeleteTarget>) -> Result<()> {
+        let mut errors = Vec::new();
+        for target in &targets {
+            if let Err(e) = remote_delete_path(&target.profile, &target.path, target.is_dir) {
+                errors.push(format!("{}: {}", target.path, e));
+            }
+        }
+        if self.config.auto_reload {
+            self.reload_panels();
+        }
+        if errors.is_empty() {
+            self.status.text = format!("Deleted {} item(s)", targets.len());
+        } else {
+            self.status.text = format!("Errors: {}", errors.join("; "));
+        }
+        Ok(())
+    }
+
     /// Initiate a delete — show confirmation if enabled, else delete immediately.
     pub fn cmd_delete(&mut self) {
-        let paths: Vec<PathBuf> = self
+        let entries = self
             .active_panel()
             .effective_selection()
             .iter()
-            .map(|e| e.path.clone())
-            .collect();
-        if paths.is_empty() {
+            .map(|e| (*e).clone())
+            .collect::<Vec<_>>();
+        if entries.is_empty() {
             return;
         }
 
-        let n = paths.len();
+        let n = entries.len();
         let label = if n == 1 {
-            paths[0].file_name().unwrap_or_default().to_string_lossy().into_owned()
+            entries[0].name.clone()
         } else {
             format!("{} items", n)
         };
+
+        let paths = entries.iter().map(|e| e.path.clone()).collect::<Vec<_>>();
+        let remote_targets = self
+            .active_panel()
+            .remote_profile()
+            .map(|profile| {
+                entries
+                    .iter()
+                    .map(|entry| RemoteDeleteTarget {
+                        profile: profile.clone(),
+                        path: entry.path.to_string_lossy().into_owned(),
+                        is_dir: entry.is_dir,
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
 
         if self.config.confirm_delete {
             self.mode = AppMode::Confirm(crate::app::ConfirmDialog {
                 title: "Delete".into(),
                 message: format!("Delete {}?", label),
-                action: crate::app::ConfirmAction::Delete(paths),
+                action: if self.active_panel().is_remote_view() {
+                    crate::app::ConfirmAction::DeleteRemote(remote_targets)
+                } else {
+                    crate::app::ConfirmAction::Delete(paths)
+                },
             });
+        } else if self.active_panel().is_remote_view() {
+            let _ = self.cmd_delete_remote_confirmed(remote_targets);
         } else {
             let _ = self.cmd_delete_confirmed(paths);
         }
@@ -756,7 +911,22 @@ impl App {
                 self.status.text = "Cannot view a directory".into();
                 return;
             }
-            match Viewer::open(&entry.path, self.config.viewer.word_wrap) {
+            let view_path = if self.active_panel().is_remote_view() {
+                let Some(profile) = self.active_panel().remote_profile() else {
+                    self.status.text = "Remote profile missing".into();
+                    return;
+                };
+                match download_to_temp(&profile, &entry.path.to_string_lossy(), false) {
+                    Ok(path) => path,
+                    Err(e) => {
+                        self.status.text = format!("Remote download failed: {}", e);
+                        return;
+                    }
+                }
+            } else {
+                entry.path.clone()
+            };
+            match Viewer::open(&view_path, self.config.viewer.word_wrap) {
                 Ok(v) => self.mode = AppMode::Viewer(v),
                 Err(e) => self.status.text = format!("Cannot open viewer: {}", e),
             }
@@ -785,6 +955,90 @@ impl App {
         }
 
         render_idf_card(&entry.path).unwrap_or_else(|| "No FILE_ID.DIZ.".into())
+    }
+
+    fn copy_between_panels(&self, entry: &crate::panel::Entry) -> Result<()> {
+        let src_remote = self.active_panel().remote_profile();
+        let dst_remote = self.other_panel().remote_profile();
+
+        match (src_remote, dst_remote) {
+            (None, None) => file_ops::copy_entry(&entry.path, &self.other_panel().path, None),
+            (None, Some(profile)) => {
+                upload_into_dir(
+                    &profile,
+                    &entry.path,
+                    self.other_panel().remote_cwd().unwrap_or("/"),
+                    entry.is_dir,
+                )?;
+                Ok(())
+            }
+            (Some(profile), None) => {
+                download_into_dir(
+                    &profile,
+                    &entry.path.to_string_lossy(),
+                    &self.other_panel().path,
+                    entry.is_dir,
+                )?;
+                Ok(())
+            }
+            (Some(src_profile), Some(dst_profile)) => {
+                let tmp = download_to_temp(&src_profile, &entry.path.to_string_lossy(), entry.is_dir)?;
+                upload_into_dir(
+                    &dst_profile,
+                    &tmp,
+                    self.other_panel().remote_cwd().unwrap_or("/"),
+                    entry.is_dir,
+                )?;
+                cleanup_temp_download(&tmp);
+                Ok(())
+            }
+        }
+    }
+
+    fn move_between_panels(&self, entry: &crate::panel::Entry) -> Result<()> {
+        let src_remote = self.active_panel().remote_profile();
+        let dst_remote = self.other_panel().remote_profile();
+
+        match (src_remote, dst_remote) {
+            (None, None) => file_ops::move_entry(&entry.path, &self.other_panel().path),
+            (None, Some(profile)) => {
+                upload_into_dir(
+                    &profile,
+                    &entry.path,
+                    self.other_panel().remote_cwd().unwrap_or("/"),
+                    entry.is_dir,
+                )?;
+                file_ops::delete_entry(&entry.path)
+            }
+            (Some(profile), None) => {
+                download_into_dir(
+                    &profile,
+                    &entry.path.to_string_lossy(),
+                    &self.other_panel().path,
+                    entry.is_dir,
+                )?;
+                remote_delete_path(&profile, &entry.path.to_string_lossy(), entry.is_dir)
+            }
+            (Some(src_profile), Some(dst_profile)) if same_remote_target(&src_profile, &dst_profile) => {
+                let dst_path = join_remote(
+                    self.other_panel().remote_cwd().unwrap_or("/"),
+                    &entry.name,
+                );
+                remote_rename_path(&src_profile, &entry.path.to_string_lossy(), &dst_path)
+            }
+            (Some(src_profile), Some(dst_profile)) => {
+                let tmp = download_to_temp(&src_profile, &entry.path.to_string_lossy(), entry.is_dir)?;
+                upload_into_dir(
+                    &dst_profile,
+                    &tmp,
+                    self.other_panel().remote_cwd().unwrap_or("/"),
+                    entry.is_dir,
+                )?;
+                remote_delete_path(&src_profile, &entry.path.to_string_lossy(), entry.is_dir)?;
+                cleanup_temp_download(&tmp);
+                Ok(())
+            }
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -863,4 +1117,31 @@ impl App {
         self.config.dir_history = self.dir_history.iter().cloned().collect();
         self.config.save()
     }
+}
+
+fn trim_opt(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn cleanup_temp_download(path: &Path) {
+    if path.is_dir() {
+        let _ = fs::remove_dir_all(path);
+    } else {
+        let _ = fs::remove_file(path);
+        if let Some(parent) = path.parent() {
+            let _ = fs::remove_dir(parent);
+        }
+    }
+}
+
+fn same_remote_target(a: &SftpProfile, b: &SftpProfile) -> bool {
+    a.name.eq_ignore_ascii_case(&b.name)
+        && a.host == b.host
+        && a.user == b.user
+        && a.port == b.port
 }

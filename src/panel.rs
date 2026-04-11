@@ -1,6 +1,7 @@
 use crate::archive;
 use crate::config::SortMode;
 use crate::file_types::FileCategory;
+use crate::remote::{RemoteEntry, SftpProfile, list_dir, resolve_initial_dir};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local};
 use std::fs;
@@ -100,6 +101,8 @@ pub struct Panel {
     /// Which match inside the filtered list is highlighted (0-based).
     pub qs_match_pos: usize,
     archive: Option<ArchiveMount>,
+    remote: Option<RemoteMount>,
+    fallback_local_path: PathBuf,
 }
 
 #[derive(Debug)]
@@ -108,10 +111,16 @@ struct ArchiveMount {
     temp_root: PathBuf,
 }
 
+#[derive(Debug, Clone)]
+struct RemoteMount {
+    profile: SftpProfile,
+    cwd: String,
+}
+
 impl Panel {
     pub fn new(path: PathBuf, sort: SortMode, show_hidden: bool) -> Self {
         let mut p = Self {
-            path,
+            path: path.clone(),
             entries: Vec::new(),
             cursor: 0,
             scroll: 0,
@@ -120,6 +129,8 @@ impl Panel {
             quicksearch: String::new(),
             qs_match_pos: 0,
             archive: None,
+            remote: None,
+            fallback_local_path: path,
         };
         let _ = p.reload();
         p
@@ -127,6 +138,9 @@ impl Panel {
 
     /// Reload directory listing from disk.
     pub fn reload(&mut self) -> Result<()> {
+        if self.remote.is_some() {
+            return self.reload_remote();
+        }
         let rd = fs::read_dir(&self.path)
             .with_context(|| format!("Reading dir: {}", self.path.display()))?;
 
@@ -163,8 +177,41 @@ impl Panel {
         Ok(())
     }
 
+    fn reload_remote(&mut self) -> Result<()> {
+        let mount = self.remote.as_ref().context("Missing remote mount")?.clone();
+        let mut entries: Vec<Entry> = list_dir(&mount.profile, &mount.cwd, self.show_hidden)?
+            .into_iter()
+            .map(|e| self.entry_from_remote(&mount.cwd, e))
+            .collect();
+
+        let parent_entry = self.parent_entry();
+        self.sort_entries(&mut entries);
+        if let Some(pe) = parent_entry {
+            entries.insert(0, pe);
+        }
+
+        let old_name = self.entries.get(self.cursor).map(|e| e.name.clone());
+        self.entries = entries;
+        if let Some(name) = old_name {
+            if let Some(idx) = self.entries.iter().position(|e| e.name == name) {
+                self.cursor = idx;
+            } else {
+                self.cursor = self.cursor.min(self.entries.len().saturating_sub(1));
+            }
+        } else {
+            self.cursor = 0;
+        }
+        Ok(())
+    }
+
     fn parent_entry(&self) -> Option<Entry> {
-        let parent = if self.is_archive_root() {
+        let parent = if self.is_remote_view() {
+            let cwd = &self.remote.as_ref()?.cwd;
+            if cwd == "/" {
+                return None;
+            }
+            Path::new(cwd).parent().unwrap_or(Path::new("/")).to_path_buf()
+        } else if self.is_archive_root() {
             self.archive.as_ref()?.archive_path.parent()?.to_path_buf()
         } else {
             self.path.parent()?.to_path_buf()
@@ -329,6 +376,17 @@ impl Panel {
     // -----------------------------------------------------------------------
 
     pub fn enter_dir(&mut self, path: PathBuf) -> Result<()> {
+        if self.remote.is_some() {
+            if let Some(mount) = self.remote.as_mut() {
+                mount.cwd = path.to_string_lossy().into_owned();
+            }
+            self.path = path;
+            self.cursor = 0;
+            self.scroll = 0;
+            self.quicksearch.clear();
+            self.entries.clear();
+            return self.reload();
+        }
         if self.archive.is_some() && !self.is_inside_archive_temp(&path) {
             self.clear_archive_mount();
         }
@@ -344,12 +402,30 @@ impl Panel {
 
     pub fn enter_archive(&mut self, archive_path: PathBuf) -> Result<()> {
         self.clear_archive_mount();
+        self.clear_remote_mount();
         let temp_root = archive::extract_archive_to_temp(&archive_path)?;
         self.archive = Some(ArchiveMount {
             archive_path,
             temp_root: temp_root.clone(),
         });
         self.path = temp_root;
+        self.cursor = 0;
+        self.scroll = 0;
+        self.quicksearch.clear();
+        self.entries.clear();
+        self.reload()
+    }
+
+    pub fn enter_remote(&mut self, profile: SftpProfile) -> Result<()> {
+        self.clear_archive_mount();
+        self.clear_remote_mount();
+        self.fallback_local_path = self.persisted_path();
+        let cwd = resolve_initial_dir(&profile)?;
+        self.remote = Some(RemoteMount {
+            profile,
+            cwd: cwd.clone(),
+        });
+        self.path = PathBuf::from(&cwd);
         self.cursor = 0;
         self.scroll = 0;
         self.quicksearch.clear();
@@ -384,6 +460,8 @@ impl Panel {
             } else {
                 format!("{}{}", mount.archive_path.display(), format!("/{}", rel.display()))
             }
+        } else if let Some(remote) = &self.remote {
+            format!("sftp://{}{}", remote.profile.name, remote.cwd)
         } else {
             self.path.to_string_lossy().into_owned()
         }
@@ -395,6 +473,8 @@ impl Panel {
                 .parent()
                 .map(Path::to_path_buf)
                 .unwrap_or_else(|| self.path.clone())
+        } else if self.remote.is_some() {
+            self.fallback_local_path.clone()
         } else {
             self.path.clone()
         }
@@ -402,6 +482,18 @@ impl Panel {
 
     pub fn is_archive_view(&self) -> bool {
         self.archive.is_some()
+    }
+
+    pub fn is_remote_view(&self) -> bool {
+        self.remote.is_some()
+    }
+
+    pub fn remote_profile(&self) -> Option<SftpProfile> {
+        self.remote.as_ref().map(|m| m.profile.clone())
+    }
+
+    pub fn remote_cwd(&self) -> Option<&str> {
+        self.remote.as_ref().map(|m| m.cwd.as_str())
     }
 
     pub fn is_archive_root(&self) -> bool {
@@ -422,6 +514,10 @@ impl Panel {
         if let Some(mount) = self.archive.take() {
             let _ = fs::remove_dir_all(mount.temp_root);
         }
+    }
+
+    fn clear_remote_mount(&mut self) {
+        self.remote = None;
     }
 
     // -----------------------------------------------------------------------
@@ -514,6 +610,9 @@ impl Panel {
     }
 
     pub fn find_file_id_path(&self) -> Option<PathBuf> {
+        if self.is_remote_view() {
+            return None;
+        }
         let mut bases = Vec::new();
         if let Some(entry) = self.current_entry() {
             if entry.name != ".." && entry.is_dir {
@@ -534,6 +633,25 @@ impl Panel {
 impl Drop for Panel {
     fn drop(&mut self) {
         self.clear_archive_mount();
+        self.clear_remote_mount();
+    }
+}
+
+impl Panel {
+    fn entry_from_remote(&self, cwd: &str, entry: RemoteEntry) -> Entry {
+        let path = Path::new(cwd).join(&entry.name);
+        let category = FileCategory::from_entry(entry.is_dir, entry.is_symlink, &entry.name);
+        Entry {
+            name: entry.name,
+            path,
+            is_dir: entry.is_dir,
+            is_symlink: entry.is_symlink,
+            size: if entry.is_dir { 0 } else { entry.size },
+            modified: entry.modified,
+            category,
+            selected: false,
+            mode: entry.mode,
+        }
     }
 }
 
