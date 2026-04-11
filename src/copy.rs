@@ -2,7 +2,7 @@ use crate::file_ops::{self, CopyOptions};
 use crate::panel::Entry;
 use crate::remote::{
     download_bulk_into_dir, download_with_progress, scan_remote_stats, upload_bulk_into_dir,
-    upload_with_progress, RemoteStats, SftpProfile,
+    upload_with_progress, RemoteProfile, RemoteStats,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -92,13 +92,13 @@ pub enum CopyTaskMessage {
 #[derive(Debug, Clone)]
 pub enum CopySource {
     Local(PathBuf),
-    Remote { profile: SftpProfile, path: String },
+    Remote { profile: RemoteProfile, path: String },
 }
 
 #[derive(Debug, Clone)]
 pub enum CopyDestination {
     Local(PathBuf),
-    Remote { profile: SftpProfile, cwd: String },
+    Remote { profile: RemoteProfile, cwd: String },
 }
 
 #[derive(Debug, Clone)]
@@ -108,7 +108,7 @@ pub struct CopyJob {
     pub total_bytes: u64,
 }
 
-pub fn spawn_copy_scan(profile: SftpProfile, items: Vec<(String, bool)>) -> CopyScanTask {
+pub fn spawn_copy_scan(profile: RemoteProfile, items: Vec<(String, bool)>) -> CopyScanTask {
     let (tx, rx) = mpsc::channel::<CopyScanUpdate>();
     let cancel = Arc::new(AtomicBool::new(false));
     let cancel_bg = cancel.clone();

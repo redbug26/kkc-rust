@@ -1,7 +1,7 @@
 use crate::archive::supports_archive_navigation;
 use crate::app::{
     App, AppMode, AssocEditorState, ConfigState, ConfirmAction, InputAction, InputDialog,
-    MenuAction, MenuState, OpenerState,
+    MenuAction, MenuState, OpenerState, RemoteEditKind,
     ViewerMenuKind, ViewerMenuState,
     MENU_DATA, MENU_HEADERS,
 };
@@ -43,6 +43,7 @@ pub fn handle_event(app: &mut App, event: Event) -> Result<bool> {
         AppMode::AssocEditor(_) => return handle_assoc_editor(app, key),
         AppMode::RemoteConnect(_) => return handle_remote_connect(app, key),
         AppMode::RemoteEdit(_) => return handle_remote_edit(app, key),
+        AppMode::RemoteConnecting(_) => return handle_remote_connecting(app, key),
         AppMode::Browse => {}
     }
 
@@ -1711,6 +1712,9 @@ fn handle_remote_connect(app: &mut App, key: KeyEvent) -> Result<bool> {
         KeyCode::F(7) => {
             app.open_remote_add();
         }
+        KeyCode::F(8) => {
+            app.open_remote_add_imap();
+        }
         KeyCode::Enter => {
             let profile = if let AppMode::RemoteConnect(ref s) = app.mode {
                 s.items.get(s.cursor).cloned()
@@ -1718,15 +1722,22 @@ fn handle_remote_connect(app: &mut App, key: KeyEvent) -> Result<bool> {
                 None
             };
             if let Some(profile) = profile {
-                match app.connect_sftp(profile) {
-                    Ok(()) => app.mode = AppMode::Browse,
-                    Err(e) => {
-                        app.status.text = format!("SFTP connect failed: {}", e);
-                        app.mode = AppMode::Browse;
-                    }
-                }
+                let return_state = if let AppMode::RemoteConnect(ref s) = app.mode {
+                    s.clone()
+                } else {
+                    crate::app::RemoteConnectState::load()
+                };
+                app.start_remote_connect(profile, return_state);
             }
         }
+        _ => {}
+    }
+    Ok(false)
+}
+
+fn handle_remote_connecting(app: &mut App, key: KeyEvent) -> Result<bool> {
+    match key.code {
+        KeyCode::Esc | KeyCode::Enter | KeyCode::F(10) => app.cancel_remote_connect(),
         _ => {}
     }
     Ok(false)
@@ -1790,7 +1801,10 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
                         Err(e) => app.status.text = format!("Cannot save connection: {}", e),
                     }
                 } else {
-                    app.status.text = "Connection name is required".into();
+                    app.status.text = match s.kind {
+                        RemoteEditKind::Sftp => "SFTP name is required".into(),
+                        RemoteEditKind::Imap => "IMAP name, host and user are required".into(),
+                    };
                 }
             } else {
                 s.cursor = (s.cursor + 1).min(crate::app::RemoteEditState::CANCEL);

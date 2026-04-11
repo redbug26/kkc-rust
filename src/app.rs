@@ -8,8 +8,9 @@ use crate::help::HelpState;
 use crate::idf::render_idf_card;
 use crate::panel::Panel;
 use crate::remote::{
-    SftpProfile, delete_path as remote_delete_path, download_into_dir, download_to_temp,
-    join_remote, load_profiles, rename_path as remote_rename_path, save_profile, upload_into_dir,
+    RemoteKind, RemoteProfile, RemoteSource, delete_path as remote_delete_path,
+    RemoteEntry, download_into_dir, download_to_temp, join_remote, load_profiles,
+    normalize_remote_cwd, prepare_connection, rename_path as remote_rename_path, save_profile, upload_into_dir,
 };
 use crate::search::{search, SearchQuery, SearchResult};
 use crate::viewer::{EncodingMode, LineFeedMode, MaskKind, ViewMode, Viewer};
@@ -19,7 +20,9 @@ use std::collections::VecDeque;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::TryRecvError;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 
 // ---------------------------------------------------------------------------
 // Which panel is active
@@ -78,6 +81,8 @@ pub enum AppMode {
     RemoteConnect(RemoteConnectState),
     /// Add a new remote connection.
     RemoteEdit(RemoteEditState),
+    /// Connecting to a remote backend in the background.
+    RemoteConnecting(RemoteConnectingState),
     /// Copy dialog and options.
     CopyDialog(CopyDialogState),
     /// Copy progress popup.
@@ -178,7 +183,7 @@ pub struct AssocEditorState {
 
 #[derive(Debug, Clone)]
 pub struct RemoteConnectState {
-    pub items: Vec<SftpProfile>,
+    pub items: Vec<RemoteProfile>,
     pub cursor: usize,
 }
 
@@ -192,7 +197,38 @@ impl RemoteConnectState {
 }
 
 #[derive(Debug, Clone)]
+pub struct RemoteConnectingState {
+    pub profile_name: String,
+    pub protocol_label: &'static str,
+    pub phase: String,
+}
+
+#[derive(Debug)]
+struct RemoteConnectTask {
+    rx: Receiver<RemoteConnectMessage>,
+    cancel: Arc<AtomicBool>,
+}
+
+#[derive(Debug)]
+enum RemoteConnectMessage {
+    Progress(String),
+    Connected {
+        profile: RemoteProfile,
+        cwd: String,
+        entries: Vec<RemoteEntry>,
+    },
+    Failed(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoteEditKind {
+    Sftp,
+    Imap,
+}
+
+#[derive(Debug, Clone)]
 pub struct RemoteEditState {
+    pub kind: RemoteEditKind,
     pub fields: [String; 6],
     pub cursor: usize,
     pub input_cursor: usize,
@@ -204,12 +240,13 @@ impl RemoteEditState {
     pub const USER: usize = 2;
     pub const PORT: usize = 3;
     pub const PATH: usize = 4;
-    pub const IDENTITY: usize = 5;
+    pub const SECRET: usize = 5;
     pub const SAVE: usize = 6;
     pub const CANCEL: usize = 7;
 
-    pub fn new() -> Self {
+    pub fn new(kind: RemoteEditKind) -> Self {
         Self {
+            kind,
             fields: Default::default(),
             cursor: 0,
             input_cursor: 0,
@@ -228,7 +265,7 @@ impl RemoteEditState {
         self.input_cursor = self.current_value().map(|s| s.len()).unwrap_or(0);
     }
 
-    pub fn build_profile(&self) -> Option<SftpProfile> {
+    pub fn build_profile(&self) -> Option<RemoteProfile> {
         let name = self.fields[Self::NAME].trim();
         if name.is_empty() {
             return None;
@@ -238,14 +275,36 @@ impl RemoteEditState {
         } else {
             self.fields[Self::PORT].trim().parse::<u16>().ok()
         };
-        Some(SftpProfile {
-            name: name.to_string(),
-            host: trim_opt(&self.fields[Self::HOST]),
-            user: trim_opt(&self.fields[Self::USER]),
-            port,
-            path: trim_opt(&self.fields[Self::PATH]),
-            identity_file: trim_opt(&self.fields[Self::IDENTITY]),
-            source: crate::remote::RemoteSource::UserToml,
+        Some(match self.kind {
+            RemoteEditKind::Sftp => RemoteProfile {
+                name: name.to_string(),
+                source: RemoteSource::UserToml,
+                kind: RemoteKind::Sftp(crate::remote::SftpProfile {
+                    host: trim_opt(&self.fields[Self::HOST]),
+                    user: trim_opt(&self.fields[Self::USER]),
+                    port,
+                    path: trim_opt(&self.fields[Self::PATH]),
+                    identity_file: trim_opt(&self.fields[Self::SECRET]),
+                }),
+            },
+            RemoteEditKind::Imap => {
+                let host = self.fields[Self::HOST].trim();
+                let user = self.fields[Self::USER].trim();
+                if host.is_empty() || user.is_empty() {
+                    return None;
+                }
+                RemoteProfile {
+                    name: name.to_string(),
+                    source: RemoteSource::UserToml,
+                    kind: RemoteKind::Imap(crate::remote::ImapProfile {
+                        host: host.to_string(),
+                        user: user.to_string(),
+                        port,
+                        path: trim_opt(&self.fields[Self::PATH]),
+                        password: trim_opt(&self.fields[Self::SECRET]),
+                    }),
+                }
+            }
         })
     }
 }
@@ -452,7 +511,7 @@ pub enum ConfirmAction {
 
 #[derive(Debug, Clone)]
 pub struct RemoteDeleteTarget {
-    pub profile: SftpProfile,
+    pub profile: RemoteProfile,
     pub path: String,
     pub is_dir: bool,
 }
@@ -470,8 +529,8 @@ pub struct InputDialog {
 pub enum InputAction {
     Rename(PathBuf),
     Mkdir(PathBuf),
-    RemoteRename { profile: SftpProfile, path: String },
-    RemoteMkdir { profile: SftpProfile, parent: String },
+    RemoteRename { profile: RemoteProfile, path: String },
+    RemoteMkdir { profile: RemoteProfile, parent: String },
     /// Wildcard select (+)
     SelectPattern,
     /// Wildcard deselect (-)
@@ -575,6 +634,8 @@ pub struct App {
     pub status: StatusMessage,
     pub dir_history: VecDeque<PathBuf>,
     pub history_cursor: usize,
+    remote_connect_task: Option<RemoteConnectTask>,
+    remote_connect_return: Option<RemoteConnectState>,
     copy_scan: Option<CopyScanTask>,
     copy_task: Option<CopyTask>,
     /// Set to true after spawning an external program so the main loop can
@@ -616,6 +677,8 @@ impl App {
             status: StatusMessage::default(),
             dir_history: history,
             history_cursor: 0,
+            remote_connect_task: None,
+            remote_connect_return: None,
             copy_scan: None,
             copy_task: None,
             needs_clear: false,
@@ -668,11 +731,17 @@ impl App {
     }
 
     pub fn open_remote_connect(&mut self) {
+        self.remote_connect_task = None;
+        self.remote_connect_return = None;
         self.mode = AppMode::RemoteConnect(RemoteConnectState::load());
     }
 
     pub fn open_remote_add(&mut self) {
-        self.mode = AppMode::RemoteEdit(RemoteEditState::new());
+        self.mode = AppMode::RemoteEdit(RemoteEditState::new(RemoteEditKind::Sftp));
+    }
+
+    pub fn open_remote_add_imap(&mut self) {
+        self.mode = AppMode::RemoteEdit(RemoteEditState::new(RemoteEditKind::Imap));
     }
 
     pub fn open_copy_dialog(&mut self) {
@@ -734,14 +803,34 @@ impl App {
         self.active_panel_mut().enter_archive(path)
     }
 
-    pub fn connect_sftp(&mut self, profile: SftpProfile) -> Result<()> {
+    pub fn start_remote_connect(&mut self, profile: RemoteProfile, return_state: RemoteConnectState) {
         self.file_id_preview = false;
-        self.run_with_busy("Remote: connecting...", |app| {
-            app.active_panel_mut().enter_remote(profile)
-        })
+        self.remote_connect_return = Some(return_state);
+        let protocol_label = match profile.kind {
+            RemoteKind::Sftp(_) => "SFTP",
+            RemoteKind::Imap(_) => "IMAP",
+        };
+        self.remote_connect_task = Some(spawn_remote_connect_task(profile.clone(), self.active_panel().show_hidden));
+        self.mode = AppMode::RemoteConnecting(RemoteConnectingState {
+            profile_name: profile.name,
+            protocol_label,
+            phase: "Preparing connection...".into(),
+        });
     }
 
-    pub fn save_remote_profile(&mut self, profile: SftpProfile) -> Result<()> {
+    pub fn cancel_remote_connect(&mut self) {
+        if let Some(task) = &self.remote_connect_task {
+            task.cancel.store(true, Ordering::Relaxed);
+        }
+        self.remote_connect_task = None;
+        self.mode = AppMode::RemoteConnect(
+            self.remote_connect_return
+                .take()
+                .unwrap_or_else(RemoteConnectState::load),
+        );
+    }
+
+    pub fn save_remote_profile(&mut self, profile: RemoteProfile) -> Result<()> {
         save_profile(&profile)?;
         Ok(())
     }
@@ -749,7 +838,12 @@ impl App {
     pub fn go_parent(&mut self) -> Result<()> {
         if self.active_panel().is_remote_view() {
             let current = self.active_panel().path.clone();
-            let parent = current.parent().unwrap_or(std::path::Path::new("/")).to_path_buf();
+            let raw_parent = current.parent().unwrap_or(std::path::Path::new("/")).to_path_buf();
+            let parent = if let Some(profile) = self.active_panel().remote_profile() {
+                PathBuf::from(normalize_remote_cwd(&profile, &raw_parent.to_string_lossy()))
+            } else {
+                raw_parent
+            };
             self.run_with_busy("Remote: changing directory...", |app| {
                 app.active_panel_mut().enter_dir(parent)
             })?;
@@ -805,6 +899,43 @@ impl App {
     }
 
     pub fn poll_background_tasks(&mut self) {
+        let mut remote_connect_result: Option<RemoteConnectMessage> = None;
+        if let Some(task) = &self.remote_connect_task {
+            match task.rx.try_recv() {
+                Ok(RemoteConnectMessage::Progress(phase)) => {
+                    if let AppMode::RemoteConnecting(state) = &mut self.mode {
+                        state.phase = phase;
+                    }
+                }
+                Ok(msg) => remote_connect_result = Some(msg),
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {
+                    remote_connect_result = Some(RemoteConnectMessage::Failed(
+                        "Remote connect worker disconnected".into(),
+                    ));
+                }
+            }
+        }
+        if let Some(msg) = remote_connect_result {
+            self.remote_connect_task = None;
+            match msg {
+                RemoteConnectMessage::Progress(_) => {}
+                RemoteConnectMessage::Connected { profile, cwd, entries } => {
+                    self.active_panel_mut().mount_remote_prefetched(profile, cwd, entries);
+                    self.remote_connect_return = None;
+                    self.mode = AppMode::Browse;
+                }
+                RemoteConnectMessage::Failed(err) => {
+                    self.status.text = format!("Remote connect failed: {}", err);
+                    self.mode = AppMode::RemoteConnect(
+                        self.remote_connect_return
+                            .take()
+                            .unwrap_or_else(RemoteConnectState::load),
+                    );
+                }
+            }
+        }
+
         let mut start_copy: Option<CopyDialogState> = None;
         let mut clear_copy_scan = false;
         if let Some(task) = &self.copy_scan {
@@ -1309,14 +1440,19 @@ fn cleanup_temp_download(path: &Path) {
     }
 }
 
-fn same_remote_target(a: &SftpProfile, b: &SftpProfile) -> bool {
-    a.name.eq_ignore_ascii_case(&b.name)
-        && a.host == b.host
-        && a.user == b.user
-        && a.port == b.port
+fn same_remote_target(a: &RemoteProfile, b: &RemoteProfile) -> bool {
+    match (&a.kind, &b.kind) {
+        (RemoteKind::Sftp(a), RemoteKind::Sftp(b)) => {
+            a.host == b.host
+                && a.user == b.user
+                && a.port == b.port
+                && a.identity_file == b.identity_file
+        }
+        _ => false,
+    }
 }
 
-fn restore_remote_panel(panel: &mut Panel, cfg: &crate::config::PanelConfig, profiles: &[SftpProfile]) {
+fn restore_remote_panel(panel: &mut Panel, cfg: &crate::config::PanelConfig, profiles: &[RemoteProfile]) {
     let Some(remote_name) = cfg.remote_name.as_ref() else {
         return;
     };
@@ -1324,7 +1460,10 @@ fn restore_remote_panel(panel: &mut Panel, cfg: &crate::config::PanelConfig, pro
         return;
     };
     if let Some(remote_path) = cfg.remote_path.clone() {
-        profile.path = Some(remote_path);
+        match &mut profile.kind {
+            RemoteKind::Sftp(sftp) => sftp.path = Some(remote_path),
+            RemoteKind::Imap(imap) => imap.path = Some(remote_path),
+        }
     }
     let _ = panel.enter_remote(profile);
 }
@@ -1352,4 +1491,32 @@ fn draw_busy_status(message: &str, has_fkey_bar: bool) -> Result<()> {
     )?;
     stdout.flush()?;
     Ok(())
+}
+
+fn spawn_remote_connect_task(profile: RemoteProfile, show_hidden: bool) -> RemoteConnectTask {
+    let (tx, rx) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel_bg = cancel.clone();
+    std::thread::spawn(move || {
+        let result = (|| -> Result<(String, Vec<RemoteEntry>)> {
+            if cancel_bg.load(Ordering::Relaxed) {
+                anyhow::bail!("Aborted");
+            }
+            let mut progress = |phase: String| {
+                let _ = tx.send(RemoteConnectMessage::Progress(phase));
+            };
+            prepare_connection(&profile, show_hidden, &mut progress, &cancel_bg)
+        })();
+        match result {
+            Ok((cwd, entries)) => {
+                let _ = tx.send(RemoteConnectMessage::Connected { profile, cwd, entries });
+            }
+            Err(err) => {
+                if !cancel_bg.load(Ordering::Relaxed) {
+                    let _ = tx.send(RemoteConnectMessage::Failed(err.to_string()));
+                }
+            }
+        }
+    });
+    RemoteConnectTask { rx, cancel }
 }

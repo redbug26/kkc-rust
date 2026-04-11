@@ -1,8 +1,8 @@
-use crate::app::{ActivePanel, App, AppMode, AssocEditorState, ConfigState, ConfirmAction, ConfirmDialog, InputDialog, MenuState, MenuAction, OpenerState, RemoteConnectState, RemoteEditState, SearchState, ViewerMenuKind, ViewerMenuState, MENU_DATA, MENU_HEADERS};
+use crate::app::{ActivePanel, App, AppMode, AssocEditorState, ConfigState, ConfirmAction, ConfirmDialog, InputDialog, MenuState, MenuAction, OpenerState, RemoteConnectState, RemoteConnectingState, RemoteEditKind, RemoteEditState, SearchState, ViewerMenuKind, ViewerMenuState, MENU_DATA, MENU_HEADERS};
 use crate::copy::{CopyDialogState, CopyProgressState};
 use crate::help::HelpView;
 use crate::idf::{probe_path, IdfKind};
-use crate::remote::RemoteSource;
+use crate::remote::{RemoteProtocol, RemoteSource};
 use crate::config::SortMode;
 use crate::file_ops::format_size;
 use crate::file_types::FileCategory;
@@ -200,6 +200,7 @@ pub fn render(f: &mut Frame, app: &App) {
         AppMode::AssocEditor(s) => render_assoc_editor(f, s, f.area()),
         AppMode::RemoteConnect(s) => render_remote_connect(f, s, f.area()),
         AppMode::RemoteEdit(s) => render_remote_edit(f, s, f.area()),
+        AppMode::RemoteConnecting(s) => render_remote_connecting(f, s, f.area()),
         AppMode::Menu(ms) => render_menu(f, ms, f.area()),
         AppMode::QuickSearch => {
             render_quicksearch_palette(f, app, f.area());
@@ -1428,7 +1429,7 @@ fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, area: Rect) 
     f.render_widget(Clear, popup);
     let block = Block::default()
         .title(Span::styled(
-            " Remote SFTP ",
+            " Remote Connections ",
             Style::default().fg(CLR_MENU_BAR_FG).bg(CLR_MENU_DD_BG).add_modifier(Modifier::BOLD),
         ))
         .borders(Borders::ALL)
@@ -1453,17 +1454,27 @@ fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, area: Rect) 
             .skip(state.cursor.saturating_sub(rows.saturating_sub(1)))
             .take(rows)
             .map(|(idx, item)| {
+                let (proto, proto_style) = match item.protocol() {
+                    RemoteProtocol::Sftp => (
+                        "sftp",
+                        Style::default().fg(Color::Rgb(121, 214, 255)).bg(CLR_MENU_DD_BG),
+                    ),
+                    RemoteProtocol::Imap => (
+                        "imap",
+                        Style::default().fg(Color::Rgb(181, 238, 170)).bg(CLR_MENU_DD_BG),
+                    ),
+                };
                 let (source, badge_style) = match item.source {
                     RemoteSource::SshConfig => (
                         "ssh",
-                        Style::default().fg(Color::Rgb(121, 214, 255)).bg(CLR_MENU_DD_BG),
+                        Style::default().fg(Color::Rgb(255, 208, 124)).bg(CLR_MENU_DD_BG),
                     ),
                     RemoteSource::UserToml => (
                         "toml",
-                        Style::default().fg(Color::Rgb(255, 208, 124)).bg(CLR_MENU_DD_BG),
+                        Style::default().fg(Color::Rgb(246, 237, 212)).bg(CLR_MENU_DD_BG),
                     ),
                 };
-                let host = item.host.as_deref().unwrap_or(&item.name);
+                let host = item.host_label();
                 let selected = idx == state.cursor;
                 let row_style = if selected {
                     Style::default()
@@ -1478,15 +1489,22 @@ fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, area: Rect) 
                 } else {
                     badge_style
                 };
+                let proto_style = if selected {
+                    proto_style.bg(CLR_MENU_SEL_BG).add_modifier(Modifier::BOLD)
+                } else {
+                    proto_style
+                };
                 let alias_style = row_style.add_modifier(Modifier::BOLD);
                 let host_style = row_style.fg(Color::Rgb(198, 184, 156));
                 let mut spans = vec![
                     Span::styled(" ", row_style),
-                    Span::styled(format!("{:<18}", truncate_str(&item.name, 18)), alias_style),
+                    Span::styled(format!("{:<16}", truncate_str(&item.name, 16)), alias_style),
+                    Span::styled(" ", row_style),
+                    Span::styled(format!("{:^6}", proto), proto_style),
                     Span::styled(" ", row_style),
                     Span::styled(format!("{:^6}", source), badge_style),
                     Span::styled("  ", row_style),
-                    Span::styled(truncate_str(host, inner.width.saturating_sub(29) as usize), host_style),
+                    Span::styled(truncate_str(&host, inner.width.saturating_sub(35) as usize), host_style),
                 ];
                 let used: usize = spans.iter().map(|s| s.content.len()).sum();
                 if used < inner.width as usize {
@@ -1500,7 +1518,7 @@ fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, area: Rect) 
     f.render_widget(List::new(items), list_area);
     let hint_area = Rect { x: inner.x, y: inner.y + inner.height - 1, width: inner.width, height: 1 };
     f.render_widget(
-        Paragraph::new(" Enter:Connect  F7:Add  Esc:Cancel ")
+        Paragraph::new(" Enter:Connect  F7:SFTP  F8:IMAP  Esc:Cancel ")
             .style(Style::default().fg(CLR_BUTTON_FG).bg(CLR_STATUS_BG)),
         hint_area,
     );
@@ -1518,7 +1536,10 @@ fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: Rect) {
     f.render_widget(Clear, popup);
     let block = Block::default()
         .title(Span::styled(
-            " Add SFTP Server ",
+            match state.kind {
+                RemoteEditKind::Sftp => " Add SFTP Server ",
+                RemoteEditKind::Imap => " Add IMAP Server ",
+            },
             Style::default().fg(CLR_MENU_BAR_FG).bg(CLR_MENU_DD_BG).add_modifier(Modifier::BOLD),
         ))
         .borders(Borders::ALL)
@@ -1526,7 +1547,10 @@ fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: Rect) {
         .style(Style::default().bg(CLR_MENU_DD_BG));
     let inner = block.inner(popup);
     f.render_widget(block, popup);
-    let labels = ["Name", "Host", "User", "Port", "Path", "Identity"];
+    let labels = match state.kind {
+        RemoteEditKind::Sftp => ["Name", "Host", "User", "Port", "Path", "Identity"],
+        RemoteEditKind::Imap => ["Name", "Host", "User", "Port", "Mailbox", "Password"],
+    };
     let mut lines = Vec::new();
     for (idx, label) in labels.iter().enumerate() {
         let selected = state.cursor == idx;
@@ -1575,6 +1599,53 @@ fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: Rect) {
         let cursor_y = inner.y + state.cursor as u16;
         f.set_cursor_position((cursor_x, cursor_y));
     }
+}
+
+fn render_remote_connecting(f: &mut Frame, state: &RemoteConnectingState, area: Rect) {
+    let width = 46u16.min(area.width.saturating_sub(4)).max(30);
+    let height = 7u16.min(area.height.saturating_sub(2)).max(6);
+    let popup = Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    };
+    f.render_widget(Clear, popup);
+    let block = Block::default()
+        .title(Span::styled(
+            " Connecting ",
+            Style::default().fg(CLR_MENU_BAR_FG).bg(CLR_MENU_DD_BG).add_modifier(Modifier::BOLD),
+        ))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(CLR_MENU_BORDER).bg(CLR_MENU_DD_BG))
+        .style(Style::default().bg(CLR_MENU_DD_BG));
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+    let lines = vec![
+        Line::from(Span::styled(
+            format!(" {} connection in progress", state.protocol_label),
+            Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG),
+        )),
+        Line::from(Span::styled(
+            format!(" {}", state.profile_name),
+            Style::default().fg(CLR_HEADER_FG).bg(CLR_MENU_DD_BG).add_modifier(Modifier::BOLD),
+        )),
+        Line::default(),
+        Line::from(Span::styled(
+            " Please wait... ",
+            Style::default().fg(CLR_TEXT).bg(CLR_MENU_DD_BG),
+        )),
+        Line::from(Span::styled(
+            format!(" {}", state.phase),
+            Style::default().fg(CLR_HEADER_FG).bg(CLR_MENU_DD_BG),
+        )),
+        Line::default(),
+        Line::from(Span::styled(
+            " Esc/Enter/F10:Abort ",
+            Style::default().fg(CLR_UNKNOWN).bg(CLR_MENU_DD_BG),
+        )),
+    ];
+    f.render_widget(Paragraph::new(lines).style(Style::default().bg(CLR_MENU_DD_BG)), inner);
 }
 
 // ---------------------------------------------------------------------------
