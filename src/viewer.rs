@@ -15,7 +15,7 @@ mod viewer_search;
 use self::viewer_decode::{
     ansi_lines, detect_mode, hex_lines, preproc_op_label, preprocess_bytes, text_lines,
 };
-use self::viewer_eml::eml_lines;
+use self::viewer_eml::{eml_lines, eml_render_lines};
 use self::viewer_html::html_document;
 use self::viewer_render::{mask_keywords, pad_visible, slice_visible};
 use self::viewer_search::parse_hex_query;
@@ -48,6 +48,7 @@ pub struct Viewer {
     hex_lines: Vec<String>,
     ansi_lines: Vec<String>,
     eml_lines: Vec<String>,
+    eml_rendered: Vec<Line<'static>>,
     html: HtmlDocument,
 }
 
@@ -146,6 +147,7 @@ impl Viewer {
         let hex_lines = hex_lines(&raw, encoding);
         let ansi_lines = ansi_lines(&raw, line_feed, &[], encoding);
         let eml_lines = eml_lines(&raw);
+        let eml_rendered = eml_render_lines(&raw);
         let html = html_document(&raw);
         let mode = detect_mode(path, &raw);
 
@@ -171,6 +173,7 @@ impl Viewer {
             hex_lines,
             ansi_lines,
             eml_lines,
+            eml_rendered,
             html,
         };
         viewer.restore_position();
@@ -471,19 +474,7 @@ impl Viewer {
                 .iter()
                 .map(|line| self.render_masked_line(line, selected_width))
                 .collect(),
-            ViewMode::Eml => self
-                .current_plain_lines()
-                .iter()
-                .map(|line| {
-                    let display = if self.wrap {
-                        line.clone()
-                    } else {
-                        let shifted = slice_visible(line, self.hscroll, selected_width);
-                        pad_visible(&shifted, selected_width)
-                    };
-                    Line::from(Span::raw(display))
-                })
-                .collect(),
+            ViewMode::Eml => self.eml_rendered.clone(),
             ViewMode::Hex => self
                 .current_plain_lines()
                 .iter()
@@ -663,6 +654,7 @@ impl Viewer {
         self.hex_lines = hex_lines(&preprocess_bytes(&self.raw, &self.preproc_ops), self.encoding);
         self.ansi_lines = ansi_lines(&self.raw, self.line_feed, &self.preproc_ops, self.encoding);
         self.eml_lines = eml_lines(&self.raw);
+        self.eml_rendered = eml_render_lines(&self.raw);
         self.html = html_document(&self.raw);
     }
 
