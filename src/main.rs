@@ -1,5 +1,6 @@
 mod app;
 mod archive;
+mod copy;
 mod config;
 mod events;
 mod file_ops;
@@ -50,6 +51,8 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
     let mut app = App::new(config);
 
     loop {
+        app.poll_background_tasks();
+
         // Draw (clamp_scroll first)
         {
             let area = terminal.size()?;

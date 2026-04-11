@@ -5,6 +5,7 @@ use crate::app::{
     ViewerMenuKind, ViewerMenuState,
     MENU_DATA, MENU_HEADERS,
 };
+use crate::copy::CopyDialogState;
 use crate::config::SortMode;
 use crate::remote::{
     download_to_temp, join_remote, make_dir as remote_make_dir, rename_path as remote_rename_path,
@@ -31,6 +32,8 @@ pub fn handle_event(app: &mut App, event: Event) -> Result<bool> {
         AppMode::ViewerMenu(_, _) => return handle_viewer_menu(app, key),
         AppMode::Confirm(_) => return handle_confirm(app, key),
         AppMode::Input(_) => return handle_input(app, key),
+        AppMode::CopyDialog(_) => return handle_copy_dialog(app, key),
+        AppMode::CopyProgress(_) => return handle_copy_progress(app, key),
         AppMode::SearchPanel(_) => return handle_search(app, key),
         AppMode::DirHistory => return handle_dir_history(app, key),
         AppMode::QuickSearch => return handle_quicksearch(app, key),
@@ -44,6 +47,16 @@ pub fn handle_event(app: &mut App, event: Event) -> Result<bool> {
     }
 
     handle_browse(app, key)
+}
+
+fn handle_copy_progress(app: &mut App, key: KeyEvent) -> Result<bool> {
+    match key.code {
+        KeyCode::Esc | KeyCode::Enter | KeyCode::F(10) => {
+            app.cancel_copy_task();
+        }
+        _ => {}
+    }
+    Ok(false)
 }
 
 // ---------------------------------------------------------------------------
@@ -192,7 +205,7 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
             launch_editor(app)?;
         }
         KeyCode::F(5) => {
-            app.cmd_copy()?;
+            app.open_copy_dialog();
         }
         KeyCode::F(6) => {
             app.cmd_move()?;
@@ -1104,6 +1117,92 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
     Ok(false)
 }
 
+fn handle_copy_dialog(app: &mut App, key: KeyEvent) -> Result<bool> {
+    let AppMode::CopyDialog(ref mut dlg) = app.mode else {
+        return Ok(false);
+    };
+
+    if dlg.waiting_to_start {
+        match key.code {
+            KeyCode::Esc | KeyCode::Enter => {
+                app.cancel_copy_scan();
+                app.mode = AppMode::Browse;
+                app.status.text = "Copy aborted".into();
+            }
+            _ => {}
+        }
+        return Ok(false);
+    }
+
+    match key.code {
+        KeyCode::Esc => {
+            app.cancel_copy_scan();
+            app.mode = AppMode::Browse;
+        }
+        KeyCode::Up => {
+            dlg.field = dlg.field.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Tab => {
+            dlg.field = (dlg.field + 1).min(CopyDialogState::CANCEL);
+        }
+        KeyCode::BackTab => {
+            dlg.field = dlg.field.saturating_sub(1);
+        }
+        KeyCode::Left => {
+            if dlg.field == CopyDialogState::DESTINATION && dlg.cursor > 0 {
+                dlg.cursor -= 1;
+            }
+        }
+        KeyCode::Right => {
+            if dlg.field == CopyDialogState::DESTINATION {
+                dlg.cursor = (dlg.cursor + 1).min(dlg.destination.len());
+            }
+        }
+        KeyCode::Backspace => {
+            if dlg.field == CopyDialogState::DESTINATION && dlg.cursor > 0 {
+                dlg.destination.remove(dlg.cursor - 1);
+                dlg.cursor -= 1;
+            }
+        }
+        KeyCode::Delete => {
+            if dlg.field == CopyDialogState::DESTINATION && dlg.cursor < dlg.destination.len() {
+                dlg.destination.remove(dlg.cursor);
+            }
+        }
+        KeyCode::Char(' ') => match dlg.field {
+            CopyDialogState::OVERWRITE => dlg.overwrite = !dlg.overwrite,
+            CopyDialogState::NEWER_ONLY => dlg.newer_only = !dlg.newer_only,
+            CopyDialogState::KEEP_ATTRIBUTES => dlg.keep_attributes = !dlg.keep_attributes,
+            _ => {}
+        },
+        KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if dlg.field == CopyDialogState::DESTINATION {
+                dlg.destination.insert(dlg.cursor, ch);
+                dlg.cursor += ch.len_utf8();
+            }
+        }
+        KeyCode::Enter => {
+            match dlg.field {
+                CopyDialogState::OVERWRITE => dlg.overwrite = !dlg.overwrite,
+                CopyDialogState::NEWER_ONLY => dlg.newer_only = !dlg.newer_only,
+                CopyDialogState::KEEP_ATTRIBUTES => dlg.keep_attributes = !dlg.keep_attributes,
+                CopyDialogState::CANCEL => app.mode = AppMode::Browse,
+                _ => {
+                    if dlg.stats_pending {
+                        dlg.waiting_to_start = true;
+                    } else {
+                        let state = dlg.clone();
+                        app.mode = AppMode::Browse;
+                        app.execute_copy_dialog(state)?;
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(false)
+}
+
 // ---------------------------------------------------------------------------
 // Search panel
 // ---------------------------------------------------------------------------
@@ -1297,7 +1396,7 @@ fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<bool> {
             launch_editor(app)?;
         }
         MenuAction::CopyFile => {
-            app.cmd_copy()?;
+            app.open_copy_dialog();
         }
         MenuAction::MoveFile => {
             app.cmd_move()?;

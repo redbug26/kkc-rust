@@ -1,41 +1,116 @@
 use anyhow::{bail, Context, Result};
 use std::fs;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 use walkdir::WalkDir;
 
 // ---------------------------------------------------------------------------
 // Progress callback type
 // ---------------------------------------------------------------------------
 
-pub type ProgressFn<'a> = &'a mut dyn FnMut(u64, u64);
+pub type ProgressFn<'a> = &'a mut dyn FnMut(u64, u64) -> bool;
+
+#[derive(Debug, Clone, Copy)]
+pub struct CopyOptions {
+    pub overwrite: bool,
+    pub newer_only: bool,
+    pub keep_attributes: bool,
+}
+
+impl Default for CopyOptions {
+    fn default() -> Self {
+        Self {
+            overwrite: false,
+            newer_only: false,
+            keep_attributes: false,
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Copy
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 /// Recursively copy `src` to `dst_dir / src.file_name()`.
 /// `progress` is called with (bytes_done, total_bytes).
 pub fn copy_entry(src: &Path, dst_dir: &Path, progress: Option<ProgressFn>) -> Result<()> {
+    copy_entry_with_options(src, dst_dir, CopyOptions::default(), progress)
+}
+
+pub fn copy_entry_with_options(
+    src: &Path,
+    dst_dir: &Path,
+    options: CopyOptions,
+    progress: Option<ProgressFn>,
+) -> Result<()> {
     let name = src.file_name().context("source has no name")?;
     let dst = dst_dir.join(name);
 
     if src.is_dir() {
-        copy_dir_recursive(src, &dst, progress)
+        copy_dir_recursive(src, &dst, options, progress)
     } else {
-        copy_file(src, &dst, progress)
+        copy_file(src, &dst, options, progress)
     }
 }
 
-fn copy_file(src: &Path, dst: &Path, _progress: Option<ProgressFn>) -> Result<()> {
+fn copy_file(src: &Path, dst: &Path, options: CopyOptions, mut progress: Option<ProgressFn>) -> Result<()> {
+    let total = src.metadata()
+        .with_context(|| format!("stat {}", src.display()))?
+        .len();
+    if should_skip_copy(src, dst, options) {
+        if let Some(cb) = progress.as_mut() {
+            if !cb(total, total) {
+                bail!("Aborted");
+            }
+        }
+        return Ok(());
+    }
     if let Some(parent) = dst.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::copy(src, dst)
-        .with_context(|| format!("copy {} → {}", src.display(), dst.display()))?;
+    if dst.exists() && options.overwrite && !dst.is_dir() {
+        fs::remove_file(dst)
+            .with_context(|| format!("remove existing {}", dst.display()))?;
+    }
+    let mut in_file = fs::File::open(src)
+        .with_context(|| format!("open {}", src.display()))?;
+    let mut out_file = fs::File::create(dst)
+        .with_context(|| format!("create {}", dst.display()))?;
+    let mut buf = vec![0u8; 1024 * 1024];
+    let mut done = 0u64;
+    loop {
+        let read = in_file.read(&mut buf)
+            .with_context(|| format!("read {}", src.display()))?;
+        if read == 0 {
+            break;
+        }
+        out_file.write_all(&buf[..read])
+            .with_context(|| format!("write {}", dst.display()))?;
+        done += read as u64;
+        if let Some(cb) = progress.as_mut() {
+            if !cb(done, total) {
+                bail!("Aborted");
+            }
+        }
+    }
+    if options.keep_attributes {
+        if let Ok(meta) = fs::metadata(src) {
+            let _ = fs::set_permissions(dst, meta.permissions());
+        }
+    }
     Ok(())
 }
 
-fn copy_dir_recursive(src: &Path, dst: &Path, _progress: Option<ProgressFn>) -> Result<()> {
+fn copy_dir_recursive(
+    src: &Path,
+    dst: &Path,
+    options: CopyOptions,
+    mut progress: Option<ProgressFn>,
+) -> Result<()> {
+    let total = entry_size(src);
+    let mut done_before = 0u64;
     for entry in WalkDir::new(src).follow_links(false) {
         let entry = entry.with_context(|| format!("walking {}", src.display()))?;
         let rel = entry.path().strip_prefix(src)?;
@@ -43,12 +118,22 @@ fn copy_dir_recursive(src: &Path, dst: &Path, _progress: Option<ProgressFn>) -> 
 
         if entry.file_type().is_dir() {
             fs::create_dir_all(&target)?;
-        } else {
-            if let Some(p) = target.parent() {
-                fs::create_dir_all(p)?;
+            if options.keep_attributes
+                && let Ok(meta) = entry.metadata()
+            {
+                let _ = fs::set_permissions(&target, meta.permissions());
             }
-            fs::copy(entry.path(), &target)
-                .with_context(|| format!("copy {}", entry.path().display()))?;
+        } else {
+            let file_len = entry.metadata().map(|m| m.len()).unwrap_or(0);
+            let mut cb = |copied: u64, _file_total: u64| {
+                if let Some(progress_cb) = progress.as_mut() {
+                    progress_cb(done_before + copied, total)
+                } else {
+                    true
+                }
+            };
+            copy_file(entry.path(), &target, options, Some(&mut cb))?;
+            done_before += file_len;
         }
     }
     Ok(())
@@ -73,7 +158,7 @@ pub fn move_entry(src: &Path, dst_dir: &Path) -> Result<()> {
     }
 
     // Cross-device: copy then delete
-    copy_entry(src, dst_dir, None)?;
+    copy_entry_with_options(src, dst_dir, CopyOptions::default(), None)?;
     delete_entry(src)?;
     Ok(())
 }
@@ -134,6 +219,10 @@ pub fn make_dir(parent: &Path, name: &str) -> Result<PathBuf> {
 // Compute directory size
 // ---------------------------------------------------------------------------
 #[allow(dead_code)]pub fn dir_size(path: &Path) -> u64 {
+    entry_size(path)
+}
+
+pub fn entry_size(path: &Path) -> u64 {
     WalkDir::new(path)
         .follow_links(false)
         .into_iter()
@@ -142,6 +231,26 @@ pub fn make_dir(parent: &Path, name: &str) -> Result<PathBuf> {
         .filter(|m| m.is_file())
         .map(|m| m.len())
         .sum()
+}
+
+fn should_skip_copy(src: &Path, dst: &Path, options: CopyOptions) -> bool {
+    if !dst.exists() {
+        return false;
+    }
+    if options.newer_only {
+        let src_time = modified_time(src);
+        let dst_time = modified_time(dst);
+        if let (Some(src_time), Some(dst_time)) = (src_time, dst_time)
+            && dst_time >= src_time
+        {
+            return true;
+        }
+    }
+    !options.overwrite
+}
+
+fn modified_time(path: &Path) -> Option<SystemTime> {
+    fs::metadata(path).ok()?.modified().ok()
 }
 
 // ---------------------------------------------------------------------------

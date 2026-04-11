@@ -1,26 +1,25 @@
+use crate::copy::{
+    count_local_files, spawn_copy_scan, spawn_copy_task, CopyDestination, CopyDialogState,
+    CopyJob, CopyProgressState, CopyScanTask, CopySource, CopyTask, CopyTaskMessage,
+};
 use crate::config::{Config, SortMode};
-use crate::file_ops;
+use crate::file_ops::{self, CopyOptions};
 use crate::help::HelpState;
 use crate::idf::render_idf_card;
 use crate::panel::Panel;
 use crate::remote::{
     SftpProfile, delete_path as remote_delete_path, download_into_dir, download_to_temp,
-    join_remote, load_profiles, rename_path as remote_rename_path, save_profile,
-    upload_into_dir,
+    join_remote, load_profiles, rename_path as remote_rename_path, save_profile, upload_into_dir,
 };
 use crate::search::{search, SearchQuery, SearchResult};
 use crate::viewer::{EncodingMode, LineFeedMode, MaskKind, ViewMode, Viewer};
 use anyhow::Result;
-use crossterm::{
-    cursor::MoveTo,
-    queue,
-    style::{Print, ResetColor, SetBackgroundColor, SetForegroundColor},
-    terminal::{size, Clear, ClearType},
-};
+use crossterm::{cursor::MoveTo, queue, style::{Print, ResetColor, SetBackgroundColor, SetForegroundColor}, terminal::{size, Clear, ClearType}};
 use std::collections::VecDeque;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::TryRecvError;
 
 // ---------------------------------------------------------------------------
 // Which panel is active
@@ -79,6 +78,10 @@ pub enum AppMode {
     RemoteConnect(RemoteConnectState),
     /// Add a new remote connection.
     RemoteEdit(RemoteEditState),
+    /// Copy dialog and options.
+    CopyDialog(CopyDialogState),
+    /// Copy progress popup.
+    CopyProgress(CopyProgressState),
 }
 
 // ---------------------------------------------------------------------------
@@ -572,6 +575,8 @@ pub struct App {
     pub status: StatusMessage,
     pub dir_history: VecDeque<PathBuf>,
     pub history_cursor: usize,
+    copy_scan: Option<CopyScanTask>,
+    copy_task: Option<CopyTask>,
     /// Set to true after spawning an external program so the main loop can
     /// call terminal.clear() before the next draw.
     pub needs_clear: bool,
@@ -579,12 +584,12 @@ pub struct App {
 
 impl App {
     pub fn new(config: Config) -> Self {
-        let left = Panel::new(
+        let mut left = Panel::new(
             config.left.path.clone(),
             config.left.sort,
             config.left.show_hidden,
         );
-        let right = Panel::new(
+        let mut right = Panel::new(
             config.right.path.clone(),
             config.right.sort,
             config.right.show_hidden,
@@ -597,6 +602,10 @@ impl App {
             history.push_front(config.left.path.clone());
         }
 
+        let profiles = load_profiles().unwrap_or_default();
+        restore_remote_panel(&mut left, &config.left, &profiles);
+        restore_remote_panel(&mut right, &config.right, &profiles);
+
         App {
             config,
             left,
@@ -607,6 +616,8 @@ impl App {
             status: StatusMessage::default(),
             dir_history: history,
             history_cursor: 0,
+            copy_scan: None,
+            copy_task: None,
             needs_clear: false,
         }
     }
@@ -662,6 +673,39 @@ impl App {
 
     pub fn open_remote_add(&mut self) {
         self.mode = AppMode::RemoteEdit(RemoteEditState::new());
+    }
+
+    pub fn open_copy_dialog(&mut self) {
+        if self.active_panel().is_archive_view() || self.other_panel().is_archive_view() {
+            self.status.text = "Copy in archive is not supported".into();
+            return;
+        }
+        let selection = self
+            .active_panel()
+            .effective_selection()
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut file_count = 0usize;
+        let mut total_bytes = 0u64;
+        let mut stats_pending = false;
+        let destination = if self.other_panel().is_remote_view() {
+            self.other_panel().remote_cwd().unwrap_or("/").to_string()
+        } else {
+            self.other_panel().path.to_string_lossy().into_owned()
+        };
+        self.copy_scan = None;
+        if let Some(profile) = self.active_panel().remote_profile() {
+            let items = selection.iter().map(|entry| (entry.path.to_string_lossy().into_owned(), entry.is_dir)).collect::<Vec<_>>();
+            self.copy_scan = Some(spawn_copy_scan(profile, items));
+            stats_pending = true;
+        } else {
+            for entry in &selection {
+                file_count += count_local_files(&entry.path);
+                total_bytes += file_ops::entry_size(&entry.path);
+            }
+        }
+        self.mode = AppMode::CopyDialog(CopyDialogState::new(destination, file_count, total_bytes, stats_pending));
     }
 
     pub fn push_dir_history(&mut self, path: PathBuf) {
@@ -760,15 +804,99 @@ impl App {
         let _ = self.right.reload();
     }
 
+    pub fn poll_background_tasks(&mut self) {
+        let mut start_copy: Option<CopyDialogState> = None;
+        let mut clear_copy_scan = false;
+        if let Some(task) = &self.copy_scan {
+            loop {
+                match task.rx.try_recv() {
+                    Ok(update) => {
+                        if let AppMode::CopyDialog(state) = &mut self.mode {
+                            state.file_count = update.stats.files;
+                            state.total_bytes = update.stats.bytes;
+                            if let Some((path, bytes)) = update.finished_entry {
+                                state.entry_bytes.insert(path, bytes);
+                            }
+                            state.stats_pending = !update.done;
+                            if update.done && state.waiting_to_start {
+                                start_copy = Some(state.clone());
+                            }
+                        }
+                        if update.done {
+                            clear_copy_scan = true;
+                            break;
+                        }
+                    }
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        if let AppMode::CopyDialog(state) = &mut self.mode {
+                            state.stats_pending = false;
+                        }
+                        clear_copy_scan = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if clear_copy_scan {
+            self.copy_scan = None;
+        }
+        if let Some(state) = start_copy {
+            let _ = self.execute_copy_dialog(state);
+        }
+        let mut finish_message: Option<(usize, Vec<String>, bool)> = None;
+        if let Some(task) = &self.copy_task {
+            loop {
+                match task.rx.try_recv() {
+                    Ok(CopyTaskMessage::Progress(progress)) => {
+                        self.mode = AppMode::CopyProgress(progress);
+                    }
+                    Ok(CopyTaskMessage::Finished { copied_items, errors, aborted }) => {
+                        finish_message = Some((copied_items, errors, aborted));
+                        break;
+                    }
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        finish_message = Some((0, vec!["Copy worker disconnected".into()], false));
+                        break;
+                    }
+                }
+            }
+        }
+        if let Some((copied_items, errors, aborted)) = finish_message {
+            self.copy_task = None;
+            self.mode = AppMode::Browse;
+            if self.config.auto_reload {
+                self.reload_panels();
+            }
+            self.status.text = if aborted {
+                "Copy aborted".into()
+            } else if errors.is_empty() {
+                format!("Copied {} item(s)", copied_items)
+            } else {
+                format!("Errors: {}", errors.join("; "))
+            };
+        }
+    }
+
+    pub fn cancel_copy_scan(&mut self) {
+        if let Some(task) = &self.copy_scan {
+            task.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        self.copy_scan = None;
+    }
+
+    pub fn cancel_copy_task(&mut self) {
+        if let Some(task) = &self.copy_task {
+            task.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
     // -----------------------------------------------------------------------
     // File operations
     // -----------------------------------------------------------------------
 
-    pub fn cmd_copy(&mut self) -> Result<()> {
-        if self.active_panel().is_archive_view() || self.other_panel().is_archive_view() {
-            self.status.text = "Copy in archive is not supported".into();
-            return Ok(());
-        }
+    pub fn execute_copy_dialog(&mut self, state: CopyDialogState) -> Result<()> {
         let sources = self
             .active_panel()
             .effective_selection()
@@ -778,26 +906,54 @@ impl App {
         if sources.is_empty() {
             return Ok(());
         }
-        let mut errors = Vec::new();
-        let needs_busy = self.active_panel().is_remote_view() || self.other_panel().is_remote_view();
-        for entry in &sources {
-            let result = if needs_busy {
-                self.run_with_busy("Remote: copying...", |app| app.copy_between_panels(entry))
-            } else {
-                self.copy_between_panels(entry)
-            };
-            if let Err(e) = result {
-                errors.push(format!("{}: {}", entry.name, e));
-            }
-        }
-        if self.config.auto_reload {
-            self.reload_panels();
-        }
-        if errors.is_empty() {
-            self.status.text = format!("Copied {} item(s)", sources.len());
-        } else {
-            self.status.text = format!("Errors: {}", errors.join("; "));
-        }
+
+        self.copy_scan = None;
+        let options = CopyOptions {
+            overwrite: state.overwrite,
+            newer_only: state.newer_only,
+            keep_attributes: state.keep_attributes,
+        };
+        let src_remote = self.active_panel().remote_profile();
+        let jobs = sources
+            .into_iter()
+            .map(|entry| CopyJob {
+                total_bytes: if src_remote.is_some() {
+                    state
+                        .entry_bytes
+                        .get(&entry.path.to_string_lossy().into_owned())
+                        .copied()
+                        .unwrap_or(entry.size)
+                } else {
+                    file_ops::entry_size(&entry.path)
+                },
+                source: match &src_remote {
+                    Some(profile) => CopySource::Remote {
+                        profile: profile.clone(),
+                        path: entry.path.to_string_lossy().into_owned(),
+                    },
+                    None => CopySource::Local(entry.path.clone()),
+                },
+                entry,
+            })
+            .collect::<Vec<_>>();
+        let destination = match self.other_panel().remote_profile() {
+            Some(profile) => CopyDestination::Remote {
+                profile,
+                cwd: state.destination,
+            },
+            None => CopyDestination::Local(PathBuf::from(state.destination)),
+        };
+        self.copy_task = Some(spawn_copy_task(jobs, destination, options));
+        self.mode = AppMode::CopyProgress(CopyProgressState {
+            current_name: String::new(),
+            item_index: 0,
+            item_count: 0,
+            file_done: 0,
+            file_total: 0,
+            total_done: 0,
+            total_bytes: state.total_bytes,
+            remaining_secs: None,
+        });
         Ok(())
     }
 
@@ -1005,44 +1161,6 @@ impl App {
         result
     }
 
-    fn copy_between_panels(&self, entry: &crate::panel::Entry) -> Result<()> {
-        let src_remote = self.active_panel().remote_profile();
-        let dst_remote = self.other_panel().remote_profile();
-
-        match (src_remote, dst_remote) {
-            (None, None) => file_ops::copy_entry(&entry.path, &self.other_panel().path, None),
-            (None, Some(profile)) => {
-                upload_into_dir(
-                    &profile,
-                    &entry.path,
-                    self.other_panel().remote_cwd().unwrap_or("/"),
-                    entry.is_dir,
-                )?;
-                Ok(())
-            }
-            (Some(profile), None) => {
-                download_into_dir(
-                    &profile,
-                    &entry.path.to_string_lossy(),
-                    &self.other_panel().path,
-                    entry.is_dir,
-                )?;
-                Ok(())
-            }
-            (Some(src_profile), Some(dst_profile)) => {
-                let tmp = download_to_temp(&src_profile, &entry.path.to_string_lossy(), entry.is_dir)?;
-                upload_into_dir(
-                    &dst_profile,
-                    &tmp,
-                    self.other_panel().remote_cwd().unwrap_or("/"),
-                    entry.is_dir,
-                )?;
-                cleanup_temp_download(&tmp);
-                Ok(())
-            }
-        }
-    }
-
     fn move_between_panels(&self, entry: &crate::panel::Entry) -> Result<()> {
         let src_remote = self.active_panel().remote_profile();
         let dst_remote = self.other_panel().remote_profile();
@@ -1157,9 +1275,13 @@ impl App {
 
     pub fn save_config(&mut self) -> Result<()> {
         self.config.left.path = self.left.persisted_path();
+        self.config.left.remote_name = self.left.remote_profile().map(|p| p.name);
+        self.config.left.remote_path = self.left.remote_cwd().map(|s| s.to_string());
         self.config.left.sort = self.left.sort;
         self.config.left.show_hidden = self.left.show_hidden;
         self.config.right.path = self.right.persisted_path();
+        self.config.right.remote_name = self.right.remote_profile().map(|p| p.name);
+        self.config.right.remote_path = self.right.remote_cwd().map(|s| s.to_string());
         self.config.right.sort = self.right.sort;
         self.config.right.show_hidden = self.right.show_hidden;
         self.config.dir_history = self.dir_history.iter().cloned().collect();
@@ -1192,6 +1314,19 @@ fn same_remote_target(a: &SftpProfile, b: &SftpProfile) -> bool {
         && a.host == b.host
         && a.user == b.user
         && a.port == b.port
+}
+
+fn restore_remote_panel(panel: &mut Panel, cfg: &crate::config::PanelConfig, profiles: &[SftpProfile]) {
+    let Some(remote_name) = cfg.remote_name.as_ref() else {
+        return;
+    };
+    let Some(mut profile) = profiles.iter().find(|p| p.name == *remote_name).cloned() else {
+        return;
+    };
+    if let Some(remote_path) = cfg.remote_path.clone() {
+        profile.path = Some(remote_path);
+    }
+    let _ = panel.enter_remote(profile);
 }
 
 fn draw_busy_status(message: &str, has_fkey_bar: bool) -> Result<()> {

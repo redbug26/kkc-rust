@@ -6,6 +6,8 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,6 +35,12 @@ pub struct RemoteEntry {
     pub size: u64,
     pub modified: Option<DateTime<Local>>,
     pub mode: u32,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RemoteStats {
+    pub files: usize,
+    pub bytes: u64,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -143,17 +151,26 @@ pub fn download_into_dir(
     local_dir: &Path,
     recursive: bool,
 ) -> Result<PathBuf> {
-    fs::create_dir_all(local_dir)
-        .with_context(|| format!("Creating {}", local_dir.display()))?;
     let name = Path::new(remote_path)
         .file_name()
         .context("remote path has no file name")?;
     let local_target = local_dir.join(name);
-    let flag = if recursive { "-r " } else { "" };
+    download_path::<fn(&str, u64) -> bool>(profile, remote_path, &local_target, recursive, None)?;
+    Ok(local_target)
+}
+
+pub fn download_bulk_into_dir(profile: &SftpProfile, remote_path: &str, local_dir: &Path) -> Result<PathBuf> {
+    let name = Path::new(remote_path)
+        .file_name()
+        .context("remote path has no file name")?;
+    let local_target = local_dir.join(name);
+    if let Some(parent) = local_target.parent() {
+        fs::create_dir_all(parent)?;
+    }
     run_batch(
         profile,
         &[format!(
-            "get {flag}{} {}",
+            "get -r {} {}",
             batch_quote(remote_path),
             batch_quote(&local_target.to_string_lossy())
         )],
@@ -169,11 +186,17 @@ pub fn upload_into_dir(
 ) -> Result<String> {
     let name = local_path.file_name().context("local path has no file name")?;
     let remote_target = join_remote(remote_dir, &name.to_string_lossy());
-    let flag = if recursive { "-r " } else { "" };
+    upload_path::<fn(&str, u64) -> bool>(profile, local_path, &remote_target, recursive, None)?;
+    Ok(remote_target)
+}
+
+pub fn upload_bulk_into_dir(profile: &SftpProfile, local_path: &Path, remote_dir: &str) -> Result<String> {
+    let name = local_path.file_name().context("local path has no file name")?;
+    let remote_target = join_remote(remote_dir, &name.to_string_lossy());
     run_batch(
         profile,
         &[format!(
-            "put {flag}{} {}",
+            "put -r {} {}",
             batch_quote(&local_path.to_string_lossy()),
             batch_quote(&remote_target)
         )],
@@ -216,6 +239,76 @@ pub fn download_to_temp(profile: &SftpProfile, remote_path: &str, recursive: boo
         .join("kkc-remote")
         .join(format!("{}-{}", std::process::id(), stamp));
     download_into_dir(profile, remote_path, &base, recursive)
+}
+
+pub fn remote_stats(profile: &SftpProfile, remote_path: &str, is_dir: bool) -> Result<RemoteStats> {
+    if !is_dir {
+        let parent = Path::new(remote_path).parent().unwrap_or(Path::new("/"));
+        let file_name = Path::new(remote_path).file_name().unwrap_or_default().to_string_lossy().into_owned();
+        let entries = list_dir(profile, &parent.to_string_lossy(), true)?;
+        let size = entries
+            .into_iter()
+            .find(|e| e.name == file_name)
+            .map(|e| e.size)
+            .unwrap_or(0);
+        return Ok(RemoteStats { files: 1, bytes: size });
+    }
+    remote_dir_stats_recursive(profile, remote_path)
+}
+
+pub fn scan_remote_stats<F>(
+    profile: &SftpProfile,
+    remote_path: &str,
+    is_dir: bool,
+    progress: &mut F,
+    cancel: &Arc<AtomicBool>,
+) -> Result<RemoteStats>
+where
+    F: FnMut(RemoteStats),
+{
+    if cancel.load(Ordering::Relaxed) {
+        bail!("Aborted");
+    }
+    if !is_dir {
+        let stats = remote_stats(profile, remote_path, false)?;
+        progress(stats);
+        return Ok(stats);
+    }
+    scan_remote_dir_recursive(profile, remote_path, progress, cancel)
+}
+
+pub fn download_with_progress<F>(
+    profile: &SftpProfile,
+    remote_path: &str,
+    local_dir: &Path,
+    recursive: bool,
+    progress: &mut F,
+) -> Result<PathBuf>
+where
+    F: FnMut(&str, u64) -> bool,
+{
+    let name = Path::new(remote_path)
+        .file_name()
+        .context("remote path has no file name")?;
+    let local_target = local_dir.join(name);
+    download_path(profile, remote_path, &local_target, recursive, Some(progress))?;
+    Ok(local_target)
+}
+
+pub fn upload_with_progress<F>(
+    profile: &SftpProfile,
+    local_path: &Path,
+    remote_dir: &str,
+    recursive: bool,
+    progress: &mut F,
+) -> Result<String>
+where
+    F: FnMut(&str, u64) -> bool,
+{
+    let name = local_path.file_name().context("local path has no file name")?;
+    let remote_target = join_remote(remote_dir, &name.to_string_lossy());
+    upload_path(profile, local_path, &remote_target, recursive, Some(progress))?;
+    Ok(remote_target)
 }
 
 fn load_saved_profiles() -> Result<Vec<SftpProfile>> {
@@ -321,6 +414,135 @@ fn delete_dir_recursive(profile: &SftpProfile, remote_path: &str) -> Result<()> 
         }
     }
     run_batch(profile, &[format!("rmdir {}", batch_quote(remote_path))])?;
+    Ok(())
+}
+
+fn remote_dir_stats_recursive(profile: &SftpProfile, remote_path: &str) -> Result<RemoteStats> {
+    let mut stats = RemoteStats::default();
+    for child in list_dir(profile, remote_path, true)? {
+        let child_path = join_remote(remote_path, &child.name);
+        if child.is_dir {
+            let sub = remote_dir_stats_recursive(profile, &child_path)?;
+            stats.files += sub.files;
+            stats.bytes += sub.bytes;
+        } else {
+            stats.files += 1;
+            stats.bytes += child.size;
+        }
+    }
+    Ok(stats)
+}
+
+fn scan_remote_dir_recursive<F>(
+    profile: &SftpProfile,
+    remote_path: &str,
+    progress: &mut F,
+    cancel: &Arc<AtomicBool>,
+) -> Result<RemoteStats>
+where
+    F: FnMut(RemoteStats),
+{
+    let mut stats = RemoteStats::default();
+    for child in list_dir(profile, remote_path, true)? {
+        if cancel.load(Ordering::Relaxed) {
+            bail!("Aborted");
+        }
+        let child_path = join_remote(remote_path, &child.name);
+        if child.is_dir {
+            let sub = scan_remote_dir_recursive(profile, &child_path, progress, cancel)?;
+            stats.files += sub.files;
+            stats.bytes += sub.bytes;
+        } else {
+            let delta = RemoteStats { files: 1, bytes: child.size };
+            stats.files += delta.files;
+            stats.bytes += delta.bytes;
+            progress(delta);
+        }
+    }
+    Ok(stats)
+}
+
+fn download_path<F>(
+    profile: &SftpProfile,
+    remote_path: &str,
+    local_target: &Path,
+    recursive: bool,
+    mut progress: Option<&mut F>,
+) -> Result<()>
+where
+    F: FnMut(&str, u64) -> bool,
+{
+    if !recursive {
+        if let Some(parent) = local_target.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        run_batch(
+            profile,
+            &[format!(
+                "get {} {}",
+                batch_quote(remote_path),
+                batch_quote(&local_target.to_string_lossy())
+            )],
+        )?;
+        if let Some(cb) = progress.as_mut() {
+            if !cb(remote_path, fs::metadata(local_target).map(|m| m.len()).unwrap_or(0)) {
+                bail!("Aborted");
+            }
+        }
+        return Ok(());
+    }
+
+    fs::create_dir_all(local_target)?;
+    for child in list_dir(profile, remote_path, true)? {
+        let child_remote = join_remote(remote_path, &child.name);
+        let child_local = local_target.join(&child.name);
+        if child.is_dir {
+            download_path(profile, &child_remote, &child_local, true, progress.as_deref_mut())?;
+        } else {
+            download_path(profile, &child_remote, &child_local, false, progress.as_deref_mut())?;
+        }
+    }
+    Ok(())
+}
+
+fn upload_path<F>(
+    profile: &SftpProfile,
+    local_path: &Path,
+    remote_target: &str,
+    recursive: bool,
+    mut progress: Option<&mut F>,
+) -> Result<()>
+where
+    F: FnMut(&str, u64) -> bool,
+{
+    if !recursive || !local_path.is_dir() {
+        run_batch(
+            profile,
+            &[format!(
+                "put {} {}",
+                batch_quote(&local_path.to_string_lossy()),
+                batch_quote(remote_target)
+            )],
+        )?;
+        if let Some(cb) = progress.as_mut() {
+            if !cb(&local_path.to_string_lossy(), fs::metadata(local_path).map(|m| m.len()).unwrap_or(0)) {
+                bail!("Aborted");
+            }
+        }
+        return Ok(());
+    }
+
+    let _ = run_batch(profile, &[format!("mkdir {}", batch_quote(remote_target))]);
+    for entry in fs::read_dir(local_path)? {
+        let entry = entry?;
+        let child_local = entry.path();
+        let child_remote = join_remote(remote_target, &entry.file_name().to_string_lossy());
+        if child_local.is_dir() {
+            upload_path(profile, &child_local, &child_remote, true, progress.as_deref_mut())?;
+        } else {
+            upload_path(profile, &child_local, &child_remote, false, progress.as_deref_mut())?;
+        }
+    }
     Ok(())
 }
 

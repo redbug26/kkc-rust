@@ -50,6 +50,12 @@ pub enum SortMode {
 pub struct PanelConfig {
     /// Last visited path for this panel.
     pub path: PathBuf,
+    /// Remote profile name if this panel was on a remote location.
+    #[serde(default)]
+    pub remote_name: Option<String>,
+    /// Remote current directory for persisted remote panels.
+    #[serde(default)]
+    pub remote_path: Option<String>,
     /// How files are sorted.
     #[serde(default)]
     pub sort: SortMode,
@@ -62,6 +68,8 @@ impl Default for PanelConfig {
     fn default() -> Self {
         Self {
             path: dirs_home(),
+            remote_name: None,
+            remote_path: None,
             sort: SortMode::Name,
             show_hidden: false,
         }
@@ -169,7 +177,13 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             left: PanelConfig::default(),
-            right: PanelConfig { path: dirs_home(), sort: SortMode::Name, show_hidden: false },
+            right: PanelConfig {
+                path: dirs_home(),
+                remote_name: None,
+                remote_path: None,
+                sort: SortMode::Name,
+                show_hidden: false,
+            },
             show_fkey_bar: true,
             confirm_exit: true,
             confirm_delete: true,
