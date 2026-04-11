@@ -797,7 +797,7 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
     } else {
         String::new()
     };
-    let col_info = if matches!(v.mode, ViewMode::Text | ViewMode::Ansi) && !v.wrap && v.hscroll > 0 {
+    let col_info = if matches!(v.mode, ViewMode::Text | ViewMode::Ansi | ViewMode::Eml) && !v.wrap && v.hscroll > 0 {
         format!(" Col:{} ", v.hscroll)
     } else {
         String::new()
@@ -881,7 +881,7 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
         })
         .collect();
 
-    if v.wrap && matches!(v.mode, ViewMode::Text | ViewMode::Ansi | ViewMode::Html) {
+    if v.wrap && matches!(v.mode, ViewMode::Text | ViewMode::Ansi | ViewMode::Html | ViewMode::Eml) {
         f.render_widget(Paragraph::new(items).wrap(Wrap { trim: false }), inner);
     } else {
         let list = List::new(items.into_iter().map(ListItem::new).collect::<Vec<_>>());
@@ -913,7 +913,7 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
 
 fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, area: Rect) {
     let items: Vec<String> = match menu.kind {
-        ViewerMenuKind::Mode => vec!["Text", "Binary", "Ansi", "Html"]
+        ViewerMenuKind::Mode => vec!["Text", "Binary", "Ansi", "EML", "Html"]
             .into_iter()
             .map(str::to_string)
             .collect(),

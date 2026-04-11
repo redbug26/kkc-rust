@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 mod viewer_decode;
+mod viewer_eml;
 mod viewer_html;
 mod viewer_render;
 mod viewer_search;
@@ -14,6 +15,7 @@ mod viewer_search;
 use self::viewer_decode::{
     ansi_lines, detect_mode, hex_lines, preproc_op_label, preprocess_bytes, text_lines,
 };
+use self::viewer_eml::eml_lines;
 use self::viewer_html::html_document;
 use self::viewer_render::{mask_keywords, pad_visible, slice_visible};
 use self::viewer_search::parse_hex_query;
@@ -45,6 +47,7 @@ pub struct Viewer {
     text_lines: Vec<String>,
     hex_lines: Vec<String>,
     ansi_lines: Vec<String>,
+    eml_lines: Vec<String>,
     html: HtmlDocument,
 }
 
@@ -53,6 +56,7 @@ pub enum ViewMode {
     Text,
     Hex,
     Ansi,
+    Eml,
     Html,
 }
 
@@ -141,8 +145,9 @@ impl Viewer {
         let text_lines = text_lines(&raw, line_feed, &[], encoding);
         let hex_lines = hex_lines(&raw, encoding);
         let ansi_lines = ansi_lines(&raw, line_feed, &[], encoding);
+        let eml_lines = eml_lines(&raw);
         let html = html_document(&raw);
-        let mode = detect_mode(&raw);
+        let mode = detect_mode(path, &raw);
 
         let mut viewer = Self {
             path: path.to_path_buf(),
@@ -165,6 +170,7 @@ impl Viewer {
             text_lines,
             hex_lines,
             ansi_lines,
+            eml_lines,
             html,
         };
         viewer.restore_position();
@@ -177,6 +183,7 @@ impl Viewer {
             ViewMode::Text => "Text",
             ViewMode::Hex => "Hex",
             ViewMode::Ansi => "Ansi",
+            ViewMode::Eml => "EML",
             ViewMode::Html => "Html",
         }
     }
@@ -227,6 +234,7 @@ impl Viewer {
     pub fn line_count(&self) -> usize {
         match self.mode {
             ViewMode::Html => self.html.lines.len().max(1),
+            ViewMode::Eml => self.eml_lines.len().max(1),
             _ => self.current_plain_lines().len().max(1),
         }
     }
@@ -342,7 +350,7 @@ impl Viewer {
     }
 
     pub fn toggle_wrap(&mut self) {
-        if matches!(self.mode, ViewMode::Text | ViewMode::Ansi | ViewMode::Html) {
+        if matches!(self.mode, ViewMode::Text | ViewMode::Ansi | ViewMode::Html | ViewMode::Eml) {
             self.wrap = !self.wrap;
         }
     }
@@ -379,19 +387,19 @@ impl Viewer {
     }
 
     pub fn scroll_left(&mut self, amount: usize) {
-        if matches!(self.mode, ViewMode::Text | ViewMode::Ansi) && !self.wrap {
+        if matches!(self.mode, ViewMode::Text | ViewMode::Ansi | ViewMode::Eml) && !self.wrap {
             self.hscroll = self.hscroll.saturating_sub(amount);
         }
     }
 
     pub fn scroll_right(&mut self, amount: usize) {
-        if matches!(self.mode, ViewMode::Text | ViewMode::Ansi) && !self.wrap {
+        if matches!(self.mode, ViewMode::Text | ViewMode::Ansi | ViewMode::Eml) && !self.wrap {
             self.hscroll = self.hscroll.saturating_add(amount);
         }
     }
 
     pub fn scroll_left_max(&mut self) {
-        if matches!(self.mode, ViewMode::Text | ViewMode::Ansi) {
+        if matches!(self.mode, ViewMode::Text | ViewMode::Ansi | ViewMode::Eml) {
             self.hscroll = 0;
         }
     }
@@ -463,6 +471,19 @@ impl Viewer {
                 .iter()
                 .map(|line| self.render_masked_line(line, selected_width))
                 .collect(),
+            ViewMode::Eml => self
+                .current_plain_lines()
+                .iter()
+                .map(|line| {
+                    let display = if self.wrap {
+                        line.clone()
+                    } else {
+                        let shifted = slice_visible(line, self.hscroll, selected_width);
+                        pad_visible(&shifted, selected_width)
+                    };
+                    Line::from(Span::raw(display))
+                })
+                .collect(),
             ViewMode::Hex => self
                 .current_plain_lines()
                 .iter()
@@ -484,6 +505,7 @@ impl Viewer {
             ViewMode::Text => &self.text_lines,
             ViewMode::Hex => &self.hex_lines,
             ViewMode::Ansi => &self.ansi_lines,
+            ViewMode::Eml => &self.eml_lines,
             ViewMode::Html => &[],
         }
     }
@@ -493,6 +515,7 @@ impl Viewer {
             ViewMode::Text => self.text_lines.get(idx).cloned().unwrap_or_default(),
             ViewMode::Hex => self.hex_lines.get(idx).cloned().unwrap_or_default(),
             ViewMode::Ansi => self.ansi_lines.get(idx).cloned().unwrap_or_default(),
+            ViewMode::Eml => self.eml_lines.get(idx).cloned().unwrap_or_default(),
             ViewMode::Html => self
                 .html
                 .lines
@@ -639,6 +662,8 @@ impl Viewer {
         self.text_lines = text_lines(&self.raw, self.line_feed, &self.preproc_ops, self.encoding);
         self.hex_lines = hex_lines(&preprocess_bytes(&self.raw, &self.preproc_ops), self.encoding);
         self.ansi_lines = ansi_lines(&self.raw, self.line_feed, &self.preproc_ops, self.encoding);
+        self.eml_lines = eml_lines(&self.raw);
+        self.html = html_document(&self.raw);
     }
 
     pub fn save_position(&self) {

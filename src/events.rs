@@ -733,6 +733,7 @@ fn handle_viewer_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
                         0 => ViewMode::Text,
                         1 => ViewMode::Hex,
                         2 => ViewMode::Ansi,
+                        3 => ViewMode::Eml,
                         _ => ViewMode::Html,
                     };
                     viewer.set_mode(mode);
@@ -790,7 +791,7 @@ fn handle_viewer_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
 
 fn viewer_menu_items(kind: ViewerMenuKind) -> &'static [&'static str] {
     match kind {
-        ViewerMenuKind::Mode => &["Text", "Binary", "Ansi", "Html"],
+        ViewerMenuKind::Mode => &["Text", "Binary", "Ansi", "EML", "Html"],
         ViewerMenuKind::LineFeed => &["DOS (CR/LF)", "Unix (LF)", "Mac (CR)", "Mixed"],
         ViewerMenuKind::Encoding => &["Plain ASCII", "DOS CP437"],
         ViewerMenuKind::Mask => &["C Style", "Pascal Style", "Assembler Style", "Ketchup Style", "Mask OFF"],

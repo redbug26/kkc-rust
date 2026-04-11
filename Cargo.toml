@@ -22,6 +22,7 @@ unicode-width = "0.2"
 open = "5"
 imap = "2.4"
 native-tls = "0.2"
+base64 = "0.13"
 
 [profile.release]
 opt-level = 3

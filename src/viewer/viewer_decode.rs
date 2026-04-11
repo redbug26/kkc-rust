@@ -1,7 +1,10 @@
 use super::{EncodingMode, LineFeedMode, PreprocOp, ViewMode};
+use std::path::Path;
 
-pub(super) fn detect_mode(data: &[u8]) -> ViewMode {
-    if looks_like_html(data) {
+pub(super) fn detect_mode(path: &Path, data: &[u8]) -> ViewMode {
+    if looks_like_eml(path, data) {
+        ViewMode::Eml
+    } else if looks_like_html(data) {
         ViewMode::Html
     } else if contains_ansi_escape(data) {
         ViewMode::Ansi
@@ -10,6 +13,19 @@ pub(super) fn detect_mode(data: &[u8]) -> ViewMode {
     } else {
         ViewMode::Text
     }
+}
+
+fn looks_like_eml(path: &Path, data: &[u8]) -> bool {
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if matches!(ext.as_str(), "eml" | "mbox") {
+        return true;
+    }
+    let sample = String::from_utf8_lossy(&data[..data.len().min(4096)]).to_ascii_lowercase();
+    sample.contains("\nsubject:") && sample.contains("\nfrom:")
 }
 
 fn contains_ansi_escape(data: &[u8]) -> bool {

@@ -397,7 +397,8 @@ impl ViewerMenuState {
                 ViewMode::Text => 0,
                 ViewMode::Hex => 1,
                 ViewMode::Ansi => 2,
-                ViewMode::Html => 3,
+                ViewMode::Eml => 3,
+                ViewMode::Html => 4,
             },
             ViewerMenuKind::LineFeed => match viewer.line_feed {
                 LineFeedMode::DosCrLf => 0,
