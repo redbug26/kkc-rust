@@ -89,6 +89,21 @@ impl Default for ViewerConfig {
 }
 
 // ---------------------------------------------------------------------------
+// File-type associations
+// ---------------------------------------------------------------------------
+
+/// Maps a file extension to one or more opener commands.
+/// `ext` is stored without the leading dot, lowercase (e.g. "mp3").
+/// Commands may contain `%f` as a placeholder for the file path;
+/// if absent the path is appended as the last argument.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileAssoc {
+    pub ext: String,
+    #[serde(default)]
+    pub openers: Vec<String>,
+}
+
+// ---------------------------------------------------------------------------
 // Main config
 // ---------------------------------------------------------------------------
 
@@ -144,6 +159,10 @@ pub struct Config {
     /// Persisted directory history (most recent first).
     #[serde(default)]
     pub dir_history: Vec<PathBuf>,
+
+    /// File-type associations (extension → opener commands).
+    #[serde(default)]
+    pub file_assoc: Vec<FileAssoc>,
 }
 
 impl Default for Config {
@@ -163,14 +182,14 @@ impl Default for Config {
             viewer: ViewerConfig::default(),
             dir_history_max: 32,
             dir_history: Vec::new(),
+            file_assoc: Vec::new(),
         }
     }
 }
 
 impl Config {
     /// Load config from disk, or return defaults if file doesn't exist.
-    pub fn load() -> Result<Self> {
-        let path = config_path()?;
+    pub fn load() -> Result<Self> {        let path = config_path()?;
         if path.exists() {
             let text = fs::read_to_string(&path)
                 .with_context(|| format!("Reading config: {}", path.display()))?;
@@ -189,6 +208,17 @@ impl Config {
         fs::write(&path, text)
             .with_context(|| format!("Writing config: {}", path.display()))?;
         Ok(())
+    }
+
+    /// Return the registered openers for the given file extension.
+    /// `ext` may have a leading dot or not; comparison is case-insensitive.
+    pub fn openers_for(&self, ext: &str) -> &[String] {
+        let ext = ext.trim_start_matches('.');
+        self.file_assoc
+            .iter()
+            .find(|a| a.ext.eq_ignore_ascii_case(ext))
+            .map(|a| a.openers.as_slice())
+            .unwrap_or(&[])
     }
 }
 

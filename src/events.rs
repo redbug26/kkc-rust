@@ -1,6 +1,7 @@
 use crate::archive::supports_archive_navigation;
 use crate::app::{
-    App, AppMode, ConfigState, ConfirmAction, InputAction, InputDialog, MenuAction, MenuState,
+    App, AppMode, AssocEditorState, ConfigState, ConfirmAction, InputAction, InputDialog,
+    MenuAction, MenuState, OpenerState,
     ViewerMenuKind, ViewerMenuState,
     MENU_DATA, MENU_HEADERS,
 };
@@ -31,6 +32,8 @@ pub fn handle_event(app: &mut App, event: Event) -> Result<bool> {
         AppMode::QuickSearch => return handle_quicksearch(app, key),
         AppMode::Menu(_) => return handle_menu(app, key),
         AppMode::Config(_) => return handle_config(app, key),
+        AppMode::Opener(_) => return handle_opener(app, key),
+        AppMode::AssocEditor(_) => return handle_assoc_editor(app, key),
         AppMode::Browse => {}
     }
 
@@ -223,11 +226,65 @@ fn handle_enter(app: &mut App) -> Result<()> {
             app.status.text = format!("Cannot enter archive: {}", e);
         }
     } else {
-        // Open with system default
-        if let Err(e) = open::that(&entry.path) {
-            app.status.text = format!("Cannot open: {}", e);
+        // Check registered openers first
+        let ext = entry.path.extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
+        let openers = app.config.openers_for(ext).to_vec();
+        match openers.len() {
+            0 => {
+                // No association: fall back to system default
+                if let Err(e) = open::that(&entry.path) {
+                    app.status.text = format!("Cannot open: {}", e);
+                }
+            }
+            1 => {
+                launch_external(app, &openers[0], &entry.path)?;
+            }
+            _ => {
+                // Multiple openers: show picker
+                app.mode = AppMode::Opener(OpenerState {
+                    items: openers,
+                    cursor: 0,
+                    path: entry.path.clone(),
+                });
+            }
         }
     }
+    Ok(())
+}
+
+/// Spawn an external command with the given file path.
+/// `%f` in command is replaced by the path; otherwise path is appended.
+fn launch_external(app: &mut App, command: &str, path: &std::path::Path) -> Result<()> {
+    let path_str = path.to_string_lossy();
+    let args: Vec<String> = if command.contains("%f") {
+        // Split on whitespace, replace %f token
+        command.split_whitespace()
+            .map(|t| if t == "%f" { path_str.to_string() } else { t.to_string() })
+            .collect()
+    } else {
+        let mut v: Vec<String> = command.split_whitespace()
+            .map(|t| t.to_string())
+            .collect();
+        v.push(path_str.to_string());
+        v
+    };
+
+    if args.is_empty() {
+        app.status.text = "Empty opener command".into();
+        return Ok(());
+    }
+
+    disable_raw_mode()?;
+    execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture)?;
+
+    let _ = std::process::Command::new(&args[0]).args(&args[1..]).status();
+
+    enable_raw_mode()?;
+    execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
+    app.needs_clear = true;
+    app.reload_panels();
     Ok(())
 }
 
@@ -854,6 +911,59 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                         app.status.text = format!("Not a directory: {}", value);
                     }
                 }
+                InputAction::AssocAddExt => {
+                    let ext = value.trim().trim_start_matches('.').to_ascii_lowercase();
+                    if ext.is_empty() {
+                        app.mode = AppMode::AssocEditor(AssocEditorState::from_config(&app.config));
+                    } else {
+                        // Find existing openers for pre-fill
+                        let existing = app.config.openers_for(&ext).join(", ");
+                        app.mode = AppMode::Input(InputDialog {
+                            title: "Association".into(),
+                            prompt: format!("Openers for .{} (comma-separated):", ext),
+                            value: existing,
+                            cursor: 0,
+                            action: InputAction::AssocAddOpeners { ext, edit_index: None },
+                        });
+                        // fix cursor to end
+                        let AppMode::Input(ref mut dlg) = app.mode else { return Ok(false); };
+                        dlg.cursor = dlg.value.len();
+                    }
+                }
+                InputAction::AssocAddOpeners { ext, edit_index } => {
+                    let openers: Vec<String> = value.split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                    if openers.is_empty() {
+                        // Remove entry if openers cleared
+                        if let Some(idx) = edit_index {
+                            if idx < app.config.file_assoc.len() {
+                                app.config.file_assoc.remove(idx);
+                            }
+                        }
+                    } else {
+                        match edit_index {
+                            Some(idx) if idx < app.config.file_assoc.len() => {
+                                app.config.file_assoc[idx].openers = openers;
+                            }
+                            _ => {
+                                if let Some(existing) = app.config.file_assoc.iter_mut()
+                                    .find(|a| a.ext.eq_ignore_ascii_case(&ext))
+                                {
+                                    existing.openers = openers;
+                                } else {
+                                    app.config.file_assoc.push(crate::config::FileAssoc {
+                                        ext,
+                                        openers,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    app.save_config().ok();
+                    app.mode = AppMode::AssocEditor(AssocEditorState::from_config(&app.config));
+                }
             }
         }
         KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -1161,6 +1271,9 @@ fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<bool> {
             let cs = ConfigState::from_config(&app.config);
             app.mode = AppMode::Config(cs);
         }
+        MenuAction::Associations => {
+            app.mode = AppMode::AssocEditor(AssocEditorState::from_config(&app.config));
+        }
         MenuAction::SaveConfig => {
             match app.save_config() {
                 Ok(_) => app.status.text = "Config saved".into(),
@@ -1271,6 +1384,106 @@ fn handle_config(app: &mut App, key: KeyEvent) -> Result<bool> {
                     _  => {}
                 }
             }
+        }
+        _ => {}
+    }
+    Ok(false)
+}
+
+// ---------------------------------------------------------------------------
+// Opener picker
+// ---------------------------------------------------------------------------
+
+fn handle_opener(app: &mut App, key: KeyEvent) -> Result<bool> {
+    let AppMode::Opener(ref mut s) = app.mode else { return Ok(false); };
+    let total = s.items.len();
+
+    match key.code {
+        KeyCode::Esc => { app.mode = AppMode::Browse; }
+        KeyCode::Up | KeyCode::BackTab => {
+            if let AppMode::Opener(ref mut s) = app.mode {
+                if s.cursor > 0 { s.cursor -= 1; }
+            }
+        }
+        KeyCode::Down | KeyCode::Tab => {
+            if let AppMode::Opener(ref mut s) = app.mode {
+                if s.cursor + 1 < total { s.cursor += 1; }
+            }
+        }
+        KeyCode::Enter => {
+            let (cmd, path) = if let AppMode::Opener(s) = &app.mode {
+                (s.items[s.cursor].clone(), s.path.clone())
+            } else { return Ok(false); };
+            app.mode = AppMode::Browse;
+            launch_external(app, &cmd, &path)?;
+        }
+        _ => {}
+    }
+    Ok(false)
+}
+
+// ---------------------------------------------------------------------------
+// Association editor
+// ---------------------------------------------------------------------------
+
+fn handle_assoc_editor(app: &mut App, key: KeyEvent) -> Result<bool> {
+    let total = if let AppMode::AssocEditor(ref s) = app.mode { s.assocs.len() } else { 0 };
+
+    match key.code {
+        KeyCode::Esc => { app.mode = AppMode::Browse; }
+        KeyCode::Up => {
+            if let AppMode::AssocEditor(ref mut s) = app.mode {
+                if s.cursor > 0 { s.cursor -= 1; }
+            }
+        }
+        KeyCode::Down => {
+            if let AppMode::AssocEditor(ref mut s) = app.mode {
+                if s.cursor + 1 < total { s.cursor += 1; }
+            }
+        }
+        // Add new association
+        KeyCode::Char('a') | KeyCode::Char('A') | KeyCode::Char('+') | KeyCode::F(1) => {
+            app.mode = AppMode::Input(InputDialog {
+                title: "New association".into(),
+                prompt: "Extension (without dot):".into(),
+                value: String::new(),
+                cursor: 0,
+                action: InputAction::AssocAddExt,
+            });
+        }
+        // Edit selected
+        KeyCode::Enter | KeyCode::Char('e') | KeyCode::Char('E') => {
+            let (ext, openers_str, idx) = if let AppMode::AssocEditor(ref s) = app.mode {
+                if s.assocs.is_empty() { return Ok(false); }
+                let (ext, openers) = &s.assocs[s.cursor];
+                (ext.clone(), openers.join(", "), s.cursor)
+            } else { return Ok(false); };
+            app.mode = AppMode::Input(InputDialog {
+                title: "Edit association".into(),
+                prompt: format!("Openers for .{} (comma-separated):", ext),
+                value: openers_str.clone(),
+                cursor: openers_str.len(),
+                action: InputAction::AssocAddOpeners { ext, edit_index: Some(idx) },
+            });
+        }
+        // Delete selected
+        KeyCode::Delete | KeyCode::Char('d') | KeyCode::Char('D') => {
+            let (idx, cursor) = if let AppMode::AssocEditor(ref s) = app.mode {
+                if s.assocs.is_empty() { return Ok(false); }
+                (s.cursor, s.cursor)
+            } else { return Ok(false); };
+            if idx < app.config.file_assoc.len() {
+                app.config.file_assoc.remove(idx);
+            }
+            app.save_config().ok();
+            let new_cursor = if cursor > 0 && cursor >= app.config.file_assoc.len() {
+                app.config.file_assoc.len().saturating_sub(1)
+            } else {
+                cursor
+            };
+            let mut new_s = AssocEditorState::from_config(&app.config);
+            new_s.cursor = new_cursor;
+            app.mode = AppMode::AssocEditor(new_s);
         }
         _ => {}
     }

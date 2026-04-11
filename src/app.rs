@@ -59,6 +59,10 @@ pub enum AppMode {
     Menu(MenuState),
     /// Configuration screen (Options > Setup).
     Config(ConfigState),
+    /// Choose from multiple registered openers.
+    Opener(OpenerState),
+    /// File-type association editor (Options > Associations).
+    AssocEditor(AssocEditorState),
 }
 
 // ---------------------------------------------------------------------------
@@ -130,6 +134,41 @@ impl ConfigState {
 }
 
 // ---------------------------------------------------------------------------
+// Opener picker state
+// ---------------------------------------------------------------------------
+
+/// State for the popup picker shown when multiple openers match a file.
+#[derive(Debug, Clone)]
+pub struct OpenerState {
+    pub items: Vec<String>,
+    pub cursor: usize,
+    pub path: std::path::PathBuf,
+}
+
+// ---------------------------------------------------------------------------
+// Association editor state
+// ---------------------------------------------------------------------------
+
+/// State for the full-screen association editor.
+#[derive(Debug, Clone)]
+pub struct AssocEditorState {
+    /// (extension, openers) pairs – mirrors config.file_assoc.
+    pub assocs: Vec<(String, Vec<String>)>,
+    pub cursor: usize,
+}
+
+impl AssocEditorState {
+    pub fn from_config(cfg: &crate::config::Config) -> Self {
+        Self {
+            assocs: cfg.file_assoc.iter()
+                .map(|a| (a.ext.clone(), a.openers.clone()))
+                .collect(),
+            cursor: 0,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Menu
 // ---------------------------------------------------------------------------
 
@@ -178,6 +217,7 @@ pub enum MenuAction {
     ToggleFBar,
     SaveConfig,
     Setup,
+    Associations,
     Help,
     About,
 }
@@ -286,9 +326,10 @@ pub static MENU_DATA: &[&[MenuEntry]] = &[
     ],
     // 5 – Options
     &[
-        ("Setup..",         None,        MenuAction::Setup),
-        ("Tgl. F-Key Bar",  None,        MenuAction::ToggleFBar),
-        ("Save Config",     None,        MenuAction::SaveConfig),
+        ("Setup..",          None,        MenuAction::Setup),
+        ("Associations..",   None,        MenuAction::Associations),
+        ("Tgl. F-Key Bar",   None,        MenuAction::ToggleFBar),
+        ("Save Config",      None,        MenuAction::SaveConfig),
     ],
     // 6 – Help
     &[
@@ -334,6 +375,14 @@ pub enum InputAction {
     DeselectPattern,
     /// Navigate active panel to typed path
     GoToPath,
+    /// Step 1 of adding an association: user typed the extension
+    AssocAddExt,
+    /// Step 2 of adding/editing: user typed the openers (comma-separated)
+    AssocAddOpeners {
+        ext: String,
+        /// Some(idx) = editing existing row, None = new
+        edit_index: Option<usize>,
+    },
 }
 
 impl InputDialog {

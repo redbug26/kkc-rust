@@ -1,4 +1,4 @@
-use crate::app::{ActivePanel, App, AppMode, ConfigState, ConfirmAction, ConfirmDialog, InputDialog, MenuState, MenuAction, SearchState, ViewerMenuKind, ViewerMenuState, MENU_DATA, MENU_HEADERS};
+use crate::app::{ActivePanel, App, AppMode, AssocEditorState, ConfigState, ConfirmAction, ConfirmDialog, InputDialog, MenuState, MenuAction, OpenerState, SearchState, ViewerMenuKind, ViewerMenuState, MENU_DATA, MENU_HEADERS};
 use crate::help::HelpView;
 use crate::idf::{probe_path, IdfKind};
 use crate::config::SortMode;
@@ -192,6 +192,8 @@ pub fn render(f: &mut Frame, app: &App) {
         AppMode::SearchPanel(s) => render_search(f, s, f.area()),
         AppMode::DirHistory => render_dir_history(f, app, f.area()),
         AppMode::Config(cs) => render_config(f, cs, f.area()),
+        AppMode::Opener(s) => render_opener(f, s, f.area()),
+        AppMode::AssocEditor(s) => render_assoc_editor(f, s, f.area()),
         AppMode::Menu(ms) => render_menu(f, ms, f.area()),
         AppMode::QuickSearch => {
             render_quicksearch_palette(f, app, f.area());
@@ -1921,5 +1923,166 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
     f.render_widget(
         Paragraph::new(" [Cancel] ").style(cancel_style),
         Rect { x: btn_x + btn_w + gap, y: btn_y, width: btn_w, height: 1 },
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Opener picker
+// ---------------------------------------------------------------------------
+
+fn render_opener(f: &mut Frame, s: &OpenerState, area: Rect) {
+    let w = 52u16;
+    let h = (s.items.len() as u16 + 4).min(20).max(6);
+    let x = area.x + (area.width.saturating_sub(w)) / 2;
+    let y = area.y + (area.height.saturating_sub(h)) / 2;
+    let popup = Rect { x, y, width: w, height: h };
+
+    // Shadow
+    let sh = Rect { x: popup.x + 2, y: popup.y + 1, width: w, height: h };
+    if sh.right() <= area.right() && sh.bottom() <= area.bottom() {
+        f.render_widget(
+            Block::default().style(Style::default().bg(Color::Rgb(20, 15, 10))),
+            sh,
+        );
+    }
+    f.render_widget(Clear, popup);
+
+    let ext = s.path.extension().and_then(|e| e.to_str()).unwrap_or("?");
+    let title = format!(" Open .{} ", ext);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG))
+        .title(Span::styled(title, Style::default().fg(CLR_BUTTON_FG).bg(CLR_APP_BG).add_modifier(Modifier::BOLD)))
+        .style(Style::default().bg(CLR_APP_BG));
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    // Hint row
+    f.render_widget(
+        Paragraph::new("  ↑↓ select  Enter open  Esc cancel")
+            .style(Style::default().fg(Color::Rgb(110, 88, 65)).bg(CLR_APP_BG)),
+        Rect { x: inner.x, y: inner.y, width: inner.width, height: 1 },
+    );
+    let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
+    f.render_widget(
+        Paragraph::new(sep).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
+        Rect { x: inner.x, y: inner.y + 1, width: inner.width, height: 1 },
+    );
+
+    // Item list
+    for (i, cmd) in s.items.iter().enumerate() {
+        let row = inner.y + 2 + i as u16;
+        if row >= inner.y + inner.height { break; }
+        let selected = s.cursor == i;
+        let style = if selected {
+            Style::default().fg(Color::Black).bg(CLR_CURSOR_BG).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Rgb(50, 36, 22)).bg(CLR_APP_BG)
+        };
+        let icon = if selected { " ▶ " } else { "   " };
+        let text = format!("{}{}", icon, cmd);
+        let padded = format!("{:<width$}", text, width = inner.width as usize);
+        f.render_widget(
+            Paragraph::new(padded).style(style),
+            Rect { x: inner.x, y: row, width: inner.width, height: 1 },
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Association editor
+// ---------------------------------------------------------------------------
+
+fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rect) {
+    const W: u16 = 64;
+    const H: u16 = 24;
+    let x = area.x + (area.width.saturating_sub(W)) / 2;
+    let y = area.y + (area.height.saturating_sub(H)) / 2;
+    let popup = Rect { x, y, width: W, height: H };
+
+    // Shadow
+    let sh = Rect { x: popup.x + 2, y: popup.y + 1, width: W, height: H };
+    if sh.right() <= area.right() && sh.bottom() <= area.bottom() {
+        f.render_widget(
+            Block::default().style(Style::default().bg(Color::Rgb(20, 15, 10))),
+            sh,
+        );
+    }
+    f.render_widget(Clear, popup);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG))
+        .title(Span::styled(" Associations ", Style::default().fg(CLR_BUTTON_FG).bg(CLR_APP_BG).add_modifier(Modifier::BOLD)))
+        .style(Style::default().bg(CLR_APP_BG));
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    // Column header
+    let header = format!("  {:<8} {}", "Ext", "Openers");
+    f.render_widget(
+        Paragraph::new(header)
+            .style(Style::default().fg(CLR_HEADER_FG).bg(CLR_HEADER_BG).add_modifier(Modifier::BOLD)),
+        Rect { x: inner.x, y: inner.y, width: inner.width, height: 1 },
+    );
+    let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
+    f.render_widget(
+        Paragraph::new(sep.clone()).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
+        Rect { x: inner.x, y: inner.y + 1, width: inner.width, height: 1 },
+    );
+
+    // List rows
+    let list_h = inner.height.saturating_sub(4) as usize; // header + sep + hint_sep + hint
+    let start = if s.assocs.is_empty() || s.cursor < list_h {
+        0
+    } else {
+        s.cursor.saturating_sub(list_h - 1)
+    };
+
+    if s.assocs.is_empty() {
+        f.render_widget(
+            Paragraph::new("  (no associations defined)")
+                .style(Style::default().fg(Color::Rgb(110, 88, 65)).bg(CLR_APP_BG)),
+            Rect { x: inner.x, y: inner.y + 2, width: inner.width, height: 1 },
+        );
+    } else {
+        for (list_row, idx) in (start..).zip(0..list_h) {
+            if list_row >= s.assocs.len() { break; }
+            let row_y = inner.y + 2 + idx as u16;
+            if row_y >= inner.y + inner.height { break; }
+            let (ext, openers) = &s.assocs[list_row];
+            let selected = s.cursor == list_row;
+            let style = if selected {
+                Style::default().fg(Color::Black).bg(CLR_CURSOR_BG).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Rgb(50, 36, 22)).bg(CLR_APP_BG)
+            };
+            let icon = if selected { "▶" } else { " " };
+            let openers_str = openers.join(", ");
+            let avail = inner.width.saturating_sub(12) as usize;
+            let openers_disp = if openers_str.len() > avail {
+                format!("{}…", &openers_str[..avail.saturating_sub(1)])
+            } else {
+                openers_str
+            };
+            let text = format!(" {} .{:<8} {}", icon, ext, openers_disp);
+            let padded = format!("{:<width$}", text, width = inner.width as usize);
+            f.render_widget(
+                Paragraph::new(padded).style(style),
+                Rect { x: inner.x, y: row_y, width: inner.width, height: 1 },
+            );
+        }
+    }
+
+    // Bottom hint
+    let hint_sep_y = inner.y + inner.height.saturating_sub(2);
+    f.render_widget(
+        Paragraph::new(sep).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
+        Rect { x: inner.x, y: hint_sep_y, width: inner.width, height: 1 },
+    );
+    f.render_widget(
+        Paragraph::new("  A/+ Add   Enter/E Edit   Del/D Delete   Esc Close")
+            .style(Style::default().fg(Color::Rgb(110, 88, 65)).bg(CLR_APP_BG)),
+        Rect { x: inner.x, y: hint_sep_y + 1, width: inner.width, height: 1 },
     );
 }
