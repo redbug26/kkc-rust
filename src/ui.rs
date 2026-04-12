@@ -14,7 +14,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, Borders, Clear, List, ListItem, Paragraph, Scrollbar,
+        Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Scrollbar,
         ScrollbarOrientation, ScrollbarState, Wrap,
     },
     Frame,
@@ -269,6 +269,7 @@ fn render_panel(
     } else {
         Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)
     };
+    let border_type = if active { BorderType::Thick } else { BorderType::Rounded }; 
 
     let display_path = panel.display_path();
     let title_text = truncate_path(&display_path, area.width.saturating_sub(4) as usize);
@@ -276,6 +277,7 @@ fn render_panel(
 
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_type(border_type)
         .border_style(border_style)
         .style(Style::default().bg(CLR_PANEL_BG))
         .title(Span::styled(title, Style::default().fg(CLR_PANEL_TITLE).bg(CLR_APP_BG)));
@@ -354,7 +356,7 @@ fn render_panel(
                 Style::default().fg(fg)
             };
 
-            let name_str = format!("{:<width$}", &entry.name, width = name_w);
+            let name_str = format!(" {:<width$}", &entry.name, width = name_w);
             let name_str = truncate_str(&name_str, name_w);
 
             let size_str = if entry.name == ".." {
@@ -458,6 +460,7 @@ fn render_panel_or_file_id(
 fn render_file_id_panel(f: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Thick)
         .border_style(Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG))
         .style(Style::default().bg(CLR_PANEL_BG))
         .title(Span::styled(" FileID ", Style::default().fg(CLR_PANEL_TITLE).bg(CLR_APP_BG)));
@@ -580,6 +583,7 @@ fn render_menu_button(f: &mut Frame, area: Rect, label: &str) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(CLR_PANEL_BORDER))
+        .border_type(BorderType::Thick)
         .style(Style::default().bg(CLR_BUTTON_BG));
     let inner = block.inner(area);
     safe_render_widget(f, block, area);
