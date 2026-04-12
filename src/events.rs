@@ -664,6 +664,10 @@ fn handle_viewer_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
             return Ok(false);
         }
     };
+    let visible_rows = match menu.kind {
+        ViewerMenuKind::Preproc => 8usize,
+        _ => 6usize,
+    };
 
     match key.code {
         KeyCode::Esc => {
@@ -693,6 +697,22 @@ fn handle_viewer_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
         KeyCode::Down => menu.cursor = viewer_menu_next_cursor(&viewer, menu.kind, menu.cursor),
         KeyCode::Home => menu.cursor = viewer_menu_first_cursor(&viewer, menu.kind),
         KeyCode::End => menu.cursor = viewer_menu_last_cursor(&viewer, menu.kind),
+        KeyCode::Char(ch) if menu.kind == ViewerMenuKind::Mode => {
+            if let Some(cursor) = viewer_mode_shortcut(ch) {
+                let mut viewer = viewer;
+                let mode = match cursor {
+                    0 => ViewMode::Text,
+                    1 => ViewMode::Hex,
+                    2 => ViewMode::Ansi,
+                    3 => ViewMode::Eml,
+                    4 => ViewMode::Html,
+                    _ => ViewMode::Image,
+                };
+                viewer.set_mode(mode);
+                app.mode = AppMode::Viewer(viewer);
+                return Ok(false);
+            }
+        }
         KeyCode::Left if menu.kind == ViewerMenuKind::Preproc => {
             let mut viewer = viewer;
             if menu.cursor < viewer.preproc_len() {
@@ -734,7 +754,8 @@ fn handle_viewer_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
                         1 => ViewMode::Hex,
                         2 => ViewMode::Ansi,
                         3 => ViewMode::Eml,
-                        _ => ViewMode::Html,
+                        4 => ViewMode::Html,
+                        _ => ViewMode::Image,
                     };
                     viewer.set_mode(mode);
                 }
@@ -785,13 +806,14 @@ fn handle_viewer_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
         _ => {}
     }
 
+    clamp_viewer_menu_scroll(&mut menu, &viewer, visible_rows);
     app.mode = AppMode::ViewerMenu(viewer, menu);
     Ok(false)
 }
 
 fn viewer_menu_items(kind: ViewerMenuKind) -> &'static [&'static str] {
     match kind {
-        ViewerMenuKind::Mode => &["Text", "Binary", "Ansi", "EML", "Html"],
+        ViewerMenuKind::Mode => &["Text", "Binary", "Ansi", "EML", "Html", "Image"],
         ViewerMenuKind::LineFeed => &["DOS (CR/LF)", "Unix (LF)", "Mac (CR)", "Mixed"],
         ViewerMenuKind::Encoding => &["Plain ASCII", "DOS CP437"],
         ViewerMenuKind::Mask => &["C Style", "Pascal Style", "Assembler Style", "Ketchup Style", "Mask OFF"],
@@ -821,6 +843,33 @@ fn viewer_menu_len(viewer: &crate::viewer::Viewer, kind: ViewerMenuKind) -> usiz
     }
 }
 
+fn viewer_mode_shortcut(ch: char) -> Option<usize> {
+    match ch.to_ascii_lowercase() {
+        't' => Some(0),
+        'b' => Some(1),
+        'a' => Some(2),
+        'e' => Some(3),
+        'h' => Some(4),
+        'i' => Some(5),
+        _ => None,
+    }
+}
+
+fn clamp_viewer_menu_scroll(
+    menu: &mut ViewerMenuState,
+    viewer: &crate::viewer::Viewer,
+    visible_rows: usize,
+) {
+    let visible_rows = visible_rows.max(1);
+    let max_scroll = viewer_menu_len(viewer, menu.kind).saturating_sub(visible_rows);
+    if menu.cursor < menu.scroll {
+        menu.scroll = menu.cursor;
+    } else if menu.cursor >= menu.scroll + visible_rows {
+        menu.scroll = menu.cursor + 1 - visible_rows;
+    }
+    menu.scroll = menu.scroll.min(max_scroll);
+}
+
 fn viewer_menu_first_cursor(viewer: &crate::viewer::Viewer, kind: ViewerMenuKind) -> usize {
     if kind == ViewerMenuKind::Preproc && viewer.preproc_len() > 0 {
         0
@@ -834,17 +883,19 @@ fn viewer_menu_last_cursor(viewer: &crate::viewer::Viewer, kind: ViewerMenuKind)
 }
 
 fn viewer_menu_next_cursor(viewer: &crate::viewer::Viewer, kind: ViewerMenuKind, cursor: usize) -> usize {
-    let mut next = (cursor + 1).min(viewer_menu_last_cursor(viewer, kind));
+    let last = viewer_menu_last_cursor(viewer, kind);
+    let mut next = if cursor >= last { 0 } else { cursor + 1 };
     if kind == ViewerMenuKind::Preproc && is_preproc_separator(viewer, next) {
-        next = (next + 1).min(viewer_menu_last_cursor(viewer, kind));
+        next = if next >= last { 0 } else { next + 1 };
     }
     next
 }
 
 fn viewer_menu_prev_cursor(viewer: &crate::viewer::Viewer, kind: ViewerMenuKind, cursor: usize) -> usize {
-    let mut prev = cursor.saturating_sub(1);
+    let last = viewer_menu_last_cursor(viewer, kind);
+    let mut prev = if cursor == 0 { last } else { cursor - 1 };
     if kind == ViewerMenuKind::Preproc && is_preproc_separator(viewer, prev) {
-        prev = prev.saturating_sub(1);
+        prev = if prev == 0 { last } else { prev - 1 };
     }
     prev
 }

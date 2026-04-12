@@ -1,8 +1,12 @@
 use anyhow::{Context, Result};
+use crossterm::{cursor::MoveTo, queue, terminal::window_size};
 use ratatui::style::{Color, Modifier, Style};
+use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
+use std::env;
 use std::collections::HashMap;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
@@ -50,6 +54,7 @@ pub struct Viewer {
     eml_lines: Vec<String>,
     eml_rendered: Vec<Line<'static>>,
     html: HtmlDocument,
+    image: Option<ImageInfo>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,6 +64,14 @@ pub enum ViewMode {
     Ansi,
     Eml,
     Html,
+    Image,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImageInfo {
+    pub format: &'static str,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -143,13 +156,43 @@ impl Viewer {
         let raw = fs::read(path).with_context(|| format!("Reading {}", path.display()))?;
         let line_feed = LineFeedMode::Mixed;
         let encoding = EncodingMode::Cp437;
-        let text_lines = text_lines(&raw, line_feed, &[], encoding);
-        let hex_lines = hex_lines(&raw, encoding);
-        let ansi_lines = ansi_lines(&raw, line_feed, &[], encoding);
-        let eml_lines = eml_lines(&raw);
-        let eml_rendered = eml_render_lines(&raw);
-        let html = html_document(&raw);
+        let image = detect_image_info(path, &raw);
         let mode = detect_mode(path, &raw);
+        let load_decoded = !matches!(mode, ViewMode::Image);
+        let text_lines = if load_decoded {
+            text_lines(&raw, line_feed, &[], encoding)
+        } else {
+            Vec::new()
+        };
+        let hex_lines = if load_decoded {
+            hex_lines(&raw, encoding)
+        } else {
+            Vec::new()
+        };
+        let ansi_lines = if load_decoded {
+            ansi_lines(&raw, line_feed, &[], encoding)
+        } else {
+            Vec::new()
+        };
+        let eml_lines = if load_decoded {
+            eml_lines(&raw)
+        } else {
+            Vec::new()
+        };
+        let eml_rendered = if load_decoded {
+            eml_render_lines(&raw)
+        } else {
+            Vec::new()
+        };
+        let html = if load_decoded {
+            html_document(&raw)
+        } else {
+            HtmlDocument {
+                lines: Vec::new(),
+                anchors: HashMap::new(),
+                links: Vec::new(),
+            }
+        };
 
         let mut viewer = Self {
             path: path.to_path_buf(),
@@ -175,7 +218,11 @@ impl Viewer {
             eml_lines,
             eml_rendered,
             html,
+            image,
         };
+        if matches!(viewer.mode, ViewMode::Image) {
+            viewer.zoomed = true;
+        }
         viewer.restore_position();
         viewer.rebuild_matches();
         Ok(viewer)
@@ -188,6 +235,7 @@ impl Viewer {
             ViewMode::Ansi => "Ansi",
             ViewMode::Eml => "EML",
             ViewMode::Html => "Html",
+            ViewMode::Image => "Image",
         }
     }
 
@@ -238,12 +286,22 @@ impl Viewer {
         match self.mode {
             ViewMode::Html => self.html.lines.len().max(1),
             ViewMode::Eml => self.eml_lines.len().max(1),
+            ViewMode::Image => 1,
             _ => self.current_plain_lines().len().max(1),
         }
     }
 
+    pub fn image_info(&self) -> Option<&ImageInfo> {
+        self.image.as_ref()
+    }
+
+    pub fn is_image_mode(&self) -> bool {
+        matches!(self.mode, ViewMode::Image)
+    }
+
     pub fn set_mode(&mut self, mode: ViewMode) {
         self.mode = mode;
+        self.ensure_mode_decoded(mode);
         self.scroll = 0;
         self.hscroll = 0;
         self.html_selected_link = 0;
@@ -475,6 +533,7 @@ impl Viewer {
                 .map(|line| self.render_masked_line(line, selected_width))
                 .collect(),
             ViewMode::Eml => self.eml_rendered.clone(),
+            ViewMode::Image => vec![Line::from(Span::raw(String::new()))],
             ViewMode::Hex => self
                 .current_plain_lines()
                 .iter()
@@ -498,6 +557,7 @@ impl Viewer {
             ViewMode::Ansi => &self.ansi_lines,
             ViewMode::Eml => &self.eml_lines,
             ViewMode::Html => &[],
+            ViewMode::Image => &[],
         }
     }
 
@@ -513,6 +573,7 @@ impl Viewer {
                 .get(idx)
                 .map(|line| line.plain.clone())
                 .unwrap_or_default(),
+            ViewMode::Image => String::new(),
         }
     }
 
@@ -656,6 +717,41 @@ impl Viewer {
         self.eml_lines = eml_lines(&self.raw);
         self.eml_rendered = eml_render_lines(&self.raw);
         self.html = html_document(&self.raw);
+        self.image = detect_image_info(&self.path, &self.raw);
+    }
+
+    fn ensure_mode_decoded(&mut self, mode: ViewMode) {
+        match mode {
+            ViewMode::Text => {
+                if self.text_lines.is_empty() {
+                    self.text_lines = text_lines(&self.raw, self.line_feed, &self.preproc_ops, self.encoding);
+                }
+            }
+            ViewMode::Hex => {
+                if self.hex_lines.is_empty() {
+                    self.hex_lines = hex_lines(&preprocess_bytes(&self.raw, &self.preproc_ops), self.encoding);
+                }
+            }
+            ViewMode::Ansi => {
+                if self.ansi_lines.is_empty() {
+                    self.ansi_lines = ansi_lines(&self.raw, self.line_feed, &self.preproc_ops, self.encoding);
+                }
+            }
+            ViewMode::Eml => {
+                if self.eml_lines.is_empty() {
+                    self.eml_lines = eml_lines(&self.raw);
+                }
+                if self.eml_rendered.is_empty() {
+                    self.eml_rendered = eml_render_lines(&self.raw);
+                }
+            }
+            ViewMode::Html => {
+                if self.html.lines.is_empty() && (self.html.anchors.is_empty() && self.html.links.is_empty()) {
+                    self.html = html_document(&self.raw);
+                }
+            }
+            ViewMode::Image => {}
+        }
     }
 
     pub fn save_position(&self) {
@@ -681,4 +777,203 @@ impl Viewer {
             self.hscroll = pos.hscroll;
         }
     }
+}
+
+pub fn kitty_graphics_supported() -> bool {
+    env::var_os("KITTY_WINDOW_ID").is_some()
+        || env::var("TERM").map(|term| term.contains("kitty")).unwrap_or(false)
+        || matches!(env::var("TERM_PROGRAM").ok().as_deref(), Some("ghostty") | Some("WezTerm"))
+}
+
+pub fn clear_kitty_images<W: Write>(out: &mut W) -> Result<()> {
+    write!(out, "\x1b_Ga=d,d=A\x1b\\")?;
+    out.flush()?;
+    Ok(())
+}
+
+pub fn render_kitty_image<W: Write>(out: &mut W, viewer: &Viewer, area: Rect) -> Result<()> {
+    if !viewer.is_image_mode() || area.width == 0 || area.height == 0 {
+        return Ok(());
+    }
+
+    let Some(image) = viewer.image_info() else {
+        return Ok(());
+    };
+    if image.format != "PNG" {
+        return Ok(());
+    }
+
+    let fit = fit_image_to_area(area, image.width, image.height);
+    queue!(out, MoveTo(fit.x, fit.y))?;
+
+    const RAW_CHUNK_LEN: usize = 3072;
+    let mut chunks = viewer.raw.chunks(RAW_CHUNK_LEN).peekable();
+    let mut first = true;
+    while let Some(chunk) = chunks.next() {
+        let payload = base64::encode(chunk);
+        if first {
+            write!(
+                out,
+                "\x1b_Ga=T,f=100,i=1,c={},r={},m={};{}\x1b\\",
+                fit.width,
+                fit.height,
+                usize::from(chunks.peek().is_some()),
+                payload,
+            )?;
+            first = false;
+        } else {
+            write!(
+                out,
+                "\x1b_Gm={};{}\x1b\\",
+                usize::from(chunks.peek().is_some()),
+                payload,
+            )?;
+        }
+    }
+    out.flush()?;
+    Ok(())
+}
+
+fn fit_image_to_area(area: Rect, image_width: Option<u32>, image_height: Option<u32>) -> Rect {
+    let Some(img_w) = image_width.filter(|&w| w > 0) else {
+        return area;
+    };
+    let Some(img_h) = image_height.filter(|&h| h > 0) else {
+        return area;
+    };
+
+    let (cell_px_w, cell_px_h) = window_size()
+        .ok()
+        .filter(|ws| ws.columns > 0 && ws.rows > 0 && ws.width > 0 && ws.height > 0)
+        .map(|ws| {
+            (
+                (ws.width as f32 / ws.columns as f32).max(1.0),
+                (ws.height as f32 / ws.rows as f32).max(1.0),
+            )
+        })
+        .unwrap_or((8.0, 16.0));
+
+    let max_px_w = area.width as f32 * cell_px_w;
+    let max_px_h = area.height as f32 * cell_px_h;
+    let scale = (max_px_w / img_w as f32)
+        .min(max_px_h / img_h as f32)
+        .max(0.0);
+
+    if scale <= 0.0 {
+        return area;
+    }
+
+    let fitted_cols = ((img_w as f32 * scale) / cell_px_w).ceil() as u16;
+    let fitted_rows = ((img_h as f32 * scale) / cell_px_h).ceil() as u16;
+    let width = fitted_cols.clamp(1, area.width);
+    let height = fitted_rows.clamp(1, area.height);
+    Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    }
+}
+
+fn detect_image_info(path: &Path, data: &[u8]) -> Option<ImageInfo> {
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    if data.starts_with(b"\x89PNG\r\n\x1a\n") {
+        let (width, height) = png_dimensions(data);
+        return Some(ImageInfo { format: "PNG", width, height });
+    }
+    if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        let (width, height) = jpeg_dimensions(data);
+        return Some(ImageInfo { format: "JPEG", width, height });
+    }
+    if data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a") {
+        let (width, height) = gif_dimensions(data);
+        return Some(ImageInfo { format: "GIF", width, height });
+    }
+    if data.starts_with(b"BM") {
+        let (width, height) = bmp_dimensions(data);
+        return Some(ImageInfo { format: "BMP", width, height });
+    }
+    if data.len() >= 12 && &data[..4] == b"RIFF" && &data[8..12] == b"WEBP" {
+        return Some(ImageInfo { format: "WEBP", width: None, height: None });
+    }
+    if matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp") {
+        return Some(ImageInfo {
+            format: match ext.as_str() {
+                "png" => "PNG",
+                "jpg" | "jpeg" => "JPEG",
+                "gif" => "GIF",
+                "bmp" => "BMP",
+                "webp" => "WEBP",
+                _ => "Image",
+            },
+            width: None,
+            height: None,
+        });
+    }
+    None
+}
+
+fn png_dimensions(data: &[u8]) -> (Option<u32>, Option<u32>) {
+    if data.len() < 24 {
+        return (None, None);
+    }
+    let width = u32::from_be_bytes([data[16], data[17], data[18], data[19]]);
+    let height = u32::from_be_bytes([data[20], data[21], data[22], data[23]]);
+    (Some(width), Some(height))
+}
+
+fn gif_dimensions(data: &[u8]) -> (Option<u32>, Option<u32>) {
+    if data.len() < 10 {
+        return (None, None);
+    }
+    let width = u16::from_le_bytes([data[6], data[7]]) as u32;
+    let height = u16::from_le_bytes([data[8], data[9]]) as u32;
+    (Some(width), Some(height))
+}
+
+fn bmp_dimensions(data: &[u8]) -> (Option<u32>, Option<u32>) {
+    if data.len() < 26 {
+        return (None, None);
+    }
+    let width = u32::from_le_bytes([data[18], data[19], data[20], data[21]]);
+    let height = u32::from_le_bytes([data[22], data[23], data[24], data[25]]);
+    (Some(width), Some(height))
+}
+
+fn jpeg_dimensions(data: &[u8]) -> (Option<u32>, Option<u32>) {
+    let mut i = 2usize;
+    while i + 8 < data.len() {
+        if data[i] != 0xFF {
+            i += 1;
+            continue;
+        }
+        let marker = data[i + 1];
+        i += 2;
+        if marker == 0xD8 || marker == 0xD9 {
+            continue;
+        }
+        if i + 2 > data.len() {
+            break;
+        }
+        let seg_len = u16::from_be_bytes([data[i], data[i + 1]]) as usize;
+        if seg_len < 2 || i + seg_len > data.len() {
+            break;
+        }
+        if matches!(
+            marker,
+            0xC0 | 0xC1 | 0xC2 | 0xC3 | 0xC5 | 0xC6 | 0xC7 | 0xC9 | 0xCA | 0xCB | 0xCD | 0xCE | 0xCF
+        ) && seg_len >= 7
+        {
+            let height = u16::from_be_bytes([data[i + 3], data[i + 4]]) as u32;
+            let width = u16::from_be_bytes([data[i + 5], data[i + 6]]) as u32;
+            return (Some(width), Some(height));
+        }
+        i += seg_len;
+    }
+    (None, None)
 }

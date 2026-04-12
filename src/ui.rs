@@ -817,6 +817,7 @@ fn viewer_area(v: &Viewer, area: Rect) -> Rect {
     let max_width = match v.mode {
         ViewMode::Hex => 80u16,
         ViewMode::Html => 82u16,
+        ViewMode::Image => area.width.saturating_sub(4).max(40).min(area.width),
         _ => v
             .current_plain_lines()
             .iter()
@@ -832,6 +833,25 @@ fn viewer_area(v: &Viewer, area: Rect) -> Rect {
         y: area.y + area.height.saturating_sub(height) / 2,
         width,
         height,
+    }
+}
+
+pub fn kitty_image_area(v: &Viewer, area: Rect) -> Option<Rect> {
+    if !v.is_image_mode() {
+        return None;
+    }
+    let viewer_host = Rect {
+        x: area.x,
+        y: area.y,
+        width: area.width,
+        height: area.height.saturating_sub(1),
+    };
+    let area = viewer_area(v, viewer_host);
+    let inner = Block::default().borders(Borders::ALL).inner(area);
+    if inner.width == 0 || inner.height == 0 {
+        None
+    } else {
+        Some(inner)
     }
 }
 
@@ -881,12 +901,21 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
         String::new()
     };
     let zoom_info = format!(" Zoom:{} ", v.zoom_label());
+    let image_info = if let Some(image) = v.image_info() {
+        match (image.width, image.height) {
+            (Some(w), Some(h)) => format!(" {} {}x{} ", image.format, w, h),
+            _ => format!(" {} ", image.format),
+        }
+    } else {
+        String::new()
+    };
     let title = format!(
-        " {} [{}] {}/{}{}{}{}{}{}{}{} ",
+        " {} [{}] {}/{}{}{}{}{}{}{}{}{} ",
         file_name,
         v.mode_label(),
         v.scroll + 1,
         v.line_count(),
+        image_info,
         lf_info,
         pre_info,
         enc_info,
@@ -902,6 +931,55 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
         .border_style(Style::default().fg(CLR_PANEL_BORDER));
     let inner = block.inner(area);
     f.render_widget(block, area);
+
+    if v.is_image_mode() {
+        let supported = crate::viewer::kitty_graphics_supported();
+        let png_renderable = matches!(v.image_info().map(|img| img.format), Some("PNG"));
+        let mut lines = vec![
+            Line::from(Span::styled(
+                "Image preview",
+                Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+            )),
+        ];
+        if let Some(image) = v.image_info() {
+            let detail = match (image.width, image.height) {
+                (Some(w), Some(h)) => format!("{} - {}x{}", image.format, w, h),
+                _ => image.format.to_string(),
+            };
+            lines.push(Line::from(Span::styled(detail, Style::default().fg(Color::Gray))));
+        }
+        lines.push(Line::from(Span::raw("")));
+        lines.push(Line::from(Span::styled(
+            if supported && png_renderable {
+                "Rendered with Kitty Graphics Protocol"
+            } else if supported {
+                "Current inline renderer supports PNG only"
+            } else {
+                "Kitty Graphics Protocol unavailable in this terminal"
+            },
+            Style::default().fg(if supported && png_renderable { Color::Cyan } else { Color::Yellow }),
+        )));
+        lines.push(Line::from(Span::styled(
+            if supported && png_renderable {
+                "Use F5 to toggle Auto/Full size"
+            } else if supported {
+                "Convert to PNG or add image decoding support for other formats"
+            } else {
+                "Open in kitty/ghostty/wezterm to enable inline preview"
+            },
+            Style::default().fg(Color::Gray),
+        )));
+        f.render_widget(
+            Paragraph::new(lines)
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(Color::Black)),
+            inner,
+        );
+        let help = Paragraph::new(" F10:Close  F4:Mode  F5:Zoom ")
+            .style(Style::default().fg(Color::Black).bg(Color::Cyan));
+        f.render_widget(help, footer_area);
+        return;
+    }
 
     let height = inner.height as usize;
     let width = inner.width as usize;
@@ -971,10 +1049,17 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
 
 fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, area: Rect) {
     let items: Vec<String> = match menu.kind {
-        ViewerMenuKind::Mode => vec!["Text", "Binary", "Ansi", "EML", "Html"]
-            .into_iter()
-            .map(str::to_string)
-            .collect(),
+        ViewerMenuKind::Mode => vec![
+            "Text: as plain text",
+            "Binary: as hex dump",
+            "Ansi: with ANSI escapes",
+            "EML: as email",
+            "Html: as rendered HTML",
+            "Image: as inline preview",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect(),
         ViewerMenuKind::LineFeed => vec!["DOS (CR/LF)", "Unix (LF)", "Mac (CR)", "Mixed"]
             .into_iter()
             .map(str::to_string)
@@ -1019,7 +1104,8 @@ fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, ar
 
     let width = items.iter().map(|s| s.len()).max().unwrap_or(10) as u16 + 6;
     let extra = if menu.kind == ViewerMenuKind::Preproc { 3 } else { 0 };
-    let height = items.len() as u16 + 2 + extra;
+    let desired_height = items.len() as u16 + 2 + extra;
+    let height = desired_height.min(area.height.saturating_sub(2).max(4));
     let popup = clamp_rect(area, Rect {
         x: area.x + area.width.saturating_sub(width) / 2,
         y: area.y + area.height.saturating_sub(height) / 2,
@@ -1036,7 +1122,7 @@ fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, ar
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
 
-    let list_items = items
+    let all_items = items
         .iter()
         .enumerate()
         .map(|(idx, item)| {
@@ -1048,13 +1134,26 @@ fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, ar
             } else {
                 Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
             };
-            ListItem::new(Line::from(Span::styled(format!(" {}", item), style)))
+            let line = if menu.kind == ViewerMenuKind::Mode {
+                viewer_mode_menu_line(item, style)
+            } else {
+                Line::from(Span::styled(format!(" {}", item), style))
+            };
+            ListItem::new(line)
         })
         .collect::<Vec<_>>();
 
     let list_height = inner.height.saturating_sub(extra);
     let list_area = Rect { x: inner.x, y: inner.y, width: inner.width, height: list_height };
-    safe_render_widget(f, List::new(list_items), list_area);
+    let scroll = menu
+        .scroll
+        .min(items.len().saturating_sub(list_height as usize));
+    let visible_items = all_items
+        .into_iter()
+        .skip(scroll)
+        .take(list_height as usize)
+        .collect::<Vec<_>>();
+    safe_render_widget(f, List::new(visible_items), list_area);
 
     if menu.kind == ViewerMenuKind::Preproc {
         let info_area = Rect {
@@ -1070,6 +1169,16 @@ fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, ar
             info_area,
         );
     }
+}
+
+fn viewer_mode_menu_line(item: &str, style: Style) -> Line<'static> {
+    let shortcut = item.chars().next().unwrap_or_default().to_string();
+    let rest = item.chars().skip(1).collect::<String>();
+    Line::from(vec![
+        Span::styled(" ", style),
+        Span::styled(shortcut, style.add_modifier(Modifier::BOLD)),
+        Span::styled(rest, style),
+    ])
 }
 
 // ---------------------------------------------------------------------------

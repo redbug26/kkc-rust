@@ -2,7 +2,9 @@ use super::{EncodingMode, LineFeedMode, PreprocOp, ViewMode};
 use std::path::Path;
 
 pub(super) fn detect_mode(path: &Path, data: &[u8]) -> ViewMode {
-    if looks_like_eml(path, data) {
+    if looks_like_image(path, data) {
+        ViewMode::Image
+    } else if looks_like_eml(path, data) {
         ViewMode::Eml
     } else if looks_like_html(data) {
         ViewMode::Html
@@ -13,6 +15,21 @@ pub(super) fn detect_mode(path: &Path, data: &[u8]) -> ViewMode {
     } else {
         ViewMode::Text
     }
+}
+
+fn looks_like_image(path: &Path, data: &[u8]) -> bool {
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp")
+        || data.starts_with(b"\x89PNG\r\n\x1a\n")
+        || data.starts_with(&[0xFF, 0xD8, 0xFF])
+        || data.starts_with(b"GIF87a")
+        || data.starts_with(b"GIF89a")
+        || data.starts_with(b"BM")
+        || (data.len() >= 12 && &data[..4] == b"RIFF" && &data[8..12] == b"WEBP")
 }
 
 fn looks_like_eml(path: &Path, data: &[u8]) -> bool {
@@ -245,10 +262,8 @@ fn ansi_to_text(data: &[u8], line_feed: LineFeedMode, encoding: EncodingMode) ->
                     }
                 }
                 'K' => {
-                    if let Some(line) = lines.get_mut(row)
-                        && col < line.len()
-                    {
-                        line.truncate(col);
+                    if let Some(line) = lines.get_mut(row) {
+                        truncate_at_char_boundary(line, col);
                     }
                 }
                 'H' | 'f' => {
@@ -330,6 +345,19 @@ fn put_char(lines: &mut Vec<String>, row: usize, col: usize, ch: char) {
             line.push(ch);
         }
     }
+}
+
+fn truncate_at_char_boundary(s: &mut String, char_len: usize) {
+    let current_len = s.chars().count();
+    if char_len >= current_len {
+        return;
+    }
+    let new_len = s
+        .char_indices()
+        .nth(char_len)
+        .map(|(idx, _)| idx)
+        .unwrap_or(s.len());
+    s.truncate(new_len);
 }
 
 fn parse_ansi_params(args: &str) -> Vec<u16> {

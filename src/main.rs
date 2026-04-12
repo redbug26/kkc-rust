@@ -17,12 +17,14 @@ use anyhow::Result;
 use app::{App, AppMode};
 use config::Config;
 use crossterm::{
+    cursor::MoveTo,
     event::{self, DisableMouseCapture, EnableMouseCapture},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{backend::CrosstermBackend, Terminal};
-use std::io::{self, Stdout};
+use ratatui::{backend::CrosstermBackend, layout::Rect, Terminal};
+use std::io::{self, Stdout, Write};
+use std::path::PathBuf;
 use std::time::Duration;
 
 fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
@@ -36,6 +38,7 @@ fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
 }
 
 fn teardown_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
+    let _ = viewer::clear_kitty_images(terminal.backend_mut());
     disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),
@@ -49,6 +52,7 @@ fn teardown_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Resul
 fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
     let config = Config::load().unwrap_or_default();
     let mut app = App::new(config);
+    let mut last_kitty_image: Option<(PathBuf, ratatui::layout::Rect, bool)> = None;
 
     loop {
         app.poll_background_tasks();
@@ -68,9 +72,40 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
         if app.needs_clear {
             app.needs_clear = false;
             terminal.clear()?;
+            last_kitty_image = None;
         }
 
         terminal.draw(|f| ui::render(f, &app))?;
+
+        let term_size = terminal.size()?;
+        let term_area = Rect {
+            x: 0,
+            y: 0,
+            width: term_size.width,
+            height: term_size.height,
+        };
+        let next_kitty_image = match &app.mode {
+            AppMode::Viewer(v) | AppMode::ViewerSearching(v) | AppMode::ViewerMenu(v, _) => {
+                ui::kitty_image_area(v, term_area).map(|rect| (v.path.clone(), rect, v.zoomed))
+            }
+            _ => None,
+        };
+
+        if next_kitty_image != last_kitty_image {
+            if last_kitty_image.is_some() {
+                viewer::clear_kitty_images(terminal.backend_mut())?;
+            }
+            if let Some((_, rect, _)) = &next_kitty_image {
+                if let AppMode::Viewer(v) | AppMode::ViewerSearching(v) | AppMode::ViewerMenu(v, _) = &app.mode
+                    && viewer::kitty_graphics_supported()
+                {
+                    viewer::render_kitty_image(terminal.backend_mut(), v, *rect)?;
+                    execute!(terminal.backend_mut(), MoveTo(0, term_area.height.saturating_sub(1)))?;
+                    terminal.backend_mut().flush()?;
+                }
+            }
+            last_kitty_image = next_kitty_image;
+        }
 
         match app.mode {
             AppMode::Input(_) | AppMode::ViewerSearching(_) => terminal.show_cursor()?,

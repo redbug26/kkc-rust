@@ -387,6 +387,7 @@ pub enum ViewerMenuKind {
 pub struct ViewerMenuState {
     pub kind: ViewerMenuKind,
     pub cursor: usize,
+    pub scroll: usize,
     pub param: u8,
 }
 
@@ -399,6 +400,7 @@ impl ViewerMenuState {
                 ViewMode::Ansi => 2,
                 ViewMode::Eml => 3,
                 ViewMode::Html => 4,
+                ViewMode::Image => 5,
             },
             ViewerMenuKind::LineFeed => match viewer.line_feed {
                 LineFeedMode::DosCrLf => 0,
@@ -425,7 +427,12 @@ impl ViewerMenuState {
             }
         };
         let param = viewer.preproc_last_param().unwrap_or(0);
-        Self { kind, cursor, param }
+        Self {
+            kind,
+            cursor,
+            scroll: 0,
+            param,
+        }
     }
 }
 
