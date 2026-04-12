@@ -209,6 +209,18 @@ pub fn render(f: &mut Frame, app: &App) {
     }
 }
 
+fn safe_set_cursor_position(f: &mut Frame, x: u16, y: u16) {
+    let area = f.area();
+    let max_x = area.x + area.width.saturating_sub(1);
+    let max_y = area.y + area.height.saturating_sub(1);
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    if x <= max_x && y <= max_y {
+        f.set_cursor_position((x, y));
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Panel
 // ---------------------------------------------------------------------------
@@ -903,7 +915,7 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
             footer_area,
         );
         let cx = (footer_area.x + 9 + v.search.len() as u16).min(footer_area.x + footer_area.width - 1);
-        f.set_cursor_position((cx, footer_area.y));
+        safe_set_cursor_position(f, cx, footer_area.y);
     } else {
         let help = Paragraph::new(" F10:Close  F2:Wrap  F3:LnFeed  F4:Mode  F5:Zoom  F6:Prepro  F7:Search  F8:Enc  F9:Mask ")
             .style(Style::default().fg(Color::Black).bg(Color::Cyan));
@@ -1225,7 +1237,7 @@ fn render_input(f: &mut Frame, dlg: &InputDialog, area: Rect) {
     let cursor_x = (inner.x + 1 + dlg.cursor as u16).min(inner.x + inner.width.saturating_sub(2));
     let cursor_y = inner.y + 3;
     if cursor_y < inner.y + inner.height {
-        f.set_cursor_position((cursor_x, cursor_y));
+        safe_set_cursor_position(f, cursor_x, cursor_y);
     }
 }
 
@@ -1338,7 +1350,7 @@ fn render_copy_dialog(f: &mut Frame, dlg: &CopyDialogState, area: Rect) {
     if dlg.field == CopyDialogState::DESTINATION && !dlg.stats_pending && !dlg.waiting_to_start {
         let cursor_x = (inner.x + 1 + dlg.cursor as u16).min(inner.x + inner.width.saturating_sub(1));
         let cursor_y = inner.y + 3;
-        f.set_cursor_position((cursor_x, cursor_y));
+        safe_set_cursor_position(f, cursor_x, cursor_y);
     }
 }
 
@@ -1597,7 +1609,7 @@ fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: Rect) {
     if state.cursor < 6 {
         let cursor_x = (inner.x + 9 + state.input_cursor as u16).min(inner.x + inner.width.saturating_sub(2));
         let cursor_y = inner.y + state.cursor as u16;
-        f.set_cursor_position((cursor_x, cursor_y));
+        safe_set_cursor_position(f, cursor_x, cursor_y);
     }
 }
 
