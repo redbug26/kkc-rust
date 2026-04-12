@@ -28,3 +28,6 @@ base64 = "0.13"
 opt-level = 3
 strip = true
 lto = true
+
+[patch.crates-io]
+imap-proto = { path = "vendor/imap-proto" }
