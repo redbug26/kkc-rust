@@ -221,6 +221,38 @@ fn safe_set_cursor_position(f: &mut Frame, x: u16, y: u16) {
     }
 }
 
+fn clamp_rect(area: Rect, rect: Rect) -> Rect {
+    let x1 = rect.x.max(area.x);
+    let y1 = rect.y.max(area.y);
+    let x2 = rect.right().min(area.right());
+    let y2 = rect.bottom().min(area.bottom());
+    Rect {
+        x: x1,
+        y: y1,
+        width: x2.saturating_sub(x1),
+        height: y2.saturating_sub(y1),
+    }
+}
+
+fn safe_render_widget<W: ratatui::widgets::Widget>(f: &mut Frame, widget: W, rect: Rect) {
+    let rect = clamp_rect(f.area(), rect);
+    if rect.width == 0 || rect.height == 0 {
+        return;
+    }
+    f.render_widget(widget, rect);
+}
+
+fn safe_render_stateful_widget<W, S>(f: &mut Frame, widget: W, rect: Rect, state: &mut S)
+where
+    W: ratatui::widgets::StatefulWidget<State = S>,
+{
+    let rect = clamp_rect(f.area(), rect);
+    if rect.width == 0 || rect.height == 0 {
+        return;
+    }
+    f.render_stateful_widget(widget, rect, state);
+}
+
 // ---------------------------------------------------------------------------
 // Panel
 // ---------------------------------------------------------------------------
@@ -271,12 +303,12 @@ fn render_panel(
         width: inner.width,
         height: inner.height.saturating_sub(2),
     };
-    let footer_area = Rect {
+    let footer_area = clamp_rect(area, Rect {
         x: inner.x,
         y: inner.y + inner.height - 1,
         width: inner.width,
         height: 1,
-    };
+    });
 
     let list_height = list_area.height as usize;
 
@@ -501,7 +533,7 @@ fn render_center_buttons(f: &mut Frame, area: Rect) {
             x: area.x,
             y,
             width: area.width,
-            height: button_h.min(area.y + area.height - y),
+            height: button_h.min(area.bottom().saturating_sub(y)),
         };
         render_menu_button(f, slot, label);
         y = y.saturating_add(button_h).saturating_add(base_gap);
@@ -516,7 +548,12 @@ fn render_menu_button(f: &mut Frame, area: Rect, label: &str) {
         return;
     }
 
-    let text = truncate_str(label, area.width.saturating_sub(2).max(1) as usize);
+    let content_w = if area.height < 3 {
+        area.width
+    } else {
+        area.width.saturating_sub(2)
+    };
+    let text = truncate_str(label, content_w.max(1) as usize).trim_end().to_string();
     if area.height < 3 {
         let top_pad = area.height.saturating_sub(1) / 2;
         let text_area = Rect {
@@ -525,11 +562,13 @@ fn render_menu_button(f: &mut Frame, area: Rect, label: &str) {
             width: area.width,
             height: 1,
         };
-        f.render_widget(
+        safe_render_widget(
+            f,
             Block::default().style(Style::default().bg(CLR_BUTTON_BG)),
             area,
         );
-        f.render_widget(
+        safe_render_widget(
+            f,
             Paragraph::new(text)
                 .alignment(Alignment::Center)
                 .style(Style::default().fg(CLR_BUTTON_FG).bg(CLR_BUTTON_BG).add_modifier(Modifier::BOLD)),
@@ -543,7 +582,7 @@ fn render_menu_button(f: &mut Frame, area: Rect, label: &str) {
         .border_style(Style::default().fg(CLR_PANEL_BORDER))
         .style(Style::default().bg(CLR_BUTTON_BG));
     let inner = block.inner(area);
-    f.render_widget(block, area);
+    safe_render_widget(f, block, area);
     let top_pad = inner.height.saturating_sub(1) / 2;
     let text_area = Rect {
         x: inner.x,
@@ -551,7 +590,8 @@ fn render_menu_button(f: &mut Frame, area: Rect, label: &str) {
         width: inner.width,
         height: 1,
     };
-    f.render_widget(
+    safe_render_widget(
+        f,
         Paragraph::new(text)
             .alignment(Alignment::Center)
             .style(Style::default().fg(CLR_BUTTON_FG).bg(CLR_BUTTON_BG).add_modifier(Modifier::BOLD)),
@@ -790,12 +830,12 @@ fn viewer_area(v: &Viewer, area: Rect) -> Rect {
 }
 
 fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
-    let footer_area = Rect {
+    let footer_area = clamp_rect(area, Rect {
         x: area.x,
         y: area.y + area.height.saturating_sub(1),
         width: area.width,
         height: 1,
-    };
+    });
     let viewer_host = Rect {
         x: area.x,
         y: area.y,
@@ -974,21 +1014,21 @@ fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, ar
     let width = items.iter().map(|s| s.len()).max().unwrap_or(10) as u16 + 6;
     let extra = if menu.kind == ViewerMenuKind::Preproc { 3 } else { 0 };
     let height = items.len() as u16 + 2 + extra;
-    let popup = Rect {
+    let popup = clamp_rect(area, Rect {
         x: area.x + area.width.saturating_sub(width) / 2,
         y: area.y + area.height.saturating_sub(height) / 2,
         width,
         height,
-    };
+    });
 
-    f.render_widget(Clear, popup);
+    safe_render_widget(f, Clear, popup);
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(CLR_PANEL_BORDER))
         .style(Style::default().bg(CLR_MENU_DD_BG));
     let inner = block.inner(popup);
-    f.render_widget(block, popup);
+    safe_render_widget(f, block, popup);
 
     let list_items = items
         .iter()
@@ -1008,7 +1048,7 @@ fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, ar
 
     let list_height = inner.height.saturating_sub(extra);
     let list_area = Rect { x: inner.x, y: inner.y, width: inner.width, height: list_height };
-    f.render_widget(List::new(list_items), list_area);
+    safe_render_widget(f, List::new(list_items), list_area);
 
     if menu.kind == ViewerMenuKind::Preproc {
         let info_area = Rect {
@@ -1018,7 +1058,8 @@ fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, ar
             height: inner.height.saturating_sub(list_height),
         };
         let info = format!(" Param:0x{:02X}  \u{2190}/\u{2192}:Edit  Ctrl+\u{2191}/\u{2193}:Move  Del:Remove ", menu.param);
-        f.render_widget(
+        safe_render_widget(
+            f,
             Paragraph::new(info).style(Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)),
             info_area,
         );
@@ -1048,28 +1089,30 @@ fn render_confirm_quit(f: &mut Frame, area: Rect) {
     const H: u16 = 11;
     let x = (area.width.saturating_sub(W)) / 2 + area.x;
     let y = (area.height.saturating_sub(H)) / 2 + area.y;
-    let popup = Rect { x, y, width: W, height: H };
+    let popup = clamp_rect(area, Rect { x, y, width: W, height: H });
 
     // Shadow
     let sh = Rect { x: popup.x + 2, y: popup.y + 1, width: W, height: H };
     if sh.x + sh.width <= area.x + area.width && sh.y + sh.height <= area.y + area.height {
-        f.render_widget(
+        safe_render_widget(
+            f,
             Block::default().style(Style::default().bg(Color::Rgb(20, 15, 10))),
             sh,
         );
     }
-    f.render_widget(Clear, popup);
+    safe_render_widget(f, Clear, popup);
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG))
         .style(Style::default().bg(CLR_APP_BG));
     let inner = block.inner(popup);
-    f.render_widget(block, popup);
+    safe_render_widget(f, block, popup);
 
     // Title band
     let logo_area = Rect { x: inner.x, y: inner.y, width: inner.width, height: 1 };
-    f.render_widget(
+    safe_render_widget(
+        f,
         Paragraph::new(" KK Commander ")
             .alignment(Alignment::Center)
             .style(Style::default().fg(CLR_BUTTON_FG).bg(CLR_STATUS_BG).add_modifier(Modifier::BOLD)),
@@ -1078,13 +1121,15 @@ fn render_confirm_quit(f: &mut Frame, area: Rect) {
 
     // Top separator
     let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
-    f.render_widget(
+    safe_render_widget(
+        f,
         Paragraph::new(sep.clone()).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
         Rect { x: inner.x, y: inner.y + 1, width: inner.width, height: 1 },
     );
 
     // Message
-    f.render_widget(
+    safe_render_widget(
+        f,
         Paragraph::new("\nDo you really want to quit?")
             .alignment(Alignment::Center)
             .style(Style::default().fg(Color::Rgb(50, 36, 22)).bg(CLR_APP_BG)),
@@ -1092,7 +1137,8 @@ fn render_confirm_quit(f: &mut Frame, area: Rect) {
     );
 
     // Bottom separator
-    f.render_widget(
+    safe_render_widget(
+        f,
         Paragraph::new(sep).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
         Rect { x: inner.x, y: inner.y + 5, width: inner.width, height: 1 },
     );
@@ -1104,19 +1150,22 @@ fn render_confirm_quit(f: &mut Frame, area: Rect) {
     let gap: u16 = 4;
     let btn_x = inner.x + (inner.width.saturating_sub(yes_w + gap + no_w)) / 2;
 
-    f.render_widget(
+    safe_render_widget(
+        f,
         Paragraph::new("  [ Yes ]  ")
             .style(Style::default().fg(Color::Black).bg(CLR_PANEL_BORDER).add_modifier(Modifier::BOLD)),
         Rect { x: btn_x, y: btn_y, width: yes_w, height: 1 },
     );
-    f.render_widget(
+    safe_render_widget(
+        f,
         Paragraph::new("  [  No ]  ")
             .style(Style::default().fg(Color::Rgb(80, 60, 40)).bg(CLR_APP_BG)),
         Rect { x: btn_x + yes_w + gap, y: btn_y, width: no_w, height: 1 },
     );
 
     // Key hints
-    f.render_widget(
+    safe_render_widget(
+        f,
         Paragraph::new("Y / Enter  ·  N / Esc")
             .alignment(Alignment::Center)
             .style(Style::default().fg(Color::Rgb(120, 90, 60)).bg(CLR_APP_BG)),
@@ -1133,8 +1182,8 @@ fn render_confirm_delete(f: &mut Frame, message: &str, count: usize, area: Rect)
     const H: u16 = 9;
     let x = (area.width.saturating_sub(W)) / 2 + area.x;
     let y = (area.height.saturating_sub(H)) / 2 + area.y;
-    let popup = Rect { x, y, width: W, height: H };
-    f.render_widget(Clear, popup);
+    let popup = clamp_rect(area, Rect { x, y, width: W, height: H });
+    safe_render_widget(f, Clear, popup);
 
     let title = Span::styled(
         " Delete ",
@@ -1146,11 +1195,12 @@ fn render_confirm_delete(f: &mut Frame, message: &str, count: usize, area: Rect)
         .border_style(Style::default().fg(Color::Rgb(180, 60, 40)))
         .style(Style::default().bg(Color::Rgb(38, 18, 14)));
     let inner = block.inner(popup);
-    f.render_widget(block, popup);
+    safe_render_widget(f, block, popup);
 
     // Warning header
     let icon_label = if count == 1 { "\u{26a0}  Delete this item?" } else { "\u{26a0}  Delete these items?" };
-    f.render_widget(
+    safe_render_widget(
+        f,
         Paragraph::new(icon_label)
             .alignment(Alignment::Center)
             .style(Style::default().fg(Color::Rgb(255, 160, 60)).bg(Color::Rgb(38, 18, 14)).add_modifier(Modifier::BOLD)),
@@ -1159,7 +1209,8 @@ fn render_confirm_delete(f: &mut Frame, message: &str, count: usize, area: Rect)
 
     // Message
     let short_msg = truncate_str(message, inner.width as usize);
-    f.render_widget(
+    safe_render_widget(
+        f,
         Paragraph::new(short_msg)
             .alignment(Alignment::Center)
             .style(Style::default().fg(Color::Rgb(240, 200, 180)).bg(Color::Rgb(38, 18, 14))),
@@ -1173,19 +1224,22 @@ fn render_confirm_delete(f: &mut Frame, message: &str, count: usize, area: Rect)
     let gap: u16 = 4;
     let btn_x = inner.x + (inner.width.saturating_sub(yes_w + gap + no_w)) / 2;
 
-    f.render_widget(
+    safe_render_widget(
+        f,
         Paragraph::new("  [ Delete ]  ")
             .style(Style::default().fg(Color::White).bg(Color::Rgb(160, 40, 30)).add_modifier(Modifier::BOLD)),
         Rect { x: btn_x, y: btn_y, width: yes_w, height: 1 },
     );
-    f.render_widget(
+    safe_render_widget(
+        f,
         Paragraph::new("  [ Cancel ]  ")
             .style(Style::default().fg(Color::Rgb(180, 140, 120)).bg(Color::Rgb(38, 18, 14))),
         Rect { x: btn_x + yes_w + gap, y: btn_y, width: no_w, height: 1 },
     );
 
     // Hints
-    f.render_widget(
+    safe_render_widget(
+        f,
         Paragraph::new("Y / Enter  ·  N / Esc")
             .alignment(Alignment::Center)
             .style(Style::default().fg(Color::Rgb(130, 90, 70)).bg(Color::Rgb(38, 18, 14))),
@@ -1202,15 +1256,15 @@ fn render_input(f: &mut Frame, dlg: &InputDialog, area: Rect) {
     let height = 7u16;
     let x = (area.width.saturating_sub(width)) / 2 + area.x;
     let y = (area.height.saturating_sub(height)) / 2 + area.y;
-    let popup = Rect { x, y, width, height };
+    let popup = clamp_rect(area, Rect { x, y, width, height });
 
-    f.render_widget(Clear, popup);
+    safe_render_widget(f, Clear, popup);
     let block = Block::default()
         .title(format!(" {} ", dlg.title))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Yellow));
     let inner = block.inner(popup);
-    f.render_widget(block, popup);
+    safe_render_widget(f, block, popup);
 
     let input_w = inner.width.saturating_sub(2) as usize;
     let value_display = format!("{:<width$}", dlg.value, width = input_w);
@@ -1246,7 +1300,7 @@ fn render_copy_dialog(f: &mut Frame, dlg: &CopyDialogState, area: Rect) {
     let height = 14u16.min(area.height.saturating_sub(2));
     let x = (area.width.saturating_sub(width)) / 2 + area.x;
     let y = (area.height.saturating_sub(height)) / 2 + area.y;
-    let popup = Rect { x, y, width, height };
+    let popup = clamp_rect(area, Rect { x, y, width, height });
 
     f.render_widget(Clear, popup);
     let block = Block::default()
@@ -1345,7 +1399,7 @@ fn render_copy_dialog(f: &mut Frame, dlg: &CopyDialogState, area: Rect) {
             Style::default().fg(CLR_UNKNOWN).bg(CLR_MENU_DD_BG),
         )),
     ];
-    f.render_widget(Paragraph::new(lines).style(Style::default().bg(CLR_MENU_DD_BG)), inner);
+    safe_render_widget(f, Paragraph::new(lines).style(Style::default().bg(CLR_MENU_DD_BG)), inner);
 
     if dlg.field == CopyDialogState::DESTINATION && !dlg.stats_pending && !dlg.waiting_to_start {
         let cursor_x = (inner.x + 1 + dlg.cursor as u16).min(inner.x + inner.width.saturating_sub(1));
@@ -1359,16 +1413,16 @@ fn render_copy_progress(f: &mut Frame, state: &CopyProgressState, area: Rect) {
     let height = 10u16.min(area.height.saturating_sub(2));
     let x = (area.width.saturating_sub(width)) / 2 + area.x;
     let y = (area.height.saturating_sub(height)) / 2 + area.y;
-    let popup = Rect { x, y, width, height };
+    let popup = clamp_rect(area, Rect { x, y, width, height });
 
-    f.render_widget(Clear, popup);
+    safe_render_widget(f, Clear, popup);
     let block = Block::default()
         .title(" Copy ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(CLR_MENU_BORDER))
         .style(Style::default().bg(CLR_MENU_DD_BG));
     let inner = block.inner(popup);
-    f.render_widget(block, popup);
+    safe_render_widget(f, block, popup);
     if inner.height < 6 {
         return;
     }
@@ -1414,7 +1468,7 @@ fn render_copy_progress(f: &mut Frame, state: &CopyProgressState, area: Rect) {
             Style::default().fg(CLR_UNKNOWN).bg(CLR_MENU_DD_BG),
         )),
     ];
-    f.render_widget(Paragraph::new(lines).style(Style::default().bg(CLR_MENU_DD_BG)), inner);
+    safe_render_widget(f, Paragraph::new(lines).style(Style::default().bg(CLR_MENU_DD_BG)), inner);
 }
 
 fn progress_bar_string(width: usize, ratio: f64) -> String {
@@ -1432,13 +1486,13 @@ fn progress_bar_string(width: usize, ratio: f64) -> String {
 fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, area: Rect) {
     let width = 76u16.min(area.width.saturating_sub(4));
     let height = 18u16.min(area.height.saturating_sub(2)).max(8);
-    let popup = Rect {
+    let popup = clamp_rect(area, Rect {
         x: area.x + area.width.saturating_sub(width) / 2,
         y: area.y + area.height.saturating_sub(height) / 2,
         width,
         height,
-    };
-    f.render_widget(Clear, popup);
+    });
+    safe_render_widget(f, Clear, popup);
     let block = Block::default()
         .title(Span::styled(
             " Remote Connections ",
@@ -1448,7 +1502,7 @@ fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, area: Rect) 
         .border_style(Style::default().fg(CLR_MENU_BORDER).bg(CLR_MENU_DD_BG))
         .style(Style::default().bg(CLR_MENU_DD_BG));
     let inner = block.inner(popup);
-    f.render_widget(block, popup);
+    safe_render_widget(f, block, popup);
     if inner.height < 2 {
         return;
     }
@@ -1527,9 +1581,10 @@ fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, area: Rect) 
             .collect()
     };
     let list_area = Rect { x: inner.x, y: inner.y, width: inner.width, height: inner.height.saturating_sub(1) };
-    f.render_widget(List::new(items), list_area);
-    let hint_area = Rect { x: inner.x, y: inner.y + inner.height - 1, width: inner.width, height: 1 };
-    f.render_widget(
+    safe_render_widget(f, List::new(items), list_area);
+    let hint_area = clamp_rect(area, Rect { x: inner.x, y: inner.y + inner.height - 1, width: inner.width, height: 1 });
+    safe_render_widget(
+        f,
         Paragraph::new(" Enter:Connect  F7:SFTP  F8:IMAP  Esc:Cancel ")
             .style(Style::default().fg(CLR_BUTTON_FG).bg(CLR_STATUS_BG)),
         hint_area,
@@ -1539,13 +1594,13 @@ fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, area: Rect) 
 fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: Rect) {
     let width = 72u16.min(area.width.saturating_sub(4));
     let height = 14u16.min(area.height.saturating_sub(2)).max(10);
-    let popup = Rect {
+    let popup = clamp_rect(area, Rect {
         x: area.x + area.width.saturating_sub(width) / 2,
         y: area.y + area.height.saturating_sub(height) / 2,
         width,
         height,
-    };
-    f.render_widget(Clear, popup);
+    });
+    safe_render_widget(f, Clear, popup);
     let block = Block::default()
         .title(Span::styled(
             match state.kind {
@@ -1558,7 +1613,7 @@ fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: Rect) {
         .border_style(Style::default().fg(CLR_MENU_BORDER).bg(CLR_MENU_DD_BG))
         .style(Style::default().bg(CLR_MENU_DD_BG));
     let inner = block.inner(popup);
-    f.render_widget(block, popup);
+    safe_render_widget(f, block, popup);
     let labels = match state.kind {
         RemoteEditKind::Sftp => ["Name", "Host", "User", "Port", "Path", "Identity"],
         RemoteEditKind::Imap => ["Name", "Host", "User", "Port", "Mailbox", "Password"],
@@ -1602,7 +1657,8 @@ fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: Rect) {
         " Tab/Shift-Tab:Next  Enter:Select  Esc:Cancel ",
         Style::default().fg(CLR_UNKNOWN).bg(CLR_MENU_DD_BG),
     )));
-    f.render_widget(
+    safe_render_widget(
+        f,
         Paragraph::new(lines).style(Style::default().bg(CLR_MENU_DD_BG)),
         inner,
     );
@@ -1616,13 +1672,13 @@ fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: Rect) {
 fn render_remote_connecting(f: &mut Frame, state: &RemoteConnectingState, area: Rect) {
     let width = 46u16.min(area.width.saturating_sub(4)).max(30);
     let height = 7u16.min(area.height.saturating_sub(2)).max(6);
-    let popup = Rect {
+    let popup = clamp_rect(area, Rect {
         x: area.x + area.width.saturating_sub(width) / 2,
         y: area.y + area.height.saturating_sub(height) / 2,
         width,
         height,
-    };
-    f.render_widget(Clear, popup);
+    });
+    safe_render_widget(f, Clear, popup);
     let block = Block::default()
         .title(Span::styled(
             " Connecting ",
@@ -1632,7 +1688,7 @@ fn render_remote_connecting(f: &mut Frame, state: &RemoteConnectingState, area: 
         .border_style(Style::default().fg(CLR_MENU_BORDER).bg(CLR_MENU_DD_BG))
         .style(Style::default().bg(CLR_MENU_DD_BG));
     let inner = block.inner(popup);
-    f.render_widget(block, popup);
+    safe_render_widget(f, block, popup);
     let lines = vec![
         Line::from(Span::styled(
             format!(" {} connection in progress", state.protocol_label),
@@ -1669,7 +1725,7 @@ fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
     let height = (area.height / 2).max(12);
     let x = (area.width.saturating_sub(width)) / 2 + area.x;
     let y = (area.height.saturating_sub(height)) / 2 + area.y;
-    let popup = Rect { x, y, width, height };
+    let popup = clamp_rect(area, Rect { x, y, width, height });
 
     f.render_widget(Clear, popup);
     let block = Block::default()
@@ -1719,7 +1775,7 @@ fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
         )),
     ];
 
-    f.render_widget(Paragraph::new(lines), Rect { x: inner.x, y: inner.y, width: inner.width, height: input_h });
+    safe_render_widget(f, Paragraph::new(lines), Rect { x: inner.x, y: inner.y, width: inner.width, height: input_h });
 
     // --- Results ---
     let result_count = state.results.len();
@@ -1762,17 +1818,18 @@ fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
         .borders(Borders::TOP)
         .border_style(Style::default().fg(Color::DarkGray));
     let result_inner = result_block.inner(results_area);
-    f.render_widget(result_block, results_area);
-    f.render_widget(List::new(items), result_inner);
+    safe_render_widget(f, result_block, results_area);
+    safe_render_widget(f, List::new(items), result_inner);
 
     // Hint
-    let hint_area = Rect {
+    let hint_area = clamp_rect(area, Rect {
         x: inner.x,
         y: inner.y + inner.height - 1,
         width: inner.width,
         height: 1,
-    };
-    f.render_widget(
+    });
+    safe_render_widget(
+        f,
         Paragraph::new(Span::styled(
             " Enter:Search  Tab:Switch field  Esc:Close ",
             Style::default().fg(Color::DarkGray),
@@ -1792,9 +1849,9 @@ fn render_dir_bookmarks(f: &mut Frame, app: &App, area: Rect) {
     let width = 64u16.min(area.width.saturating_sub(4));
     let x = (area.width.saturating_sub(width)) / 2 + area.x;
     let y = (area.height.saturating_sub(height)) / 2 + area.y;
-    let popup = Rect { x, y, width, height };
+    let popup = clamp_rect(area, Rect { x, y, width, height });
 
-    f.render_widget(Clear, popup);
+    safe_render_widget(f, Clear, popup);
 
     let block = Block::default()
         .title(" Bookmarks ")
@@ -1802,7 +1859,7 @@ fn render_dir_bookmarks(f: &mut Frame, app: &App, area: Rect) {
         .border_style(Style::default().fg(CLR_MENU_BORDER))
         .style(Style::default().bg(CLR_MENU_DD_BG));
     let inner = block.inner(popup);
-    f.render_widget(block, popup);
+    safe_render_widget(f, block, popup);
 
     // List + hint line
     let [list_area, hint_area] =
@@ -1839,12 +1896,13 @@ fn render_dir_bookmarks(f: &mut Frame, app: &App, area: Rect) {
             })
             .collect()
     };
-    f.render_widget(List::new(items).style(Style::default().bg(CLR_MENU_DD_BG)), list_area);
+    safe_render_widget(f, List::new(items).style(Style::default().bg(CLR_MENU_DD_BG)), list_area);
 
     // Hint
     let key_style = Style::default().fg(CLR_HEADER_FG).bg(CLR_MENU_DD_BG).add_modifier(Modifier::BOLD);
     let txt_style = Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG);
-    f.render_widget(
+    safe_render_widget(
+        f,
         Paragraph::new(Line::from(vec![
             Span::styled(" Enter", key_style),
             Span::styled(":Go  ", txt_style),
@@ -1935,16 +1993,16 @@ fn render_quicksearch_palette(f: &mut Frame, app: &App, area: Rect) {
 
     let x = (area.width.saturating_sub(palette_w)) / 2 + area.x;
     let y = area.y + 2;
-    let popup = Rect { x, y, width: palette_w, height: palette_h };
+    let popup = clamp_rect(area, Rect { x, y, width: palette_w, height: palette_h });
 
-    f.render_widget(Clear, popup);
+    safe_render_widget(f, Clear, popup);
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(CLR_QS_BORDER))
         .style(Style::default().bg(CLR_QS_BG));
     let inner = block.inner(popup);
-    f.render_widget(block, popup);
+    safe_render_widget(f, block, popup);
 
     if inner.height < 2 {
         return;
@@ -1976,20 +2034,23 @@ fn render_quicksearch_palette(f: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(CLR_QS_NO_MATCH).bg(CLR_QS_INPUT_BG),
         ),
     ]);
-    f.render_widget(
+    safe_render_widget(
+        f,
         Paragraph::new(input_row).style(Style::default().bg(CLR_QS_INPUT_BG)),
         input_area,
     );
 
     let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
-    f.render_widget(
+    safe_render_widget(
+        f,
         Paragraph::new(sep).style(Style::default().fg(CLR_QS_SEP).bg(CLR_QS_BG)),
         sep_area,
     );
 
     // ── match list ─────────────────────────────────────────────────────────
     if total == 0 && !query.is_empty() {
-        f.render_widget(
+        safe_render_widget(
+            f,
             Paragraph::new(" No match")
                 .style(Style::default().fg(CLR_QS_NO_MATCH).bg(CLR_QS_BG)),
             list_area,
@@ -2047,11 +2108,12 @@ fn render_quicksearch_palette(f: &mut Frame, app: &App, area: Rect) {
         (list_area, None)
     };
 
-    f.render_widget(List::new(items).style(Style::default().bg(CLR_QS_BG)), render_area);
+    safe_render_widget(f, List::new(items).style(Style::default().bg(CLR_QS_BG)), render_area);
 
     if let Some(sb) = sb_area {
         let mut sb_state = ScrollbarState::new(total).position(scroll);
-        f.render_stateful_widget(
+        safe_render_stateful_widget(
+            f,
             Scrollbar::new(ScrollbarOrientation::VerticalRight)
                 .thumb_style(Style::default().fg(CLR_QS_BORDER))
                 .track_style(Style::default().bg(CLR_QS_BG))
@@ -2068,14 +2130,14 @@ fn render_quicksearch_palette(f: &mut Frame, app: &App, area: Rect) {
 // ---------------------------------------------------------------------------
 
 fn render_help(f: &mut Frame, state: &crate::help::HelpState, area: Rect) {
-    let popup = Rect {
+    let popup = clamp_rect(area, Rect {
         x: area.x + 1,
         y: area.y + 1,
         width: area.width.saturating_sub(2),
         height: area.height.saturating_sub(2),
-    };
+    });
 
-    f.render_widget(Clear, popup);
+    safe_render_widget(f, Clear, popup);
     let title = match state.view {
         HelpView::Index { .. } => " KKC-DOS Help Index ",
         HelpView::Topics { section, .. } => {
@@ -2102,24 +2164,24 @@ fn render_help_with_title(
         .border_style(Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG))
         .style(Style::default().bg(Color::Black));
     let inner = block.inner(popup);
-    f.render_widget(block, popup);
+    safe_render_widget(f, block, popup);
 
     if inner.height < 3 {
         return;
     }
 
-    let body = Rect {
+    let body = clamp_rect(popup, Rect {
         x: inner.x,
         y: inner.y,
         width: inner.width,
         height: inner.height.saturating_sub(1),
-    };
-    let footer = Rect {
+    });
+    let footer = clamp_rect(popup, Rect {
         x: inner.x,
         y: inner.y + inner.height.saturating_sub(1),
         width: inner.width,
         height: 1,
-    };
+    });
 
     match state.view {
         HelpView::Index { cursor } => {
@@ -2137,8 +2199,9 @@ fn render_help_with_title(
                     ListItem::new(Line::from(Span::styled(format!(" {}", section.title), style)))
                 })
                 .collect();
-            f.render_widget(List::new(items), body);
-            f.render_widget(
+            safe_render_widget(f, List::new(items), body);
+            safe_render_widget(
+                f,
                 Paragraph::new(" Esc/F10:Close  Enter:Open topic group ")
                     .style(Style::default().fg(Color::DarkGray)),
                 footer,
@@ -2161,8 +2224,9 @@ fn render_help_with_title(
                     )))
                 })
                 .collect();
-            f.render_widget(List::new(items), body);
-            f.render_widget(
+            safe_render_widget(f, List::new(items), body);
+            safe_render_widget(
+                f,
                 Paragraph::new(" Esc:Close  Backspace:Back  Enter:Open page ")
                     .style(Style::default().fg(Color::DarkGray)),
                 footer,
@@ -2170,14 +2234,16 @@ fn render_help_with_title(
         }
         HelpView::Page { topic, scroll, selected_link } => {
             let topic = &state.system.topics[topic];
-            f.render_widget(
+            safe_render_widget(
+                f,
                 Paragraph::new(topic.to_render_lines(selected_link))
                     .style(Style::default().fg(Color::White))
                     .scroll((scroll, 0))
                     .wrap(Wrap { trim: false }),
                 body,
             );
-            f.render_widget(
+            safe_render_widget(
+                f,
                 Paragraph::new(" Esc:Close  Backspace:Back  Up/Down/PgUp/PgDn:Scroll  Tab:Next link  Enter:Open ")
                     .style(Style::default().fg(Color::DarkGray)),
                 footer,
@@ -2259,18 +2325,19 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
     const H: u16 = 22;
     let x = area.x + (area.width.saturating_sub(W)) / 2;
     let y = area.y + (area.height.saturating_sub(H)) / 2;
-    let popup = Rect { x, y, width: W, height: H };
+    let popup = clamp_rect(area, Rect { x, y, width: W, height: H });
 
     // Shadow
     let sh = Rect { x: popup.x + 2, y: popup.y + 1, width: W, height: H };
     if sh.right() <= area.right() && sh.bottom() <= area.bottom() {
-        f.render_widget(
+        safe_render_widget(
+            f,
             Block::default().style(Style::default().bg(Color::Rgb(20, 15, 10))),
             sh,
         );
     }
 
-    f.render_widget(Clear, popup);
+    safe_render_widget(f, Clear, popup);
 
     // Outer box
     let block = Block::default()
@@ -2279,7 +2346,7 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
         .title(Span::styled(" Setup ", Style::default().fg(CLR_BUTTON_FG).bg(CLR_APP_BG).add_modifier(Modifier::BOLD)))
         .style(Style::default().bg(CLR_APP_BG));
     let inner = block.inner(popup);
-    f.render_widget(block, popup);
+    safe_render_widget(f, block, popup);
 
     // ── Checkboxes ────────────────────────────────────────────────────────
     const LABELS: [&str; 8] = [
@@ -2315,7 +2382,8 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
             Style::default().fg(Color::Rgb(50, 36, 22)).bg(CLR_APP_BG)
         };
         let padded = format!("{:<width$}", text, width = (inner.width) as usize);
-        f.render_widget(
+        safe_render_widget(
+            f,
             Paragraph::new(padded).style(style),
             Rect { x: inner.x, y: row, width: inner.width, height: 1 },
         );
@@ -2325,7 +2393,8 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
     let sep_y = inner.y + 8;
     if sep_y < inner.y + inner.height {
         let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
-        f.render_widget(
+        safe_render_widget(
+            f,
             Paragraph::new(sep).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
             Rect { x: inner.x, y: sep_y, width: inner.width, height: 1 },
         );
@@ -2346,7 +2415,8 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
 
         // Label row
         let label_style = Style::default().fg(Color::Rgb(80, 60, 40)).bg(CLR_APP_BG);
-        f.render_widget(
+        safe_render_widget(
+            f,
             Paragraph::new(format!("  {}:", label)).style(label_style),
             Rect { x: inner.x, y: row, width: inner.width, height: 1 },
         );
@@ -2361,7 +2431,8 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
         } else {
             padded
         };
-        f.render_widget(
+        safe_render_widget(
+            f,
             Paragraph::new(display).style(Style::default().fg(input_fg).bg(input_bg)),
             Rect { x: inner.x + 2, y: row + 1, width: field_w, height: 1 },
         );
@@ -2371,7 +2442,8 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
     let bot_sep_y = inner.y + inner.height.saturating_sub(3);
     if bot_sep_y < inner.y + inner.height {
         let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
-        f.render_widget(
+        safe_render_widget(
+            f,
             Paragraph::new(sep).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
             Rect { x: inner.x, y: bot_sep_y, width: inner.width, height: 1 },
         );
@@ -2396,11 +2468,13 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
         Style::default().fg(Color::Rgb(80, 60, 40)).bg(CLR_APP_BG)
     };
 
-    f.render_widget(
+    safe_render_widget(
+        f,
         Paragraph::new("  [ OK ]  ").style(ok_style),
         Rect { x: btn_x, y: btn_y, width: btn_w, height: 1 },
     );
-    f.render_widget(
+    safe_render_widget(
+        f,
         Paragraph::new(" [Cancel] ").style(cancel_style),
         Rect { x: btn_x + btn_w + gap, y: btn_y, width: btn_w, height: 1 },
     );
@@ -2415,17 +2489,18 @@ fn render_opener(f: &mut Frame, s: &OpenerState, area: Rect) {
     let h = (s.items.len() as u16 + 4).min(20).max(6);
     let x = area.x + (area.width.saturating_sub(w)) / 2;
     let y = area.y + (area.height.saturating_sub(h)) / 2;
-    let popup = Rect { x, y, width: w, height: h };
+    let popup = clamp_rect(area, Rect { x, y, width: w, height: h });
 
     // Shadow
     let sh = Rect { x: popup.x + 2, y: popup.y + 1, width: w, height: h };
     if sh.right() <= area.right() && sh.bottom() <= area.bottom() {
-        f.render_widget(
+        safe_render_widget(
+            f,
             Block::default().style(Style::default().bg(Color::Rgb(20, 15, 10))),
             sh,
         );
     }
-    f.render_widget(Clear, popup);
+    safe_render_widget(f, Clear, popup);
 
     let ext = s.path.extension().and_then(|e| e.to_str()).unwrap_or("?");
     let title = format!(" Open .{} ", ext);
@@ -2435,16 +2510,18 @@ fn render_opener(f: &mut Frame, s: &OpenerState, area: Rect) {
         .title(Span::styled(title, Style::default().fg(CLR_BUTTON_FG).bg(CLR_APP_BG).add_modifier(Modifier::BOLD)))
         .style(Style::default().bg(CLR_APP_BG));
     let inner = block.inner(popup);
-    f.render_widget(block, popup);
+    safe_render_widget(f, block, popup);
 
     // Hint row
-    f.render_widget(
+    safe_render_widget(
+        f,
         Paragraph::new("  ↑↓ select  Enter open  Esc cancel")
             .style(Style::default().fg(Color::Rgb(110, 88, 65)).bg(CLR_APP_BG)),
         Rect { x: inner.x, y: inner.y, width: inner.width, height: 1 },
     );
     let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
-    f.render_widget(
+    safe_render_widget(
+        f,
         Paragraph::new(sep).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
         Rect { x: inner.x, y: inner.y + 1, width: inner.width, height: 1 },
     );
@@ -2462,7 +2539,8 @@ fn render_opener(f: &mut Frame, s: &OpenerState, area: Rect) {
         let icon = if selected { " ▶ " } else { "   " };
         let text = format!("{}{}", icon, cmd);
         let padded = format!("{:<width$}", text, width = inner.width as usize);
-        f.render_widget(
+        safe_render_widget(
+            f,
             Paragraph::new(padded).style(style),
             Rect { x: inner.x, y: row, width: inner.width, height: 1 },
         );
@@ -2478,17 +2556,18 @@ fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rect) {
     const H: u16 = 24;
     let x = area.x + (area.width.saturating_sub(W)) / 2;
     let y = area.y + (area.height.saturating_sub(H)) / 2;
-    let popup = Rect { x, y, width: W, height: H };
+    let popup = clamp_rect(area, Rect { x, y, width: W, height: H });
 
     // Shadow
     let sh = Rect { x: popup.x + 2, y: popup.y + 1, width: W, height: H };
     if sh.right() <= area.right() && sh.bottom() <= area.bottom() {
-        f.render_widget(
+        safe_render_widget(
+            f,
             Block::default().style(Style::default().bg(Color::Rgb(20, 15, 10))),
             sh,
         );
     }
-    f.render_widget(Clear, popup);
+    safe_render_widget(f, Clear, popup);
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -2496,17 +2575,19 @@ fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rect) {
         .title(Span::styled(" Associations ", Style::default().fg(CLR_BUTTON_FG).bg(CLR_APP_BG).add_modifier(Modifier::BOLD)))
         .style(Style::default().bg(CLR_APP_BG));
     let inner = block.inner(popup);
-    f.render_widget(block, popup);
+    safe_render_widget(f, block, popup);
 
     // Column header
     let header = format!("  {:<8} {}", "Ext", "Openers");
-    f.render_widget(
+    safe_render_widget(
+        f,
         Paragraph::new(header)
             .style(Style::default().fg(CLR_HEADER_FG).bg(CLR_HEADER_BG).add_modifier(Modifier::BOLD)),
         Rect { x: inner.x, y: inner.y, width: inner.width, height: 1 },
     );
     let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
-    f.render_widget(
+    safe_render_widget(
+        f,
         Paragraph::new(sep.clone()).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
         Rect { x: inner.x, y: inner.y + 1, width: inner.width, height: 1 },
     );
@@ -2520,7 +2601,8 @@ fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rect) {
     };
 
     if s.assocs.is_empty() {
-        f.render_widget(
+        safe_render_widget(
+            f,
             Paragraph::new("  (no associations defined)")
                 .style(Style::default().fg(Color::Rgb(110, 88, 65)).bg(CLR_APP_BG)),
             Rect { x: inner.x, y: inner.y + 2, width: inner.width, height: 1 },
@@ -2547,7 +2629,8 @@ fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rect) {
             };
             let text = format!(" {} .{:<8} {}", icon, ext, openers_disp);
             let padded = format!("{:<width$}", text, width = inner.width as usize);
-            f.render_widget(
+            safe_render_widget(
+                f,
                 Paragraph::new(padded).style(style),
                 Rect { x: inner.x, y: row_y, width: inner.width, height: 1 },
             );
@@ -2556,11 +2639,13 @@ fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rect) {
 
     // Bottom hint
     let hint_sep_y = inner.y + inner.height.saturating_sub(2);
-    f.render_widget(
+    safe_render_widget(
+        f,
         Paragraph::new(sep).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
         Rect { x: inner.x, y: hint_sep_y, width: inner.width, height: 1 },
     );
-    f.render_widget(
+    safe_render_widget(
+        f,
         Paragraph::new("  A/+ Add   Enter/E Edit   Del/D Delete   Esc Close")
             .style(Style::default().fg(Color::Rgb(110, 88, 65)).bg(CLR_APP_BG)),
         Rect { x: inner.x, y: hint_sep_y + 1, width: inner.width, height: 1 },
