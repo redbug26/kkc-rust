@@ -352,6 +352,8 @@ fn render_panel(
                 Style::default().fg(fg).bg(CLR_CURSOR_BG).add_modifier(Modifier::BOLD)
             } else if entry.selected {
                 Style::default().fg(fg).add_modifier(Modifier::BOLD)
+            } else if entry.is_dir {
+                Style::default().fg(fg).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(fg)
             };
