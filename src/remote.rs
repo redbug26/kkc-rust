@@ -142,7 +142,7 @@ pub fn load_profiles() -> Result<Vec<RemoteProfile>> {
     Ok(out)
 }
 
-pub fn save_profile(profile: &RemoteProfile) -> Result<()> {
+pub fn save_profile(profile: &RemoteProfile, old_name: Option<&str>) -> Result<()> {
     let path = connections_path()?;
     let mut store = if path.exists() {
         let text = fs::read_to_string(&path)
@@ -155,6 +155,10 @@ pub fn save_profile(profile: &RemoteProfile) -> Result<()> {
 
     match &profile.kind {
         RemoteKind::Sftp(sftp) => {
+            // Remove old entry by original name (rename case) and by new name (duplicate guard).
+            if let Some(old) = old_name {
+                store.sftp.retain(|p| !p.name.eq_ignore_ascii_case(old));
+            }
             store.sftp.retain(|p| !p.name.eq_ignore_ascii_case(&profile.name));
             store.sftp.push(SftpProfileToml {
                 name: profile.name.clone(),
@@ -166,6 +170,9 @@ pub fn save_profile(profile: &RemoteProfile) -> Result<()> {
             });
         }
         RemoteKind::Imap(imap) => {
+            if let Some(old) = old_name {
+                store.imap.retain(|p| !p.name.eq_ignore_ascii_case(old));
+            }
             store.imap.retain(|p| !p.name.eq_ignore_ascii_case(&profile.name));
             store.imap.push(ImapProfileToml {
                 name: profile.name.clone(),
@@ -832,11 +839,18 @@ fn run_sftp_batch(profile: &RemoteProfile, commands: &[String]) -> Result<String
     };
     let mut cmd = Command::new("sftp");
     cmd.arg("-q").arg("-b").arg("-");
+    // Prevent sftp from opening /dev/tty for password/passphrase prompts,
+    // which would corrupt the TUI. Connections must use key-based auth
+    // (agent or identity file). Accept new host keys automatically so that
+    // first-time connections to a TOML-defined server don't hang.
+    cmd.arg("-o").arg("BatchMode=yes");
+    cmd.arg("-o").arg("StrictHostKeyChecking=accept-new");
     if let Some(port) = sftp.port {
         cmd.arg("-P").arg(port.to_string());
     }
     if let Some(identity) = sftp.identity_file.as_ref().filter(|s| !s.trim().is_empty()) {
         cmd.arg("-i").arg(expand_tilde(identity));
+        cmd.arg("-o").arg("IdentitiesOnly=yes");
     }
     cmd.arg(remote_target(profile));
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());

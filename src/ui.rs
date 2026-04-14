@@ -1772,7 +1772,7 @@ fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, area: Rect) 
     safe_render_widget(f, List::new(items), list_area);
     safe_render_widget(
         f,
-        Paragraph::new(" Type:Filter  Enter:Connect  F7:SFTP  F8:IMAP  Esc:Cancel ")
+        Paragraph::new(" Type:Filter  Enter:Connect  F6:Edit  F7:SFTP  F8:IMAP  Esc:Cancel ")
             .style(Style::default().fg(CLR_BUTTON_FG).bg(CLR_STATUS_BG)),
         hint_area,
     );
@@ -1805,6 +1805,7 @@ fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: Rect) {
         RemoteEditKind::Sftp => ["Name", "Host", "User", "Port", "Path", "Identity"],
         RemoteEditKind::Imap => ["Name", "Host", "User", "Port", "Mailbox", "Password"],
     };
+    let value_w = (inner.width as usize).saturating_sub(9);
     let mut lines = Vec::new();
     for (idx, label) in labels.iter().enumerate() {
         let selected = state.cursor == idx;
@@ -1820,7 +1821,7 @@ fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: Rect) {
         };
         lines.push(Line::from(vec![
             Span::styled(format!("{:<9}", format!("{label}:")), label_style),
-            Span::styled(state.fields[idx].clone(), value_style),
+            Span::styled(format!("{:<width$}", state.fields[idx], width = value_w), value_style),
         ]));
     }
     lines.push(Line::default());

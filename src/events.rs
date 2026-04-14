@@ -1804,6 +1804,9 @@ fn handle_remote_connect(app: &mut App, key: KeyEvent) -> Result<bool> {
                 s.pop_query();
             }
         }
+        KeyCode::F(6) => {
+            app.open_remote_edit();
+        }
         KeyCode::F(7) => {
             app.open_remote_add();
         }
@@ -1903,7 +1906,8 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
                 app.mode = AppMode::RemoteConnect(crate::app::RemoteConnectState::load());
             } else if s.cursor == crate::app::RemoteEditState::SAVE {
                 if let Some(profile) = s.build_profile() {
-                    match app.save_remote_profile(profile) {
+                    let old_name = s.edit_original_name.clone();
+                    match app.save_remote_profile(profile, old_name) {
                         Ok(()) => app.mode = AppMode::RemoteConnect(crate::app::RemoteConnectState::load()),
                         Err(e) => app.status.text = format!("Cannot save connection: {}", e),
                     }

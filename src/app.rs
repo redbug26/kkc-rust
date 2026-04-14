@@ -334,6 +334,8 @@ pub struct RemoteEditState {
     pub fields: [String; 6],
     pub cursor: usize,
     pub input_cursor: usize,
+    /// Original name when editing an existing profile (for rename support).
+    pub edit_original_name: Option<String>,
 }
 
 impl RemoteEditState {
@@ -347,11 +349,52 @@ impl RemoteEditState {
     pub const CANCEL: usize = 7;
 
     pub fn new(kind: RemoteEditKind) -> Self {
+        let fields = match kind {
+            RemoteEditKind::Sftp => [
+                String::new(),
+                String::new(),
+                String::new(),
+                "22".into(),
+                "~".into(),
+                String::new(),
+            ],
+            RemoteEditKind::Imap => Default::default(),
+        };
+        let input_cursor = fields[Self::NAME].len();
         Self {
             kind,
-            fields: Default::default(),
+            fields,
             cursor: 0,
-            input_cursor: 0,
+            input_cursor,
+            edit_original_name: None,
+        }
+    }
+
+    pub fn from_profile(profile: &RemoteProfile) -> Self {
+        let (kind, fields) = match &profile.kind {
+            RemoteKind::Sftp(sftp) => (RemoteEditKind::Sftp, [
+                profile.name.clone(),
+                sftp.host.clone().unwrap_or_default(),
+                sftp.user.clone().unwrap_or_default(),
+                sftp.port.map(|p| p.to_string()).unwrap_or_default(),
+                sftp.path.clone().unwrap_or_default(),
+                sftp.identity_file.clone().unwrap_or_default(),
+            ]),
+            RemoteKind::Imap(imap) => (RemoteEditKind::Imap, [
+                profile.name.clone(),
+                imap.host.clone(),
+                imap.user.clone(),
+                imap.port.map(|p| p.to_string()).unwrap_or_default(),
+                imap.path.clone().unwrap_or_default(),
+                imap.password.clone().unwrap_or_default(),
+            ]),
+        };
+        Self {
+            kind,
+            input_cursor: fields[Self::NAME].len(),
+            fields,
+            cursor: 0,
+            edit_original_name: Some(profile.name.clone()),
         }
     }
 
@@ -1005,6 +1048,10 @@ impl App {
         self.mode = AppMode::RemoteEdit(RemoteEditState::new(RemoteEditKind::Imap));
     }
 
+    pub fn open_remote_edit(&mut self) {
+        self.open_remote_edit_profile();
+    }
+
     pub fn open_copy_dialog(&mut self) {
         if self.active_panel().is_archive_view() || self.other_panel().is_archive_view() {
             self.status.text = "Copy in archive is not supported".into();
@@ -1113,9 +1160,26 @@ impl App {
         );
     }
 
-    pub fn save_remote_profile(&mut self, profile: RemoteProfile) -> Result<()> {
-        save_profile(&profile)?;
+    pub fn save_remote_profile(&mut self, profile: RemoteProfile, old_name: Option<String>) -> Result<()> {
+        save_profile(&profile, old_name.as_deref())?;
         Ok(())
+    }
+
+    pub fn open_remote_edit_profile(&mut self) {
+        let profile = if let AppMode::RemoteConnect(ref s) = self.mode {
+            s.filtered_indices()
+                .get(s.match_pos)
+                .and_then(|idx| s.items.get(*idx))
+                .filter(|p| p.source == RemoteSource::UserToml)
+                .cloned()
+        } else {
+            None
+        };
+        if let Some(profile) = profile {
+            self.mode = AppMode::RemoteEdit(RemoteEditState::from_profile(&profile));
+        } else {
+            self.status.text = "Only user-defined (toml) connections can be edited".into();
+        }
     }
 
     pub fn go_parent(&mut self) -> Result<()> {
