@@ -1,6 +1,6 @@
 use crate::archive::supports_archive_navigation;
 use crate::app::{
-    App, AppMode, AssocEditorState, ConfigState, ConfirmAction, InputAction, InputDialog,
+    App, AppMode, AssocEditorState, BookmarkListItem, ConfigState, ConfirmAction, InputAction, InputDialog,
     MenuAction, MenuState, OpenerState, RemoteEditKind,
     ViewerMenuKind, ViewerMenuState,
     MENU_DATA, MENU_HEADERS,
@@ -107,8 +107,7 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
                 return Ok(false);
             }
             KeyCode::Char('d') => {
-                app.bookmark_cursor = 0;
-                app.mode = AppMode::DirBookmarks;
+                app.open_dir_bookmarks();
                 return Ok(false);
             }
             KeyCode::Char('f') => {
@@ -1316,51 +1315,64 @@ fn handle_dir_bookmarks(app: &mut App, key: KeyEvent) -> Result<bool> {
             app.mode = AppMode::Browse;
         }
         KeyCode::Up => {
-            if app.bookmark_cursor > 0 {
-                app.bookmark_cursor -= 1;
-            }
+            app.move_prev_bookmark();
         }
         KeyCode::Down => {
-            if app.bookmark_cursor + 1 < app.bookmarks.len() {
-                app.bookmark_cursor += 1;
-            }
+            app.move_next_bookmark();
+        }
+        KeyCode::Backspace => {
+            app.pop_bookmark_query();
         }
         KeyCode::Enter => {
-            let path = app.bookmarks.get(app.bookmark_cursor).cloned();
-            app.mode = AppMode::Browse;
-            if let Some(p) = path {
-                let s = p.to_string_lossy();
-                if let Some(rest) = s.strip_prefix("remote://") {
-                    let (profile_name, cwd) = rest.split_once('/').unwrap_or((rest, ""));
-                    let target_cwd = format!("/{}", cwd);
-                    let profiles = load_profiles().unwrap_or_default();
-                    if let Some(profile) = profiles.into_iter().find(|pr| pr.name == profile_name) {
-                        app.start_remote_connect_with_cwd(profile, target_cwd);
-                    }
-                } else if p.is_dir() {
-                    app.enter_dir(p)?;
+            let selected = app
+                .filtered_bookmark_items()
+                .get(app.bookmark_match_pos)
+                .cloned();
+            match selected {
+                Some(BookmarkListItem::AddCurrentDir(_)) => {
+                    app.add_current_dir_bookmark();
                 }
-            }
-        }
-        KeyCode::Char('a') | KeyCode::Char('A') => {
-            let cur = if let Some(profile) = app.active_panel().remote_profile() {
-                let cwd = app.active_panel().remote_cwd().unwrap_or("/");
-                std::path::PathBuf::from(format!("remote://{}/{}", profile.name, cwd.trim_start_matches('/')))
-            } else {
-                app.active_panel().path.clone()
-            };
-            if !app.bookmarks.contains(&cur) {
-                app.bookmarks.push(cur);
-                app.bookmark_cursor = app.bookmarks.len() - 1;
+                Some(BookmarkListItem::Existing(idx)) => {
+                    let path = app.bookmarks.get(idx).cloned();
+                    app.mode = AppMode::Browse;
+                    if let Some(p) = path {
+                        let s = p.to_string_lossy();
+                        if let Some(rest) = s.strip_prefix("remote://") {
+                            let (profile_name, cwd) = rest.split_once('/').unwrap_or((rest, ""));
+                            let target_cwd = format!("/{}", cwd);
+                            let profiles = load_profiles().unwrap_or_default();
+                            if let Some(profile) = profiles.into_iter().find(|pr| pr.name == profile_name) {
+                                app.start_remote_connect_with_cwd(profile, target_cwd);
+                            }
+                        } else if p.is_dir() {
+                            app.enter_dir(p)?;
+                        }
+                    }
+                }
+                None => app.mode = AppMode::Browse,
             }
         }
         KeyCode::Delete => {
-            if !app.bookmarks.is_empty() {
-                app.bookmarks.remove(app.bookmark_cursor);
-                if app.bookmark_cursor >= app.bookmarks.len() && app.bookmark_cursor > 0 {
-                    app.bookmark_cursor -= 1;
+            if let Some(BookmarkListItem::Existing(idx)) = app
+                .filtered_bookmark_items()
+                .get(app.bookmark_match_pos)
+                .cloned()
+            {
+                if idx < app.bookmarks.len() {
+                    app.bookmarks.remove(idx);
+                    if app.bookmark_cursor >= app.bookmarks.len() && app.bookmark_cursor > 0 {
+                        app.bookmark_cursor -= 1;
+                    }
+                    app.sync_bookmark_cursor();
                 }
             }
+        }
+        KeyCode::Char(ch)
+            if !key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::ALT)
+                && !ch.is_control() =>
+        {
+            app.append_bookmark_query(ch);
         }
         _ => {}
     }
@@ -1546,8 +1558,7 @@ fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<bool> {
             app.open_search();
         }
         MenuAction::DirBookmarks => {
-            app.bookmark_cursor = 0;
-            app.mode = AppMode::DirBookmarks;
+            app.open_dir_bookmarks();
         }
         MenuAction::ToggleFBar => {
             app.config.show_fkey_bar = !app.config.show_fkey_bar;

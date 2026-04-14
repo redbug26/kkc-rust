@@ -293,6 +293,12 @@ impl RemoteConnectState {
 }
 
 #[derive(Debug, Clone)]
+pub enum BookmarkListItem {
+    Existing(usize),
+    AddCurrentDir(PathBuf),
+}
+
+#[derive(Debug, Clone)]
 pub struct RemoteConnectingState {
     pub profile_name: String,
     pub protocol_label: &'static str,
@@ -739,6 +745,8 @@ pub struct App {
     pub dir_history: VecDeque<PathBuf>,
     pub bookmarks: Vec<PathBuf>,
     pub bookmark_cursor: usize,
+    pub bookmark_query: String,
+    pub bookmark_match_pos: usize,
     remote_connect_task: Option<RemoteConnectTask>,
     remote_connect_return: Option<RemoteConnectState>,
     pending_remote_cwd: Option<String>,
@@ -793,6 +801,8 @@ impl App {
             dir_history: history,
             bookmarks,
             bookmark_cursor: 0,
+            bookmark_query: String::new(),
+            bookmark_match_pos: 0,
             remote_connect_task: None,
             remote_connect_return: None,
             pending_remote_cwd: None,
@@ -845,6 +855,140 @@ impl App {
 
     pub fn swap_panels(&mut self) {
         std::mem::swap(&mut self.left, &mut self.right);
+    }
+
+    pub fn open_dir_bookmarks(&mut self) {
+        self.bookmark_query.clear();
+        let current = self.current_bookmark_candidate();
+        self.bookmark_cursor = self
+            .bookmarks
+            .iter()
+            .position(|bookmark| *bookmark == current)
+            .unwrap_or(0);
+        self.bookmark_match_pos = self
+            .filtered_bookmark_items()
+            .iter()
+            .position(|item| matches!(item, BookmarkListItem::Existing(idx) if *idx == self.bookmark_cursor))
+            .unwrap_or(0);
+        self.sync_bookmark_cursor();
+        self.mode = AppMode::DirBookmarks;
+    }
+
+    pub fn current_bookmark_candidate(&self) -> PathBuf {
+        if let Some(profile) = self.active_panel().remote_profile() {
+            let cwd = self.active_panel().remote_cwd().unwrap_or("/");
+            PathBuf::from(format!("remote://{}/{}", profile.name, cwd.trim_start_matches('/')))
+        } else {
+            self.active_panel().path.clone()
+        }
+    }
+
+    pub fn add_current_dir_bookmark(&mut self) {
+        let cur = self.current_bookmark_candidate();
+        if !self.bookmarks.contains(&cur) {
+            self.bookmarks.push(cur);
+            self.bookmark_cursor = self.bookmarks.len() - 1;
+            self.bookmark_match_pos = 0;
+            self.sync_bookmark_cursor();
+        }
+    }
+
+    pub fn filtered_bookmark_items(&self) -> Vec<BookmarkListItem> {
+        let tokens: Vec<String> = self
+            .bookmark_query
+            .split_whitespace()
+            .map(|t| t.to_lowercase())
+            .filter(|t| !t.is_empty())
+            .collect();
+
+        let matches_tokens = |label: &str| -> bool {
+            if tokens.is_empty() {
+                return true;
+            }
+            let lowered = label.to_lowercase();
+            let first = &tokens[0];
+            let rest = &tokens[1..];
+            lowered.contains(first.as_str())
+                && rest.iter().all(|token| lowered.contains(token.as_str()))
+        };
+        let starts_with_first = |label: &str| -> bool {
+            if tokens.is_empty() {
+                return true;
+            }
+            label.to_lowercase().starts_with(tokens[0].as_str())
+        };
+
+        let mut starts = Vec::new();
+        let mut contains = Vec::new();
+
+        let current = self.current_bookmark_candidate();
+        if !self.bookmarks.contains(&current) {
+            let label = format!("<add current dir> {}", current.to_string_lossy());
+            if matches_tokens(&label) {
+                let item = BookmarkListItem::AddCurrentDir(current);
+                if starts_with_first(&label) {
+                    starts.push(item);
+                } else {
+                    contains.push(item);
+                }
+            }
+        }
+
+        for (idx, bookmark) in self.bookmarks.iter().enumerate() {
+            let label = bookmark.to_string_lossy();
+            if !matches_tokens(&label) {
+                continue;
+            }
+            let item = BookmarkListItem::Existing(idx);
+            if starts_with_first(&label) {
+                starts.push(item);
+            } else {
+                contains.push(item);
+            }
+        }
+
+        starts.extend(contains);
+        starts
+    }
+
+    pub fn sync_bookmark_cursor(&mut self) {
+        let matches = self.filtered_bookmark_items();
+        if matches.is_empty() {
+            self.bookmark_match_pos = 0;
+            self.bookmark_cursor = self.bookmark_cursor.min(self.bookmarks.len().saturating_sub(1));
+            return;
+        }
+        self.bookmark_match_pos = self.bookmark_match_pos.min(matches.len().saturating_sub(1));
+        if let BookmarkListItem::Existing(idx) = matches[self.bookmark_match_pos] {
+            self.bookmark_cursor = idx;
+        }
+    }
+
+    pub fn append_bookmark_query(&mut self, ch: char) {
+        self.bookmark_query.push(ch);
+        self.bookmark_match_pos = 0;
+        self.sync_bookmark_cursor();
+    }
+
+    pub fn pop_bookmark_query(&mut self) {
+        self.bookmark_query.pop();
+        self.bookmark_match_pos = 0;
+        self.sync_bookmark_cursor();
+    }
+
+    pub fn move_prev_bookmark(&mut self) {
+        if self.bookmark_match_pos > 0 {
+            self.bookmark_match_pos -= 1;
+        }
+        self.sync_bookmark_cursor();
+    }
+
+    pub fn move_next_bookmark(&mut self) {
+        let len = self.filtered_bookmark_items().len();
+        if self.bookmark_match_pos + 1 < len {
+            self.bookmark_match_pos += 1;
+        }
+        self.sync_bookmark_cursor();
     }
 
     pub fn open_remote_connect(&mut self) {

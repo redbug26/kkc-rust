@@ -1,4 +1,4 @@
-use crate::app::{ActivePanel, App, AppMode, AssocEditorState, ConfigState, ConfirmAction, ConfirmDialog, InputDialog, MenuState, MenuAction, OpenerState, RemoteConnectState, RemoteConnectingState, RemoteEditKind, RemoteEditState, SearchState, ViewerMenuKind, ViewerMenuState, MENU_DATA, MENU_HEADERS};
+use crate::app::{ActivePanel, App, AppMode, AssocEditorState, BookmarkListItem, ConfigState, ConfirmAction, ConfirmDialog, InputDialog, MenuState, MenuAction, OpenerState, RemoteConnectState, RemoteConnectingState, RemoteEditKind, RemoteEditState, SearchState, ViewerMenuKind, ViewerMenuState, MENU_DATA, MENU_HEADERS};
 use crate::copy::{CopyDialogState, CopyProgressState};
 use crate::help::HelpView;
 use crate::idf::{probe_path, IdfKind};
@@ -2030,9 +2030,9 @@ fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
 // ---------------------------------------------------------------------------
 
 fn render_dir_bookmarks(f: &mut Frame, app: &App, area: Rect) {
-    let list_h = app.bookmarks.len().max(1) as u16;
-    // 2 border + 1 hint line + list
-    let height = (list_h + 3).min(area.height.saturating_sub(4));
+    let list_h = app.bookmarks.len().max(3) as u16;
+    // 2 border + input + separator + hint + list
+    let height = (list_h + 5).min(area.height.saturating_sub(4)).max(8);
     let width = 64u16.min(area.width.saturating_sub(4));
     let x = (area.width.saturating_sub(width)) / 2 + area.x;
     let y = (area.height.saturating_sub(height)) / 2 + area.y;
@@ -2048,38 +2048,126 @@ fn render_dir_bookmarks(f: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
 
-    // List + hint line
-    let [list_area, hint_area] =
-        Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(inner);
+    let input_area = Rect { x: inner.x, y: inner.y, width: inner.width, height: 1 };
+    let sep_area = Rect { x: inner.x, y: inner.y + 1, width: inner.width, height: 1 };
+    let list_area = Rect {
+        x: inner.x,
+        y: inner.y + 2,
+        width: inner.width,
+        height: inner.height.saturating_sub(3),
+    };
+    let hint_area = Rect {
+        x: inner.x,
+        y: inner.y + inner.height - 1,
+        width: inner.width,
+        height: 1,
+    };
 
-    // Bookmark list
+    let matches = app.filtered_bookmark_items();
+    let total = matches.len();
+    let count_hint = if app.bookmark_query.is_empty() {
+        format!(" {} ", app.bookmarks.len())
+    } else if total > 0 {
+        format!(" {}/{} ", app.bookmark_match_pos + 1, total)
+    } else {
+        " 0/0 ".to_owned()
+    };
+    let hint_w = count_hint.len() as u16;
+    let input_inner_w = inner.width.saturating_sub(hint_w) as usize;
+    let input_text = format!(" ⌕ {}\u{2581}", app.bookmark_query);
+    let input_row = Line::from(vec![
+        Span::styled(
+            truncate_str(&input_text, input_inner_w),
+            Style::default().fg(CLR_QS_INPUT_FG).bg(CLR_QS_INPUT_BG),
+        ),
+        Span::styled(
+            count_hint,
+            Style::default().fg(CLR_QS_NO_MATCH).bg(CLR_QS_INPUT_BG),
+        ),
+    ]);
+    safe_render_widget(
+        f,
+        Paragraph::new(input_row).style(Style::default().bg(CLR_QS_INPUT_BG)),
+        input_area,
+    );
+
+    let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
+    safe_render_widget(
+        f,
+        Paragraph::new(sep).style(Style::default().fg(CLR_QS_SEP).bg(CLR_MENU_DD_BG)),
+        sep_area,
+    );
+
     let max_w = list_area.width as usize;
-    let items: Vec<ListItem> = if app.bookmarks.is_empty() {
+    let rows = list_area.height as usize;
+    let tokens: Vec<String> = app
+        .bookmark_query
+        .split_whitespace()
+        .map(|t| t.to_lowercase())
+        .collect();
+    let scroll = if app.bookmark_match_pos >= rows && rows > 0 {
+        app.bookmark_match_pos - rows + 1
+    } else {
+        0
+    };
+
+    let items: Vec<ListItem> = if app.bookmarks.is_empty() && matches.is_empty() {
         vec![ListItem::new(Line::from(Span::styled(
-            "(no bookmarks — press 'a' to add current dir)",
+            "(no bookmarks)",
             Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG),
         )))]
+    } else if matches.is_empty() {
+        vec![ListItem::new(Line::from(Span::styled(
+            " No matching bookmark ",
+            Style::default().fg(CLR_QS_NO_MATCH).bg(CLR_MENU_DD_BG),
+        )))]
     } else {
-        app.bookmarks
+        matches
             .iter()
             .enumerate()
-            .map(|(i, p)| {
-                let s = p.to_string_lossy();
-                let is_remote = s.starts_with("remote://");
-                let label = if is_remote {
-                    let rest = &s["remote://".len()..];
-                    format!(" \u{2039}remote\u{203a} {}", truncate_str(rest, max_w.saturating_sub(11)))
-                } else {
-                    format!(" {}", truncate_str(&s, max_w.saturating_sub(1)))
+            .skip(scroll)
+            .take(rows)
+            .map(|(match_idx, item)| {
+                let selected = match_idx == app.bookmark_match_pos;
+                let (label, style) = match item {
+                    BookmarkListItem::AddCurrentDir(path) => {
+                        let path = truncate_str(&path.to_string_lossy(), max_w.saturating_sub(20));
+                        let label = format!(" <add current dir> {}", path);
+                        let style = if selected {
+                            Style::default().fg(CLR_MENU_SEL_FG).bg(CLR_MENU_SEL_BG).add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(CLR_HEADER_FG).bg(CLR_MENU_DD_BG).add_modifier(Modifier::BOLD)
+                        };
+                        (label, style)
+                    }
+                    BookmarkListItem::Existing(idx) => {
+                        let p = &app.bookmarks[*idx];
+                        let s = p.to_string_lossy();
+                        let is_remote = s.starts_with("remote://");
+                        let label = if is_remote {
+                            let rest = &s["remote://".len()..];
+                            format!(" \u{2039}remote\u{203a} {}", truncate_str(rest, max_w.saturating_sub(11)))
+                        } else {
+                            format!(" {}", truncate_str(&s, max_w.saturating_sub(1)))
+                        };
+                        let style = if selected {
+                            Style::default().fg(CLR_MENU_SEL_FG).bg(CLR_MENU_SEL_BG).add_modifier(Modifier::BOLD)
+                        } else if !is_remote && !p.is_dir() {
+                            Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG).add_modifier(Modifier::DIM)
+                        } else {
+                            Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
+                        };
+                        (label, style)
+                    }
                 };
-                let style = if i == app.bookmark_cursor {
-                    Style::default().fg(CLR_MENU_SEL_FG).bg(CLR_MENU_SEL_BG).add_modifier(Modifier::BOLD)
-                } else if !is_remote && !p.is_dir() {
-                    Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG).add_modifier(Modifier::DIM)
-                } else {
-                    Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
-                };
-                ListItem::new(Line::from(Span::styled(label, style)))
+                let hi = if selected { CLR_QS_MATCH_HI_SEL } else { CLR_QS_MATCH_HI };
+                ListItem::new(highlight_tokens(
+                    &label,
+                    &tokens,
+                    style.fg.unwrap_or(CLR_MENU_DD_FG),
+                    style.bg.unwrap_or(CLR_MENU_DD_BG),
+                    hi,
+                ))
             })
             .collect()
     };
@@ -2091,10 +2179,10 @@ fn render_dir_bookmarks(f: &mut Frame, app: &App, area: Rect) {
     safe_render_widget(
         f,
         Paragraph::new(Line::from(vec![
+            Span::styled(" Type", key_style),
+            Span::styled(":Filter  ", txt_style),
             Span::styled(" Enter", key_style),
-            Span::styled(":Go  ", txt_style),
-            Span::styled("a", key_style),
-            Span::styled(":Add  ", txt_style),
+            Span::styled(":Open/Add  ", txt_style),
             Span::styled("Del", key_style),
             Span::styled(":Remove  ", txt_style),
             Span::styled("Esc", key_style),
