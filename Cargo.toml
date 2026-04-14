@@ -1,6 +1,6 @@
 [package]
 name = "kkc"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2024"
 description = "KKC — Ketchup Killers Commander, a Norton Commander clone in Rust"
 authors = ["RedBug26"]
@@ -23,6 +23,7 @@ open = "5"
 imap = "2.4"
 native-tls = "0.2"
 base64 = "0.13"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp"] }
 
 [profile.release]
 opt-level = 3

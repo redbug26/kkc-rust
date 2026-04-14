@@ -185,14 +185,110 @@ pub struct AssocEditorState {
 pub struct RemoteConnectState {
     pub items: Vec<RemoteProfile>,
     pub cursor: usize,
+    pub query: String,
+    pub match_pos: usize,
 }
 
 impl RemoteConnectState {
     pub fn load() -> Self {
-        Self {
+        let mut state = Self {
             items: load_profiles().unwrap_or_default(),
             cursor: 0,
+            query: String::new(),
+            match_pos: 0,
+        };
+        state.sync_cursor();
+        state
+    }
+
+    pub fn filtered_indices(&self) -> Vec<usize> {
+        if self.query.trim().is_empty() {
+            return (0..self.items.len()).collect();
         }
+
+        let tokens: Vec<String> = self
+            .query
+            .split_whitespace()
+            .map(|t| t.to_lowercase())
+            .filter(|t| !t.is_empty())
+            .collect();
+        if tokens.is_empty() {
+            return (0..self.items.len()).collect();
+        }
+
+        let first = &tokens[0];
+        let rest = &tokens[1..];
+
+        let mut starts = Vec::new();
+        let mut contains = Vec::new();
+
+        for (idx, item) in self.items.iter().enumerate() {
+            let protocol = match item.kind {
+                RemoteKind::Sftp(_) => "sftp",
+                RemoteKind::Imap(_) => "imap",
+            };
+            let source = match item.source {
+                RemoteSource::SshConfig => "ssh",
+                RemoteSource::UserToml => "toml",
+            };
+            let searchable = format!(
+                "{} {} {} {}",
+                item.name,
+                item.host_label(),
+                protocol,
+                source
+            );
+            let lowered = searchable.to_lowercase();
+            if !rest.iter().all(|token| lowered.contains(token.as_str())) {
+                continue;
+            }
+            if lowered.starts_with(first.as_str()) || item.name.to_lowercase().starts_with(first.as_str()) {
+                starts.push(idx);
+            } else if lowered.contains(first.as_str()) {
+                contains.push(idx);
+            }
+        }
+
+        starts.extend(contains);
+        starts
+    }
+
+    pub fn sync_cursor(&mut self) {
+        let matches = self.filtered_indices();
+        if matches.is_empty() {
+            self.match_pos = 0;
+            self.cursor = self.cursor.min(self.items.len().saturating_sub(1));
+            return;
+        }
+        self.match_pos = self.match_pos.min(matches.len().saturating_sub(1));
+        self.cursor = matches[self.match_pos];
+    }
+
+    pub fn append_query(&mut self, ch: char) {
+        self.query.push(ch);
+        self.match_pos = 0;
+        self.sync_cursor();
+    }
+
+    pub fn pop_query(&mut self) {
+        self.query.pop();
+        self.match_pos = 0;
+        self.sync_cursor();
+    }
+
+    pub fn move_prev(&mut self) {
+        if self.match_pos > 0 {
+            self.match_pos -= 1;
+        }
+        self.sync_cursor();
+    }
+
+    pub fn move_next(&mut self) {
+        let len = self.filtered_indices().len();
+        if self.match_pos + 1 < len {
+            self.match_pos += 1;
+        }
+        self.sync_cursor();
     }
 }
 

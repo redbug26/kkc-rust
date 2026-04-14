@@ -366,7 +366,7 @@ fn render_panel(
             } else if entry.is_dir {
                 format!("{:>width$}", "⌦sub--dir⌫", width = size_w)
             } else {
-                format!("{:>width$}", format_dos_number(entry.size), width = size_w)
+                format!("{:>width$}", format_panel_size(entry.size, size_w), width = size_w)
             };
 
             let date_str = match entry.modified {
@@ -934,7 +934,6 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
 
     if v.is_image_mode() {
         let supported = crate::viewer::kitty_graphics_supported();
-        let png_renderable = matches!(v.image_info().map(|img| img.format), Some("PNG"));
         let mut lines = vec![
             Line::from(Span::styled(
                 "Image preview",
@@ -950,20 +949,16 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
         }
         lines.push(Line::from(Span::raw("")));
         lines.push(Line::from(Span::styled(
-            if supported && png_renderable {
+            if supported {
                 "Rendered with Kitty Graphics Protocol"
-            } else if supported {
-                "Current inline renderer supports PNG only"
             } else {
                 "Kitty Graphics Protocol unavailable in this terminal"
             },
-            Style::default().fg(if supported && png_renderable { Color::Cyan } else { Color::Yellow }),
+            Style::default().fg(if supported { Color::Cyan } else { Color::Yellow }),
         )));
         lines.push(Line::from(Span::styled(
-            if supported && png_renderable {
+            if supported {
                 "Use F5 to toggle Auto/Full size"
-            } else if supported {
-                "Convert to PNG or add image decoding support for other formats"
             } else {
                 "Open in kitty/ghostty/wezterm to enable inline preview"
             },
@@ -1600,7 +1595,7 @@ fn progress_bar_string(width: usize, ratio: f64) -> String {
 
 fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, area: Rect) {
     let width = 76u16.min(area.width.saturating_sub(4));
-    let height = 18u16.min(area.height.saturating_sub(2)).max(8);
+    let height = 20u16.min(area.height.saturating_sub(2)).max(10);
     let popup = clamp_rect(area, Rect {
         x: area.x + area.width.saturating_sub(width) / 2,
         y: area.y + area.height.saturating_sub(height) / 2,
@@ -1618,23 +1613,90 @@ fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, area: Rect) 
         .style(Style::default().bg(CLR_MENU_DD_BG));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
-    if inner.height < 2 {
+    if inner.height < 4 {
         return;
     }
 
-    let rows = inner.height.saturating_sub(1) as usize;
+    let input_area = Rect { x: inner.x, y: inner.y, width: inner.width, height: 1 };
+    let sep_area = Rect { x: inner.x, y: inner.y + 1, width: inner.width, height: 1 };
+    let list_area = Rect {
+        x: inner.x,
+        y: inner.y + 2,
+        width: inner.width,
+        height: inner.height.saturating_sub(3),
+    };
+    let hint_area = clamp_rect(area, Rect {
+        x: inner.x,
+        y: inner.y + inner.height - 1,
+        width: inner.width,
+        height: 1,
+    });
+
+    let matches = state.filtered_indices();
+    let total = matches.len();
+    let count_hint = if state.query.is_empty() {
+        format!(" {} ", state.items.len())
+    } else if total > 0 {
+        format!(" {}/{} ", state.match_pos + 1, total)
+    } else {
+        " 0/0 ".to_owned()
+    };
+    let hint_w = count_hint.len() as u16;
+    let input_inner_w = inner.width.saturating_sub(hint_w) as usize;
+    let input_text = format!(" ⌕ {}\u{2581}", state.query);
+    let input_row = Line::from(vec![
+        Span::styled(
+            truncate_str(&input_text, input_inner_w),
+            Style::default().fg(CLR_QS_INPUT_FG).bg(CLR_QS_INPUT_BG),
+        ),
+        Span::styled(
+            count_hint,
+            Style::default().fg(CLR_QS_NO_MATCH).bg(CLR_QS_INPUT_BG),
+        ),
+    ]);
+    safe_render_widget(
+        f,
+        Paragraph::new(input_row).style(Style::default().bg(CLR_QS_INPUT_BG)),
+        input_area,
+    );
+
+    let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
+    safe_render_widget(
+        f,
+        Paragraph::new(sep).style(Style::default().fg(CLR_QS_SEP).bg(CLR_MENU_DD_BG)),
+        sep_area,
+    );
+
+    let rows = list_area.height as usize;
+    let tokens: Vec<String> = state
+        .query
+        .split_whitespace()
+        .map(|t| t.to_lowercase())
+        .collect();
+    let scroll = if state.match_pos >= rows && rows > 0 {
+        state.match_pos - rows + 1
+    } else {
+        0
+    };
+
     let items = if state.items.is_empty() {
         vec![ListItem::new(Line::from(Span::styled(
             " No server entry found in ~/.ssh/config or connections.toml ",
             Style::default().fg(CLR_UNKNOWN),
         )))]
+    } else if matches.is_empty() {
+        vec![ListItem::new(Line::from(Span::styled(
+            " No matching connection ",
+            Style::default().fg(CLR_QS_NO_MATCH).bg(CLR_MENU_DD_BG),
+        )))]
     } else {
-        state.items
+        matches
             .iter()
             .enumerate()
-            .skip(state.cursor.saturating_sub(rows.saturating_sub(1)))
+            .skip(scroll)
             .take(rows)
-            .map(|(idx, item)| {
+            .map(|(match_idx, item_idx)| {
+                let item = &state.items[*item_idx];
                 let (proto, proto_style) = match item.protocol() {
                     RemoteProtocol::Sftp => (
                         "sftp",
@@ -1656,7 +1718,7 @@ fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, area: Rect) 
                     ),
                 };
                 let host = item.host_label();
-                let selected = idx == state.cursor;
+                let selected = match_idx == state.match_pos;
                 let row_style = if selected {
                     Style::default()
                         .fg(CLR_MENU_SEL_FG)
@@ -1676,31 +1738,41 @@ fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, area: Rect) 
                     proto_style
                 };
                 let alias_style = row_style.add_modifier(Modifier::BOLD);
-                let host_style = row_style.fg(Color::Rgb(198, 184, 156));
+                let host_style = if selected {
+                    Style::default()
+                        .fg(CLR_MENU_SEL_FG)
+                        .bg(CLR_MENU_SEL_BG)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::Rgb(198, 184, 156)).bg(CLR_MENU_DD_BG)
+                };
+                let alias_line = highlight_tokens(&format!("{:<16}", truncate_str(&item.name, 16)), &tokens, alias_style.fg.unwrap_or(CLR_MENU_DD_FG), alias_style.bg.unwrap_or(CLR_MENU_DD_BG), CLR_QS_MATCH_HI_SEL);
+                let host_text = truncate_str(&host, inner.width.saturating_sub(35) as usize);
+                let host_line = highlight_tokens(&host_text, &tokens, host_style.fg.unwrap_or(CLR_MENU_DD_FG), host_style.bg.unwrap_or(CLR_MENU_DD_BG), if selected { CLR_QS_MATCH_HI_SEL } else { CLR_QS_MATCH_HI });
                 let mut spans = vec![
                     Span::styled(" ", row_style),
-                    Span::styled(format!("{:<16}", truncate_str(&item.name, 16)), alias_style),
+                ];
+                spans.extend(alias_line.spans);
+                spans.extend([
                     Span::styled(" ", row_style),
                     Span::styled(format!("{:^6}", proto), proto_style),
                     Span::styled(" ", row_style),
                     Span::styled(format!("{:^6}", source), badge_style),
                     Span::styled("  ", row_style),
-                    Span::styled(truncate_str(&host, inner.width.saturating_sub(35) as usize), host_style),
-                ];
+                ]);
+                spans.extend(host_line.spans);
                 let used: usize = spans.iter().map(|s| s.content.len()).sum();
-                if used < inner.width as usize {
-                    spans.push(Span::styled(" ".repeat(inner.width as usize - used), row_style));
+                if used < list_area.width as usize {
+                    spans.push(Span::styled(" ".repeat(list_area.width as usize - used), row_style));
                 }
                 ListItem::new(Line::from(spans))
             })
             .collect()
     };
-    let list_area = Rect { x: inner.x, y: inner.y, width: inner.width, height: inner.height.saturating_sub(1) };
     safe_render_widget(f, List::new(items), list_area);
-    let hint_area = clamp_rect(area, Rect { x: inner.x, y: inner.y + inner.height - 1, width: inner.width, height: 1 });
     safe_render_widget(
         f,
-        Paragraph::new(" Enter:Connect  F7:SFTP  F8:IMAP  Esc:Cancel ")
+        Paragraph::new(" Type:Filter  Enter:Connect  F7:SFTP  F8:IMAP  Esc:Cancel ")
             .style(Style::default().fg(CLR_BUTTON_FG).bg(CLR_STATUS_BG)),
         hint_area,
     );
@@ -2038,13 +2110,13 @@ fn render_dir_bookmarks(f: &mut Frame, app: &App, area: Rect) {
 // ---------------------------------------------------------------------------
 
 /// Build a `Line` with each whitespace-separated token highlighted in the name.
-fn highlight_tokens<'a>(
-    name: &'a str,
+fn highlight_tokens(
+    name: &str,
     tokens: &[String],
     base_fg: Color,
     base_bg: Color,
     hi_fg: Color,
-) -> Line<'a> {
+) -> Line<'static> {
     // Build a boolean mask: which byte positions are highlighted
     let name_lower = name.to_lowercase();
     let mut mask = vec![false; name.len()];
@@ -2068,7 +2140,7 @@ fn highlight_tokens<'a>(
     }
 
     // Walk the name char by char, grouping consecutive same-style chars into spans
-    let mut spans: Vec<Span<'a>> = Vec::new();
+    let mut spans: Vec<Span<'static>> = Vec::new();
     let mut seg_start = 0;
     let mut current_hi = mask.first().copied().unwrap_or(false);
     let base = Style::default().fg(base_fg).bg(base_bg);
@@ -2409,6 +2481,33 @@ fn format_dos_number(value: u64) -> String {
         out.push(ch);
     }
     out.chars().rev().collect()
+}
+
+fn format_panel_size(value: u64, width: usize) -> String {
+    let dos = format_dos_number(value);
+    if dos.chars().count() <= width {
+        return dos;
+    }
+    format_compact_size(value)
+}
+
+fn format_compact_size(value: u64) -> String {
+    const UNITS: [&str; 6] = ["B", "KB", "MB", "GB", "TB", "PB"];
+    let mut size = value as f64;
+    let mut unit = 0usize;
+    while size >= 1024.0 && unit + 1 < UNITS.len() {
+        size /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{} {}", value, UNITS[unit])
+    } else if size >= 100.0 {
+        format!("{:.0} {}", size, UNITS[unit])
+    } else if size >= 10.0 {
+        format!("{:.1} {}", size, UNITS[unit])
+    } else {
+        format!("{:.2} {}", size, UNITS[unit])
+    }
 }
 
 fn truncate_path(p: &str, max: usize) -> String {

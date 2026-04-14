@@ -1,12 +1,13 @@
 use anyhow::{Context, Result};
 use crossterm::{cursor::MoveTo, queue, terminal::window_size};
+use image::{ImageFormat, ImageReader};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
 use std::env;
 use std::collections::HashMap;
 use std::fs;
-use std::io::Write;
+use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
@@ -72,6 +73,7 @@ pub struct ImageInfo {
     pub format: &'static str,
     pub width: Option<u32>,
     pub height: Option<u32>,
+    kitty_png: OnceLock<Option<Vec<u8>>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -799,15 +801,17 @@ pub fn render_kitty_image<W: Write>(out: &mut W, viewer: &Viewer, area: Rect) ->
     let Some(image) = viewer.image_info() else {
         return Ok(());
     };
-    if image.format != "PNG" {
-        return Ok(());
-    }
-
     let fit = fit_image_to_area(area, image.width, image.height);
     queue!(out, MoveTo(fit.x, fit.y))?;
 
     const RAW_CHUNK_LEN: usize = 3072;
-    let mut chunks = viewer.raw.chunks(RAW_CHUNK_LEN).peekable();
+    let payload = image
+        .kitty_png
+        .get_or_init(|| build_kitty_png_payload(&viewer.raw, image.format).ok());
+    let Some(payload) = payload.as_ref() else {
+        return Ok(());
+    };
+    let mut chunks = payload.chunks(RAW_CHUNK_LEN).peekable();
     let mut first = true;
     while let Some(chunk) = chunks.next() {
         let payload = base64::encode(chunk);
@@ -884,22 +888,47 @@ fn detect_image_info(path: &Path, data: &[u8]) -> Option<ImageInfo> {
 
     if data.starts_with(b"\x89PNG\r\n\x1a\n") {
         let (width, height) = png_dimensions(data);
-        return Some(ImageInfo { format: "PNG", width, height });
+        return Some(ImageInfo {
+            format: "PNG",
+            width,
+            height,
+            kitty_png: OnceLock::new(),
+        });
     }
     if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
         let (width, height) = jpeg_dimensions(data);
-        return Some(ImageInfo { format: "JPEG", width, height });
+        return Some(ImageInfo {
+            format: "JPEG",
+            width,
+            height,
+            kitty_png: OnceLock::new(),
+        });
     }
     if data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a") {
         let (width, height) = gif_dimensions(data);
-        return Some(ImageInfo { format: "GIF", width, height });
+        return Some(ImageInfo {
+            format: "GIF",
+            width,
+            height,
+            kitty_png: OnceLock::new(),
+        });
     }
     if data.starts_with(b"BM") {
         let (width, height) = bmp_dimensions(data);
-        return Some(ImageInfo { format: "BMP", width, height });
+        return Some(ImageInfo {
+            format: "BMP",
+            width,
+            height,
+            kitty_png: OnceLock::new(),
+        });
     }
     if data.len() >= 12 && &data[..4] == b"RIFF" && &data[8..12] == b"WEBP" {
-        return Some(ImageInfo { format: "WEBP", width: None, height: None });
+        return Some(ImageInfo {
+            format: "WEBP",
+            width: None,
+            height: None,
+            kitty_png: OnceLock::new(),
+        });
     }
     if matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp") {
         return Some(ImageInfo {
@@ -913,9 +942,26 @@ fn detect_image_info(path: &Path, data: &[u8]) -> Option<ImageInfo> {
             },
             width: None,
             height: None,
+            kitty_png: OnceLock::new(),
         });
     }
     None
+}
+
+fn build_kitty_png_payload(raw: &[u8], format: &'static str) -> Result<Vec<u8>> {
+    if format == "PNG" {
+        return Ok(raw.to_vec());
+    }
+
+    let guessed = ImageReader::new(Cursor::new(raw))
+        .with_guessed_format()
+        .context("guessing image format")?;
+    let image = guessed.decode().context("decoding image for viewer")?;
+    let mut out = Cursor::new(Vec::new());
+    image
+        .write_to(&mut out, ImageFormat::Png)
+        .context("encoding PNG for kitty graphics")?;
+    Ok(out.into_inner())
 }
 
 fn png_dimensions(data: &[u8]) -> (Option<u32>, Option<u32>) {

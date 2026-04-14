@@ -1776,17 +1776,21 @@ fn handle_assoc_editor(app: &mut App, key: KeyEvent) -> Result<bool> {
 }
 
 fn handle_remote_connect(app: &mut App, key: KeyEvent) -> Result<bool> {
-    let len = if let AppMode::RemoteConnect(ref s) = app.mode { s.items.len() } else { 0 };
     match key.code {
         KeyCode::Esc => app.mode = AppMode::Browse,
         KeyCode::Up => {
             if let AppMode::RemoteConnect(ref mut s) = app.mode {
-                s.cursor = s.cursor.saturating_sub(1);
+                s.move_prev();
             }
         }
         KeyCode::Down => {
             if let AppMode::RemoteConnect(ref mut s) = app.mode {
-                s.cursor = (s.cursor + 1).min(len.saturating_sub(1));
+                s.move_next();
+            }
+        }
+        KeyCode::Backspace => {
+            if let AppMode::RemoteConnect(ref mut s) = app.mode {
+                s.pop_query();
             }
         }
         KeyCode::F(7) => {
@@ -1797,7 +1801,10 @@ fn handle_remote_connect(app: &mut App, key: KeyEvent) -> Result<bool> {
         }
         KeyCode::Enter => {
             let profile = if let AppMode::RemoteConnect(ref s) = app.mode {
-                s.items.get(s.cursor).cloned()
+                s.filtered_indices()
+                    .get(s.match_pos)
+                    .and_then(|idx| s.items.get(*idx))
+                    .cloned()
             } else {
                 None
             };
@@ -1808,6 +1815,15 @@ fn handle_remote_connect(app: &mut App, key: KeyEvent) -> Result<bool> {
                     crate::app::RemoteConnectState::load()
                 };
                 app.start_remote_connect(profile, return_state);
+            }
+        }
+        KeyCode::Char(ch)
+            if !key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::ALT)
+                && !ch.is_control() =>
+        {
+            if let AppMode::RemoteConnect(ref mut s) = app.mode {
+                s.append_query(ch);
             }
         }
         _ => {}
