@@ -288,14 +288,14 @@ pub fn ansi_line_to_line(text: &str) -> Line<'static> {
                     }
                     i += 2; // skip ESC [
                     let start = i;
-                    while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b';') {
+                    while i < bytes.len() && !(0x40..=0x7e).contains(&bytes[i]) {
                         i += 1;
                     }
                     if i >= bytes.len() { break; }
                     let cmd = bytes[i] as char;
+                    let param_str = std::str::from_utf8(&bytes[start..i]).unwrap_or("");
                     i += 1; // consume command byte
                     if cmd == 'm' {
-                        let param_str = std::str::from_utf8(&bytes[start..i - 1]).unwrap_or("");
                         style = apply_sgr(style, param_str);
                     }
                     // All other CSI commands (cursor movement, etc.) are dropped
@@ -336,9 +336,10 @@ pub fn ansi_line_to_line(text: &str) -> Line<'static> {
             // Skip other control chars (CR, BEL, etc.)
             i += 1;
         } else {
-            // Regular character — push to current chunk
-            chunk.push(bytes[i] as char);
-            i += 1;
+            // Regular text — preserve UTF-8 instead of widening raw bytes to chars.
+            let Some(ch) = text[i..].chars().next() else { break };
+            chunk.push(ch);
+            i += ch.len_utf8();
         }
     }
     if !chunk.is_empty() {
@@ -353,7 +354,7 @@ fn apply_sgr(mut style: Style, params: &str) -> Style {
         return Style::default();
     }
     let nums: Vec<u16> = params
-        .split(';')
+        .split([';', ':'])
         .filter_map(|s| s.parse().ok())
         .collect();
     let mut idx = 0;
@@ -388,7 +389,6 @@ fn apply_sgr(mut style: Style, params: &str) -> Style {
                 if let Some(color) = parse_extended_color(&nums, &mut idx) {
                     style = style.fg(color);
                 }
-                continue; // idx already advanced in parse_extended_color
             }
             39 => style = style.fg(Color::Reset),
             // Background: standard 8 colors
@@ -405,7 +405,6 @@ fn apply_sgr(mut style: Style, params: &str) -> Style {
                 if let Some(color) = parse_extended_color(&nums, &mut idx) {
                     style = style.bg(color);
                 }
-                continue; // idx already advanced
             }
             49 => style = style.bg(Color::Reset),
             // Bright foreground colors
@@ -431,6 +430,36 @@ fn apply_sgr(mut style: Style, params: &str) -> Style {
         idx += 1;
     }
     style
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ansi_line_to_line;
+    use ratatui::style::Color;
+
+    fn line_text(line: &ratatui::text::Line<'_>) -> String {
+        line.spans.iter().map(|span| span.content.as_ref()).collect()
+    }
+
+    #[test]
+    fn ansi_parser_preserves_utf8_text() {
+        let line = ansi_line_to_line("\x1b[1mSouligné déjà\x1b[0m");
+        assert_eq!(line_text(&line), "Souligné déjà");
+    }
+
+    #[test]
+    fn ansi_parser_ignores_non_sgr_csi_sequences() {
+        let line = ansi_line_to_line("\x1b[3J\x1b[H\x1b[2J\x1b[?25lHello\x1b[?25h");
+        assert_eq!(line_text(&line), "Hello");
+    }
+
+    #[test]
+    fn ansi_parser_supports_extended_colors() {
+        let line = ansi_line_to_line("\x1b[48;2;255;128;0mRGB\x1b[0m \x1b[38;5;196mIndexed\x1b[0m");
+        assert_eq!(line_text(&line), "RGB Indexed");
+        assert!(line.spans.iter().any(|span| span.content == "RGB" && span.style.bg == Some(Color::Rgb(255, 128, 0))));
+        assert!(line.spans.iter().any(|span| span.content == "Indexed" && span.style.fg == Some(Color::Indexed(196))));
+    }
 }
 
 /// Parse `38;5;n`, `38;2;r;g;b` (and `48;…`) extended color sequences.
