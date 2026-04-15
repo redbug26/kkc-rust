@@ -1382,7 +1382,7 @@ impl App {
         loop {
             match task.rx.try_recv() {
                 Ok(CmdLine::Out(line)) => self.terminal.push_output(line),
-                Ok(CmdLine::Err(line)) => self.terminal.push_output(format!("err: {}", line)),
+                Ok(CmdLine::Err(line)) => self.terminal.push_output(line),
                 Ok(CmdLine::Done(code)) => {
                     task.done = true;
                     if let Some(c) = code {

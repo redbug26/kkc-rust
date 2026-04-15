@@ -2965,7 +2965,6 @@ const CLR_TERM_FG: Color = Color::Rgb(200, 200, 200);
 const CLR_TERM_BORDER: Color = Color::Rgb(80, 180, 80);
 const CLR_TERM_PROMPT: Color = Color::Rgb(100, 220, 100);
 const CLR_TERM_INPUT: Color = Color::White;
-const CLR_TERM_ERR: Color = Color::Rgb(255, 100, 100);
 
 fn render_terminal(f: &mut Frame, app: &App, area: Rect) {
     let ts = &app.terminal;
@@ -3006,16 +3005,27 @@ fn render_terminal(f: &mut Frame, app: &App, area: Rect) {
     let lines: Vec<Line> = ts.output[start..]
         .iter()
         .map(|l| {
-            let style = if l.starts_with("err:") || l.starts_with("error:") {
-                Style::default().fg(CLR_TERM_ERR)
-            } else if l.starts_with("$ ") {
-                Style::default().fg(CLR_TERM_PROMPT).add_modifier(Modifier::BOLD)
-            } else if l.starts_with('[') {
-                Style::default().fg(Color::Rgb(160, 160, 160))
-            } else {
-                Style::default().fg(CLR_TERM_FG)
-            };
-            Line::from(Span::styled(l.clone(), style))
+            // Lines emitted by the prompt itself get a fixed style
+            if l.starts_with("$ ") {
+                return Line::from(Span::styled(
+                    l.clone(),
+                    Style::default().fg(CLR_TERM_PROMPT).add_modifier(Modifier::BOLD),
+                ));
+            }
+            if l.starts_with('[') {
+                return Line::from(Span::styled(
+                    l.clone(),
+                    Style::default().fg(Color::Rgb(160, 160, 160)),
+                ));
+            }
+            // For all other lines parse embedded ANSI escape codes
+            let mut line = crate::terminal::ansi_line_to_line(l);
+            // If the line has no spans with any explicit fg colour we fall back
+            // to the default terminal foreground so plain text matches the theme.
+            if line.spans.iter().all(|s| s.style.fg.is_none()) {
+                line = line.style(Style::default().fg(CLR_TERM_FG));
+            }
+            line
         })
         .collect();
 

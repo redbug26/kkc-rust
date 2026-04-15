@@ -2,6 +2,8 @@ use crate::app::{App, AppMode, ActivePanel};
 use crate::config;
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
 use serde::{Deserialize, Serialize};
 use std::io::BufRead;
 use std::path::PathBuf;
@@ -28,13 +30,36 @@ pub fn spawn_cmd_streaming(raw: String, dir: PathBuf) -> RunningCmd {
     let (tx, rx) = mpsc::channel::<CmdLine>();
     thread::spawn(move || {
         use std::process::{Command, Stdio};
-        let result = Command::new("sh")
-            .arg("-c")
+        #[cfg(unix)]
+        use std::os::unix::process::CommandExt;
+
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c")
             .arg(&raw)
             .current_dir(&dir)
+            // Force color output: programs detect Stdio::piped() as non-TTY
+            // and disable colors unless we tell them otherwise.
+            .env("TERM", "xterm-256color")
+            .env("COLORTERM", "truecolor")
+            .env("CLICOLOR_FORCE", "1")      // macOS/BSD ls and friends
+            .env("FORCE_COLOR", "1")          // Node.js ecosystem
+            .env("CARGO_TERM_COLOR", "always")// cargo
+            .env("GIT_TERMINAL_PROMPT", "0")  // avoid git hanging on auth
+            // Disconnect stdin so no child can block waiting for user input,
+            // and so bash doesn't try to do TTY/job-control setup.
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn();
+            .stderr(Stdio::piped());
+
+        // Put the child in its own process group so it cannot open /dev/tty
+        // (the controlling terminal of kkc).  Without this, commands like
+        // `clear` call `tput` which does ioctl on /dev/tty while crossterm
+        // has raw mode active, corrupting the terminal state and appearing
+        // to freeze kkc.
+        #[cfg(unix)]
+        cmd.process_group(0);
+
+        let result = cmd.spawn();
         let mut child = match result {
             Ok(c) => c,
             Err(e) => {
@@ -45,6 +70,7 @@ pub fn spawn_cmd_streaming(raw: String, dir: PathBuf) -> RunningCmd {
         };
         let stdout = child.stdout.take().map(std::io::BufReader::new);
         let stderr = child.stderr.take().map(std::io::BufReader::new);
+
         // Spawn stdout reader thread
         let tx_out = tx.clone();
         if let Some(stdout) = stdout {
@@ -53,19 +79,32 @@ pub fn spawn_cmd_streaming(raw: String, dir: PathBuf) -> RunningCmd {
                     match line {
                         Ok(l) => { let _ = tx_out.send(CmdLine::Out(l)); }
                         Err(_) => break,
+                    }   
+                }
+            });
+        }
+
+        // Spawn stderr reader thread — MUST be a separate thread, not blocking
+        // here, because reading stderr synchronously while stdout is also being
+        // produced causes a classic pipe-buffer deadlock:
+        //   child blocks on full stdout pipe → never closes stderr →
+        //   our blocking stderr read never returns → child.wait() never called.
+        let tx_err = tx.clone();
+        if let Some(stderr) = stderr {
+            thread::spawn(move || {
+                for line in stderr.lines() {
+                    match line {
+                        Ok(l) => { let _ = tx_err.send(CmdLine::Err(l)); }
+                        Err(_) => break,
                     }
                 }
             });
         }
-        // Read stderr in current thread
-        if let Some(stderr) = stderr {
-            for line in stderr.lines() {
-                match line {
-                    Ok(l) => { let _ = tx.send(CmdLine::Err(l)); }
-                    Err(_) => break,
-                }
-            }
-        }
+
+        // Wait for child to exit then signal completion.
+        // tx_out / tx_err may still be alive in their threads after this point;
+        // that is fine — Done is sent into an ordered channel, so any Out/Err
+        // messages already queued will be received before Done.
         let status = child.wait().ok().and_then(|s| s.code());
         let _ = tx.send(CmdLine::Done(status));
     });
@@ -223,6 +262,204 @@ pub fn save_terminal_cache(history: &[String], output: &[String]) -> Result<()> 
     let text = toml::to_string(&cache)?;
     std::fs::write(&path, text)?;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// ANSI escape-code parser — converts a raw string to styled ratatui spans
+// ---------------------------------------------------------------------------
+
+/// Parse a string containing ANSI SGR escape sequences and return a styled
+/// ratatui `Line`.  Only SGR (`ESC [ … m`) sequences are interpreted; other
+/// escape sequences are silently skipped.
+pub fn ansi_line_to_line(text: &str) -> Line<'static> {
+    let bytes = text.as_bytes();
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut style = Style::default();
+    let mut chunk = String::new();
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if bytes[i] == 0x1b && i + 1 < bytes.len() {
+            match bytes[i + 1] {
+                b'[' => {
+                    // CSI sequence — flush pending text, parse SGR
+                    if !chunk.is_empty() {
+                        spans.push(Span::styled(std::mem::take(&mut chunk), style));
+                    }
+                    i += 2; // skip ESC [
+                    let start = i;
+                    while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b';') {
+                        i += 1;
+                    }
+                    if i >= bytes.len() { break; }
+                    let cmd = bytes[i] as char;
+                    i += 1; // consume command byte
+                    if cmd == 'm' {
+                        let param_str = std::str::from_utf8(&bytes[start..i - 1]).unwrap_or("");
+                        style = apply_sgr(style, param_str);
+                    }
+                    // All other CSI commands (cursor movement, etc.) are dropped
+                }
+                b']' => {
+                    // OSC sequence (e.g. hyperlinks: ESC ] 8 ; ; URL ESC \)
+                    // Flush pending text, then skip the whole OSC until BEL or ESC \.
+                    // The visible text between two OSC 8 sequences is NOT inside
+                    // the sequence — it is plain text we keep.
+                    if !chunk.is_empty() {
+                        spans.push(Span::styled(std::mem::take(&mut chunk), style));
+                    }
+                    i += 2; // skip ESC ]
+                    while i < bytes.len() {
+                        if bytes[i] == 0x07 {
+                            // BEL terminator
+                            i += 1;
+                            break;
+                        }
+                        if bytes[i] == 0x1b && i + 1 < bytes.len() && bytes[i + 1] == b'\\' {
+                            // ESC \ (String Terminator)
+                            i += 2;
+                            break;
+                        }
+                        i += 1;
+                    }
+                }
+                b'\\' => {
+                    // Bare String Terminator (ESC \) without a preceding OSC — skip
+                    i += 2;
+                }
+                _ => {
+                    // Any other ESC sequence (ESC c, ESC M, …) — skip one byte
+                    i += 2;
+                }
+            }
+        } else if bytes[i] < 0x20 && bytes[i] != b'\t' {
+            // Skip other control chars (CR, BEL, etc.)
+            i += 1;
+        } else {
+            // Regular character — push to current chunk
+            chunk.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+    if !chunk.is_empty() {
+        spans.push(Span::styled(chunk, style));
+    }
+    Line::from(spans)
+}
+
+/// Apply a single SGR parameter string to the current style.
+fn apply_sgr(mut style: Style, params: &str) -> Style {
+    if params.is_empty() {
+        return Style::default();
+    }
+    let nums: Vec<u16> = params
+        .split(';')
+        .filter_map(|s| s.parse().ok())
+        .collect();
+    let mut idx = 0;
+    while idx < nums.len() {
+        let n = nums[idx];
+        match n {
+            0  => style = Style::default(),
+            1  => style = style.add_modifier(Modifier::BOLD),
+            2  => style = style.add_modifier(Modifier::DIM),
+            3  => style = style.add_modifier(Modifier::ITALIC),
+            4  => style = style.add_modifier(Modifier::UNDERLINED),
+            5 | 6 => style = style.add_modifier(Modifier::SLOW_BLINK),
+            7  => style = style.add_modifier(Modifier::REVERSED),
+            9  => style = style.add_modifier(Modifier::CROSSED_OUT),
+            22 => style = style.remove_modifier(Modifier::BOLD | Modifier::DIM),
+            23 => style = style.remove_modifier(Modifier::ITALIC),
+            24 => style = style.remove_modifier(Modifier::UNDERLINED),
+            25 => style = style.remove_modifier(Modifier::SLOW_BLINK),
+            27 => style = style.remove_modifier(Modifier::REVERSED),
+            29 => style = style.remove_modifier(Modifier::CROSSED_OUT),
+            // Foreground: standard 8 colors
+            30 => style = style.fg(Color::Black),
+            31 => style = style.fg(Color::Red),
+            32 => style = style.fg(Color::Green),
+            33 => style = style.fg(Color::Yellow),
+            34 => style = style.fg(Color::Blue),
+            35 => style = style.fg(Color::Magenta),
+            36 => style = style.fg(Color::Cyan),
+            37 => style = style.fg(Color::White),
+            // 38: extended foreground
+            38 => {
+                if let Some(color) = parse_extended_color(&nums, &mut idx) {
+                    style = style.fg(color);
+                }
+                continue; // idx already advanced in parse_extended_color
+            }
+            39 => style = style.fg(Color::Reset),
+            // Background: standard 8 colors
+            40 => style = style.bg(Color::Black),
+            41 => style = style.bg(Color::Red),
+            42 => style = style.bg(Color::Green),
+            43 => style = style.bg(Color::Yellow),
+            44 => style = style.bg(Color::Blue),
+            45 => style = style.bg(Color::Magenta),
+            46 => style = style.bg(Color::Cyan),
+            47 => style = style.bg(Color::White),
+            // 48: extended background
+            48 => {
+                if let Some(color) = parse_extended_color(&nums, &mut idx) {
+                    style = style.bg(color);
+                }
+                continue; // idx already advanced
+            }
+            49 => style = style.bg(Color::Reset),
+            // Bright foreground colors
+            90 => style = style.fg(Color::DarkGray),
+            91 => style = style.fg(Color::LightRed),
+            92 => style = style.fg(Color::LightGreen),
+            93 => style = style.fg(Color::LightYellow),
+            94 => style = style.fg(Color::LightBlue),
+            95 => style = style.fg(Color::LightMagenta),
+            96 => style = style.fg(Color::LightCyan),
+            97 => style = style.fg(Color::Gray),
+            // Bright background colors
+            100 => style = style.bg(Color::DarkGray),
+            101 => style = style.bg(Color::LightRed),
+            102 => style = style.bg(Color::LightGreen),
+            103 => style = style.bg(Color::LightYellow),
+            104 => style = style.bg(Color::LightBlue),
+            105 => style = style.bg(Color::LightMagenta),
+            106 => style = style.bg(Color::LightCyan),
+            107 => style = style.bg(Color::Gray),
+            _ => {}
+        }
+        idx += 1;
+    }
+    style
+}
+
+/// Parse `38;5;n`, `38;2;r;g;b` (and `48;…`) extended color sequences.
+/// On entry `idx` points at the 38 or 48.  On return `idx` points at the
+/// last consumed parameter so the caller's `idx += 1` lands correctly.
+fn parse_extended_color(nums: &[u16], idx: &mut usize) -> Option<Color> {
+    match nums.get(*idx + 1) {
+        Some(&5) => {
+            // 256-color palette
+            if let Some(&n) = nums.get(*idx + 2) {
+                *idx += 2;
+                Some(Color::Indexed(n as u8))
+            } else {
+                None
+            }
+        }
+        Some(&2) => {
+            // True color
+            if let (Some(&r), Some(&g), Some(&b)) =
+                (nums.get(*idx + 2), nums.get(*idx + 3), nums.get(*idx + 4))
+            {
+                *idx += 4;
+                Some(Color::Rgb(r as u8, g as u8, b as u8))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
 }
 
 // ---------------------------------------------------------------------------
