@@ -176,6 +176,14 @@ pub struct Config {
     /// File-type associations (extension → opener commands).
     #[serde(default)]
     pub file_assoc: Vec<FileAssoc>,
+
+    /// Persisted pseudo-terminal command history.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub terminal_history: Vec<String>,
+
+    /// Persisted pseudo-terminal scrollback output.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub terminal_output: Vec<String>,
 }
 
 impl Default for Config {
@@ -203,6 +211,8 @@ impl Default for Config {
             dir_history: Vec::new(),
             bookmarks: default_bookmarks(),
             file_assoc: Vec::new(),
+            terminal_history: Vec::new(),
+            terminal_output: Vec::new(),
         }
     }
 }

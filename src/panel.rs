@@ -359,6 +359,7 @@ impl Panel {
         }
     }
 
+    #[allow(dead_code)]
     pub fn deselect_all(&mut self) {
         for e in &mut self.entries {
             e.selected = false;

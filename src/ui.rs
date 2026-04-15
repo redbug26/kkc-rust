@@ -205,6 +205,7 @@ pub fn render(f: &mut Frame, app: &App) {
         AppMode::QuickSearch => {
             render_quicksearch_palette(f, app, f.area());
         }
+        AppMode::Terminal => render_terminal(f, app, f.area()),
         _ => {}
     }
 }
@@ -1809,18 +1810,18 @@ fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: Rect) {
     let mut lines = Vec::new();
     for (idx, label) in labels.iter().enumerate() {
         let selected = state.cursor == idx;
-        let label_style = if selected {
-            Style::default().fg(CLR_MENU_SEL_FG).bg(CLR_MENU_SEL_BG).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(CLR_HEADER_FG).bg(CLR_MENU_DD_BG)
-        };
+        // Label: always dark background; arrow prefix on selected row
+        let label_style = Style::default().fg(CLR_HEADER_FG).bg(CLR_MENU_DD_BG)
+            .add_modifier(if selected { Modifier::BOLD } else { Modifier::empty() });
+        let prefix = if selected { ">" } else { " " };
+        // Active input field: white bg / black fg so the terminal cursor is clearly visible
         let value_style = if selected {
-            Style::default().fg(CLR_MENU_SEL_FG).bg(CLR_MENU_SEL_BG).add_modifier(Modifier::BOLD)
+            Style::default().fg(Color::Black).bg(Color::White)
         } else {
             Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
         };
         lines.push(Line::from(vec![
-            Span::styled(format!("{:<9}", format!("{label}:")), label_style),
+            Span::styled(format!("{}{:<8}", prefix, format!("{label}:")), label_style),
             Span::styled(format!("{:<width$}", state.fields[idx], width = value_w), value_style),
         ]));
     }
@@ -2953,4 +2954,108 @@ fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rect) {
             .style(Style::default().fg(Color::Rgb(110, 88, 65)).bg(CLR_APP_BG)),
         Rect { x: inner.x, y: hint_sep_y + 1, width: inner.width, height: 1 },
     );
+}
+
+// ---------------------------------------------------------------------------
+// Ctrl-U pseudo-terminal overlay
+// ---------------------------------------------------------------------------
+
+const CLR_TERM_BG: Color = Color::Rgb(10, 10, 10);
+const CLR_TERM_FG: Color = Color::Rgb(200, 200, 200);
+const CLR_TERM_BORDER: Color = Color::Rgb(80, 180, 80);
+const CLR_TERM_PROMPT: Color = Color::Rgb(100, 220, 100);
+const CLR_TERM_INPUT: Color = Color::White;
+const CLR_TERM_ERR: Color = Color::Rgb(255, 100, 100);
+
+fn render_terminal(f: &mut Frame, app: &App, area: Rect) {
+    let ts = &app.terminal;
+    let running = app.running_cmd.is_some();
+
+    f.render_widget(Clear, area);
+    let title = format!(
+        " KKC Terminal — {}{}— Ctrl-U/Esc to close ",
+        app.active_panel().path.display(),
+        if running { " [running…] " } else { " " },
+    );
+    f.render_widget(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(if running { Color::Rgb(220, 160, 60) } else { CLR_TERM_BORDER }))
+            .style(Style::default().bg(CLR_TERM_BG))
+            .title(Span::styled(title, Style::default().fg(CLR_TERM_PROMPT))),
+        area,
+    );
+
+    let inner = Block::default().borders(Borders::ALL).inner(area);
+    if inner.height < 2 {
+        return;
+    }
+
+    // Split: scrollback lines + prompt input line at the bottom.
+    let prompt_y = inner.y + inner.height - 1;
+    let log_area = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: inner.width,
+        height: inner.height - 1,
+    };
+
+    // Scrollback — bottom-aligned
+    let visible_lines = log_area.height as usize;
+    let start = ts.output.len().saturating_sub(visible_lines);
+    let lines: Vec<Line> = ts.output[start..]
+        .iter()
+        .map(|l| {
+            let style = if l.starts_with("err:") || l.starts_with("error:") {
+                Style::default().fg(CLR_TERM_ERR)
+            } else if l.starts_with("$ ") {
+                Style::default().fg(CLR_TERM_PROMPT).add_modifier(Modifier::BOLD)
+            } else if l.starts_with('[') {
+                Style::default().fg(Color::Rgb(160, 160, 160))
+            } else {
+                Style::default().fg(CLR_TERM_FG)
+            };
+            Line::from(Span::styled(l.clone(), style))
+        })
+        .collect();
+
+    safe_render_widget(
+        f,
+        Paragraph::new(lines).style(Style::default().bg(CLR_TERM_BG)),
+        log_area,
+    );
+
+    // Prompt line (blocked while running)
+    let cwd = app.active_panel().path.display().to_string();
+    let prompt = if running {
+        format!("{}> ", cwd)
+    } else {
+        format!("{}$ ", cwd)
+    };
+    let prompt_len = prompt.chars().count() as u16;
+    let input_x = inner.x + prompt_len;
+
+    safe_render_widget(
+        f,
+        Paragraph::new(Line::from(vec![
+            Span::styled(
+                prompt,
+                Style::default()
+                    .fg(if running { Color::Rgb(220, 160, 60) } else { CLR_TERM_PROMPT })
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(ts.input.clone(), Style::default().fg(CLR_TERM_INPUT)),
+        ]))
+        .style(Style::default().bg(CLR_TERM_BG)),
+        Rect { x: inner.x, y: prompt_y, width: inner.width, height: 1 },
+    );
+
+    // Show cursor only when not running
+    if !running {
+        let cursor_col = ts.input[..ts.cursor].chars().count() as u16;
+        let cx = input_x + cursor_col;
+        if cx < inner.x + inner.width {
+            f.set_cursor_position((cx, prompt_y));
+        }
+    }
 }

@@ -108,7 +108,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
         }
 
         match app.mode {
-            AppMode::Input(_) | AppMode::ViewerSearching(_) => terminal.show_cursor()?,
+            AppMode::Input(_) | AppMode::ViewerSearching(_) | AppMode::Terminal => terminal.show_cursor()?,
             _ => terminal.hide_cursor()?,
         }
 
