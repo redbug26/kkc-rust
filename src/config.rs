@@ -27,6 +27,14 @@ pub fn data_dir() -> Result<PathBuf> {
     Ok(dir.to_path_buf())
 }
 
+/// Returns the path to the terminal cache file, creating parent dirs if needed.
+pub fn terminal_cache_path() -> Result<PathBuf> {
+    let dirs = project_dirs()?;
+    let dir = dirs.cache_dir();
+    fs::create_dir_all(dir)?;
+    Ok(dir.join("terminal.toml"))
+}
+
 // ---------------------------------------------------------------------------
 // Sort modes
 // ---------------------------------------------------------------------------
@@ -177,13 +185,6 @@ pub struct Config {
     #[serde(default)]
     pub file_assoc: Vec<FileAssoc>,
 
-    /// Persisted pseudo-terminal command history.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub terminal_history: Vec<String>,
-
-    /// Persisted pseudo-terminal scrollback output.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub terminal_output: Vec<String>,
 }
 
 impl Default for Config {
@@ -211,8 +212,6 @@ impl Default for Config {
             dir_history: Vec::new(),
             bookmarks: default_bookmarks(),
             file_assoc: Vec::new(),
-            terminal_history: Vec::new(),
-            terminal_output: Vec::new(),
         }
     }
 }

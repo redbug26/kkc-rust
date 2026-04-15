@@ -13,17 +13,17 @@ use crate::remote::{
     normalize_remote_cwd, prepare_connection, rename_path as remote_rename_path, save_profile, upload_into_dir,
 };
 use crate::search::{search, SearchQuery, SearchResult};
+use crate::terminal::{CmdLine, RunningCmd, TerminalState};
 use crate::viewer::{EncodingMode, LineFeedMode, MaskKind, ViewMode, Viewer};
 use anyhow::Result;
 use crossterm::{cursor::MoveTo, queue, style::{Print, ResetColor, SetBackgroundColor, SetForegroundColor}, terminal::{size, Clear, ClearType}};
 use std::collections::VecDeque;
 use std::fs;
-use std::io::{self, BufRead, Write};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
-use std::thread;
 
 // ---------------------------------------------------------------------------
 // Which panel is active
@@ -90,182 +90,6 @@ pub enum AppMode {
     CopyProgress(CopyProgressState),
     /// Pseudo-terminal mode (Ctrl-U / Esc toggle).
     Terminal,
-}
-
-// ---------------------------------------------------------------------------
-// Running external command (for streaming output)
-// ---------------------------------------------------------------------------
-
-pub enum CmdLine {
-    Out(String),
-    Err(String),
-    Done(Option<i32>),
-}
-
-pub struct RunningCmd {
-    pub rx: Receiver<CmdLine>,
-    pub done: bool,
-}
-
-/// Spawn a command, streaming its output through a channel.
-pub fn spawn_cmd_streaming(raw: String, dir: PathBuf) -> RunningCmd {
-    let (tx, rx) = mpsc::channel::<CmdLine>();
-    thread::spawn(move || {
-        use std::process::{Command, Stdio};
-        let result = Command::new("sh")
-            .arg("-c")
-            .arg(&raw)
-            .current_dir(&dir)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn();
-        let mut child = match result {
-            Ok(c) => c,
-            Err(e) => {
-                let _ = tx.send(CmdLine::Err(format!("error: {}", e)));
-                let _ = tx.send(CmdLine::Done(None));
-                return;
-            }
-        };
-        let stdout = child.stdout.take().map(std::io::BufReader::new);
-        let stderr = child.stderr.take().map(std::io::BufReader::new);
-        // Spawn stdout reader thread
-        let tx_out = tx.clone();
-        if let Some(stdout) = stdout {
-            thread::spawn(move || {
-                for line in stdout.lines() {
-                    match line {
-                        Ok(l) => { let _ = tx_out.send(CmdLine::Out(l)); }
-                        Err(_) => break,
-                    }
-                }
-            });
-        }
-        // Read stderr in current thread
-        if let Some(stderr) = stderr {
-            for line in stderr.lines() {
-                match line {
-                    Ok(l) => { let _ = tx.send(CmdLine::Err(l)); }
-                    Err(_) => break,
-                }
-            }
-        }
-        let status = child.wait().ok().and_then(|s| s.code());
-        let _ = tx.send(CmdLine::Done(status));
-    });
-    RunningCmd { rx, done: false }
-}
-
-// ---------------------------------------------------------------------------
-// Terminal state (Ctrl-U pseudo-terminal)
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-pub struct TerminalState {
-    /// Current command-line input.
-    pub input: String,
-    /// Byte-offset cursor inside `input`.
-    pub cursor: usize,
-    /// Scrollback lines (prompt + output mixed).
-    pub output: Vec<String>,
-    /// Command history (oldest first).
-    pub history: Vec<String>,
-    /// Which history entry is being browsed (`None` = live input).
-    pub history_pos: Option<usize>,
-    /// Saved live input while browsing history.
-    pub live_input: String,
-    /// Tab-completion candidates (file/dir names from the active panel).
-    pub tab_candidates: Vec<String>,
-    /// Which candidate is currently shown.
-    pub tab_index: usize,
-    /// The stem before the last word (for prefix restoration).
-    pub tab_prefix: String,
-}
-
-impl TerminalState {
-    pub fn new() -> Self {
-        Self {
-            input: String::new(),
-            cursor: 0,
-            output: Vec::new(),
-            history: Vec::new(),
-            history_pos: None,
-            live_input: String::new(),
-            tab_candidates: Vec::new(),
-            tab_index: 0,
-            tab_prefix: String::new(),
-        }
-    }
-
-    pub fn push_output(&mut self, line: impl Into<String>) {
-        self.output.push(line.into());
-        // Keep scrollback bounded.
-        if self.output.len() > 500 {
-            self.output.drain(0..100);
-        }
-    }
-
-    /// Insert a character at the current cursor position.
-    pub fn insert_char(&mut self, ch: char) {
-        self.input.insert(self.cursor, ch);
-        self.cursor += ch.len_utf8();
-        self.reset_tab();
-    }
-
-    pub fn backspace(&mut self) {
-        if self.cursor > 0 {
-            let mut prev = self.cursor - 1;
-            while prev > 0 && !self.input.is_char_boundary(prev) {
-                prev -= 1;
-            }
-            self.input.remove(prev);
-            self.cursor = prev;
-            self.reset_tab();
-        }
-    }
-
-    pub fn delete_char(&mut self) {
-        if self.cursor < self.input.len() {
-            self.input.remove(self.cursor);
-            self.reset_tab();
-        }
-    }
-
-    pub fn move_left(&mut self) {
-        if self.cursor > 0 {
-            let mut p = self.cursor - 1;
-            while p > 0 && !self.input.is_char_boundary(p) {
-                p -= 1;
-            }
-            self.cursor = p;
-        }
-    }
-
-    pub fn move_right(&mut self) {
-        if self.cursor < self.input.len() {
-            let mut p = self.cursor + 1;
-            while p < self.input.len() && !self.input.is_char_boundary(p) {
-                p += 1;
-            }
-            self.cursor = p;
-        }
-    }
-
-    pub fn home(&mut self) { self.cursor = 0; }
-    pub fn end(&mut self)  { self.cursor = self.input.len(); }
-
-    /// Kill from cursor to end, or the whole line with Ctrl-U.
-    #[allow(dead_code)]
-    pub fn kill_line(&mut self) {
-        self.input.truncate(self.cursor);
-        self.reset_tab();
-    }
-
-    pub fn reset_tab(&mut self) {
-        self.tab_candidates.clear();
-        self.tab_index = 0;
-        self.tab_prefix.clear();
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1016,8 +840,7 @@ impl App {
             bm
         };
 
-        let term_output  = config.terminal_output.clone();
-        let term_history = config.terminal_history.clone();
+        let (term_history, term_output) = crate::terminal::load_terminal_cache();
 
         App {
             config,
@@ -1039,8 +862,8 @@ impl App {
             copy_task: None,
             needs_clear: false,
             terminal: TerminalState {
-                output:  term_output,
                 history: term_history,
+                output:  term_output,
                 ..TerminalState::new()
             },
             running_cmd: None,
@@ -1989,11 +1812,13 @@ impl App {
         self.config.right.show_hidden = self.right.show_hidden;
         self.config.dir_history = self.dir_history.iter().cloned().collect();
         self.config.bookmarks = self.bookmarks.clone();
-        self.config.terminal_history = self.terminal.history.clone();
-        // Keep at most 200 output lines in config
+        // Save terminal history and output to cache (not config)
         let len = self.terminal.output.len();
         let start = len.saturating_sub(200);
-        self.config.terminal_output = self.terminal.output[start..].to_vec();
+        let _ = crate::terminal::save_terminal_cache(
+            &self.terminal.history,
+            &self.terminal.output[start..],
+        );
         self.config.save()
     }
 }
