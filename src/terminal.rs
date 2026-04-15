@@ -1,5 +1,6 @@
-use crate::app::{App, AppMode, ActivePanel};
+use crate::app::{ActivePanel, App, AppMode};
 use crate::config;
+use crate::remote::{RemoteEntry, join_remote, list_dir, normalize_remote_cwd};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::{Color, Modifier, Style};
@@ -25,13 +26,33 @@ pub struct RunningCmd {
     pub done: bool,
 }
 
+pub const PROMPT_LINE_MARKER: &str = "\u{1e}";
+
+pub fn terminal_prompt(app: &App, running: bool) -> String {
+    let cwd = app.active_panel().display_path();
+    if running {
+        format!("{}> ", cwd)
+    } else {
+        format!("{}$ ", cwd)
+    }
+}
+
+pub fn terminal_prompt_line(app: &App, raw: &str) -> String {
+    format!(
+        "{}{}{}",
+        PROMPT_LINE_MARKER,
+        terminal_prompt(app, false),
+        raw
+    )
+}
+
 /// Spawn a command, streaming its output through a channel.
 pub fn spawn_cmd_streaming(raw: String, dir: PathBuf) -> RunningCmd {
     let (tx, rx) = mpsc::channel::<CmdLine>();
     thread::spawn(move || {
-        use std::process::{Command, Stdio};
         #[cfg(unix)]
         use std::os::unix::process::CommandExt;
+        use std::process::{Command, Stdio};
 
         let mut cmd = Command::new("sh");
         cmd.arg("-c")
@@ -41,10 +62,10 @@ pub fn spawn_cmd_streaming(raw: String, dir: PathBuf) -> RunningCmd {
             // and disable colors unless we tell them otherwise.
             .env("TERM", "xterm-256color")
             .env("COLORTERM", "truecolor")
-            .env("CLICOLOR_FORCE", "1")      // macOS/BSD ls and friends
-            .env("FORCE_COLOR", "1")          // Node.js ecosystem
-            .env("CARGO_TERM_COLOR", "always")// cargo
-            .env("GIT_TERMINAL_PROMPT", "0")  // avoid git hanging on auth
+            .env("CLICOLOR_FORCE", "1") // macOS/BSD ls and friends
+            .env("FORCE_COLOR", "1") // Node.js ecosystem
+            .env("CARGO_TERM_COLOR", "always") // cargo
+            .env("GIT_TERMINAL_PROMPT", "0") // avoid git hanging on auth
             // Disconnect stdin so no child can block waiting for user input,
             // and so bash doesn't try to do TTY/job-control setup.
             .stdin(Stdio::null())
@@ -77,9 +98,11 @@ pub fn spawn_cmd_streaming(raw: String, dir: PathBuf) -> RunningCmd {
             thread::spawn(move || {
                 for line in stdout.lines() {
                     match line {
-                        Ok(l) => { let _ = tx_out.send(CmdLine::Out(l)); }
+                        Ok(l) => {
+                            let _ = tx_out.send(CmdLine::Out(l));
+                        }
                         Err(_) => break,
-                    }   
+                    }
                 }
             });
         }
@@ -94,7 +117,9 @@ pub fn spawn_cmd_streaming(raw: String, dir: PathBuf) -> RunningCmd {
             thread::spawn(move || {
                 for line in stderr.lines() {
                     match line {
-                        Ok(l) => { let _ = tx_err.send(CmdLine::Err(l)); }
+                        Ok(l) => {
+                            let _ = tx_err.send(CmdLine::Err(l));
+                        }
                         Err(_) => break,
                     }
                 }
@@ -205,8 +230,12 @@ impl TerminalState {
         }
     }
 
-    pub fn home(&mut self) { self.cursor = 0; }
-    pub fn end(&mut self)  { self.cursor = self.input.len(); }
+    pub fn home(&mut self) {
+        self.cursor = 0;
+    }
+    pub fn end(&mut self) {
+        self.cursor = self.input.len();
+    }
 
     /// Kill from cursor to end of line.
     #[allow(dead_code)]
@@ -291,7 +320,9 @@ pub fn ansi_line_to_line(text: &str) -> Line<'static> {
                     while i < bytes.len() && !(0x40..=0x7e).contains(&bytes[i]) {
                         i += 1;
                     }
-                    if i >= bytes.len() { break; }
+                    if i >= bytes.len() {
+                        break;
+                    }
                     let cmd = bytes[i] as char;
                     let param_str = std::str::from_utf8(&bytes[start..i]).unwrap_or("");
                     i += 1; // consume command byte
@@ -337,7 +368,9 @@ pub fn ansi_line_to_line(text: &str) -> Line<'static> {
             i += 1;
         } else {
             // Regular text — preserve UTF-8 instead of widening raw bytes to chars.
-            let Some(ch) = text[i..].chars().next() else { break };
+            let Some(ch) = text[i..].chars().next() else {
+                break;
+            };
             chunk.push(ch);
             i += ch.len_utf8();
         }
@@ -361,14 +394,14 @@ fn apply_sgr(mut style: Style, params: &str) -> Style {
     while idx < nums.len() {
         let n = nums[idx];
         match n {
-            0  => style = Style::default(),
-            1  => style = style.add_modifier(Modifier::BOLD),
-            2  => style = style.add_modifier(Modifier::DIM),
-            3  => style = style.add_modifier(Modifier::ITALIC),
-            4  => style = style.add_modifier(Modifier::UNDERLINED),
+            0 => style = Style::default(),
+            1 => style = style.add_modifier(Modifier::BOLD),
+            2 => style = style.add_modifier(Modifier::DIM),
+            3 => style = style.add_modifier(Modifier::ITALIC),
+            4 => style = style.add_modifier(Modifier::UNDERLINED),
             5 | 6 => style = style.add_modifier(Modifier::SLOW_BLINK),
-            7  => style = style.add_modifier(Modifier::REVERSED),
-            9  => style = style.add_modifier(Modifier::CROSSED_OUT),
+            7 => style = style.add_modifier(Modifier::REVERSED),
+            9 => style = style.add_modifier(Modifier::CROSSED_OUT),
             22 => style = style.remove_modifier(Modifier::BOLD | Modifier::DIM),
             23 => style = style.remove_modifier(Modifier::ITALIC),
             24 => style = style.remove_modifier(Modifier::UNDERLINED),
@@ -438,7 +471,10 @@ mod tests {
     use ratatui::style::Color;
 
     fn line_text(line: &ratatui::text::Line<'_>) -> String {
-        line.spans.iter().map(|span| span.content.as_ref()).collect()
+        line.spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect()
     }
 
     #[test]
@@ -514,9 +550,15 @@ pub fn handle_terminal(app: &mut App, key: KeyEvent) -> Result<bool> {
                 return Ok(false);
             }
             // Ctrl-A = go to beginning
-            KeyCode::Char('a') => { app.terminal.home(); return Ok(false); }
+            KeyCode::Char('a') => {
+                app.terminal.home();
+                return Ok(false);
+            }
             // Ctrl-E = go to end
-            KeyCode::Char('e') => { app.terminal.end(); return Ok(false); }
+            KeyCode::Char('e') => {
+                app.terminal.end();
+                return Ok(false);
+            }
             _ => {}
         }
     }
@@ -535,7 +577,9 @@ pub fn handle_terminal(app: &mut App, key: KeyEvent) -> Result<bool> {
                 return Ok(false);
             }
             let quit = terminal_execute(app)?;
-            if quit { return Ok(true); }
+            if quit {
+                return Ok(true);
+            }
         }
 
         // ── Tab completion ────────────────────────────────────────────────
@@ -546,7 +590,9 @@ pub fn handle_terminal(app: &mut App, key: KeyEvent) -> Result<bool> {
         // ── History navigation ────────────────────────────────────────────
         KeyCode::Up => {
             let ts = &mut app.terminal;
-            if ts.history.is_empty() { return Ok(false); }
+            if ts.history.is_empty() {
+                return Ok(false);
+            }
             let next_pos = match ts.history_pos {
                 None => {
                     ts.live_input = ts.input.clone();
@@ -584,12 +630,24 @@ pub fn handle_terminal(app: &mut App, key: KeyEvent) -> Result<bool> {
         }
 
         // ── Line editing ──────────────────────────────────────────────────
-        KeyCode::Left  => { app.terminal.move_left(); }
-        KeyCode::Right => { app.terminal.move_right(); }
-        KeyCode::Home  => { app.terminal.home(); }
-        KeyCode::End   => { app.terminal.end(); }
-        KeyCode::Backspace => { app.terminal.backspace(); }
-        KeyCode::Delete    => { app.terminal.delete_char(); }
+        KeyCode::Left => {
+            app.terminal.move_left();
+        }
+        KeyCode::Right => {
+            app.terminal.move_right();
+        }
+        KeyCode::Home => {
+            app.terminal.home();
+        }
+        KeyCode::End => {
+            app.terminal.end();
+        }
+        KeyCode::Backspace => {
+            app.terminal.backspace();
+        }
+        KeyCode::Delete => {
+            app.terminal.delete_char();
+        }
 
         KeyCode::Char(ch) if !ctrl => {
             app.terminal.insert_char(ch);
@@ -604,15 +662,12 @@ pub fn handle_terminal(app: &mut App, key: KeyEvent) -> Result<bool> {
 /// Execute the current input line.  Returns `true` to quit the whole app.
 fn terminal_execute(app: &mut App) -> Result<bool> {
     let raw = app.terminal.input.trim().to_string();
-    app.terminal.push_output(format!("$ {}", raw));
     app.terminal.input.clear();
     app.terminal.cursor = 0;
     app.terminal.reset_tab();
 
     // Record in history (skip blanks, skip exact duplicate of last entry)
-    if !raw.is_empty()
-        && app.terminal.history.last().map(|s| s.as_str()) != Some(raw.as_str())
-    {
+    if !raw.is_empty() && app.terminal.history.last().map(|s| s.as_str()) != Some(raw.as_str()) {
         app.terminal.history.push(raw.clone());
     }
     app.terminal.history_pos = None;
@@ -621,10 +676,11 @@ fn terminal_execute(app: &mut App) -> Result<bool> {
     if raw.is_empty() {
         return Ok(false);
     }
+    app.terminal.push_output(terminal_prompt_line(app, &raw));
 
     let mut parts = raw.splitn(2, char::is_whitespace);
-    let cmd  = parts.next().unwrap_or("");
-    let arg  = parts.next().map(str::trim).unwrap_or("");
+    let cmd = parts.next().unwrap_or("");
+    let arg = parts.next().map(str::trim).unwrap_or("");
 
     // ── Internal commands ────────────────────────────────────────────────
     match cmd {
@@ -635,51 +691,101 @@ fn terminal_execute(app: &mut App) -> Result<bool> {
 
         "help" | "?" => {
             app.terminal.push_output("Built-in commands:");
-            app.terminal.push_output("  cd [dir]       Change directory (panel + prompt)");
-            app.terminal.push_output("  help           Show this message");
+            app.terminal
+                .push_output("  cd [dir]       Change directory (panel + prompt)");
+            app.terminal
+                .push_output("  ls [dir]       List remote directory contents (remote only)");
+            app.terminal
+                .push_output("  help           Show this message");
             app.terminal.push_output("  exit           Quit KKC");
             app.terminal.push_output("Key bindings:");
-            app.terminal.push_output("  Tab            Cycle completions (dirs first for cd)");
-            app.terminal.push_output("  Up/Down        Navigate history");
-            app.terminal.push_output("  Ctrl-A/E       Start / end of line");
+            app.terminal
+                .push_output("  Tab            Cycle completions (dirs first for cd)");
+            app.terminal
+                .push_output("  Up/Down        Navigate history");
+            app.terminal
+                .push_output("  Ctrl-A/E       Start / end of line");
             app.terminal.push_output("  Ctrl-K         Kill to end");
-            app.terminal.push_output("  Ctrl-U / Esc   Close terminal overlay");
+            app.terminal
+                .push_output("  Ctrl-U / Esc   Close terminal overlay");
+            return Ok(false);
+        }
+
+        "ls" if app.active_panel().is_remote_view() => {
+            let profile = app.active_panel().remote_profile().unwrap();
+            let base = app.active_panel().remote_cwd().unwrap_or("/");
+            let target = if arg.is_empty() || arg == "~" {
+                base.to_string()
+            } else if arg.starts_with('/') {
+                arg.to_string()
+            } else {
+                join_remote(base, arg)
+            };
+            let target = normalize_remote_cwd(&profile, &target);
+            let show_hidden = app.active_panel().show_hidden;
+            let entries = list_dir(&profile, &target, show_hidden)?;
+
+            if entries.is_empty() {
+                app.terminal.push_output("[empty]");
+            } else {
+                for entry in entries {
+                    app.terminal.push_output(format_remote_ls_entry(&entry));
+                }
+            }
             return Ok(false);
         }
 
         "cd" => {
-            let panel_dir = match app.active {
-                ActivePanel::Left  => app.left.path.clone(),
-                ActivePanel::Right => app.right.path.clone(),
-            };
-            let target = if arg.is_empty() {
-                directories::UserDirs::new()
-                    .map(|u| u.home_dir().to_path_buf())
-                    .unwrap_or_else(|| std::path::PathBuf::from("/"))
-            } else if arg.starts_with('/') || arg.starts_with('~') {
-                let expanded = if let Some(rest) = arg.strip_prefix("~/") {
-                    directories::UserDirs::new()
-                        .map(|u| u.home_dir().join(rest))
-                        .unwrap_or_else(|| std::path::PathBuf::from(arg))
-                } else if arg == "~" {
+            let is_remote = app.active_panel().is_remote_view();
+            let target = if is_remote {
+                if arg.is_empty() || arg == "~" {
+                    std::path::PathBuf::from("/")
+                } else if arg.starts_with('/') {
+                    std::path::PathBuf::from(arg)
+                } else {
+                    let base = app.active_panel().remote_cwd().unwrap_or("/");
+                    std::path::PathBuf::from(join_remote(base, arg))
+                }
+            } else {
+                let panel_dir = match app.active {
+                    ActivePanel::Left => app.left.path.clone(),
+                    ActivePanel::Right => app.right.path.clone(),
+                };
+                if arg.is_empty() {
                     directories::UserDirs::new()
                         .map(|u| u.home_dir().to_path_buf())
                         .unwrap_or_else(|| std::path::PathBuf::from("/"))
-                } else {
-                    std::path::PathBuf::from(arg)
-                };
-                expanded
-            } else {
-                panel_dir.join(arg)
-            };
-            match std::fs::canonicalize(&target) {
-                Ok(p) => {
-                    if let Err(e) = app.active_panel_mut().enter_dir(p) {
-                        app.terminal.push_output(format!("cd: {}", e));
+                } else if arg.starts_with('/') || arg.starts_with('~') {
+                    if let Some(rest) = arg.strip_prefix("~/") {
+                        directories::UserDirs::new()
+                            .map(|u| u.home_dir().join(rest))
+                            .unwrap_or_else(|| std::path::PathBuf::from(arg))
+                    } else if arg == "~" {
+                        directories::UserDirs::new()
+                            .map(|u| u.home_dir().to_path_buf())
+                            .unwrap_or_else(|| std::path::PathBuf::from("/"))
+                    } else {
+                        std::path::PathBuf::from(arg)
                     }
+                } else {
+                    panel_dir.join(arg)
                 }
-                Err(e) => {
-                    app.terminal.push_output(format!("cd: {}: {}", arg, e));
+            };
+
+            if is_remote {
+                if let Err(e) = app.active_panel_mut().enter_dir(target) {
+                    app.terminal.push_output(format!("cd: {}", e));
+                }
+            } else {
+                match std::fs::canonicalize(&target) {
+                    Ok(p) => {
+                        if let Err(e) = app.active_panel_mut().enter_dir(p) {
+                            app.terminal.push_output(format!("cd: {}", e));
+                        }
+                    }
+                    Err(e) => {
+                        app.terminal.push_output(format!("cd: {}: {}", arg, e));
+                    }
                 }
             }
             return Ok(false);
@@ -689,12 +795,62 @@ fn terminal_execute(app: &mut App) -> Result<bool> {
     }
 
     // ── External command – spawn thread, stream output ───────────────────
+    if app.active_panel().is_remote_view() {
+        app.terminal
+            .push_output("Shell commands are disabled for remote panels");
+        return Ok(false);
+    }
+
     let panel_dir = match app.active {
-        ActivePanel::Left  => app.left.path.clone(),
+        ActivePanel::Left => app.left.path.clone(),
         ActivePanel::Right => app.right.path.clone(),
     };
     app.running_cmd = Some(spawn_cmd_streaming(raw, panel_dir));
     Ok(false)
+}
+
+fn format_remote_ls_entry(entry: &RemoteEntry) -> String {
+    let suffix = if entry.is_dir {
+        "/"
+    } else if entry.is_symlink {
+        "@"
+    } else {
+        ""
+    };
+    let modified = entry
+        .modified
+        .as_ref()
+        .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_else(|| "----------------".into());
+    format!(
+        "{}{} {:>8} {} {}{}",
+        remote_type_char(entry),
+        format_mode_bits(entry.mode),
+        if entry.is_dir { 0 } else { entry.size },
+        modified,
+        entry.name,
+        suffix
+    )
+}
+
+fn remote_type_char(entry: &RemoteEntry) -> char {
+    if entry.is_symlink {
+        'l'
+    } else if entry.is_dir {
+        'd'
+    } else {
+        '-'
+    }
+}
+
+fn format_mode_bits(mode: u32) -> String {
+    let mut out = String::with_capacity(9);
+    for shift in [6, 3, 0] {
+        out.push(if mode & (0o4 << shift) != 0 { 'r' } else { '-' });
+        out.push(if mode & (0o2 << shift) != 0 { 'w' } else { '-' });
+        out.push(if mode & (0o1 << shift) != 0 { 'x' } else { '-' });
+    }
+    out
 }
 
 /// Bash-style tab completion from the filesystem.
@@ -704,7 +860,9 @@ fn terminal_execute(app: &mut App) -> Result<bool> {
 /// * For `cd` as the first word, only directories are shown.
 fn terminal_tab_complete(app: &mut App) {
     // Guard: don't complete while a command is running
-    if app.running_cmd.is_some() { return; }
+    if app.running_cmd.is_some() {
+        return;
+    }
 
     // ── If candidates already exist, cycle ───────────────────────────────
     if !app.terminal.tab_candidates.is_empty() {
@@ -721,7 +879,10 @@ fn terminal_tab_complete(app: &mut App) {
 
     // Split into "prefix before the last word" and "the word being typed"
     let (cmd_prefix, token) = if let Some(pos) = before_cursor.rfind(|c: char| c.is_whitespace()) {
-        (before_cursor[..=pos].to_string(), before_cursor[pos + 1..].to_string())
+        (
+            before_cursor[..=pos].to_string(),
+            before_cursor[pos + 1..].to_string(),
+        )
     } else {
         (String::new(), before_cursor.clone())
     };
@@ -736,7 +897,7 @@ fn terminal_tab_complete(app: &mut App) {
 
     // Resolve base dir and partial name for the token
     let panel_dir = match app.active {
-        ActivePanel::Left  => app.left.path.clone(),
+        ActivePanel::Left => app.left.path.clone(),
         ActivePanel::Right => app.right.path.clone(),
     };
 
@@ -758,7 +919,8 @@ fn terminal_tab_complete(app: &mut App) {
             } else {
                 panel_dir.join(parent)
             };
-            let partial = p.file_name()
+            let partial = p
+                .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
             // We prepend the directory part back to each candidate
@@ -786,23 +948,23 @@ fn terminal_tab_complete(app: &mut App) {
         })
         .filter(|e| {
             if dirs_only {
-                e.file_type().map(|ft| ft.is_dir()).unwrap_or(false)
-                    || e.path().is_dir() // follow symlinks
+                e.file_type().map(|ft| ft.is_dir()).unwrap_or(false) || e.path().is_dir() // follow symlinks
             } else {
                 true
             }
         })
         .map(|e| {
             let name = e.file_name().to_string_lossy().into_owned();
-            let is_dir = e.file_type().map(|ft| ft.is_dir()).unwrap_or(false)
-                || e.path().is_dir();
+            let is_dir = e.file_type().map(|ft| ft.is_dir()).unwrap_or(false) || e.path().is_dir();
             let suffix = if is_dir { "/" } else { "" };
             format!("{}{}{}", keep_prefix_in_candidate, name, suffix)
         })
         .collect();
     names.sort();
 
-    if names.is_empty() { return; }
+    if names.is_empty() {
+        return;
+    }
 
     // Apply first candidate
     let ts = &mut app.terminal;

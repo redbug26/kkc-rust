@@ -46,7 +46,12 @@ fn parse_eml(data: &[u8]) -> EmlDoc {
         }
     }
     if let Some(ct) = headers.get("content-type") {
-        push_header(&mut plain, &mut rendered, "Content-Type", &decode_rfc2047(ct));
+        push_header(
+            &mut plain,
+            &mut rendered,
+            "Content-Type",
+            &decode_rfc2047(ct),
+        );
     }
     if let Some(cte) = headers.get("content-transfer-encoding") {
         push_header(&mut plain, &mut rendered, "Encoding", cte);
@@ -75,7 +80,10 @@ fn parse_eml(data: &[u8]) -> EmlDoc {
     if body_lines.is_empty() || body_lines.iter().all(|l| l.trim().is_empty()) {
         let s = "(empty body)".to_string();
         plain.push(s.clone());
-        rendered.push(Line::from(Span::styled(s, Style::default().fg(Color::DarkGray))));
+        rendered.push(Line::from(Span::styled(
+            s,
+            Style::default().fg(Color::DarkGray),
+        )));
     } else {
         for line in &body_lines {
             plain.push(line.clone());
@@ -95,7 +103,9 @@ fn push_section(plain: &mut Vec<String>, rendered: &mut Vec<Line<'static>>, titl
     plain.push(full.clone());
     rendered.push(Line::from(Span::styled(
         full,
-        Style::default().fg(CLR_SECTION).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(CLR_SECTION)
+            .add_modifier(Modifier::BOLD),
     )));
 }
 
@@ -109,7 +119,9 @@ fn push_header(plain: &mut Vec<String>, rendered: &mut Vec<Line<'static>>, key: 
     rendered.push(Line::from(vec![
         Span::styled(
             format!("{key}: "),
-            Style::default().fg(CLR_HDR_KEY).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(CLR_HDR_KEY)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::styled(val.to_string(), Style::default().fg(CLR_HDR_VAL)),
     ]));
@@ -139,28 +151,40 @@ fn decode_rfc2047(input: &str) -> String {
 
                 let q1 = match rem.find('?') {
                     Some(i) => i,
-                    None => { result.push_str("=?"); result.push_str(rem); return result; }
+                    None => {
+                        result.push_str("=?");
+                        result.push_str(rem);
+                        return result;
+                    }
                 };
                 let charset = rem[..q1].to_string();
                 rem = &rem[q1 + 1..];
 
                 let q2 = match rem.find('?') {
                     Some(i) => i,
-                    None => { result.push_str(&format!("=?{charset}?")); result.push_str(rem); return result; }
+                    None => {
+                        result.push_str(&format!("=?{charset}?"));
+                        result.push_str(rem);
+                        return result;
+                    }
                 };
                 let encoding = rem[..q2].to_string();
                 rem = &rem[q2 + 1..];
 
                 let end = match rem.find("?=") {
                     Some(i) => i,
-                    None => { result.push_str(rem); return result; }
+                    None => {
+                        result.push_str(rem);
+                        return result;
+                    }
                 };
                 let encoded = &rem[..end];
                 rem = &rem[end + 2..];
 
                 let decoded_bytes: Option<Vec<u8>> = match encoding.to_ascii_uppercase().as_str() {
                     "B" => {
-                        let compact: String = encoded.chars()
+                        let compact: String = encoded
+                            .chars()
                             .filter(|c| !c.is_ascii_whitespace())
                             .collect();
                         decode_config(compact.as_bytes(), base64::STANDARD).ok()
@@ -187,13 +211,24 @@ fn decode_qp_encoded_word(input: &[u8]) -> Vec<u8> {
     let mut i = 0usize;
     while i < input.len() {
         match input[i] {
-            b'_' => { out.push(b' '); i += 1; }
+            b'_' => {
+                out.push(b' ');
+                i += 1;
+            }
             b'=' if i + 2 < input.len() => {
                 let hex = std::str::from_utf8(&input[i + 1..i + 3]).unwrap_or("  ");
-                if let Ok(v) = u8::from_str_radix(hex, 16) { out.push(v); i += 3; }
-                else { out.push(b'='); i += 1; }
+                if let Ok(v) = u8::from_str_radix(hex, 16) {
+                    out.push(v);
+                    i += 3;
+                } else {
+                    out.push(b'=');
+                    i += 1;
+                }
             }
-            b => { out.push(b); i += 1; }
+            b => {
+                out.push(b);
+                i += 1;
+            }
         }
     }
     out
@@ -202,7 +237,9 @@ fn decode_qp_encoded_word(input: &[u8]) -> Vec<u8> {
 fn decode_bytes_charset(bytes: &[u8], charset: &str) -> String {
     match charset.to_ascii_lowercase().as_str() {
         "utf-8" | "utf8" | "" => String::from_utf8_lossy(bytes).into_owned(),
-        "iso-8859-1" | "iso8859-1" | "latin-1" | "latin1" => bytes.iter().map(|&b| b as char).collect(),
+        "iso-8859-1" | "iso8859-1" | "latin-1" | "latin1" => {
+            bytes.iter().map(|&b| b as char).collect()
+        }
         "windows-1252" | "cp1252" | "cp-1252" => bytes.iter().map(|&b| cp1252_to_char(b)).collect(),
         "iso-8859-15" | "iso8859-15" => bytes.iter().map(|&b| latin9_to_char(b)).collect(),
         _ => String::from_utf8_lossy(bytes).into_owned(),
@@ -210,7 +247,11 @@ fn decode_bytes_charset(bytes: &[u8], charset: &str) -> String {
 }
 
 fn split_headers_body(text: &str) -> (&str, &str) {
-    if let Some((h, b)) = text.split_once("\n\n") { (h, b) } else { (text, "") }
+    if let Some((h, b)) = text.split_once("\n\n") {
+        (h, b)
+    } else {
+        (text, "")
+    }
 }
 
 fn parse_headers(headers: &str) -> HashMap<String, String> {
@@ -230,11 +271,16 @@ fn parse_headers(headers: &str) -> HashMap<String, String> {
                     cur_name = name.trim().to_ascii_lowercase();
                     cur_val = val.trim().to_string();
                 }
-                None => { cur_name.clear(); cur_val.clear(); }
+                None => {
+                    cur_name.clear();
+                    cur_val.clear();
+                }
             }
         }
     }
-    if !cur_name.is_empty() { map.insert(cur_name, cur_val.trim().to_string()); }
+    if !cur_name.is_empty() {
+        map.insert(cur_name, cur_val.trim().to_string());
+    }
     map
 }
 
@@ -251,27 +297,38 @@ fn header_param(value: Option<&String>, name: &str) -> Option<String> {
 }
 
 fn extract_best_body(headers: &HashMap<String, String>, body: &str) -> Vec<String> {
-    let content_type = headers.get("content-type")
-        .map(|v| v.to_ascii_lowercase()).unwrap_or_else(|| "text/plain".into());
-    let charset = header_param(headers.get("content-type"), "charset")
-        .unwrap_or_else(|| "utf-8".into());
-    let transfer_encoding = headers.get("content-transfer-encoding")
-        .map(|v| v.to_ascii_lowercase()).unwrap_or_default();
+    let content_type = headers
+        .get("content-type")
+        .map(|v| v.to_ascii_lowercase())
+        .unwrap_or_else(|| "text/plain".into());
+    let charset =
+        header_param(headers.get("content-type"), "charset").unwrap_or_else(|| "utf-8".into());
+    let transfer_encoding = headers
+        .get("content-transfer-encoding")
+        .map(|v| v.to_ascii_lowercase())
+        .unwrap_or_default();
 
     if content_type.starts_with("multipart/") {
         if let Some(boundary) = header_param(headers.get("content-type"), "boundary") {
-            if let Some(lines) = extract_from_multipart(body, &boundary) { return lines; }
+            if let Some(lines) = extract_from_multipart(body, &boundary) {
+                return lines;
+            }
         }
     }
     decode_body(body, &transfer_encoding, &content_type, &charset)
 }
 
 fn collect_attachments(headers: &HashMap<String, String>, body: &str) -> Vec<String> {
-    let content_type = headers.get("content-type")
-        .map(|v| v.to_ascii_lowercase()).unwrap_or_default();
-    if !content_type.starts_with("multipart/") { return Vec::new(); }
+    let content_type = headers
+        .get("content-type")
+        .map(|v| v.to_ascii_lowercase())
+        .unwrap_or_default();
+    if !content_type.starts_with("multipart/") {
+        return Vec::new();
+    }
     let boundary = match header_param(headers.get("content-type"), "boundary") {
-        Some(b) => b, None => return Vec::new(),
+        Some(b) => b,
+        None => return Vec::new(),
     };
     scan_parts_for_attachments(body, &boundary)
 }
@@ -281,15 +338,26 @@ fn scan_parts_for_attachments(body: &str, boundary: &str) -> Vec<String> {
     let mut names: Vec<String> = Vec::new();
     for part in body.split(&marker) {
         let trimmed = part.trim_start_matches('\n');
-        if trimmed.trim().is_empty() || trimmed.trim() == "--" { continue; }
-        if trimmed.trim_start_matches('-').trim().is_empty() { continue; }
+        if trimmed.trim().is_empty() || trimmed.trim() == "--" {
+            continue;
+        }
+        if trimmed.trim_start_matches('-').trim().is_empty() {
+            continue;
+        }
         let (phdr, pbody) = split_headers_body(trimmed);
         let ph = parse_headers(phdr);
-        let ct = ph.get("content-type").map(|v| v.to_ascii_lowercase()).unwrap_or_default();
-        let disp = ph.get("content-disposition").map(|v| v.to_ascii_lowercase()).unwrap_or_default();
+        let ct = ph
+            .get("content-type")
+            .map(|v| v.to_ascii_lowercase())
+            .unwrap_or_default();
+        let disp = ph
+            .get("content-disposition")
+            .map(|v| v.to_ascii_lowercase())
+            .unwrap_or_default();
         if ct.starts_with("multipart/") {
             if let Some(nb) = header_param(ph.get("content-type"), "boundary") {
-                names.extend(scan_parts_for_attachments(pbody, &nb)); continue;
+                names.extend(scan_parts_for_attachments(pbody, &nb));
+                continue;
             }
         }
         let is_att = disp.starts_with("attachment")
@@ -299,7 +367,9 @@ fn scan_parts_for_attachments(body: &str, boundary: &str) -> Vec<String> {
                 .or_else(|| header_param(ph.get("content-type"), "name"))
                 .unwrap_or_else(|| ct.split(';').next().unwrap_or("file").trim().to_string());
             let name = decode_rfc2047(&raw);
-            if !names.contains(&name) { names.push(name); }
+            if !names.contains(&name) {
+                names.push(name);
+            }
         }
     }
     names
@@ -308,28 +378,47 @@ fn scan_parts_for_attachments(body: &str, boundary: &str) -> Vec<String> {
 fn extract_from_multipart(body: &str, boundary: &str) -> Option<Vec<String>> {
     let marker = format!("--{boundary}");
     let mut best_plain: Option<Vec<String>> = None;
-    let mut best_html:  Option<Vec<String>> = None;
+    let mut best_html: Option<Vec<String>> = None;
     for part in body.split(&marker) {
         let trimmed = part.trim_start_matches('\n').trim();
-        if trimmed.is_empty() || trimmed == "--" || trimmed.ends_with("--") { continue; }
-        if trimmed.starts_with("--") { continue; }
+        if trimmed.is_empty() || trimmed == "--" || trimmed.ends_with("--") {
+            continue;
+        }
+        if trimmed.starts_with("--") {
+            continue;
+        }
         let (phdr, pbody) = split_headers_body(trimmed);
         let ph = parse_headers(phdr);
-        let ct = ph.get("content-type").map(|v| v.to_ascii_lowercase())
+        let ct = ph
+            .get("content-type")
+            .map(|v| v.to_ascii_lowercase())
             .unwrap_or_else(|| "text/plain".into());
-        let disp = ph.get("content-disposition").map(|v| v.to_ascii_lowercase()).unwrap_or_default();
-        if disp.starts_with("attachment") { continue; }
+        let disp = ph
+            .get("content-disposition")
+            .map(|v| v.to_ascii_lowercase())
+            .unwrap_or_default();
+        if disp.starts_with("attachment") {
+            continue;
+        }
         if ct.starts_with("multipart/") {
             if let Some(nb) = header_param(ph.get("content-type"), "boundary") {
-                if let Some(lines) = extract_from_multipart(pbody, &nb) { return Some(lines); }
+                if let Some(lines) = extract_from_multipart(pbody, &nb) {
+                    return Some(lines);
+                }
             }
             continue;
         }
-        let enc = ph.get("content-transfer-encoding").map(|v| v.to_ascii_lowercase()).unwrap_or_default();
-        let cs  = header_param(ph.get("content-type"), "charset").unwrap_or_else(|| "utf-8".into());
+        let enc = ph
+            .get("content-transfer-encoding")
+            .map(|v| v.to_ascii_lowercase())
+            .unwrap_or_default();
+        let cs = header_param(ph.get("content-type"), "charset").unwrap_or_else(|| "utf-8".into());
         let lines = decode_body(pbody, &enc, &ct, &cs);
-        if ct.starts_with("text/plain") && best_plain.is_none() { best_plain = Some(lines); }
-        else if ct.starts_with("text/html") && best_html.is_none()  { best_html  = Some(lines); }
+        if ct.starts_with("text/plain") && best_plain.is_none() {
+            best_plain = Some(lines);
+        } else if ct.starts_with("text/html") && best_html.is_none() {
+            best_html = Some(lines);
+        }
     }
     best_plain.or(best_html)
 }
@@ -338,13 +427,17 @@ fn decode_body(body: &str, encoding: &str, content_type: &str, charset: &str) ->
     let decoded: String = match encoding {
         "base64" => {
             let compact: String = body.chars().filter(|c| !c.is_ascii_whitespace()).collect();
-            decode_config(compact.as_bytes(), base64::STANDARD).ok()
+            decode_config(compact.as_bytes(), base64::STANDARD)
+                .ok()
                 .map(|b| decode_bytes_charset(&b, charset))
                 .unwrap_or_else(|| String::from_utf8_lossy(body.as_bytes()).into_owned())
         }
         "quoted-printable" => decode_bytes_charset(&decode_quoted_printable(body), charset),
         _ => {
-            if charset.eq_ignore_ascii_case("utf-8") || charset.eq_ignore_ascii_case("utf8") || charset.is_empty() {
+            if charset.eq_ignore_ascii_case("utf-8")
+                || charset.eq_ignore_ascii_case("utf8")
+                || charset.is_empty()
+            {
                 body.to_string()
             } else {
                 decode_bytes_charset(body.as_bytes(), charset)
@@ -354,11 +447,23 @@ fn decode_body(body: &str, encoding: &str, content_type: &str, charset: &str) ->
     if content_type.starts_with("text/html") {
         let html = html_document(decoded.as_bytes());
         let lines: Vec<String> = html.lines.into_iter().map(|l| l.plain).collect();
-        if lines.is_empty() { vec![String::new()] } else { lines }
+        if lines.is_empty() {
+            vec![String::new()]
+        } else {
+            lines
+        }
     } else {
-        let lines: Vec<String> = decoded.replace("\r\n", "\n").replace('\r', "\n")
-            .lines().map(|s| s.to_string()).collect();
-        if lines.is_empty() { vec![String::new()] } else { lines }
+        let lines: Vec<String> = decoded
+            .replace("\r\n", "\n")
+            .replace('\r', "\n")
+            .lines()
+            .map(|s| s.to_string())
+            .collect();
+        if lines.is_empty() {
+            vec![String::new()]
+        } else {
+            lines
+        }
     }
 }
 
@@ -368,14 +473,26 @@ fn decode_quoted_printable(input: &str) -> Vec<u8> {
     let mut i = 0usize;
     while i < bytes.len() {
         match bytes[i] {
-            b'=' if i + 1 < bytes.len() && bytes[i + 1] == b'\n' => { i += 2; }
-            b'=' if i + 2 < bytes.len() && bytes[i + 1] == b'\r' && bytes[i + 2] == b'\n' => { i += 3; }
+            b'=' if i + 1 < bytes.len() && bytes[i + 1] == b'\n' => {
+                i += 2;
+            }
+            b'=' if i + 2 < bytes.len() && bytes[i + 1] == b'\r' && bytes[i + 2] == b'\n' => {
+                i += 3;
+            }
             b'=' if i + 2 < bytes.len() => {
                 let hex = &input[i + 1..i + 3];
-                if let Ok(v) = u8::from_str_radix(hex, 16) { out.push(v); i += 3; }
-                else { out.push(b'='); i += 1; }
+                if let Ok(v) = u8::from_str_radix(hex, 16) {
+                    out.push(v);
+                    i += 3;
+                } else {
+                    out.push(b'=');
+                    i += 1;
+                }
             }
-            b => { out.push(b); i += 1; }
+            b => {
+                out.push(b);
+                i += 1;
+            }
         }
     }
     out
@@ -383,19 +500,29 @@ fn decode_quoted_printable(input: &str) -> Vec<u8> {
 
 fn cp1252_to_char(b: u8) -> char {
     const TABLE: [char; 32] = [
-        '\u{20AC}', '\u{FFFD}', '\u{201A}', '\u{0192}', '\u{201E}', '\u{2026}', '\u{2020}', '\u{2021}',
-        '\u{02C6}', '\u{2030}', '\u{0160}', '\u{2039}', '\u{0152}', '\u{FFFD}', '\u{017D}', '\u{FFFD}',
-        '\u{FFFD}', '\u{2018}', '\u{2019}', '\u{201C}', '\u{201D}', '\u{2022}', '\u{2013}', '\u{2014}',
-        '\u{02DC}', '\u{2122}', '\u{0161}', '\u{203A}', '\u{0153}', '\u{FFFD}', '\u{017E}', '\u{0178}',
+        '\u{20AC}', '\u{FFFD}', '\u{201A}', '\u{0192}', '\u{201E}', '\u{2026}', '\u{2020}',
+        '\u{2021}', '\u{02C6}', '\u{2030}', '\u{0160}', '\u{2039}', '\u{0152}', '\u{FFFD}',
+        '\u{017D}', '\u{FFFD}', '\u{FFFD}', '\u{2018}', '\u{2019}', '\u{201C}', '\u{201D}',
+        '\u{2022}', '\u{2013}', '\u{2014}', '\u{02DC}', '\u{2122}', '\u{0161}', '\u{203A}',
+        '\u{0153}', '\u{FFFD}', '\u{017E}', '\u{0178}',
     ];
-    if (0x80..0xA0).contains(&b) { TABLE[(b - 0x80) as usize] } else { b as char }
+    if (0x80..0xA0).contains(&b) {
+        TABLE[(b - 0x80) as usize]
+    } else {
+        b as char
+    }
 }
 
 fn latin9_to_char(b: u8) -> char {
     match b {
-        0xA4 => '\u{20AC}', 0xA6 => '\u{0160}', 0xA8 => '\u{0161}',
-        0xB4 => '\u{017D}', 0xB8 => '\u{017E}',
-        0xBC => '\u{0152}', 0xBD => '\u{0153}', 0xBE => '\u{0178}',
+        0xA4 => '\u{20AC}',
+        0xA6 => '\u{0160}',
+        0xA8 => '\u{0161}',
+        0xB4 => '\u{017D}',
+        0xB8 => '\u{017E}',
+        0xBC => '\u{0152}',
+        0xBD => '\u{0153}',
+        0xBE => '\u{0178}',
         _ => b as char,
     }
 }

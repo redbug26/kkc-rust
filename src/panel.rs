@@ -1,7 +1,10 @@
 use crate::archive;
 use crate::config::SortMode;
 use crate::file_types::FileCategory;
-use crate::remote::{RemoteEntry, RemoteProfile, display_path as remote_display_path, list_dir, normalize_remote_cwd, resolve_initial_dir};
+use crate::remote::{
+    RemoteEntry, RemoteProfile, display_path as remote_display_path, list_dir,
+    normalize_remote_cwd, resolve_initial_dir,
+};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local};
 use std::fs;
@@ -28,8 +31,8 @@ pub struct Entry {
 
 impl Entry {
     pub fn from_path(path: &Path) -> Result<Self> {
-        let metadata = fs::symlink_metadata(path)
-            .with_context(|| format!("stat: {}", path.display()))?;
+        let metadata =
+            fs::symlink_metadata(path).with_context(|| format!("stat: {}", path.display()))?;
 
         let is_symlink = metadata.file_type().is_symlink();
         // For directories/size resolve through the symlink
@@ -118,7 +121,12 @@ struct RemoteMount {
 }
 
 impl Panel {
-    fn prepare_remote_entries(&self, profile: &RemoteProfile, cwd: &str, remote_entries: Vec<RemoteEntry>) -> Vec<Entry> {
+    fn prepare_remote_entries(
+        &self,
+        profile: &RemoteProfile,
+        cwd: &str,
+        remote_entries: Vec<RemoteEntry>,
+    ) -> Vec<Entry> {
         let mut entries: Vec<Entry> = remote_entries
             .into_iter()
             .map(|e| self.entry_from_remote(cwd, e))
@@ -128,7 +136,10 @@ impl Panel {
         } else {
             Some(Entry {
                 name: "..".into(),
-                path: Path::new(cwd).parent().unwrap_or(Path::new("/")).to_path_buf(),
+                path: Path::new(cwd)
+                    .parent()
+                    .unwrap_or(Path::new("/"))
+                    .to_path_buf(),
                 is_dir: true,
                 is_symlink: false,
                 size: 0,
@@ -206,7 +217,11 @@ impl Panel {
     }
 
     fn reload_remote(&mut self) -> Result<()> {
-        let mount = self.remote.as_ref().context("Missing remote mount")?.clone();
+        let mount = self
+            .remote
+            .as_ref()
+            .context("Missing remote mount")?
+            .clone();
         let mut entries: Vec<Entry> = list_dir(&mount.profile, &mount.cwd, self.show_hidden)?
             .into_iter()
             .map(|e| self.entry_from_remote(&mount.cwd, e))
@@ -240,7 +255,10 @@ impl Panel {
                 return None;
             }
             let parent = Path::new(cwd).parent().unwrap_or(Path::new("/"));
-            PathBuf::from(normalize_remote_cwd(&mount.profile, &parent.to_string_lossy()))
+            PathBuf::from(normalize_remote_cwd(
+                &mount.profile,
+                &parent.to_string_lossy(),
+            ))
         } else if self.is_archive_root() {
             self.archive.as_ref()?.archive_path.parent()?.to_path_buf()
         } else {
@@ -264,7 +282,9 @@ impl Panel {
             SortMode::Name => {
                 entries.sort_by(|a, b| {
                     // directories first
-                    b.is_dir.cmp(&a.is_dir).then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+                    b.is_dir
+                        .cmp(&a.is_dir)
+                        .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
                 });
             }
             SortMode::Extension => {
@@ -278,16 +298,10 @@ impl Panel {
                 });
             }
             SortMode::Date => {
-                entries.sort_by(|a, b| {
-                    b.is_dir
-                        .cmp(&a.is_dir)
-                        .then(b.modified.cmp(&a.modified))
-                });
+                entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then(b.modified.cmp(&a.modified)));
             }
             SortMode::Size => {
-                entries.sort_by(|a, b| {
-                    b.is_dir.cmp(&a.is_dir).then(b.size.cmp(&a.size))
-                });
+                entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then(b.size.cmp(&a.size)));
             }
             SortMode::Unsorted => {}
         }
@@ -466,7 +480,12 @@ impl Panel {
         self.reload()
     }
 
-    pub fn mount_remote_prefetched(&mut self, profile: RemoteProfile, cwd: String, remote_entries: Vec<RemoteEntry>) {
+    pub fn mount_remote_prefetched(
+        &mut self,
+        profile: RemoteProfile,
+        cwd: String,
+        remote_entries: Vec<RemoteEntry>,
+    ) {
         self.clear_archive_mount();
         self.clear_remote_mount();
         self.fallback_local_path = self.persisted_path();
@@ -503,11 +522,18 @@ impl Panel {
 
     pub fn display_path(&self) -> String {
         if let Some(mount) = &self.archive {
-            let rel = self.path.strip_prefix(&mount.temp_root).unwrap_or(Path::new(""));
+            let rel = self
+                .path
+                .strip_prefix(&mount.temp_root)
+                .unwrap_or(Path::new(""));
             if rel.as_os_str().is_empty() {
                 mount.archive_path.to_string_lossy().into_owned()
             } else {
-                format!("{}{}", mount.archive_path.display(), format!("/{}", rel.display()))
+                format!(
+                    "{}{}",
+                    mount.archive_path.display(),
+                    format!("/{}", rel.display())
+                )
             }
         } else if let Some(remote) = &self.remote {
             remote_display_path(&remote.profile, &remote.cwd)
@@ -518,7 +544,8 @@ impl Panel {
 
     pub fn persisted_path(&self) -> PathBuf {
         if let Some(mount) = &self.archive {
-            mount.archive_path
+            mount
+                .archive_path
                 .parent()
                 .map(Path::to_path_buf)
                 .unwrap_or_else(|| self.path.clone())
@@ -631,7 +658,9 @@ impl Panel {
             .enumerate()
             .filter(|(_, e)| {
                 let low = e.name.to_lowercase();
-                low.contains(first.as_str()) && !low.starts_with(first.as_str()) && matches_all(&e.name)
+                low.contains(first.as_str())
+                    && !low.starts_with(first.as_str())
+                    && matches_all(&e.name)
             })
             .map(|(i, _)| i)
             .collect();
@@ -655,7 +684,11 @@ impl Panel {
     }
 
     pub fn selected_bytes(&self) -> u64 {
-        self.entries.iter().filter(|e| e.selected).map(|e| e.size).sum()
+        self.entries
+            .iter()
+            .filter(|e| e.selected)
+            .map(|e| e.size)
+            .sum()
     }
 
     pub fn current_entry(&self) -> Option<&Entry> {
@@ -721,7 +754,13 @@ fn ext_of(name: &str) -> String {
 }
 
 fn find_file_id_in_dir(dir: &Path) -> Option<PathBuf> {
-    for name in ["FILE_ID.DIZ", "file_id.diz", "File_id.diz", "FILE_ID.ANS", "file_id.ans"] {
+    for name in [
+        "FILE_ID.DIZ",
+        "file_id.diz",
+        "File_id.diz",
+        "FILE_ID.ANS",
+        "file_id.ans",
+    ] {
         let path = dir.join(name);
         if path.is_file() {
             return Some(path);

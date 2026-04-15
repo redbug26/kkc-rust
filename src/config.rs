@@ -6,8 +6,7 @@ use std::path::PathBuf;
 
 /// Returns the ProjectDirs handle for KKC.
 pub fn project_dirs() -> Result<ProjectDirs> {
-    ProjectDirs::from("be", "kyuran", "kkc")
-        .context("Could not determine project directories")
+    ProjectDirs::from("be", "kyuran", "kkc").context("Could not determine project directories")
 }
 
 /// Returns the path to the config file, creating parent dirs if needed.
@@ -100,7 +99,10 @@ pub struct ViewerConfig {
 
 impl Default for ViewerConfig {
     fn default() -> Self {
-        Self { word_wrap: true, tab_width: 4 }
+        Self {
+            word_wrap: true,
+            tab_width: 4,
+        }
     }
 }
 
@@ -184,7 +186,6 @@ pub struct Config {
     /// File-type associations (extension → opener commands).
     #[serde(default)]
     pub file_assoc: Vec<FileAssoc>,
-
 }
 
 impl Default for Config {
@@ -218,7 +219,8 @@ impl Default for Config {
 
 impl Config {
     /// Load config from disk, or return defaults if file doesn't exist.
-    pub fn load() -> Result<Self> {        let path = config_path()?;
+    pub fn load() -> Result<Self> {
+        let path = config_path()?;
         if path.exists() {
             let text = fs::read_to_string(&path)
                 .with_context(|| format!("Reading config: {}", path.display()))?;
@@ -234,8 +236,7 @@ impl Config {
     pub fn save(&self) -> Result<()> {
         let path = config_path()?;
         let text = toml::to_string_pretty(self).context("Serialising config")?;
-        fs::write(&path, text)
-            .with_context(|| format!("Writing config: {}", path.display()))?;
+        fs::write(&path, text).with_context(|| format!("Writing config: {}", path.display()))?;
         Ok(())
     }
 
@@ -269,9 +270,15 @@ fn default_pager() -> String {
     std::env::var("PAGER").unwrap_or_else(|_| "less".into())
 }
 
-const fn t() -> bool { true }
-const fn tab_default() -> usize { 4 }
-const fn history_max() -> usize { 32 }
+const fn t() -> bool {
+    true
+}
+const fn tab_default() -> usize {
+    4
+}
+const fn history_max() -> usize {
+    32
+}
 
 fn default_bookmarks() -> Vec<PathBuf> {
     vec![dirs_home()]

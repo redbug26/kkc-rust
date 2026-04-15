@@ -23,8 +23,10 @@ fn looks_like_image(path: &Path, data: &[u8]) -> bool {
         .and_then(|s| s.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
-    matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp")
-        || data.starts_with(b"\x89PNG\r\n\x1a\n")
+    matches!(
+        ext.as_str(),
+        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp"
+    ) || data.starts_with(b"\x89PNG\r\n\x1a\n")
         || data.starts_with(&[0xFF, 0xD8, 0xFF])
         || data.starts_with(b"GIF87a")
         || data.starts_with(b"GIF89a")
@@ -51,7 +53,10 @@ fn contains_ansi_escape(data: &[u8]) -> bool {
 
 fn looks_like_html(data: &[u8]) -> bool {
     let sample = String::from_utf8_lossy(&data[..data.len().min(8192)]).to_lowercase();
-    sample.contains("<html") || sample.contains("<body") || sample.contains("<a href") || sample.contains("<!doctype html")
+    sample.contains("<html")
+        || sample.contains("<body")
+        || sample.contains("<a href")
+        || sample.contains("<!doctype html")
 }
 
 fn is_likely_binary(data: &[u8]) -> bool {
@@ -75,9 +80,19 @@ pub(super) fn text_lines(
     let processed = preprocess_bytes(data, preproc_ops);
     let lines = split_line_bytes(&processed, line_feed)
         .into_iter()
-        .map(|bytes| bytes.into_iter().map(|b| byte_to_display_char(b, encoding)).collect::<String>().replace('\t', "    "))
+        .map(|bytes| {
+            bytes
+                .into_iter()
+                .map(|b| byte_to_display_char(b, encoding))
+                .collect::<String>()
+                .replace('\t', "    ")
+        })
         .collect::<Vec<_>>();
-    if lines.is_empty() { vec![String::new()] } else { lines }
+    if lines.is_empty() {
+        vec![String::new()]
+    } else {
+        lines
+    }
 }
 
 pub(super) fn ansi_lines(
@@ -88,7 +103,11 @@ pub(super) fn ansi_lines(
 ) -> Vec<String> {
     let processed = preprocess_bytes(data, preproc_ops);
     let text = ansi_to_text(&processed, line_feed, encoding);
-    if text.is_empty() { vec![String::new()] } else { text }
+    if text.is_empty() {
+        vec![String::new()]
+    } else {
+        text
+    }
 }
 
 pub(super) fn hex_lines(data: &[u8], encoding: EncodingMode) -> Vec<String> {
@@ -103,11 +122,21 @@ pub(super) fn hex_lines(data: &[u8], encoding: EncodingMode) -> Vec<String> {
             .join(" ");
         let ascii: String = chunk
             .iter()
-            .map(|&b| if b < 0x20 || b == 0x7f { '.' } else { byte_to_display_char(b, encoding) })
+            .map(|&b| {
+                if b < 0x20 || b == 0x7f {
+                    '.'
+                } else {
+                    byte_to_display_char(b, encoding)
+                }
+            })
             .collect();
         lines.push(format!("{:08X}  {:<47}  {}", offset, hex, ascii));
     }
-    if lines.is_empty() { vec![String::new()] } else { lines }
+    if lines.is_empty() {
+        vec![String::new()]
+    } else {
+        lines
+    }
 }
 
 fn split_line_bytes(input: &[u8], mode: LineFeedMode) -> Vec<Vec<u8>> {
@@ -227,7 +256,11 @@ fn byte_to_display_char(b: u8, encoding: EncodingMode) -> char {
     }
     match encoding {
         EncodingMode::Plain => {
-            if b.is_ascii() { b as char } else { '.' }
+            if b.is_ascii() {
+                b as char
+            } else {
+                '.'
+            }
         }
         EncodingMode::Cp437 => CP437[b as usize],
     }
@@ -299,7 +332,10 @@ fn ansi_to_text(data: &[u8], line_feed: LineFeedMode, encoding: EncodingMode) ->
                 col = 0;
             }
             b'\n' => {
-                if matches!(line_feed, LineFeedMode::DosCrLf | LineFeedMode::UnixLf | LineFeedMode::Mixed) {
+                if matches!(
+                    line_feed,
+                    LineFeedMode::DosCrLf | LineFeedMode::UnixLf | LineFeedMode::Mixed
+                ) {
                     row += 1;
                     while lines.len() <= row {
                         lines.push(String::new());
@@ -364,7 +400,9 @@ fn parse_ansi_params(args: &str) -> Vec<u16> {
     if args.is_empty() {
         return vec![0];
     }
-    args.split(';').filter_map(|p| p.parse::<u16>().ok()).collect()
+    args.split(';')
+        .filter_map(|p| p.parse::<u16>().ok())
+        .collect()
 }
 
 pub(super) fn preproc_op_label(op: PreprocOp) -> String {
@@ -381,20 +419,18 @@ pub(super) fn preproc_op_label(op: PreprocOp) -> String {
 }
 
 const CP437: [char; 256] = [
-    '\0','☺','☻','♥','♦','♣','♠','•','◘','○','◙','♂','♀','♪','♫','☼',
-    '►','◄','↕','‼','¶','§','▬','↨','↑','↓','→','←','∟','↔','▲','▼',
-    ' ','!','"','#','$','%','&','\'','(',')','*','+',',','-','.','/',
-    '0','1','2','3','4','5','6','7','8','9',':',';','<','=','>','?',
-    '@','A','B','C','D','E','F','G','H','I','J','K','L','M','N','O',
-    'P','Q','R','S','T','U','V','W','X','Y','Z','[','\\',']','^','_',
-    '`','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o',
-    'p','q','r','s','t','u','v','w','x','y','z','{','|','}','~','⌂',
-    'Ç','ü','é','â','ä','à','å','ç','ê','ë','è','ï','î','ì','Ä','Å',
-    'É','æ','Æ','ô','ö','ò','û','ù','ÿ','Ö','Ü','¢','£','¥','₧','ƒ',
-    'á','í','ó','ú','ñ','Ñ','ª','º','¿','⌐','¬','½','¼','¡','«','»',
-    '░','▒','▓','│','┤','Á','Â','À','©','╣','║','╗','╝','¢','¥','┐',
-    '└','┴','┬','├','─','┼','ã','Ã','╚','╔','╩','╦','╠','═','╬','¤',
-    'ð','Ð','Ê','Ë','È','ı','Í','Î','Ï','┘','┌','█','▄','¦','Ì','▀',
-    'Ó','ß','Ô','Ò','õ','Õ','µ','þ','Þ','Ú','Û','Ù','ý','Ý','¯','´',
-    '≡','±','‗','¾','¶','§','÷','¸','°','¨','·','¹','³','²','■',' ',
+    '\0', '☺', '☻', '♥', '♦', '♣', '♠', '•', '◘', '○', '◙', '♂', '♀', '♪', '♫', '☼', '►', '◄', '↕',
+    '‼', '¶', '§', '▬', '↨', '↑', '↓', '→', '←', '∟', '↔', '▲', '▼', ' ', '!', '"', '#', '$', '%',
+    '&', '\'', '(', ')', '*', '+', ',', '-', '.', '/', '0', '1', '2', '3', '4', '5', '6', '7', '8',
+    '9', ':', ';', '<', '=', '>', '?', '@', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K',
+    'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '[', '\\', ']', '^',
+    '_', '`', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q',
+    'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '{', '|', '}', '~', '⌂', 'Ç', 'ü', 'é', 'â', 'ä',
+    'à', 'å', 'ç', 'ê', 'ë', 'è', 'ï', 'î', 'ì', 'Ä', 'Å', 'É', 'æ', 'Æ', 'ô', 'ö', 'ò', 'û', 'ù',
+    'ÿ', 'Ö', 'Ü', '¢', '£', '¥', '₧', 'ƒ', 'á', 'í', 'ó', 'ú', 'ñ', 'Ñ', 'ª', 'º', '¿', '⌐', '¬',
+    '½', '¼', '¡', '«', '»', '░', '▒', '▓', '│', '┤', 'Á', 'Â', 'À', '©', '╣', '║', '╗', '╝', '¢',
+    '¥', '┐', '└', '┴', '┬', '├', '─', '┼', 'ã', 'Ã', '╚', '╔', '╩', '╦', '╠', '═', '╬', '¤', 'ð',
+    'Ð', 'Ê', 'Ë', 'È', 'ı', 'Í', 'Î', 'Ï', '┘', '┌', '█', '▄', '¦', 'Ì', '▀', 'Ó', 'ß', 'Ô', 'Ò',
+    'õ', 'Õ', 'µ', 'þ', 'Þ', 'Ú', 'Û', 'Ù', 'ý', 'Ý', '¯', '´', '≡', '±', '‗', '¾', '¶', '§', '÷',
+    '¸', '°', '¨', '·', '¹', '³', '²', '■', ' ',
 ];

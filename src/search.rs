@@ -52,10 +52,7 @@ where
         if entry.file_type().is_dir() {
             continue;
         }
-        let file_name = entry
-            .file_name()
-            .to_string_lossy()
-            .to_lowercase();
+        let file_name = entry.file_name().to_string_lossy().to_lowercase();
 
         if !glob_match(&pat, &file_name) {
             continue;

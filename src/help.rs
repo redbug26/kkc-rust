@@ -42,9 +42,18 @@ pub struct HelpSystem {
 
 #[derive(Debug, Clone, Copy)]
 pub enum HelpView {
-    Index { cursor: usize },
-    Topics { section: usize, cursor: usize },
-    Page { topic: usize, scroll: u16, selected_link: usize },
+    Index {
+        cursor: usize,
+    },
+    Topics {
+        section: usize,
+        cursor: usize,
+    },
+    Page {
+        topic: usize,
+        scroll: u16,
+        selected_link: usize,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -94,7 +103,6 @@ impl HelpState {
             false
         }
     }
-
 }
 
 impl HelpSystem {
@@ -112,7 +120,10 @@ impl HelpSystem {
                 if let Some(topic) = current_topic.and_then(|idx| topics.get_mut(idx)) {
                     topic.lines.push(HelpLine {
                         kind: HelpLineKind::Normal,
-                        spans: vec![HelpSpan { text: String::new(), link_target: None }],
+                        spans: vec![HelpSpan {
+                            text: String::new(),
+                            link_target: None,
+                        }],
                     });
                 }
                 continue;
@@ -122,14 +133,20 @@ impl HelpSystem {
                 '*' => {}
                 '@' => {
                     let title = line[1..].trim().to_string();
-                    sections.push(HelpSection { title, topics: Vec::new() });
+                    sections.push(HelpSection {
+                        title,
+                        topics: Vec::new(),
+                    });
                     current_section = Some(sections.len() - 1);
                     current_topic = None;
                 }
                 ':' => {
                     let title = line[1..].trim().to_string();
                     let topic_idx = topics.len();
-                    topics.push(HelpTopic { title: title.clone(), lines: Vec::new() });
+                    topics.push(HelpTopic {
+                        title: title.clone(),
+                        lines: Vec::new(),
+                    });
                     if let Some(section_idx) = current_section {
                         sections[section_idx].topics.push(topic_idx);
                     }
@@ -171,7 +188,11 @@ impl HelpSystem {
             }
         }
 
-        Self { sections, topics, topic_index }
+        Self {
+            sections,
+            topics,
+            topic_index,
+        }
     }
 
     pub fn find_topic(&self, name: &str) -> Option<usize> {
@@ -183,7 +204,12 @@ impl HelpTopic {
     pub fn link_count(&self) -> usize {
         self.lines
             .iter()
-            .map(|line| line.spans.iter().filter(|span| span.link_target.is_some()).count())
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .filter(|span| span.link_target.is_some())
+                    .count()
+            })
             .sum()
     }
 
@@ -225,12 +251,12 @@ impl HelpTopic {
                                     .fg(Color::Cyan)
                                     .add_modifier(Modifier::UNDERLINED)
                             }
-                            (None, HelpLineKind::CenteredHeading) => {
-                                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
-                            }
-                            (None, HelpLineKind::Heading) => {
-                                Style::default().fg(Color::LightYellow).add_modifier(Modifier::BOLD)
-                            }
+                            (None, HelpLineKind::CenteredHeading) => Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
+                            (None, HelpLineKind::Heading) => Style::default()
+                                .fg(Color::LightYellow)
+                                .add_modifier(Modifier::BOLD),
                             (None, HelpLineKind::Normal) => Style::default().fg(Color::White),
                         };
                         Span::styled(span.text.clone(), style)
@@ -253,11 +279,17 @@ fn parse_inline_links(line: &str) -> Vec<HelpSpan> {
     while let Some(start) = rest.find('<') {
         let (before, after_start) = rest.split_at(start);
         if !before.is_empty() {
-            spans.push(HelpSpan { text: before.to_string(), link_target: None });
+            spans.push(HelpSpan {
+                text: before.to_string(),
+                link_target: None,
+            });
         }
 
         let Some(end) = after_start.find('>') else {
-            spans.push(HelpSpan { text: after_start.to_string(), link_target: None });
+            spans.push(HelpSpan {
+                text: after_start.to_string(),
+                link_target: None,
+            });
             return spans;
         };
 
@@ -268,14 +300,20 @@ fn parse_inline_links(line: &str) -> Vec<HelpSpan> {
                 link_target: Some(target.to_string()),
             });
         } else {
-            spans.push(HelpSpan { text: after_start[..=end].to_string(), link_target: None });
+            spans.push(HelpSpan {
+                text: after_start[..=end].to_string(),
+                link_target: None,
+            });
         }
 
         rest = &after_start[end + 1..];
     }
 
     if !rest.is_empty() || spans.is_empty() {
-        spans.push(HelpSpan { text: rest.to_string(), link_target: None });
+        spans.push(HelpSpan {
+            text: rest.to_string(),
+            link_target: None,
+        });
     }
 
     spans

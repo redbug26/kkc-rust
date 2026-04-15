@@ -1,14 +1,14 @@
 use crate::file_ops::{self, CopyOptions};
 use crate::panel::Entry;
 use crate::remote::{
-    download_bulk_into_dir, download_with_progress, scan_remote_stats, upload_bulk_into_dir,
-    upload_with_progress, RemoteProfile, RemoteStats,
+    RemoteProfile, RemoteStats, download_bulk_into_dir, download_with_progress, scan_remote_stats,
+    upload_bulk_into_dir, upload_with_progress,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
-use std::sync::Arc;
 use std::time::Instant;
 
 #[derive(Debug, Clone)]
@@ -34,7 +34,12 @@ impl CopyDialogState {
     pub const START: usize = 4;
     pub const CANCEL: usize = 5;
 
-    pub fn new(destination: String, file_count: usize, total_bytes: u64, stats_pending: bool) -> Self {
+    pub fn new(
+        destination: String,
+        file_count: usize,
+        total_bytes: u64,
+        stats_pending: bool,
+    ) -> Self {
         let cursor = destination.len();
         Self {
             destination,
@@ -86,13 +91,20 @@ pub struct CopyTask {
 #[derive(Debug, Clone)]
 pub enum CopyTaskMessage {
     Progress(CopyProgressState),
-    Finished { copied_items: usize, errors: Vec<String>, aborted: bool },
+    Finished {
+        copied_items: usize,
+        errors: Vec<String>,
+        aborted: bool,
+    },
 }
 
 #[derive(Debug, Clone)]
 pub enum CopySource {
     Local(PathBuf),
-    Remote { profile: RemoteProfile, path: String },
+    Remote {
+        profile: RemoteProfile,
+        path: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -121,12 +133,17 @@ pub fn spawn_copy_scan(profile: RemoteProfile, items: Vec<(String, bool)>) -> Co
             let mut partial = |delta: RemoteStats| {
                 total.files += delta.files;
                 total.bytes += delta.bytes;
-                let _ = tx.send(CopyScanUpdate { stats: total, done: false, finished_entry: None });
+                let _ = tx.send(CopyScanUpdate {
+                    stats: total,
+                    done: false,
+                    finished_entry: None,
+                });
             };
-            let item_total = match scan_remote_stats(&profile, &path, is_dir, &mut partial, &cancel_bg) {
-                Ok(stats) => stats,
-                Err(_) => break,
-            };
+            let item_total =
+                match scan_remote_stats(&profile, &path, is_dir, &mut partial, &cancel_bg) {
+                    Ok(stats) => stats,
+                    Err(_) => break,
+                };
             let _ = tx.send(CopyScanUpdate {
                 stats: total,
                 done: false,
@@ -142,7 +159,11 @@ pub fn spawn_copy_scan(profile: RemoteProfile, items: Vec<(String, bool)>) -> Co
     CopyScanTask { rx, cancel }
 }
 
-pub fn spawn_copy_task(jobs: Vec<CopyJob>, destination: CopyDestination, options: CopyOptions) -> CopyTask {
+pub fn spawn_copy_task(
+    jobs: Vec<CopyJob>,
+    destination: CopyDestination,
+    options: CopyOptions,
+) -> CopyTask {
     let (tx, rx) = mpsc::channel::<CopyTaskMessage>();
     let cancel = Arc::new(AtomicBool::new(false));
     let cancel_bg = cancel.clone();
@@ -156,13 +177,18 @@ pub fn spawn_copy_task(jobs: Vec<CopyJob>, destination: CopyDestination, options
 
         for (idx, job) in jobs.iter().enumerate() {
             if cancel_bg.load(Ordering::Relaxed) {
-                let _ = tx.send(CopyTaskMessage::Finished { copied_items, errors, aborted: true });
+                let _ = tx.send(CopyTaskMessage::Finished {
+                    copied_items,
+                    errors,
+                    aborted: true,
+                });
                 return;
             }
 
             let mut file_done = 0u64;
             let emit = |name: &str, absolute_file_done: u64, total_done_base: u64| {
-                let remaining_secs = estimate_remaining(started, total_done_base + absolute_file_done, total_bytes);
+                let remaining_secs =
+                    estimate_remaining(started, total_done_base + absolute_file_done, total_bytes);
                 let _ = tx.send(CopyTaskMessage::Progress(CopyProgressState {
                     current_name: name.to_string(),
                     item_index: idx + 1,
@@ -217,10 +243,21 @@ pub fn spawn_copy_task(jobs: Vec<CopyJob>, destination: CopyDestination, options
                         download_with_progress(profile, path, dst_dir, false, &mut cb).map(|_| ())
                     }
                 }
-                (CopySource::Remote { profile: src_profile, path }, CopyDestination::Remote { profile: dst_profile, cwd }) => {
-                    let temp_dir = std::env::temp_dir()
-                        .join("kkc-copy-worker")
-                        .join(format!("{}-{}", std::process::id(), idx));
+                (
+                    CopySource::Remote {
+                        profile: src_profile,
+                        path,
+                    },
+                    CopyDestination::Remote {
+                        profile: dst_profile,
+                        cwd,
+                    },
+                ) => {
+                    let temp_dir = std::env::temp_dir().join("kkc-copy-worker").join(format!(
+                        "{}-{}",
+                        std::process::id(),
+                        idx
+                    ));
                     let mut cb = |name: &str, bytes: u64| -> bool {
                         if cancel_bg.load(Ordering::Relaxed) {
                             return false;
@@ -236,11 +273,12 @@ pub fn spawn_copy_task(jobs: Vec<CopyJob>, destination: CopyDestination, options
                             Ok(())
                         })
                     } else {
-                        download_with_progress(src_profile, path, &temp_dir, false, &mut cb).and_then(|tmp_path| {
-                            upload_with_progress(dst_profile, &tmp_path, cwd, false, &mut cb)?;
-                            cleanup_temp_download(&tmp_path);
-                            Ok(())
-                        })
+                        download_with_progress(src_profile, path, &temp_dir, false, &mut cb)
+                            .and_then(|tmp_path| {
+                                upload_with_progress(dst_profile, &tmp_path, cwd, false, &mut cb)?;
+                                cleanup_temp_download(&tmp_path);
+                                Ok(())
+                            })
                     };
                     let _ = std::fs::remove_dir_all(&temp_dir);
                     res
@@ -251,10 +289,18 @@ pub fn spawn_copy_task(jobs: Vec<CopyJob>, destination: CopyDestination, options
                 Ok(()) => {
                     total_done += job.total_bytes;
                     copied_items += 1;
-                    emit(&job.entry.name, job.total_bytes, total_done - job.total_bytes);
+                    emit(
+                        &job.entry.name,
+                        job.total_bytes,
+                        total_done - job.total_bytes,
+                    );
                 }
                 Err(err) if is_abort_error(&err) || cancel_bg.load(Ordering::Relaxed) => {
-                    let _ = tx.send(CopyTaskMessage::Finished { copied_items, errors, aborted: true });
+                    let _ = tx.send(CopyTaskMessage::Finished {
+                        copied_items,
+                        errors,
+                        aborted: true,
+                    });
                     return;
                 }
                 Err(err) => {
@@ -264,7 +310,11 @@ pub fn spawn_copy_task(jobs: Vec<CopyJob>, destination: CopyDestination, options
             }
         }
 
-        let _ = tx.send(CopyTaskMessage::Finished { copied_items, errors, aborted: false });
+        let _ = tx.send(CopyTaskMessage::Finished {
+            copied_items,
+            errors,
+            aborted: false,
+        });
     });
 
     CopyTask { rx, cancel }

@@ -3,7 +3,10 @@ pub(super) fn parse_hex_query(query: &str) -> Option<Vec<u8>> {
         .chars()
         .filter(|c| !c.is_ascii_whitespace())
         .collect::<String>();
-    if compact.is_empty() || compact.len() % 2 != 0 || !compact.chars().all(|c| c.is_ascii_hexdigit()) {
+    if compact.is_empty()
+        || compact.len() % 2 != 0
+        || !compact.chars().all(|c| c.is_ascii_hexdigit())
+    {
         return None;
     }
     let mut out = Vec::with_capacity(compact.len() / 2);

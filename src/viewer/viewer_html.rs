@@ -4,7 +4,10 @@ use std::collections::HashMap;
 pub(super) fn html_document(data: &[u8]) -> HtmlDocument {
     let input = String::from_utf8_lossy(data).into_owned();
     let chars: Vec<char> = input.chars().collect();
-    let mut lines: Vec<HtmlLine> = vec![HtmlLine { spans: Vec::new(), plain: String::new() }];
+    let mut lines: Vec<HtmlLine> = vec![HtmlLine {
+        spans: Vec::new(),
+        plain: String::new(),
+    }];
     let mut anchors = HashMap::new();
     let mut links = Vec::new();
     let mut in_pre = false;
@@ -65,7 +68,14 @@ pub(super) fn html_document(data: &[u8]) -> HtmlDocument {
             }
             if j < chars.len() && chars[j] == ';' {
                 let entity: String = chars[i + 1..j].iter().collect();
-                append_html_text(&mut lines, &decode_entity(&entity), current_href.clone(), &mut links, &mut collapse_space, in_pre);
+                append_html_text(
+                    &mut lines,
+                    &decode_entity(&entity),
+                    current_href.clone(),
+                    &mut links,
+                    &mut collapse_space,
+                    in_pre,
+                );
                 i = j + 1;
                 continue;
             }
@@ -76,16 +86,31 @@ pub(super) fn html_document(data: &[u8]) -> HtmlDocument {
             push_html_line(&mut lines);
             collapse_space = true;
         } else {
-            append_html_text(&mut lines, &ch.to_string(), current_href.clone(), &mut links, &mut collapse_space, in_pre);
+            append_html_text(
+                &mut lines,
+                &ch.to_string(),
+                current_href.clone(),
+                &mut links,
+                &mut collapse_space,
+                in_pre,
+            );
         }
         i += 1;
     }
 
-    while lines.last().is_some_and(|line| line.spans.is_empty() && line.plain.is_empty()) && lines.len() > 1 {
+    while lines
+        .last()
+        .is_some_and(|line| line.spans.is_empty() && line.plain.is_empty())
+        && lines.len() > 1
+    {
         lines.pop();
     }
 
-    HtmlDocument { lines, anchors, links }
+    HtmlDocument {
+        lines,
+        anchors,
+        links,
+    }
 }
 
 fn append_html_text(
@@ -122,18 +147,30 @@ fn append_html_text(
         last.text.push_str(&normalized);
     } else {
         if let Some(target) = href.clone() {
-            links.push(HtmlLinkRef { line: line_idx, href: target });
+            links.push(HtmlLinkRef {
+                line: line_idx,
+                href: target,
+            });
         }
-        line.spans.push(HtmlSpan { text: normalized.clone(), href });
+        line.spans.push(HtmlSpan {
+            text: normalized.clone(),
+            href,
+        });
     }
     line.plain.push_str(&normalized);
 }
 
 fn push_html_line(lines: &mut Vec<HtmlLine>) {
-    if lines.last().is_some_and(|line| line.spans.is_empty() && line.plain.is_empty()) {
+    if lines
+        .last()
+        .is_some_and(|line| line.spans.is_empty() && line.plain.is_empty())
+    {
         return;
     }
-    lines.push(HtmlLine { spans: Vec::new(), plain: String::new() });
+    lines.push(HtmlLine {
+        spans: Vec::new(),
+        plain: String::new(),
+    });
 }
 
 fn attr_value(tag: &str, attr: &str) -> Option<String> {

@@ -40,8 +40,8 @@ impl FileCategory {
 
             // --- Archives ---
             Some(
-                "zip" | "rar" | "7z" | "tar" | "gz" | "bz2" | "xz" | "zst" | "lha" | "lzh"
-                | "arj" | "cab" | "iso" | "tgz" | "tbz2" | "txz" | "deb" | "rpm" | "pkg",
+                "zip" | "rar" | "7z" | "tar" | "gz" | "bz2" | "xz" | "zst" | "lha" | "lzh" | "arj"
+                | "cab" | "iso" | "tgz" | "tbz2" | "txz" | "deb" | "rpm" | "pkg",
             ) => FileCategory::Archive,
 
             // --- Audio ---
@@ -70,22 +70,22 @@ impl FileCategory {
 
             // --- Source code ---
             Some(
-                "rs" | "c" | "h" | "cc" | "cpp" | "cxx" | "hh" | "hpp" | "hxx" | "py" | "js"
-                | "ts" | "java" | "cs" | "go" | "rb" | "php" | "swift" | "kt" | "asm" | "s"
-                | "lua" | "pl" | "pm" | "ex" | "exs" | "hs" | "elm" | "clj" | "scala" | "dart"
-                | "zig" | "nim" | "v" | "vhd" | "vhdl" | "verilog" | "sv",
+                "rs" | "c" | "h" | "cc" | "cpp" | "cxx" | "hh" | "hpp" | "hxx" | "py" | "js" | "ts"
+                | "java" | "cs" | "go" | "rb" | "php" | "swift" | "kt" | "asm" | "s" | "lua" | "pl"
+                | "pm" | "ex" | "exs" | "hs" | "elm" | "clj" | "scala" | "dart" | "zig" | "nim"
+                | "v" | "vhd" | "vhdl" | "verilog" | "sv",
             ) => FileCategory::Source,
 
             // --- Data / config ---
             Some(
-                "toml" | "yaml" | "yml" | "json" | "json5" | "xml" | "csv" | "tsv" | "ini"
-                | "cfg" | "conf" | "env" | "properties" | "lock" | "sql" | "db" | "sqlite",
+                "toml" | "yaml" | "yml" | "json" | "json5" | "xml" | "csv" | "tsv" | "ini" | "cfg"
+                | "conf" | "env" | "properties" | "lock" | "sql" | "db" | "sqlite",
             ) => FileCategory::Data,
 
             // --- Text ---
             Some(
-                "txt" | "md" | "rst" | "log" | "readme" | "changelog" | "license" | "nfo"
-                | "diz" | "ans" | "htm" | "html" | "css",
+                "txt" | "md" | "rst" | "log" | "readme" | "changelog" | "license" | "nfo" | "diz"
+                | "ans" | "htm" | "html" | "css",
             ) => FileCategory::Text,
 
             _ => FileCategory::Unknown,

@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -55,8 +55,14 @@ pub fn copy_entry_with_options(
     }
 }
 
-fn copy_file(src: &Path, dst: &Path, options: CopyOptions, mut progress: Option<ProgressFn>) -> Result<()> {
-    let total = src.metadata()
+fn copy_file(
+    src: &Path,
+    dst: &Path,
+    options: CopyOptions,
+    mut progress: Option<ProgressFn>,
+) -> Result<()> {
+    let total = src
+        .metadata()
         .with_context(|| format!("stat {}", src.display()))?
         .len();
     if should_skip_copy(src, dst, options) {
@@ -71,22 +77,22 @@ fn copy_file(src: &Path, dst: &Path, options: CopyOptions, mut progress: Option<
         fs::create_dir_all(parent)?;
     }
     if dst.exists() && options.overwrite && !dst.is_dir() {
-        fs::remove_file(dst)
-            .with_context(|| format!("remove existing {}", dst.display()))?;
+        fs::remove_file(dst).with_context(|| format!("remove existing {}", dst.display()))?;
     }
-    let mut in_file = fs::File::open(src)
-        .with_context(|| format!("open {}", src.display()))?;
-    let mut out_file = fs::File::create(dst)
-        .with_context(|| format!("create {}", dst.display()))?;
+    let mut in_file = fs::File::open(src).with_context(|| format!("open {}", src.display()))?;
+    let mut out_file =
+        fs::File::create(dst).with_context(|| format!("create {}", dst.display()))?;
     let mut buf = vec![0u8; 1024 * 1024];
     let mut done = 0u64;
     loop {
-        let read = in_file.read(&mut buf)
+        let read = in_file
+            .read(&mut buf)
             .with_context(|| format!("read {}", src.display()))?;
         if read == 0 {
             break;
         }
-        out_file.write_all(&buf[..read])
+        out_file
+            .write_all(&buf[..read])
             .with_context(|| format!("write {}", dst.display()))?;
         done += read as u64;
         if let Some(cb) = progress.as_mut() {
@@ -169,11 +175,9 @@ pub fn move_entry(src: &Path, dst_dir: &Path) -> Result<()> {
 
 pub fn delete_entry(path: &Path) -> Result<()> {
     if path.is_dir() && !path.is_symlink() {
-        fs::remove_dir_all(path)
-            .with_context(|| format!("remove_dir_all: {}", path.display()))
+        fs::remove_dir_all(path).with_context(|| format!("remove_dir_all: {}", path.display()))
     } else {
-        fs::remove_file(path)
-            .with_context(|| format!("remove_file: {}", path.display()))
+        fs::remove_file(path).with_context(|| format!("remove_file: {}", path.display()))
     }
 }
 
@@ -210,15 +214,15 @@ pub fn make_dir(parent: &Path, name: &str) -> Result<PathBuf> {
         bail!("Illegal characters in directory name");
     }
     let path = parent.join(name);
-    fs::create_dir_all(&path)
-        .with_context(|| format!("mkdir {}", path.display()))?;
+    fs::create_dir_all(&path).with_context(|| format!("mkdir {}", path.display()))?;
     Ok(path)
 }
 
 // ---------------------------------------------------------------------------
 // Compute directory size
 // ---------------------------------------------------------------------------
-#[allow(dead_code)]pub fn dir_size(path: &Path) -> u64 {
+#[allow(dead_code)]
+pub fn dir_size(path: &Path) -> u64 {
     entry_size(path)
 }
 

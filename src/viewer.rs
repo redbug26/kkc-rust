@@ -1,11 +1,11 @@
 use anyhow::{Context, Result};
 use crossterm::{cursor::MoveTo, queue, terminal::window_size};
 use image::{ImageFormat, ImageReader};
-use ratatui::style::{Color, Modifier, Style};
 use ratatui::layout::Rect;
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use std::env;
 use std::collections::HashMap;
+use std::env;
 use std::fs;
 use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
@@ -269,7 +269,11 @@ impl Viewer {
         } else if self.preproc_ops.len() == 1 {
             preproc_op_label(self.preproc_ops[0])
         } else {
-            format!("{}+{}", preproc_op_label(self.preproc_ops[0]), self.preproc_ops.len() - 1)
+            format!(
+                "{}+{}",
+                preproc_op_label(self.preproc_ops[0]),
+                self.preproc_ops.len() - 1
+            )
         }
     }
 
@@ -363,7 +367,11 @@ impl Viewer {
 
     pub fn preproc_last_param(&self) -> Option<u8> {
         self.preproc_ops.last().and_then(|op| match *op {
-            PreprocOp::Xor(v) | PreprocOp::And(v) | PreprocOp::Or(v) | PreprocOp::Ror(v) | PreprocOp::Add(v) => Some(v),
+            PreprocOp::Xor(v)
+            | PreprocOp::And(v)
+            | PreprocOp::Or(v)
+            | PreprocOp::Ror(v)
+            | PreprocOp::Add(v) => Some(v),
             _ => None,
         })
     }
@@ -393,9 +401,15 @@ impl Viewer {
     }
 
     pub fn update_preproc_param(&mut self, idx: usize, delta: i16) {
-        let Some(op) = self.preproc_ops.get_mut(idx) else { return; };
+        let Some(op) = self.preproc_ops.get_mut(idx) else {
+            return;
+        };
         match op {
-            PreprocOp::Xor(v) | PreprocOp::And(v) | PreprocOp::Or(v) | PreprocOp::Ror(v) | PreprocOp::Add(v) => {
+            PreprocOp::Xor(v)
+            | PreprocOp::And(v)
+            | PreprocOp::Or(v)
+            | PreprocOp::Ror(v)
+            | PreprocOp::Add(v) => {
                 *v = v.wrapping_add_signed(delta as i8);
                 self.rebuild_decoded_lines();
                 self.rebuild_matches();
@@ -413,7 +427,10 @@ impl Viewer {
     }
 
     pub fn toggle_wrap(&mut self) {
-        if matches!(self.mode, ViewMode::Text | ViewMode::Ansi | ViewMode::Html | ViewMode::Eml) {
+        if matches!(
+            self.mode,
+            ViewMode::Text | ViewMode::Ansi | ViewMode::Html | ViewMode::Eml
+        ) {
             self.wrap = !self.wrap;
         }
     }
@@ -488,7 +505,10 @@ impl Viewer {
         if self.matches.is_empty() {
             return;
         }
-        self.match_pos = self.match_pos.checked_sub(1).unwrap_or(self.matches.len() - 1);
+        self.match_pos = self
+            .match_pos
+            .checked_sub(1)
+            .unwrap_or(self.matches.len() - 1);
         self.scroll = self.matches[self.match_pos];
     }
 
@@ -692,11 +712,10 @@ impl Viewer {
                     i += 1;
                 }
                 let token: String = chars[start..i].iter().collect();
-                let style = if keywords
-                    .iter()
-                    .any(|kw| kw.eq_ignore_ascii_case(&token))
-                {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                let style = if keywords.iter().any(|kw| kw.eq_ignore_ascii_case(&token)) {
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(Color::White)
                 };
@@ -714,7 +733,10 @@ impl Viewer {
 
     fn rebuild_decoded_lines(&mut self) {
         self.text_lines = text_lines(&self.raw, self.line_feed, &self.preproc_ops, self.encoding);
-        self.hex_lines = hex_lines(&preprocess_bytes(&self.raw, &self.preproc_ops), self.encoding);
+        self.hex_lines = hex_lines(
+            &preprocess_bytes(&self.raw, &self.preproc_ops),
+            self.encoding,
+        );
         self.ansi_lines = ansi_lines(&self.raw, self.line_feed, &self.preproc_ops, self.encoding);
         self.eml_lines = eml_lines(&self.raw);
         self.eml_rendered = eml_render_lines(&self.raw);
@@ -726,17 +748,22 @@ impl Viewer {
         match mode {
             ViewMode::Text => {
                 if self.text_lines.is_empty() {
-                    self.text_lines = text_lines(&self.raw, self.line_feed, &self.preproc_ops, self.encoding);
+                    self.text_lines =
+                        text_lines(&self.raw, self.line_feed, &self.preproc_ops, self.encoding);
                 }
             }
             ViewMode::Hex => {
                 if self.hex_lines.is_empty() {
-                    self.hex_lines = hex_lines(&preprocess_bytes(&self.raw, &self.preproc_ops), self.encoding);
+                    self.hex_lines = hex_lines(
+                        &preprocess_bytes(&self.raw, &self.preproc_ops),
+                        self.encoding,
+                    );
                 }
             }
             ViewMode::Ansi => {
                 if self.ansi_lines.is_empty() {
-                    self.ansi_lines = ansi_lines(&self.raw, self.line_feed, &self.preproc_ops, self.encoding);
+                    self.ansi_lines =
+                        ansi_lines(&self.raw, self.line_feed, &self.preproc_ops, self.encoding);
                 }
             }
             ViewMode::Eml => {
@@ -748,7 +775,9 @@ impl Viewer {
                 }
             }
             ViewMode::Html => {
-                if self.html.lines.is_empty() && (self.html.anchors.is_empty() && self.html.links.is_empty()) {
+                if self.html.lines.is_empty()
+                    && (self.html.anchors.is_empty() && self.html.links.is_empty())
+                {
                     self.html = html_document(&self.raw);
                 }
             }
@@ -763,7 +792,10 @@ impl Viewer {
         if let Ok(mut positions) = viewer_positions().lock() {
             positions.insert(
                 self.path.clone(),
-                ViewerPosition { scroll: self.scroll, hscroll: self.hscroll },
+                ViewerPosition {
+                    scroll: self.scroll,
+                    hscroll: self.hscroll,
+                },
             );
         }
     }
@@ -783,8 +815,13 @@ impl Viewer {
 
 pub fn kitty_graphics_supported() -> bool {
     env::var_os("KITTY_WINDOW_ID").is_some()
-        || env::var("TERM").map(|term| term.contains("kitty")).unwrap_or(false)
-        || matches!(env::var("TERM_PROGRAM").ok().as_deref(), Some("ghostty") | Some("WezTerm"))
+        || env::var("TERM")
+            .map(|term| term.contains("kitty"))
+            .unwrap_or(false)
+        || matches!(
+            env::var("TERM_PROGRAM").ok().as_deref(),
+            Some("ghostty") | Some("WezTerm")
+        )
 }
 
 pub fn clear_kitty_images<W: Write>(out: &mut W) -> Result<()> {
@@ -930,7 +967,10 @@ fn detect_image_info(path: &Path, data: &[u8]) -> Option<ImageInfo> {
             kitty_png: OnceLock::new(),
         });
     }
-    if matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp") {
+    if matches!(
+        ext.as_str(),
+        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp"
+    ) {
         return Some(ImageInfo {
             format: match ext.as_str() {
                 "png" => "PNG",
@@ -1012,7 +1052,18 @@ fn jpeg_dimensions(data: &[u8]) -> (Option<u32>, Option<u32>) {
         }
         if matches!(
             marker,
-            0xC0 | 0xC1 | 0xC2 | 0xC3 | 0xC5 | 0xC6 | 0xC7 | 0xC9 | 0xCA | 0xCB | 0xCD | 0xCE | 0xCF
+            0xC0 | 0xC1
+                | 0xC2
+                | 0xC3
+                | 0xC5
+                | 0xC6
+                | 0xC7
+                | 0xC9
+                | 0xCA
+                | 0xCB
+                | 0xCD
+                | 0xCE
+                | 0xCF
         ) && seg_len >= 7
         {
             let height = u16::from_be_bytes([data[i + 3], data[i + 4]]) as u32;

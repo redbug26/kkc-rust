@@ -70,7 +70,6 @@ impl RemoteProfile {
             RemoteKind::Imap(imap) => imap.host.clone(),
         }
     }
-
 }
 
 #[derive(Debug, Clone)]
@@ -145,8 +144,8 @@ pub fn load_profiles() -> Result<Vec<RemoteProfile>> {
 pub fn save_profile(profile: &RemoteProfile, old_name: Option<&str>) -> Result<()> {
     let path = connections_path()?;
     let mut store = if path.exists() {
-        let text = fs::read_to_string(&path)
-            .with_context(|| format!("Reading {}", path.display()))?;
+        let text =
+            fs::read_to_string(&path).with_context(|| format!("Reading {}", path.display()))?;
         toml::from_str::<ConnectionStore>(&text)
             .with_context(|| format!("Parsing {}", path.display()))?
     } else {
@@ -159,7 +158,9 @@ pub fn save_profile(profile: &RemoteProfile, old_name: Option<&str>) -> Result<(
             if let Some(old) = old_name {
                 store.sftp.retain(|p| !p.name.eq_ignore_ascii_case(old));
             }
-            store.sftp.retain(|p| !p.name.eq_ignore_ascii_case(&profile.name));
+            store
+                .sftp
+                .retain(|p| !p.name.eq_ignore_ascii_case(&profile.name));
             store.sftp.push(SftpProfileToml {
                 name: profile.name.clone(),
                 host: sftp.host.clone(),
@@ -173,7 +174,9 @@ pub fn save_profile(profile: &RemoteProfile, old_name: Option<&str>) -> Result<(
             if let Some(old) = old_name {
                 store.imap.retain(|p| !p.name.eq_ignore_ascii_case(old));
             }
-            store.imap.retain(|p| !p.name.eq_ignore_ascii_case(&profile.name));
+            store
+                .imap
+                .retain(|p| !p.name.eq_ignore_ascii_case(&profile.name));
             store.imap.push(ImapProfileToml {
                 name: profile.name.clone(),
                 host: imap.host.clone(),
@@ -237,7 +240,10 @@ where
     if cancel.load(Ordering::Relaxed) {
         bail!("Aborted");
     }
-    progress(format!("Listing {}...", if cwd == "/" { "root" } else { &cwd }));
+    progress(format!(
+        "Listing {}...",
+        if cwd == "/" { "root" } else { &cwd }
+    ));
     let entries = match &profile.kind {
         RemoteKind::Sftp(_) => list_sftp_dir(profile, &cwd, show_hidden)?,
         RemoteKind::Imap(imap) => list_imap_dir_with_progress(imap, &cwd, progress)?,
@@ -289,7 +295,11 @@ pub fn download_into_dir(
     }
 }
 
-pub fn download_bulk_into_dir(profile: &RemoteProfile, remote_path: &str, local_dir: &Path) -> Result<PathBuf> {
+pub fn download_bulk_into_dir(
+    profile: &RemoteProfile,
+    remote_path: &str,
+    local_dir: &Path,
+) -> Result<PathBuf> {
     match &profile.kind {
         RemoteKind::Sftp(_) => download_sftp_bulk_into_dir(profile, remote_path, local_dir),
         RemoteKind::Imap(imap) => download_imap_into_dir(imap, remote_path, local_dir),
@@ -308,7 +318,11 @@ pub fn upload_into_dir(
     }
 }
 
-pub fn upload_bulk_into_dir(profile: &RemoteProfile, local_path: &Path, remote_dir: &str) -> Result<String> {
+pub fn upload_bulk_into_dir(
+    profile: &RemoteProfile,
+    local_path: &Path,
+    remote_dir: &str,
+) -> Result<String> {
     match &profile.kind {
         RemoteKind::Sftp(_) => upload_sftp_bulk_into_dir(profile, local_path, remote_dir),
         RemoteKind::Imap(_) => bail!("Upload to IMAP is not supported"),
@@ -356,19 +370,28 @@ pub fn delete_path(profile: &RemoteProfile, remote_path: &str, is_dir: bool) -> 
     }
 }
 
-pub fn download_to_temp(profile: &RemoteProfile, remote_path: &str, recursive: bool) -> Result<PathBuf> {
+pub fn download_to_temp(
+    profile: &RemoteProfile,
+    remote_path: &str,
+    recursive: bool,
+) -> Result<PathBuf> {
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis();
-    let base = std::env::temp_dir()
-        .join("kkc-remote")
-        .join(format!("{}-{}", std::process::id(), stamp));
+    let base =
+        std::env::temp_dir()
+            .join("kkc-remote")
+            .join(format!("{}-{}", std::process::id(), stamp));
     download_into_dir(profile, remote_path, &base, recursive)
 }
 
 #[allow(dead_code)]
-pub fn remote_stats(profile: &RemoteProfile, remote_path: &str, is_dir: bool) -> Result<RemoteStats> {
+pub fn remote_stats(
+    profile: &RemoteProfile,
+    remote_path: &str,
+    is_dir: bool,
+) -> Result<RemoteStats> {
     match &profile.kind {
         RemoteKind::Sftp(_) => remote_sftp_stats(profile, remote_path, is_dir),
         RemoteKind::Imap(imap) => remote_imap_stats(imap, remote_path, is_dir),
@@ -405,8 +428,12 @@ where
     F: FnMut(&str, u64) -> bool,
 {
     match &profile.kind {
-        RemoteKind::Sftp(_) => download_sftp_with_progress(profile, remote_path, local_dir, recursive, progress),
-        RemoteKind::Imap(imap) => download_imap_with_progress(imap, remote_path, local_dir, progress),
+        RemoteKind::Sftp(_) => {
+            download_sftp_with_progress(profile, remote_path, local_dir, recursive, progress)
+        }
+        RemoteKind::Imap(imap) => {
+            download_imap_with_progress(imap, remote_path, local_dir, progress)
+        }
     }
 }
 
@@ -421,7 +448,9 @@ where
     F: FnMut(&str, u64) -> bool,
 {
     match &profile.kind {
-        RemoteKind::Sftp(_) => upload_sftp_with_progress(profile, local_path, remote_dir, recursive, progress),
+        RemoteKind::Sftp(_) => {
+            upload_sftp_with_progress(profile, local_path, remote_dir, recursive, progress)
+        }
         RemoteKind::Imap(_) => bail!("Upload to IMAP is not supported"),
     }
 }
@@ -431,8 +460,7 @@ fn load_saved_profiles() -> Result<Vec<RemoteProfile>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let text = fs::read_to_string(&path)
-        .with_context(|| format!("Reading {}", path.display()))?;
+    let text = fs::read_to_string(&path).with_context(|| format!("Reading {}", path.display()))?;
     let store = toml::from_str::<ConnectionStore>(&text)
         .with_context(|| format!("Parsing {}", path.display()))?;
     let mut out = Vec::new();
@@ -505,18 +533,29 @@ fn load_ssh_profiles() -> Result<Vec<RemoteProfile>> {
             continue;
         }
         let mut parts = line.split_whitespace();
-        let Some(key) = parts.next() else { continue; };
+        let Some(key) = parts.next() else {
+            continue;
+        };
         let rest = parts.collect::<Vec<_>>().join(" ");
         match key.to_ascii_lowercase().as_str() {
             "host" => {
-                flush(&mut out, &mut current_hosts, &host_name, &user, port, &identity_file);
+                flush(
+                    &mut out,
+                    &mut current_hosts,
+                    &host_name,
+                    &user,
+                    port,
+                    &identity_file,
+                );
                 host_name = None;
                 user = None;
                 port = None;
                 identity_file = None;
                 current_hosts = rest
                     .split_whitespace()
-                    .filter(|alias| !alias.contains('*') && !alias.contains('?') && !alias.starts_with('!'))
+                    .filter(|alias| {
+                        !alias.contains('*') && !alias.contains('?') && !alias.starts_with('!')
+                    })
                     .map(|s| s.to_string())
                     .collect();
             }
@@ -527,7 +566,14 @@ fn load_ssh_profiles() -> Result<Vec<RemoteProfile>> {
             _ => {}
         }
     }
-    flush(&mut out, &mut current_hosts, &host_name, &user, port, &identity_file);
+    flush(
+        &mut out,
+        &mut current_hosts,
+        &host_name,
+        &user,
+        port,
+        &identity_file,
+    );
     Ok(out)
 }
 
@@ -544,7 +590,11 @@ fn resolve_sftp_initial_dir(profile: &RemoteProfile, sftp: &SftpProfile) -> Resu
     Ok("/".into())
 }
 
-fn list_sftp_dir(profile: &RemoteProfile, cwd: &str, show_hidden: bool) -> Result<Vec<RemoteEntry>> {
+fn list_sftp_dir(
+    profile: &RemoteProfile,
+    cwd: &str,
+    show_hidden: bool,
+) -> Result<Vec<RemoteEntry>> {
     let out = run_sftp_batch(
         profile,
         &[format!("cd {}", batch_quote(cwd)), "ls -la".into()],
@@ -575,11 +625,21 @@ fn download_sftp_into_dir(
         .file_name()
         .context("remote path has no file name")?;
     let local_target = local_dir.join(name);
-    download_sftp_path::<fn(&str, u64) -> bool>(profile, remote_path, &local_target, recursive, None)?;
+    download_sftp_path::<fn(&str, u64) -> bool>(
+        profile,
+        remote_path,
+        &local_target,
+        recursive,
+        None,
+    )?;
     Ok(local_target)
 }
 
-fn download_sftp_bulk_into_dir(profile: &RemoteProfile, remote_path: &str, local_dir: &Path) -> Result<PathBuf> {
+fn download_sftp_bulk_into_dir(
+    profile: &RemoteProfile,
+    remote_path: &str,
+    local_dir: &Path,
+) -> Result<PathBuf> {
     let name = Path::new(remote_path)
         .file_name()
         .context("remote path has no file name")?;
@@ -604,14 +664,28 @@ fn upload_sftp_into_dir(
     remote_dir: &str,
     recursive: bool,
 ) -> Result<String> {
-    let name = local_path.file_name().context("local path has no file name")?;
+    let name = local_path
+        .file_name()
+        .context("local path has no file name")?;
     let remote_target = join_remote(remote_dir, &name.to_string_lossy());
-    upload_sftp_path::<fn(&str, u64) -> bool>(profile, local_path, &remote_target, recursive, None)?;
+    upload_sftp_path::<fn(&str, u64) -> bool>(
+        profile,
+        local_path,
+        &remote_target,
+        recursive,
+        None,
+    )?;
     Ok(remote_target)
 }
 
-fn upload_sftp_bulk_into_dir(profile: &RemoteProfile, local_path: &Path, remote_dir: &str) -> Result<String> {
-    let name = local_path.file_name().context("local path has no file name")?;
+fn upload_sftp_bulk_into_dir(
+    profile: &RemoteProfile,
+    local_path: &Path,
+    remote_dir: &str,
+) -> Result<String> {
+    let name = local_path
+        .file_name()
+        .context("local path has no file name")?;
     let remote_target = join_remote(remote_dir, &name.to_string_lossy());
     run_sftp_batch(
         profile,
@@ -624,17 +698,28 @@ fn upload_sftp_bulk_into_dir(profile: &RemoteProfile, local_path: &Path, remote_
     Ok(remote_target)
 }
 
-fn remote_sftp_stats(profile: &RemoteProfile, remote_path: &str, is_dir: bool) -> Result<RemoteStats> {
+fn remote_sftp_stats(
+    profile: &RemoteProfile,
+    remote_path: &str,
+    is_dir: bool,
+) -> Result<RemoteStats> {
     if !is_dir {
         let parent = Path::new(remote_path).parent().unwrap_or(Path::new("/"));
-        let file_name = Path::new(remote_path).file_name().unwrap_or_default().to_string_lossy().into_owned();
+        let file_name = Path::new(remote_path)
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
         let entries = list_sftp_dir(profile, &parent.to_string_lossy(), true)?;
         let size = entries
             .into_iter()
             .find(|e| e.name == file_name)
             .map(|e| e.size)
             .unwrap_or(0);
-        return Ok(RemoteStats { files: 1, bytes: size });
+        return Ok(RemoteStats {
+            files: 1,
+            bytes: size,
+        });
     }
     remote_sftp_dir_stats_recursive(profile, remote_path)
 }
@@ -674,7 +759,13 @@ where
         .file_name()
         .context("remote path has no file name")?;
     let local_target = local_dir.join(name);
-    download_sftp_path(profile, remote_path, &local_target, recursive, Some(progress))?;
+    download_sftp_path(
+        profile,
+        remote_path,
+        &local_target,
+        recursive,
+        Some(progress),
+    )?;
     Ok(local_target)
 }
 
@@ -688,9 +779,17 @@ fn upload_sftp_with_progress<F>(
 where
     F: FnMut(&str, u64) -> bool,
 {
-    let name = local_path.file_name().context("local path has no file name")?;
+    let name = local_path
+        .file_name()
+        .context("local path has no file name")?;
     let remote_target = join_remote(remote_dir, &name.to_string_lossy());
-    upload_sftp_path(profile, local_path, &remote_target, recursive, Some(progress))?;
+    upload_sftp_path(
+        profile,
+        local_path,
+        &remote_target,
+        recursive,
+        Some(progress),
+    )?;
     Ok(remote_target)
 }
 
@@ -707,7 +806,10 @@ fn delete_sftp_dir_recursive(profile: &RemoteProfile, remote_path: &str) -> Resu
     Ok(())
 }
 
-fn remote_sftp_dir_stats_recursive(profile: &RemoteProfile, remote_path: &str) -> Result<RemoteStats> {
+fn remote_sftp_dir_stats_recursive(
+    profile: &RemoteProfile,
+    remote_path: &str,
+) -> Result<RemoteStats> {
     let mut stats = RemoteStats::default();
     for child in list_sftp_dir(profile, remote_path, true)? {
         if child.is_dir {
@@ -741,7 +843,10 @@ where
             stats.files += sub.files;
             stats.bytes += sub.bytes;
         } else {
-            let delta = RemoteStats { files: 1, bytes: child.size };
+            let delta = RemoteStats {
+                files: 1,
+                bytes: child.size,
+            };
             stats.files += delta.files;
             stats.bytes += delta.bytes;
             progress(delta);
@@ -773,7 +878,10 @@ where
             )],
         )?;
         if let Some(cb) = progress.as_mut()
-            && !cb(remote_path, fs::metadata(local_target).map(|m| m.len()).unwrap_or(0))
+            && !cb(
+                remote_path,
+                fs::metadata(local_target).map(|m| m.len()).unwrap_or(0),
+            )
         {
             bail!("Aborted");
         }
@@ -784,9 +892,21 @@ where
     for child in list_sftp_dir(profile, remote_path, true)? {
         let child_local = local_target.join(&child.name);
         if child.is_dir {
-            download_sftp_path(profile, &child.path, &child_local, true, progress.as_deref_mut())?;
+            download_sftp_path(
+                profile,
+                &child.path,
+                &child_local,
+                true,
+                progress.as_deref_mut(),
+            )?;
         } else {
-            download_sftp_path(profile, &child.path, &child_local, false, progress.as_deref_mut())?;
+            download_sftp_path(
+                profile,
+                &child.path,
+                &child_local,
+                false,
+                progress.as_deref_mut(),
+            )?;
         }
     }
     Ok(())
@@ -812,7 +932,10 @@ where
             )],
         )?;
         if let Some(cb) = progress.as_mut()
-            && !cb(&local_path.to_string_lossy(), fs::metadata(local_path).map(|m| m.len()).unwrap_or(0))
+            && !cb(
+                &local_path.to_string_lossy(),
+                fs::metadata(local_path).map(|m| m.len()).unwrap_or(0),
+            )
         {
             bail!("Aborted");
         }
@@ -825,9 +948,21 @@ where
         let child_local = entry.path();
         let child_remote = join_remote(remote_target, &entry.file_name().to_string_lossy());
         if child_local.is_dir() {
-            upload_sftp_path(profile, &child_local, &child_remote, true, progress.as_deref_mut())?;
+            upload_sftp_path(
+                profile,
+                &child_local,
+                &child_remote,
+                true,
+                progress.as_deref_mut(),
+            )?;
         } else {
-            upload_sftp_path(profile, &child_local, &child_remote, false, progress.as_deref_mut())?;
+            upload_sftp_path(
+                profile,
+                &child_local,
+                &child_remote,
+                false,
+                progress.as_deref_mut(),
+            )?;
         }
     }
     Ok(())
@@ -853,7 +988,9 @@ fn run_sftp_batch(profile: &RemoteProfile, commands: &[String]) -> Result<String
         cmd.arg("-o").arg("IdentitiesOnly=yes");
     }
     cmd.arg(remote_target(profile));
-    cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
     let mut child = cmd.spawn().context("Launching sftp")?;
     {
@@ -889,7 +1026,11 @@ fn list_imap_dir(profile: &ImapProfile, cwd: &str) -> Result<Vec<RemoteEntry>> {
     list_imap_mailbox_contents(profile, cwd)
 }
 
-fn list_imap_dir_with_progress<F>(profile: &ImapProfile, cwd: &str, progress: &mut F) -> Result<Vec<RemoteEntry>>
+fn list_imap_dir_with_progress<F>(
+    profile: &ImapProfile,
+    cwd: &str,
+    progress: &mut F,
+) -> Result<Vec<RemoteEntry>>
 where
     F: FnMut(String),
 {
@@ -899,11 +1040,18 @@ where
     list_imap_mailbox_contents_with_progress(profile, cwd, progress)
 }
 
-fn remote_imap_stats(profile: &ImapProfile, remote_path: &str, is_dir: bool) -> Result<RemoteStats> {
+fn remote_imap_stats(
+    profile: &ImapProfile,
+    remote_path: &str,
+    is_dir: bool,
+) -> Result<RemoteStats> {
     if !is_dir {
         let (_, uid) = parse_imap_message_path(remote_path)?;
         let message = fetch_imap_message_meta(profile, remote_path)?;
-        return Ok(RemoteStats { files: usize::from(uid > 0), bytes: message.size });
+        return Ok(RemoteStats {
+            files: usize::from(uid > 0),
+            bytes: message.size,
+        });
     }
     let mailbox = decode_mailbox_path(remote_path)?;
     let messages = imap_fetch_messages(profile, &mailbox)?;
@@ -938,7 +1086,10 @@ where
         if cancel.load(Ordering::Relaxed) {
             bail!("Aborted");
         }
-        let delta = RemoteStats { files: 1, bytes: msg.size };
+        let delta = RemoteStats {
+            files: 1,
+            bytes: msg.size,
+        };
         total.files += 1;
         total.bytes += msg.size;
         progress(delta);
@@ -946,7 +1097,11 @@ where
     Ok(total)
 }
 
-fn download_imap_into_dir(profile: &ImapProfile, remote_path: &str, local_dir: &Path) -> Result<PathBuf> {
+fn download_imap_into_dir(
+    profile: &ImapProfile,
+    remote_path: &str,
+    local_dir: &Path,
+) -> Result<PathBuf> {
     if is_imap_message_path(remote_path) {
         return save_imap_message_to_dir(profile, remote_path, local_dir);
     }
@@ -980,20 +1135,28 @@ where
 fn list_imap_mailboxes(profile: &ImapProfile, parent_cwd: &str) -> Result<Vec<RemoteEntry>> {
     let mut noop = |_msg: &str| {};
     let mut session = imap_connect_with_progress(profile, &mut noop)?;
-    let names = session.list(None, Some("*")).context("Listing IMAP mailboxes")?;
+    let names = session
+        .list(None, Some("*"))
+        .context("Listing IMAP mailboxes")?;
     let entries = build_imap_mailbox_entries(&names, parent_cwd);
     let _ = session.logout();
     Ok(entries)
 }
 
-fn list_imap_mailboxes_with_progress<F>(profile: &ImapProfile, parent_cwd: &str, progress: &mut F) -> Result<Vec<RemoteEntry>>
+fn list_imap_mailboxes_with_progress<F>(
+    profile: &ImapProfile,
+    parent_cwd: &str,
+    progress: &mut F,
+) -> Result<Vec<RemoteEntry>>
 where
     F: FnMut(String),
 {
     let mut phase = |msg: &str| progress(msg.to_string());
     let mut session = imap_connect_with_progress(profile, &mut phase)?;
     progress("Listing mailboxes...".into());
-    let names = session.list(None, Some("*")).context("Listing IMAP mailboxes")?;
+    let names = session
+        .list(None, Some("*"))
+        .context("Listing IMAP mailboxes")?;
     let entries = build_imap_mailbox_entries(&names, parent_cwd);
     let _ = session.logout();
     Ok(entries)
@@ -1027,7 +1190,11 @@ fn list_imap_messages(profile: &ImapProfile, cwd: &str) -> Result<Vec<RemoteEntr
         .collect())
 }
 
-fn list_imap_mailbox_contents_with_progress<F>(profile: &ImapProfile, cwd: &str, progress: &mut F) -> Result<Vec<RemoteEntry>>
+fn list_imap_mailbox_contents_with_progress<F>(
+    profile: &ImapProfile,
+    cwd: &str,
+    progress: &mut F,
+) -> Result<Vec<RemoteEntry>>
 where
     F: FnMut(String),
 {
@@ -1036,7 +1203,11 @@ where
     Ok(entries)
 }
 
-fn list_imap_messages_with_progress<F>(profile: &ImapProfile, cwd: &str, progress: &mut F) -> Result<Vec<RemoteEntry>>
+fn list_imap_messages_with_progress<F>(
+    profile: &ImapProfile,
+    cwd: &str,
+    progress: &mut F,
+) -> Result<Vec<RemoteEntry>>
 where
     F: FnMut(String),
 {
@@ -1143,7 +1314,10 @@ fn fetch_imap_message_meta(profile: &ImapProfile, remote_path: &str) -> Result<I
     let mut session = imap_connect(profile)?;
     session.select(&mailbox)?;
     let fetches = session
-        .uid_fetch(uid.to_string(), "(UID RFC822.SIZE INTERNALDATE BODY.PEEK[HEADER.FIELDS (SUBJECT)])")
+        .uid_fetch(
+            uid.to_string(),
+            "(UID RFC822.SIZE INTERNALDATE BODY.PEEK[HEADER.FIELDS (SUBJECT)])",
+        )
         .context("Fetching IMAP message metadata")?;
     let Some(fetch) = fetches.iter().next() else {
         bail!("Message not found");
@@ -1153,7 +1327,11 @@ fn fetch_imap_message_meta(profile: &ImapProfile, remote_path: &str) -> Result<I
     Ok(meta)
 }
 
-fn save_imap_message_to_dir(profile: &ImapProfile, remote_path: &str, local_dir: &Path) -> Result<PathBuf> {
+fn save_imap_message_to_dir(
+    profile: &ImapProfile,
+    remote_path: &str,
+    local_dir: &Path,
+) -> Result<PathBuf> {
     let (mailbox, uid) = parse_imap_message_path(remote_path)?;
     let mut session = imap_connect(profile)?;
     session.select(&mailbox)?;
@@ -1185,7 +1363,10 @@ fn imap_fetch_messages(profile: &ImapProfile, mailbox: &str) -> Result<Vec<ImapM
     let mut session = imap_connect_with_progress(profile, &mut noop)?;
     session.select(mailbox)?;
     let fetches = session
-        .fetch("1:*", "(UID RFC822.SIZE INTERNALDATE BODY.PEEK[HEADER.FIELDS (SUBJECT)])")
+        .fetch(
+            "1:*",
+            "(UID RFC822.SIZE INTERNALDATE BODY.PEEK[HEADER.FIELDS (SUBJECT)])",
+        )
         .context("Listing IMAP messages")?;
     let mut out = Vec::new();
     for fetch in fetches.iter() {
@@ -1197,7 +1378,11 @@ fn imap_fetch_messages(profile: &ImapProfile, mailbox: &str) -> Result<Vec<ImapM
     Ok(out)
 }
 
-fn imap_fetch_messages_with_progress<F>(profile: &ImapProfile, mailbox: &str, progress: &mut F) -> Result<Vec<ImapMessageMeta>>
+fn imap_fetch_messages_with_progress<F>(
+    profile: &ImapProfile,
+    mailbox: &str,
+    progress: &mut F,
+) -> Result<Vec<ImapMessageMeta>>
 where
     F: FnMut(String),
 {
@@ -1207,7 +1392,10 @@ where
     session.select(mailbox)?;
     progress("Fetching message headers...".into());
     let fetches = session
-        .fetch("1:*", "(UID RFC822.SIZE INTERNALDATE BODY.PEEK[HEADER.FIELDS (SUBJECT)])")
+        .fetch(
+            "1:*",
+            "(UID RFC822.SIZE INTERNALDATE BODY.PEEK[HEADER.FIELDS (SUBJECT)])",
+        )
         .context("Listing IMAP messages")?;
     let mut out = Vec::new();
     for fetch in fetches.iter() {
@@ -1228,14 +1416,14 @@ struct ImapMessageMeta {
 }
 
 fn parse_imap_fetch(fetch: &imap::types::Fetch) -> Result<ImapMessageMeta> {
-    let uid = fetch.uid.ok_or_else(|| anyhow::anyhow!("Missing IMAP UID"))?;
+    let uid = fetch
+        .uid
+        .ok_or_else(|| anyhow::anyhow!("Missing IMAP UID"))?;
     let size = fetch.size.unwrap_or(0) as u64;
-    let modified = fetch
-        .internal_date()
-        .and_then(|date| {
-            let ts = date.timestamp();
-            Local.timestamp_opt(ts, 0).single()
-        });
+    let modified = fetch.internal_date().and_then(|date| {
+        let ts = date.timestamp();
+        Local.timestamp_opt(ts, 0).single()
+    });
     let subject = fetch
         .header()
         .map(|raw| parse_header_value(raw, "subject"))
@@ -1270,7 +1458,9 @@ fn imap_connect_with_progress<F>(profile: &ImapProfile, progress: &mut F) -> Res
 where
     F: FnMut(&str),
 {
-    let tls = TlsConnector::builder().build().context("Building TLS connector")?;
+    let tls = TlsConnector::builder()
+        .build()
+        .context("Building TLS connector")?;
     let host = profile.host.trim();
     if host.is_empty() {
         bail!("IMAP host is required");
@@ -1283,13 +1473,14 @@ where
         .next()
         .context("No IMAP socket address resolved")?;
     progress("Opening TCP socket");
-    let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(10))
-        .context("Connecting to IMAP")?;
+    let stream =
+        TcpStream::connect_timeout(&addr, Duration::from_secs(10)).context("Connecting to IMAP")?;
     stream.set_read_timeout(Some(Duration::from_secs(15))).ok();
     stream.set_write_timeout(Some(Duration::from_secs(15))).ok();
     progress("Negotiating TLS");
     let tls_stream = Client::new(
-        TlsConnector::connect(&tls, host, stream).map_err(|err| anyhow::anyhow!("TLS handshake failed: {err}"))?
+        TlsConnector::connect(&tls, host, stream)
+            .map_err(|err| anyhow::anyhow!("TLS handshake failed: {err}"))?,
     );
     let mut client = tls_stream;
     progress("Reading IMAP greeting");
@@ -1357,9 +1548,19 @@ fn decode_mailbox_component(name: &str) -> String {
 fn safe_fs_name(name: &str) -> String {
     let cleaned = name
         .chars()
-        .map(|ch| if matches!(ch, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { '_' } else { ch })
+        .map(|ch| {
+            if matches!(ch, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') {
+                '_'
+            } else {
+                ch
+            }
+        })
         .collect::<String>();
-    if cleaned.is_empty() { "mailbox".into() } else { cleaned }
+    if cleaned.is_empty() {
+        "mailbox".into()
+    } else {
+        cleaned
+    }
 }
 
 fn safe_mail_subject(subject: &str) -> String {
@@ -1401,7 +1602,13 @@ fn expand_tilde(path: &str) -> PathBuf {
 }
 
 fn parse_ls_line(line: &str) -> Option<RemoteEntry> {
-    if line.is_empty() || line.starts_with("sftp>") || line.starts_with("Connected to") || line.starts_with("Fetching") || line.starts_with("Remote working directory:") || line.starts_with("total ") {
+    if line.is_empty()
+        || line.starts_with("sftp>")
+        || line.starts_with("Connected to")
+        || line.starts_with("Fetching")
+        || line.starts_with("Remote working directory:")
+        || line.starts_with("total ")
+    {
         return None;
     }
     let mode_txt = line.split_whitespace().next()?;
@@ -1442,20 +1649,34 @@ fn parse_ls_line(line: &str) -> Option<RemoteEntry> {
 fn parse_sftp_time(month: &str, day: &str, time_or_year: &str) -> Option<DateTime<Local>> {
     let day = day.parse::<u32>().ok()?;
     let month_num = match &month.to_ascii_lowercase()[..] {
-        "jan" => 1, "feb" => 2, "mar" => 3, "apr" => 4, "may" => 5, "jun" => 6,
-        "jul" => 7, "aug" => 8, "sep" => 9, "oct" => 10, "nov" => 11, "dec" => 12,
+        "jan" => 1,
+        "feb" => 2,
+        "mar" => 3,
+        "apr" => 4,
+        "may" => 5,
+        "jun" => 6,
+        "jul" => 7,
+        "aug" => 8,
+        "sep" => 9,
+        "oct" => 10,
+        "nov" => 11,
+        "dec" => 12,
         _ => return None,
     };
     if let Some((hh, mm)) = time_or_year.split_once(':') {
         let year = Local::now().year();
         let date = NaiveDate::from_ymd_opt(year, month_num, day)?;
         let time = NaiveTime::from_hms_opt(hh.parse().ok()?, mm.parse().ok()?, 0)?;
-        Local.from_local_datetime(&NaiveDateTime::new(date, time)).single()
+        Local
+            .from_local_datetime(&NaiveDateTime::new(date, time))
+            .single()
     } else {
         let year = time_or_year.parse::<i32>().ok()?;
         let date = NaiveDate::from_ymd_opt(year, month_num, day)?;
         let time = NaiveTime::from_hms_opt(0, 0, 0)?;
-        Local.from_local_datetime(&NaiveDateTime::new(date, time)).single()
+        Local
+            .from_local_datetime(&NaiveDateTime::new(date, time))
+            .single()
     }
 }
 
@@ -1464,9 +1685,15 @@ fn parse_mode_bits(txt: &str) -> u32 {
     let chars: Vec<char> = txt.chars().collect();
     for (idx, ch) in chars.iter().enumerate().skip(1).take(9) {
         let bit = match idx {
-            1 => 0o400, 2 => 0o200, 3 => 0o100,
-            4 => 0o040, 5 => 0o020, 6 => 0o010,
-            7 => 0o004, 8 => 0o002, 9 => 0o001,
+            1 => 0o400,
+            2 => 0o200,
+            3 => 0o100,
+            4 => 0o040,
+            5 => 0o020,
+            6 => 0o010,
+            7 => 0o004,
+            8 => 0o002,
+            9 => 0o001,
             _ => 0,
         };
         if *ch != '-' {

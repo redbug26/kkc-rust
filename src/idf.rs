@@ -42,7 +42,11 @@ pub fn probe_path(path: &Path) -> Option<IdInfo> {
     if meta.is_dir() {
         return Some(IdInfo {
             format: "Directory".into(),
-            detail: path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
+            detail: path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
             kind: IdfKind::Other,
             title: None,
             composer: None,
@@ -107,87 +111,335 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         .map(|s| s.to_ascii_lowercase())
         .unwrap_or_default();
 
-    let info = if data.starts_with(b"PK\x03\x04") || data.starts_with(b"PK\x05\x06") || data.starts_with(b"PK\x07\x08") {
-        Some(info("ZIP archive", path, IdfKind::Archive, None, None, vec![]))
+    let info = if data.starts_with(b"PK\x03\x04")
+        || data.starts_with(b"PK\x05\x06")
+        || data.starts_with(b"PK\x07\x08")
+    {
+        Some(info(
+            "ZIP archive",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(b"7z\xBC\xAF\x27\x1C") {
-        Some(info("7-Zip archive", path, IdfKind::Archive, None, None, vec![]))
+        Some(info(
+            "7-Zip archive",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(&[0x1F, 0x8B]) {
-        Some(info("GZip archive", path, IdfKind::Archive, None, None, vec![]))
+        Some(info(
+            "GZip archive",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(b"BZh") {
-        Some(info("BZip2 archive", path, IdfKind::Archive, None, None, vec![]))
+        Some(info(
+            "BZip2 archive",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(&[0xFD, b'7', b'z', b'X', b'Z', 0x00]) {
-        Some(info("XZ archive", path, IdfKind::Archive, None, None, vec![]))
+        Some(info(
+            "XZ archive",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(b"\x60\xEA") {
-        Some(info("ARJ archive", path, IdfKind::Archive, None, None, vec![]))
+        Some(info(
+            "ARJ archive",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(b"MSCF") {
-        Some(info("CAB archive", path, IdfKind::Archive, None, None, vec![]))
+        Some(info(
+            "CAB archive",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(&[0x28, 0xB5, 0x2F, 0xFD]) {
-        Some(info("Zstandard archive", path, IdfKind::Archive, None, None, vec![]))
+        Some(info(
+            "Zstandard archive",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(b"-lh") && data.get(6) == Some(&b'-') {
-        Some(info("LHA/LZH archive", path, IdfKind::Archive, None, None, vec![]))
+        Some(info(
+            "LHA/LZH archive",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
     } else if is_tar(&data) {
-        Some(info("TAR archive", path, IdfKind::Archive, None, None, vec![]))
+        Some(info(
+            "TAR archive",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
     } else if is_iso9660(&data) {
-        Some(info("ISO-9660 image", path, IdfKind::Archive, None, None, vec![]))
+        Some(info(
+            "ISO-9660 image",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(b"Rar!\x1A\x07\x00") {
-        Some(info("RAR archive v4", path, IdfKind::Archive, None, None, vec![]))
+        Some(info(
+            "RAR archive v4",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(b"Rar!\x1A\x07\x01\x00") {
-        Some(info("RAR archive v5", path, IdfKind::Archive, None, None, vec![]))
+        Some(info(
+            "RAR archive v5",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(b"\x89PNG\r\n\x1A\n") {
         let (w, h) = png_size(&data).unwrap_or((0, 0));
-        Some(info("PNG bitmap", path, IdfKind::Bitmap, None, None, wh_lines(w, h)))
+        Some(info(
+            "PNG bitmap",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            wh_lines(w, h),
+        ))
     } else if data.starts_with(b"RIFF") && data.get(8..12) == Some(b"WEBP") {
         let (w, h) = webp_size(&data).unwrap_or((0, 0));
-        Some(info("WebP bitmap", path, IdfKind::Bitmap, None, None, wh_lines(w, h)))
+        Some(info(
+            "WebP bitmap",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            wh_lines(w, h),
+        ))
     } else if data.starts_with(&[0x00, 0x00, 0x01, 0x00]) {
-        Some(info("ICO bitmap", path, IdfKind::Bitmap, None, None, ico_lines(&data)))
+        Some(info(
+            "ICO bitmap",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            ico_lines(&data),
+        ))
     } else if is_pcx(&data) {
-        Some(info("PCX bitmap", path, IdfKind::Bitmap, None, None, pcx_lines(&data)))
+        Some(info(
+            "PCX bitmap",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            pcx_lines(&data),
+        ))
     } else if data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a") {
         let (w, h) = gif_size(&data).unwrap_or((0, 0));
-        Some(info("GIF bitmap", path, IdfKind::Bitmap, None, None, wh_lines(w, h)))
+        Some(info(
+            "GIF bitmap",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            wh_lines(w, h),
+        ))
     } else if data.starts_with(b"\xFF\xD8\xFF") {
         let (w, h) = jpeg_size(&data).unwrap_or((0, 0));
-        Some(info("JPEG bitmap", path, IdfKind::Bitmap, None, None, wh_lines(w, h)))
+        Some(info(
+            "JPEG bitmap",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            wh_lines(w, h),
+        ))
     } else if data.starts_with(b"BM") {
         let (w, h) = bmp_size(&data).unwrap_or((0, 0));
-        Some(info("BMP bitmap", path, IdfKind::Bitmap, None, None, wh_lines(w, h)))
+        Some(info(
+            "BMP bitmap",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            wh_lines(w, h),
+        ))
     } else if is_tiff(&data) {
-        Some(info("TIFF bitmap", path, IdfKind::Bitmap, None, None, vec![]))
+        Some(info(
+            "TIFF bitmap",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(b"8BPS") {
-        Some(info("Photoshop bitmap", path, IdfKind::Bitmap, None, None, vec![]))
+        Some(info(
+            "Photoshop bitmap",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            vec![],
+        ))
     } else if is_tga(&data, &ext) {
-        Some(info("TGA bitmap", path, IdfKind::Bitmap, None, None, tga_lines(&data)))
+        Some(info(
+            "TGA bitmap",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            tga_lines(&data),
+        ))
     } else if data.starts_with(b"RIFF") && data.get(8..12) == Some(b"WAVE") {
         Some(wav_info(path, &data))
     } else if data.starts_with(b"FORM") && data.get(8..12) == Some(b"AIFF") {
-        Some(info("AIFF audio", path, IdfKind::Sample, None, None, vec![]))
+        Some(info(
+            "AIFF audio",
+            path,
+            IdfKind::Sample,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(b".snd") {
         Some(info("AU audio", path, IdfKind::Sample, None, None, vec![]))
     } else if data.starts_with(b"RIFF") && data.get(8..12) == Some(b"AVI ") {
-        Some(info("AVI animation", path, IdfKind::Animation, None, None, vec![]))
+        Some(info(
+            "AVI animation",
+            path,
+            IdfKind::Animation,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.len() > 12 && &data[4..8] == b"ftyp" {
-        Some(info("MP4/MOV container", path, IdfKind::Animation, None, None, mp4_lines(&data)))
+        Some(info(
+            "MP4/MOV container",
+            path,
+            IdfKind::Animation,
+            None,
+            None,
+            mp4_lines(&data),
+        ))
     } else if data.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]) {
-        Some(info("Matroska container", path, IdfKind::Animation, None, None, vec![]))
+        Some(info(
+            "Matroska container",
+            path,
+            IdfKind::Animation,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(b"fLaC") {
-        Some(info("FLAC audio", path, IdfKind::Sample, None, None, flac_lines(&data)))
+        Some(info(
+            "FLAC audio",
+            path,
+            IdfKind::Sample,
+            None,
+            None,
+            flac_lines(&data),
+        ))
     } else if data.starts_with(b"OggS") {
-        Some(info("Ogg stream", path, IdfKind::Sample, None, None, ogg_lines(&data)))
+        Some(info(
+            "Ogg stream",
+            path,
+            IdfKind::Sample,
+            None,
+            None,
+            ogg_lines(&data),
+        ))
     } else if data.starts_with(b"ID3") {
-        Some(info("MP3 audio", path, IdfKind::Sample, id3v1_title(&data), None, vec![]))
+        Some(info(
+            "MP3 audio",
+            path,
+            IdfKind::Sample,
+            id3v1_title(&data),
+            None,
+            vec![],
+        ))
     } else if data.starts_with(b"MThd") {
         Some(midi_info(path, &data))
     } else if data.starts_with(b"%PDF-") {
-        Some(info("PDF document", path, IdfKind::Other, None, None, pdf_lines(&data)))
+        Some(info(
+            "PDF document",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            pdf_lines(&data),
+        ))
     } else if data.starts_with(b"{\\rtf") {
-        Some(info("RTF document", path, IdfKind::Other, None, None, vec![]))
+        Some(info(
+            "RTF document",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(b"MZ") {
-        Some(info("DOS/Windows executable", path, IdfKind::Other, None, None, vec![]))
+        Some(info(
+            "DOS/Windows executable",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(b"\x7FELF") {
-        Some(info("ELF executable", path, IdfKind::Other, None, None, vec![]))
+        Some(info(
+            "ELF executable",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
     } else if is_s3m(&data) {
-        Some(info("Scream Tracker module", path, IdfKind::Module, fixed_text(&data[..28]), None, vec![]))
+        Some(info(
+            "Scream Tracker module",
+            path,
+            IdfKind::Module,
+            fixed_text(&data[..28]),
+            None,
+            vec![],
+        ))
     } else if is_xm(&data) {
         Some(info(
             "FastTracker module",
@@ -198,13 +450,41 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             vec![],
         ))
     } else if is_it(&data) {
-        Some(info("Impulse Tracker module", path, IdfKind::Module, fixed_text(&data[4..30]), None, vec![]))
+        Some(info(
+            "Impulse Tracker module",
+            path,
+            IdfKind::Module,
+            fixed_text(&data[4..30]),
+            None,
+            vec![],
+        ))
     } else if is_mod(&data) {
-        Some(info("ProTracker module", path, IdfKind::Module, fixed_text(&data[..20]), None, vec![]))
+        Some(info(
+            "ProTracker module",
+            path,
+            IdfKind::Module,
+            fixed_text(&data[..20]),
+            None,
+            vec![],
+        ))
     } else if matches!(ext.as_str(), "htm" | "html") || looks_like_html(&data) {
-        Some(info("HTML document", path, IdfKind::Other, html_title(&data), None, vec![]))
+        Some(info(
+            "HTML document",
+            path,
+            IdfKind::Other,
+            html_title(&data),
+            None,
+            vec![],
+        ))
     } else if matches!(ext.as_str(), "ans" | "nfo" | "diz") {
-        Some(info("ANSI/DOS text", path, IdfKind::Other, None, None, vec![]))
+        Some(info(
+            "ANSI/DOS text",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
     } else if seems_text(&data) {
         Some(info("Text file", path, IdfKind::Other, None, None, vec![]))
     } else {
@@ -224,7 +504,11 @@ fn info(
 ) -> IdInfo {
     IdInfo {
         format: format.into(),
-        detail: path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
+        detail: path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned(),
         kind,
         title,
         composer,
@@ -375,7 +659,10 @@ fn ico_lines(data: &[u8]) -> Vec<String> {
 }
 
 fn is_pcx(data: &[u8]) -> bool {
-    data.len() >= 128 && data[0] == 0x0A && matches!(data[2], 0 | 1) && matches!(data[3], 1 | 2 | 4 | 8)
+    data.len() >= 128
+        && data[0] == 0x0A
+        && matches!(data[2], 0 | 1)
+        && matches!(data[3], 1 | 2 | 4 | 8)
 }
 
 fn pcx_lines(data: &[u8]) -> Vec<String> {
@@ -514,7 +801,11 @@ fn html_title(data: &[u8]) -> Option<String> {
     let start = lower.find("<title>")?;
     let end = lower[start + 7..].find("</title>")?;
     let title = sample[start + 7..start + 7 + end].trim();
-    if title.is_empty() { None } else { Some(title.to_string()) }
+    if title.is_empty() {
+        None
+    } else {
+        Some(title.to_string())
+    }
 }
 
 fn clean_field(s: &str) -> String {
@@ -539,7 +830,12 @@ fn is_mod(data: &[u8]) -> bool {
     data.len() > 1084
         && matches!(
             data.get(1080..1084),
-            Some(b"M.K.") | Some(b"M!K!") | Some(b"FLT4") | Some(b"4CHN") | Some(b"6CHN") | Some(b"8CHN")
+            Some(b"M.K.")
+                | Some(b"M!K!")
+                | Some(b"FLT4")
+                | Some(b"4CHN")
+                | Some(b"6CHN")
+                | Some(b"8CHN")
         )
 }
 

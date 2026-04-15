@@ -1,22 +1,27 @@
-use crate::copy::{
-    count_local_files, spawn_copy_scan, spawn_copy_task, CopyDestination, CopyDialogState,
-    CopyJob, CopyProgressState, CopyScanTask, CopySource, CopyTask, CopyTaskMessage,
-};
 use crate::config::{Config, SortMode};
+use crate::copy::{
+    CopyDestination, CopyDialogState, CopyJob, CopyProgressState, CopyScanTask, CopySource,
+    CopyTask, CopyTaskMessage, count_local_files, spawn_copy_scan, spawn_copy_task,
+};
 use crate::file_ops::{self, CopyOptions};
 use crate::help::HelpState;
 use crate::idf::render_idf_card;
 use crate::panel::Panel;
 use crate::remote::{
-    RemoteKind, RemoteProfile, RemoteSource, delete_path as remote_delete_path,
-    RemoteEntry, download_into_dir, download_to_temp, join_remote, load_profiles,
-    normalize_remote_cwd, prepare_connection, rename_path as remote_rename_path, save_profile, upload_into_dir,
+    RemoteEntry, RemoteKind, RemoteProfile, RemoteSource, delete_path as remote_delete_path,
+    download_into_dir, download_to_temp, join_remote, load_profiles, normalize_remote_cwd,
+    prepare_connection, rename_path as remote_rename_path, save_profile, upload_into_dir,
 };
-use crate::search::{search, SearchQuery, SearchResult};
+use crate::search::{SearchQuery, SearchResult, search};
 use crate::terminal::{CmdLine, RunningCmd, TerminalState};
 use crate::viewer::{EncodingMode, LineFeedMode, MaskKind, ViewMode, Viewer};
 use anyhow::Result;
-use crossterm::{cursor::MoveTo, queue, style::{Print, ResetColor, SetBackgroundColor, SetForegroundColor}, terminal::{size, Clear, ClearType}};
+use crossterm::{
+    cursor::MoveTo,
+    queue,
+    style::{Print, ResetColor, SetBackgroundColor, SetForegroundColor},
+    terminal::{Clear, ClearType, size},
+};
 use std::collections::VecDeque;
 use std::fs;
 use std::io::{self, Write};
@@ -100,51 +105,51 @@ pub enum AppMode {
 #[derive(Debug, Clone)]
 pub struct ConfigState {
     // checkboxes
-    pub confirm_exit:     bool,
-    pub confirm_delete:   bool,
-    pub auto_reload:      bool,
+    pub confirm_exit: bool,
+    pub confirm_delete: bool,
+    pub auto_reload: bool,
     pub insert_moves_down: bool,
-    pub select_dirs:      bool,
-    pub show_hidden:      bool,
-    pub color_by_type:    bool,
-    pub show_fkey_bar:    bool,
+    pub select_dirs: bool,
+    pub show_hidden: bool,
+    pub color_by_type: bool,
+    pub show_fkey_bar: bool,
     // text fields
-    pub editor:           String,
-    pub pager:            String,
-    pub dir_history_max:  String,
+    pub editor: String,
+    pub pager: String,
+    pub dir_history_max: String,
     // cursor inside the form (0-based, covers checkboxes then text fields)
-    pub cursor:           usize,
+    pub cursor: usize,
 }
 
 impl ConfigState {
     pub fn from_config(cfg: &crate::config::Config) -> Self {
         Self {
-            confirm_exit:     cfg.confirm_exit,
-            confirm_delete:   cfg.confirm_delete,
-            auto_reload:      cfg.auto_reload,
+            confirm_exit: cfg.confirm_exit,
+            confirm_delete: cfg.confirm_delete,
+            auto_reload: cfg.auto_reload,
             insert_moves_down: cfg.insert_moves_down,
-            select_dirs:      cfg.select_dirs,
-            show_hidden:      cfg.left.show_hidden,
-            color_by_type:    cfg.color_by_type,
-            show_fkey_bar:    cfg.show_fkey_bar,
-            editor:           cfg.editor.clone(),
-            pager:            cfg.pager.clone(),
-            dir_history_max:  cfg.dir_history_max.to_string(),
-            cursor:           0,
+            select_dirs: cfg.select_dirs,
+            show_hidden: cfg.left.show_hidden,
+            color_by_type: cfg.color_by_type,
+            show_fkey_bar: cfg.show_fkey_bar,
+            editor: cfg.editor.clone(),
+            pager: cfg.pager.clone(),
+            dir_history_max: cfg.dir_history_max.to_string(),
+            cursor: 0,
         }
     }
 
     /// Apply the form values back into a Config.
     pub fn apply_to(&self, cfg: &mut crate::config::Config) {
-        cfg.confirm_exit     = self.confirm_exit;
-        cfg.confirm_delete   = self.confirm_delete;
-        cfg.auto_reload      = self.auto_reload;
+        cfg.confirm_exit = self.confirm_exit;
+        cfg.confirm_delete = self.confirm_delete;
+        cfg.auto_reload = self.auto_reload;
         cfg.insert_moves_down = self.insert_moves_down;
-        cfg.select_dirs      = self.select_dirs;
+        cfg.select_dirs = self.select_dirs;
         cfg.left.show_hidden = self.show_hidden;
         cfg.right.show_hidden = self.show_hidden;
-        cfg.color_by_type    = self.color_by_type;
-        cfg.show_fkey_bar    = self.show_fkey_bar;
+        cfg.color_by_type = self.color_by_type;
+        cfg.show_fkey_bar = self.show_fkey_bar;
         if !self.editor.trim().is_empty() {
             cfg.editor = self.editor.trim().to_owned();
         }
@@ -152,7 +157,9 @@ impl ConfigState {
             cfg.pager = self.pager.trim().to_owned();
         }
         if let Ok(n) = self.dir_history_max.trim().parse::<usize>() {
-            if n > 0 { cfg.dir_history_max = n; }
+            if n > 0 {
+                cfg.dir_history_max = n;
+            }
         }
     }
 
@@ -245,7 +252,9 @@ impl RemoteConnectState {
             if !rest.iter().all(|token| lowered.contains(token.as_str())) {
                 continue;
             }
-            if lowered.starts_with(first.as_str()) || item.name.to_lowercase().starts_with(first.as_str()) {
+            if lowered.starts_with(first.as_str())
+                || item.name.to_lowercase().starts_with(first.as_str())
+            {
                 starts.push(idx);
             } else if lowered.contains(first.as_str()) {
                 contains.push(idx);
@@ -375,22 +384,28 @@ impl RemoteEditState {
 
     pub fn from_profile(profile: &RemoteProfile) -> Self {
         let (kind, fields) = match &profile.kind {
-            RemoteKind::Sftp(sftp) => (RemoteEditKind::Sftp, [
-                profile.name.clone(),
-                sftp.host.clone().unwrap_or_default(),
-                sftp.user.clone().unwrap_or_default(),
-                sftp.port.map(|p| p.to_string()).unwrap_or_default(),
-                sftp.path.clone().unwrap_or_default(),
-                sftp.identity_file.clone().unwrap_or_default(),
-            ]),
-            RemoteKind::Imap(imap) => (RemoteEditKind::Imap, [
-                profile.name.clone(),
-                imap.host.clone(),
-                imap.user.clone(),
-                imap.port.map(|p| p.to_string()).unwrap_or_default(),
-                imap.path.clone().unwrap_or_default(),
-                imap.password.clone().unwrap_or_default(),
-            ]),
+            RemoteKind::Sftp(sftp) => (
+                RemoteEditKind::Sftp,
+                [
+                    profile.name.clone(),
+                    sftp.host.clone().unwrap_or_default(),
+                    sftp.user.clone().unwrap_or_default(),
+                    sftp.port.map(|p| p.to_string()).unwrap_or_default(),
+                    sftp.path.clone().unwrap_or_default(),
+                    sftp.identity_file.clone().unwrap_or_default(),
+                ],
+            ),
+            RemoteKind::Imap(imap) => (
+                RemoteEditKind::Imap,
+                [
+                    profile.name.clone(),
+                    imap.host.clone(),
+                    imap.user.clone(),
+                    imap.port.map(|p| p.to_string()).unwrap_or_default(),
+                    imap.path.clone().unwrap_or_default(),
+                    imap.password.clone().unwrap_or_default(),
+                ],
+            ),
         };
         Self {
             kind,
@@ -460,7 +475,9 @@ impl RemoteEditState {
 impl AssocEditorState {
     pub fn from_config(cfg: &crate::config::Config) -> Self {
         Self {
-            assocs: cfg.file_assoc.iter()
+            assocs: cfg
+                .file_assoc
+                .iter()
                 .map(|a| (a.ext.clone(), a.openers.clone()))
                 .collect(),
             cursor: 0,
@@ -484,7 +501,11 @@ pub struct MenuState {
 
 impl MenuState {
     pub fn new() -> Self {
-        Self { bar_pos: 0, open: false, item_pos: 0 }
+        Self {
+            bar_pos: 0,
+            open: false,
+            item_pos: 0,
+        }
     }
 }
 
@@ -587,62 +608,66 @@ impl ViewerMenuState {
 pub type MenuEntry = (&'static str, Option<&'static str>, MenuAction);
 
 pub const MENU_HEADERS: &[&str] = &[
-    "File", "Panel", "Disk", "Selection", "Tools", "Options", "Help",
+    "File",
+    "Panel",
+    "Disk",
+    "Selection",
+    "Tools",
+    "Options",
+    "Help",
 ];
 
 pub static MENU_DATA: &[&[MenuEntry]] = &[
     // 0 – File
     &[
-        ("View",        Some("F3"),   MenuAction::ViewFile),
-        ("Edit",        Some("F4"),   MenuAction::EditFile),
-        ("",            None,         MenuAction::Separator),
-        ("Copy to..",   Some("F5"),   MenuAction::CopyFile),
-        ("Move to..",   Some("F6"),   MenuAction::MoveFile),
-        ("Create Dir",  Some("F7"),   MenuAction::MkDir),
-        ("Rename",      Some("S-F6"), MenuAction::RenameFile),
-        ("Delete",      Some("F8"),   MenuAction::DeleteFile),
-        ("",            None,         MenuAction::Separator),
-        ("Quit",        Some("F10"),  MenuAction::Quit),
+        ("View", Some("F3"), MenuAction::ViewFile),
+        ("Edit", Some("F4"), MenuAction::EditFile),
+        ("", None, MenuAction::Separator),
+        ("Copy to..", Some("F5"), MenuAction::CopyFile),
+        ("Move to..", Some("F6"), MenuAction::MoveFile),
+        ("Create Dir", Some("F7"), MenuAction::MkDir),
+        ("Rename", Some("S-F6"), MenuAction::RenameFile),
+        ("Delete", Some("F8"), MenuAction::DeleteFile),
+        ("", None, MenuAction::Separator),
+        ("Quit", Some("F10"), MenuAction::Quit),
     ],
     // 1 – Panel
     &[
-        ("Swap Panels",   None,         MenuAction::SwapPanels),
-        ("",              None,         MenuAction::Separator),
-        ("Sort by Name",  Some("^F1"),  MenuAction::SortName),
-        ("Sort by Ext",   Some("^F2"),  MenuAction::SortExtension),
-        ("Sort by Date",  Some("^F3"),  MenuAction::SortDate),
-        ("Sort by Size",  Some("^F4"),  MenuAction::SortSize),
-        ("Unsorted",      Some("^F5"),  MenuAction::SortUnsorted),
-        ("",              None,         MenuAction::Separator),
-        ("Tgl. Hidden",   Some("^H"),   MenuAction::ToggleHidden),
-        ("Reload",        Some("^R"),   MenuAction::Reload),
+        ("Swap Panels", None, MenuAction::SwapPanels),
+        ("", None, MenuAction::Separator),
+        ("Sort by Name", Some("^F1"), MenuAction::SortName),
+        ("Sort by Ext", Some("^F2"), MenuAction::SortExtension),
+        ("Sort by Date", Some("^F3"), MenuAction::SortDate),
+        ("Sort by Size", Some("^F4"), MenuAction::SortSize),
+        ("Unsorted", Some("^F5"), MenuAction::SortUnsorted),
+        ("", None, MenuAction::Separator),
+        ("Tgl. Hidden", Some("^H"), MenuAction::ToggleHidden),
+        ("Reload", Some("^R"), MenuAction::Reload),
     ],
     // 2 – Disk
-    &[
-        ("Go to Path..",  None,         MenuAction::GoToPath),
-    ],
+    &[("Go to Path..", None, MenuAction::GoToPath)],
     // 3 – Selection
     &[
-        ("Select..",      Some("+"),    MenuAction::SelectPattern),
-        ("Deselect..",    Some("-"),    MenuAction::DeselectPattern),
-        ("Invert",        Some("*"),    MenuAction::InvertSelection),
+        ("Select..", Some("+"), MenuAction::SelectPattern),
+        ("Deselect..", Some("-"), MenuAction::DeselectPattern),
+        ("Invert", Some("*"), MenuAction::InvertSelection),
     ],
     // 4 – Tools
     &[
-        ("Search..",      Some("A-F7"), MenuAction::SearchFiles),
-        ("Bookmarks",     Some("^D"),   MenuAction::DirBookmarks),
+        ("Search..", Some("A-F7"), MenuAction::SearchFiles),
+        ("Bookmarks", Some("^D"), MenuAction::DirBookmarks),
     ],
     // 5 – Options
     &[
-        ("Setup..",          None,        MenuAction::Setup),
-        ("Associations..",   None,        MenuAction::Associations),
-        ("Tgl. F-Key Bar",   None,        MenuAction::ToggleFBar),
-        ("Save Config",      None,        MenuAction::SaveConfig),
+        ("Setup..", None, MenuAction::Setup),
+        ("Associations..", None, MenuAction::Associations),
+        ("Tgl. F-Key Bar", None, MenuAction::ToggleFBar),
+        ("Save Config", None, MenuAction::SaveConfig),
     ],
     // 6 – Help
     &[
-        ("Help",           Some("F1"),  MenuAction::Help),
-        ("About KKC",      None,        MenuAction::About),
+        ("Help", Some("F1"), MenuAction::Help),
+        ("About KKC", None, MenuAction::About),
     ],
 ];
 
@@ -685,8 +710,14 @@ pub struct InputDialog {
 pub enum InputAction {
     Rename(PathBuf),
     Mkdir(PathBuf),
-    RemoteRename { profile: RemoteProfile, path: String },
-    RemoteMkdir { profile: RemoteProfile, parent: String },
+    RemoteRename {
+        profile: RemoteProfile,
+        path: String,
+    },
+    RemoteMkdir {
+        profile: RemoteProfile,
+        parent: String,
+    },
     /// Wildcard select (+)
     SelectPattern,
     /// Wildcard deselect (-)
@@ -747,9 +778,13 @@ impl InputDialog {
         }
     }
 
-    pub fn home(&mut self) { self.cursor = 0; }
+    pub fn home(&mut self) {
+        self.cursor = 0;
+    }
 
-    pub fn end(&mut self) { self.cursor = self.value.len(); }
+    pub fn end(&mut self) {
+        self.cursor = self.value.len();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -820,8 +855,7 @@ impl App {
             config.right.show_hidden,
         );
         let max = config.dir_history_max;
-        let mut history: VecDeque<PathBuf> =
-            config.dir_history.iter().cloned().take(max).collect();
+        let mut history: VecDeque<PathBuf> = config.dir_history.iter().cloned().take(max).collect();
         // Always seed with the left panel path if history is empty
         if history.is_empty() {
             history.push_front(config.left.path.clone());
@@ -836,7 +870,9 @@ impl App {
             let home = directories::UserDirs::new()
                 .map(|u| u.home_dir().to_path_buf())
                 .unwrap_or_else(|| PathBuf::from("/"));
-            if bm.is_empty() { bm.push(home); }
+            if bm.is_empty() {
+                bm.push(home);
+            }
             bm
         };
 
@@ -863,7 +899,7 @@ impl App {
             needs_clear: false,
             terminal: TerminalState {
                 history: term_history,
-                output:  term_output,
+                output: term_output,
                 ..TerminalState::new()
             },
             running_cmd: None,
@@ -935,7 +971,11 @@ impl App {
     pub fn current_bookmark_candidate(&self) -> PathBuf {
         if let Some(profile) = self.active_panel().remote_profile() {
             let cwd = self.active_panel().remote_cwd().unwrap_or("/");
-            PathBuf::from(format!("remote://{}/{}", profile.name, cwd.trim_start_matches('/')))
+            PathBuf::from(format!(
+                "remote://{}/{}",
+                profile.name,
+                cwd.trim_start_matches('/')
+            ))
         } else {
             self.active_panel().path.clone()
         }
@@ -1013,7 +1053,9 @@ impl App {
         let matches = self.filtered_bookmark_items();
         if matches.is_empty() {
             self.bookmark_match_pos = 0;
-            self.bookmark_cursor = self.bookmark_cursor.min(self.bookmarks.len().saturating_sub(1));
+            self.bookmark_cursor = self
+                .bookmark_cursor
+                .min(self.bookmarks.len().saturating_sub(1));
             return;
         }
         self.bookmark_match_pos = self.bookmark_match_pos.min(matches.len().saturating_sub(1));
@@ -1088,7 +1130,10 @@ impl App {
         };
         self.copy_scan = None;
         if let Some(profile) = self.active_panel().remote_profile() {
-            let items = selection.iter().map(|entry| (entry.path.to_string_lossy().into_owned(), entry.is_dir)).collect::<Vec<_>>();
+            let items = selection
+                .iter()
+                .map(|entry| (entry.path.to_string_lossy().into_owned(), entry.is_dir))
+                .collect::<Vec<_>>();
             self.copy_scan = Some(spawn_copy_scan(profile, items));
             stats_pending = true;
         } else {
@@ -1097,7 +1142,12 @@ impl App {
                 total_bytes += file_ops::entry_size(&entry.path);
             }
         }
-        self.mode = AppMode::CopyDialog(CopyDialogState::new(destination, file_count, total_bytes, stats_pending));
+        self.mode = AppMode::CopyDialog(CopyDialogState::new(
+            destination,
+            file_count,
+            total_bytes,
+            stats_pending,
+        ));
     }
 
     pub fn push_dir_history(&mut self, path: PathBuf) {
@@ -1131,7 +1181,11 @@ impl App {
         self.active_panel_mut().enter_archive(path)
     }
 
-    pub fn start_remote_connect(&mut self, profile: RemoteProfile, return_state: RemoteConnectState) {
+    pub fn start_remote_connect(
+        &mut self,
+        profile: RemoteProfile,
+        return_state: RemoteConnectState,
+    ) {
         self.pending_remote_cwd = None;
         self.file_id_preview = false;
         self.remote_connect_return = Some(return_state);
@@ -1139,7 +1193,10 @@ impl App {
             RemoteKind::Sftp(_) => "SFTP",
             RemoteKind::Imap(_) => "IMAP",
         };
-        self.remote_connect_task = Some(spawn_remote_connect_task(profile.clone(), self.active_panel().show_hidden));
+        self.remote_connect_task = Some(spawn_remote_connect_task(
+            profile.clone(),
+            self.active_panel().show_hidden,
+        ));
         self.mode = AppMode::RemoteConnecting(RemoteConnectingState {
             profile_name: profile.name,
             protocol_label,
@@ -1155,7 +1212,10 @@ impl App {
             RemoteKind::Sftp(_) => "SFTP",
             RemoteKind::Imap(_) => "IMAP",
         };
-        self.remote_connect_task = Some(spawn_remote_connect_task(profile.clone(), self.active_panel().show_hidden));
+        self.remote_connect_task = Some(spawn_remote_connect_task(
+            profile.clone(),
+            self.active_panel().show_hidden,
+        ));
         self.mode = AppMode::RemoteConnecting(RemoteConnectingState {
             profile_name: profile.name,
             protocol_label,
@@ -1175,7 +1235,11 @@ impl App {
         );
     }
 
-    pub fn save_remote_profile(&mut self, profile: RemoteProfile, old_name: Option<String>) -> Result<()> {
+    pub fn save_remote_profile(
+        &mut self,
+        profile: RemoteProfile,
+        old_name: Option<String>,
+    ) -> Result<()> {
         save_profile(&profile, old_name.as_deref())?;
         Ok(())
     }
@@ -1200,9 +1264,15 @@ impl App {
     pub fn go_parent(&mut self) -> Result<()> {
         if self.active_panel().is_remote_view() {
             let current = self.active_panel().path.clone();
-            let raw_parent = current.parent().unwrap_or(std::path::Path::new("/")).to_path_buf();
+            let raw_parent = current
+                .parent()
+                .unwrap_or(std::path::Path::new("/"))
+                .to_path_buf();
             let parent = if let Some(profile) = self.active_panel().remote_profile() {
-                PathBuf::from(normalize_remote_cwd(&profile, &raw_parent.to_string_lossy()))
+                PathBuf::from(normalize_remote_cwd(
+                    &profile,
+                    &raw_parent.to_string_lossy(),
+                ))
             } else {
                 raw_parent
             };
@@ -1283,8 +1353,13 @@ impl App {
             self.remote_connect_task = None;
             match msg {
                 RemoteConnectMessage::Progress(_) => {}
-                RemoteConnectMessage::Connected { profile, cwd, entries } => {
-                    self.active_panel_mut().mount_remote_prefetched(profile, cwd, entries);
+                RemoteConnectMessage::Connected {
+                    profile,
+                    cwd,
+                    entries,
+                } => {
+                    self.active_panel_mut()
+                        .mount_remote_prefetched(profile, cwd, entries);
                     if let Some(target) = self.pending_remote_cwd.take() {
                         let _ = self.active_panel_mut().enter_dir(PathBuf::from(target));
                     }
@@ -1348,7 +1423,11 @@ impl App {
                     Ok(CopyTaskMessage::Progress(progress)) => {
                         self.mode = AppMode::CopyProgress(progress);
                     }
-                    Ok(CopyTaskMessage::Finished { copied_items, errors, aborted }) => {
+                    Ok(CopyTaskMessage::Finished {
+                        copied_items,
+                        errors,
+                        aborted,
+                    }) => {
                         finish_message = Some((copied_items, errors, aborted));
                         break;
                     }
@@ -1378,7 +1457,9 @@ impl App {
 
     /// Drain lines from a running streaming command into the terminal scrollback.
     pub fn poll_running_cmd(&mut self) {
-        let Some(task) = &mut self.running_cmd else { return; };
+        let Some(task) = &mut self.running_cmd else {
+            return;
+        };
         loop {
             match task.rx.try_recv() {
                 Ok(CmdLine::Out(line)) => self.terminal.push_output(line),
@@ -1407,14 +1488,16 @@ impl App {
 
     pub fn cancel_copy_scan(&mut self) {
         if let Some(task) = &self.copy_scan {
-            task.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+            task.cancel
+                .store(true, std::sync::atomic::Ordering::Relaxed);
         }
         self.copy_scan = None;
     }
 
     pub fn cancel_copy_task(&mut self) {
         if let Some(task) = &self.copy_task {
-            task.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+            task.cancel
+                .store(true, std::sync::atomic::Ordering::Relaxed);
         }
     }
 
@@ -1498,7 +1581,8 @@ impl App {
             return Ok(());
         }
         let mut errors = Vec::new();
-        let needs_busy = self.active_panel().is_remote_view() || self.other_panel().is_remote_view();
+        let needs_busy =
+            self.active_panel().is_remote_view() || self.other_panel().is_remote_view();
         for entry in &sources {
             let result = if needs_busy {
                 self.run_with_busy("Remote: moving...", |app| app.move_between_panels(entry))
@@ -1711,15 +1795,16 @@ impl App {
                 )?;
                 remote_delete_path(&profile, &entry.path.to_string_lossy(), entry.is_dir)
             }
-            (Some(src_profile), Some(dst_profile)) if same_remote_target(&src_profile, &dst_profile) => {
-                let dst_path = join_remote(
-                    self.other_panel().remote_cwd().unwrap_or("/"),
-                    &entry.name,
-                );
+            (Some(src_profile), Some(dst_profile))
+                if same_remote_target(&src_profile, &dst_profile) =>
+            {
+                let dst_path =
+                    join_remote(self.other_panel().remote_cwd().unwrap_or("/"), &entry.name);
                 remote_rename_path(&src_profile, &entry.path.to_string_lossy(), &dst_path)
             }
             (Some(src_profile), Some(dst_profile)) => {
-                let tmp = download_to_temp(&src_profile, &entry.path.to_string_lossy(), entry.is_dir)?;
+                let tmp =
+                    download_to_temp(&src_profile, &entry.path.to_string_lossy(), entry.is_dir)?;
                 upload_into_dir(
                     &dst_profile,
                     &tmp,
@@ -1772,7 +1857,11 @@ impl App {
         state.running = true;
 
         let query = SearchQuery {
-            pattern: if state.query.is_empty() { "*".into() } else { state.query.clone() },
+            pattern: if state.query.is_empty() {
+                "*".into()
+            } else {
+                state.query.clone()
+            },
             content: if state.content_query.is_empty() {
                 None
             } else {
@@ -1855,7 +1944,11 @@ fn same_remote_target(a: &RemoteProfile, b: &RemoteProfile) -> bool {
     }
 }
 
-fn restore_remote_panel(panel: &mut Panel, cfg: &crate::config::PanelConfig, profiles: &[RemoteProfile]) {
+fn restore_remote_panel(
+    panel: &mut Panel,
+    cfg: &crate::config::PanelConfig,
+    profiles: &[RemoteProfile],
+) {
     let Some(remote_name) = cfg.remote_name.as_ref() else {
         return;
     };
@@ -1886,8 +1979,16 @@ fn draw_busy_status(message: &str, has_fkey_bar: bool) -> Result<()> {
     queue!(
         stdout,
         MoveTo(0, status_row),
-        SetForegroundColor(crossterm::style::Color::Rgb { r: 244, g: 235, b: 208 }),
-        SetBackgroundColor(crossterm::style::Color::Rgb { r: 125, g: 107, b: 92 }),
+        SetForegroundColor(crossterm::style::Color::Rgb {
+            r: 244,
+            g: 235,
+            b: 208
+        }),
+        SetBackgroundColor(crossterm::style::Color::Rgb {
+            r: 125,
+            g: 107,
+            b: 92
+        }),
         Clear(ClearType::CurrentLine),
         Print(line),
         ResetColor,
@@ -1912,7 +2013,11 @@ fn spawn_remote_connect_task(profile: RemoteProfile, show_hidden: bool) -> Remot
         })();
         match result {
             Ok((cwd, entries)) => {
-                let _ = tx.send(RemoteConnectMessage::Connected { profile, cwd, entries });
+                let _ = tx.send(RemoteConnectMessage::Connected {
+                    profile,
+                    cwd,
+                    entries,
+                });
             }
             Err(err) => {
                 if !cancel_bg.load(Ordering::Relaxed) {

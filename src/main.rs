@@ -1,16 +1,16 @@
 mod app;
 mod archive;
-mod copy;
 mod config;
+mod copy;
 mod events;
 mod file_ops;
 mod file_types;
 mod help;
 mod idf;
 mod panel;
-mod terminal;
 mod remote;
 mod search;
+mod terminal;
 mod ui;
 mod viewer;
 
@@ -21,9 +21,9 @@ use crossterm::{
     cursor::MoveTo,
     event::{self, DisableMouseCapture, EnableMouseCapture},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{backend::CrosstermBackend, layout::Rect, Terminal};
+use ratatui::{Terminal, backend::CrosstermBackend, layout::Rect};
 use std::io::{self, Stdout, Write};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -97,11 +97,15 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
                 viewer::clear_kitty_images(terminal.backend_mut())?;
             }
             if let Some((_, rect, _)) = &next_kitty_image {
-                if let AppMode::Viewer(v) | AppMode::ViewerSearching(v) | AppMode::ViewerMenu(v, _) = &app.mode
+                if let AppMode::Viewer(v) | AppMode::ViewerSearching(v) | AppMode::ViewerMenu(v, _) =
+                    &app.mode
                     && viewer::kitty_graphics_supported()
                 {
                     viewer::render_kitty_image(terminal.backend_mut(), v, *rect)?;
-                    execute!(terminal.backend_mut(), MoveTo(0, term_area.height.saturating_sub(1)))?;
+                    execute!(
+                        terminal.backend_mut(),
+                        MoveTo(0, term_area.height.saturating_sub(1))
+                    )?;
                     terminal.backend_mut().flush()?;
                 }
             }
@@ -109,7 +113,9 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
         }
 
         match app.mode {
-            AppMode::Input(_) | AppMode::ViewerSearching(_) | AppMode::Terminal => terminal.show_cursor()?,
+            AppMode::Input(_) | AppMode::ViewerSearching(_) | AppMode::Terminal => {
+                terminal.show_cursor()?
+            }
             _ => terminal.hide_cursor()?,
         }
 

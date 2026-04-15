@@ -1,23 +1,22 @@
-use crate::archive::supports_archive_navigation;
 use crate::app::{
-    App, AppMode, AssocEditorState, BookmarkListItem, ConfigState, ConfirmAction, InputAction, InputDialog,
-    MenuAction, MenuState, OpenerState, RemoteEditKind,
+    App, AppMode, AssocEditorState, BookmarkListItem, ConfigState, ConfirmAction, InputAction,
+    InputDialog, MENU_DATA, MENU_HEADERS, MenuAction, MenuState, OpenerState, RemoteEditKind,
     ViewerMenuKind, ViewerMenuState,
-    MENU_DATA, MENU_HEADERS,
 };
-use crate::copy::CopyDialogState;
+use crate::archive::supports_archive_navigation;
 use crate::config::SortMode;
+use crate::copy::CopyDialogState;
 use crate::remote::{
-    download_to_temp, join_remote, load_profiles, make_dir as remote_make_dir, rename_path as remote_rename_path,
-    upload_into_dir,
+    download_to_temp, join_remote, load_profiles, make_dir as remote_make_dir,
+    rename_path as remote_rename_path, upload_into_dir,
 };
 use crate::viewer::{EncodingMode, LineFeedMode, MaskKind, PreprocOpKind, ViewMode};
+use anyhow::Result;
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use anyhow::Result;
 use std::io;
 
 pub fn handle_event(app: &mut App, event: Event) -> Result<bool> {
@@ -91,11 +90,26 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
     // Handle Ctrl-modified keys first
     if ctrl && !alt && !shift {
         match key.code {
-            KeyCode::F(1) => { app.set_sort(SortMode::Name); return Ok(false); }
-            KeyCode::F(2) => { app.set_sort(SortMode::Extension); return Ok(false); }
-            KeyCode::F(3) => { app.set_sort(SortMode::Date); return Ok(false); }
-            KeyCode::F(4) => { app.set_sort(SortMode::Size); return Ok(false); }
-            KeyCode::F(5) => { app.set_sort(SortMode::Unsorted); return Ok(false); }
+            KeyCode::F(1) => {
+                app.set_sort(SortMode::Name);
+                return Ok(false);
+            }
+            KeyCode::F(2) => {
+                app.set_sort(SortMode::Extension);
+                return Ok(false);
+            }
+            KeyCode::F(3) => {
+                app.set_sort(SortMode::Date);
+                return Ok(false);
+            }
+            KeyCode::F(4) => {
+                app.set_sort(SortMode::Size);
+                return Ok(false);
+            }
+            KeyCode::F(5) => {
+                app.set_sort(SortMode::Unsorted);
+                return Ok(false);
+            }
             KeyCode::Char('r') => {
                 app.reload_panels();
                 app.status.text = "Reloaded".into();
@@ -275,7 +289,9 @@ fn handle_enter(app: &mut App) -> Result<()> {
             entry.path.clone()
         };
         // Check registered openers first
-        let ext = entry.path.extension()
+        let ext = entry
+            .path
+            .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("");
         let openers = app.config.openers_for(ext).to_vec();
@@ -308,13 +324,18 @@ fn launch_external(app: &mut App, command: &str, path: &std::path::Path) -> Resu
     let path_str = path.to_string_lossy();
     let args: Vec<String> = if command.contains("%f") {
         // Split on whitespace, replace %f token
-        command.split_whitespace()
-            .map(|t| if t == "%f" { path_str.to_string() } else { t.to_string() })
+        command
+            .split_whitespace()
+            .map(|t| {
+                if t == "%f" {
+                    path_str.to_string()
+                } else {
+                    t.to_string()
+                }
+            })
             .collect()
     } else {
-        let mut v: Vec<String> = command.split_whitespace()
-            .map(|t| t.to_string())
-            .collect();
+        let mut v: Vec<String> = command.split_whitespace().map(|t| t.to_string()).collect();
         v.push(path_str.to_string());
         v
     };
@@ -327,7 +348,9 @@ fn launch_external(app: &mut App, command: &str, path: &std::path::Path) -> Resu
     disable_raw_mode()?;
     execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture)?;
 
-    let _ = std::process::Command::new(&args[0]).args(&args[1..]).status();
+    let _ = std::process::Command::new(&args[0])
+        .args(&args[1..])
+        .status();
 
     enable_raw_mode()?;
     execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
@@ -504,7 +527,9 @@ fn handle_quicksearch(app: &mut App, key: KeyEvent) -> Result<bool> {
             if p.qs_match_pos > 0 {
                 p.qs_match_pos -= 1;
             }
-            let entry_idx = app.active_panel().quicksearch_matches()
+            let entry_idx = app
+                .active_panel()
+                .quicksearch_matches()
                 .get(app.active_panel().qs_match_pos)
                 .copied();
             if let Some(idx) = entry_idx {
@@ -518,7 +543,9 @@ fn handle_quicksearch(app: &mut App, key: KeyEvent) -> Result<bool> {
             if p.qs_match_pos + 1 < matches_len {
                 p.qs_match_pos += 1;
             }
-            let entry_idx = app.active_panel().quicksearch_matches()
+            let entry_idx = app
+                .active_panel()
+                .quicksearch_matches()
                 .get(app.active_panel().qs_match_pos)
                 .copied();
             if let Some(idx) = entry_idx {
@@ -573,42 +600,48 @@ fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
             return Ok(false);
         }
         KeyCode::Char('/') | KeyCode::F(7) => {
-            let AppMode::Viewer(v) = std::mem::replace(&mut app.mode, AppMode::Browse)
-            else { return Ok(false); };
+            let AppMode::Viewer(v) = std::mem::replace(&mut app.mode, AppMode::Browse) else {
+                return Ok(false);
+            };
             app.mode = AppMode::ViewerSearching(v);
             return Ok(false);
         }
         KeyCode::F(3) => {
-            let AppMode::Viewer(v) = std::mem::replace(&mut app.mode, AppMode::Browse)
-            else { return Ok(false); };
+            let AppMode::Viewer(v) = std::mem::replace(&mut app.mode, AppMode::Browse) else {
+                return Ok(false);
+            };
             let menu = ViewerMenuState::new(ViewerMenuKind::LineFeed, &v);
             app.mode = AppMode::ViewerMenu(v, menu);
             return Ok(false);
         }
         KeyCode::F(4) => {
-            let AppMode::Viewer(v) = std::mem::replace(&mut app.mode, AppMode::Browse)
-            else { return Ok(false); };
+            let AppMode::Viewer(v) = std::mem::replace(&mut app.mode, AppMode::Browse) else {
+                return Ok(false);
+            };
             let menu = ViewerMenuState::new(ViewerMenuKind::Mode, &v);
             app.mode = AppMode::ViewerMenu(v, menu);
             return Ok(false);
         }
         KeyCode::F(6) => {
-            let AppMode::Viewer(v) = std::mem::replace(&mut app.mode, AppMode::Browse)
-            else { return Ok(false); };
+            let AppMode::Viewer(v) = std::mem::replace(&mut app.mode, AppMode::Browse) else {
+                return Ok(false);
+            };
             let menu = ViewerMenuState::new(ViewerMenuKind::Preproc, &v);
             app.mode = AppMode::ViewerMenu(v, menu);
             return Ok(false);
         }
         KeyCode::F(8) => {
-            let AppMode::Viewer(v) = std::mem::replace(&mut app.mode, AppMode::Browse)
-            else { return Ok(false); };
+            let AppMode::Viewer(v) = std::mem::replace(&mut app.mode, AppMode::Browse) else {
+                return Ok(false);
+            };
             let menu = ViewerMenuState::new(ViewerMenuKind::Encoding, &v);
             app.mode = AppMode::ViewerMenu(v, menu);
             return Ok(false);
         }
         KeyCode::F(9) => {
-            let AppMode::Viewer(v) = std::mem::replace(&mut app.mode, AppMode::Browse)
-            else { return Ok(false); };
+            let AppMode::Viewer(v) = std::mem::replace(&mut app.mode, AppMode::Browse) else {
+                return Ok(false);
+            };
             let menu = ViewerMenuState::new(ViewerMenuKind::Mask, &v);
             app.mode = AppMode::ViewerMenu(v, menu);
             return Ok(false);
@@ -625,18 +658,16 @@ fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
             KeyCode::Left => v.scroll_left(40),
             KeyCode::Right => v.scroll_right(40),
             KeyCode::Home => v.scroll_left_max(),
-            _ => {
-                match key.code {
-                    KeyCode::Up => v.scroll_up(),
-                    KeyCode::Down => v.scroll_down(),
-                    KeyCode::PageUp => v.page_up(20),
-                    KeyCode::PageDown => v.page_down(20),
-                    KeyCode::End => v.goto_end(20),
-                    KeyCode::Char('n') => v.search_next(),
-                    KeyCode::Char('N') => v.search_prev(),
-                    _ => {}
-                }
-            }
+            _ => match key.code {
+                KeyCode::Up => v.scroll_up(),
+                KeyCode::Down => v.scroll_down(),
+                KeyCode::PageUp => v.page_up(20),
+                KeyCode::PageDown => v.page_down(20),
+                KeyCode::End => v.goto_end(20),
+                KeyCode::Char('n') => v.search_next(),
+                KeyCode::Char('N') => v.search_prev(),
+                _ => {}
+            },
         }
     } else {
         match key.code {
@@ -682,7 +713,10 @@ fn handle_viewer_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
             app.mode = AppMode::Viewer(viewer);
             return Ok(false);
         }
-        KeyCode::Up if menu.kind == ViewerMenuKind::Preproc && key.modifiers.contains(KeyModifiers::CONTROL) => {
+        KeyCode::Up
+            if menu.kind == ViewerMenuKind::Preproc
+                && key.modifiers.contains(KeyModifiers::CONTROL) =>
+        {
             let mut viewer = viewer;
             if menu.cursor < viewer.preproc_len() {
                 viewer.move_preproc_up(menu.cursor);
@@ -691,7 +725,10 @@ fn handle_viewer_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
             app.mode = AppMode::ViewerMenu(viewer, menu);
             return Ok(false);
         }
-        KeyCode::Down if menu.kind == ViewerMenuKind::Preproc && key.modifiers.contains(KeyModifiers::CONTROL) => {
+        KeyCode::Down
+            if menu.kind == ViewerMenuKind::Preproc
+                && key.modifiers.contains(KeyModifiers::CONTROL) =>
+        {
             let mut viewer = viewer;
             if menu.cursor < viewer.preproc_len() {
                 viewer.move_preproc_down(menu.cursor);
@@ -797,15 +834,13 @@ fn handle_viewer_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
                     };
                     viewer.set_encoding(mode);
                 }
-                ViewerMenuKind::Mask => {
-                    match menu.cursor {
-                        0 => viewer.set_mask(Some(MaskKind::C)),
-                        1 => viewer.set_mask(Some(MaskKind::Pascal)),
-                        2 => viewer.set_mask(Some(MaskKind::Assembler)),
-                        3 => viewer.set_mask(Some(MaskKind::Ketchup)),
-                        _ => viewer.set_mask(None),
-                    }
-                }
+                ViewerMenuKind::Mask => match menu.cursor {
+                    0 => viewer.set_mask(Some(MaskKind::C)),
+                    1 => viewer.set_mask(Some(MaskKind::Pascal)),
+                    2 => viewer.set_mask(Some(MaskKind::Assembler)),
+                    3 => viewer.set_mask(Some(MaskKind::Ketchup)),
+                    _ => viewer.set_mask(None),
+                },
             }
             app.mode = AppMode::Viewer(viewer);
             return Ok(false);
@@ -823,7 +858,13 @@ fn viewer_menu_items(kind: ViewerMenuKind) -> &'static [&'static str] {
         ViewerMenuKind::Mode => &["Text", "Binary", "Ansi", "EML", "Html", "Image"],
         ViewerMenuKind::LineFeed => &["DOS (CR/LF)", "Unix (LF)", "Mac (CR)", "Mixed"],
         ViewerMenuKind::Encoding => &["Plain ASCII", "DOS CP437"],
-        ViewerMenuKind::Mask => &["C Style", "Pascal Style", "Assembler Style", "Ketchup Style", "Mask OFF"],
+        ViewerMenuKind::Mask => &[
+            "C Style",
+            "Pascal Style",
+            "Assembler Style",
+            "Ketchup Style",
+            "Mask OFF",
+        ],
         ViewerMenuKind::Preproc => &[],
     }
 }
@@ -889,7 +930,11 @@ fn viewer_menu_last_cursor(viewer: &crate::viewer::Viewer, kind: ViewerMenuKind)
     viewer_menu_len(viewer, kind).saturating_sub(1)
 }
 
-fn viewer_menu_next_cursor(viewer: &crate::viewer::Viewer, kind: ViewerMenuKind, cursor: usize) -> usize {
+fn viewer_menu_next_cursor(
+    viewer: &crate::viewer::Viewer,
+    kind: ViewerMenuKind,
+    cursor: usize,
+) -> usize {
     let last = viewer_menu_last_cursor(viewer, kind);
     let mut next = if cursor >= last { 0 } else { cursor + 1 };
     if kind == ViewerMenuKind::Preproc && is_preproc_separator(viewer, next) {
@@ -898,7 +943,11 @@ fn viewer_menu_next_cursor(viewer: &crate::viewer::Viewer, kind: ViewerMenuKind,
     next
 }
 
-fn viewer_menu_prev_cursor(viewer: &crate::viewer::Viewer, kind: ViewerMenuKind, cursor: usize) -> usize {
+fn viewer_menu_prev_cursor(
+    viewer: &crate::viewer::Viewer,
+    kind: ViewerMenuKind,
+    cursor: usize,
+) -> usize {
     let last = viewer_menu_last_cursor(viewer, kind);
     let mut prev = if cursor == 0 { last } else { cursor - 1 };
     if kind == ViewerMenuKind::Preproc && is_preproc_separator(viewer, prev) {
@@ -937,7 +986,9 @@ fn handle_viewer_searching(app: &mut App, key: KeyEvent) -> Result<bool> {
                 v.matches.clear();
             }
             let AppMode::ViewerSearching(v) = std::mem::replace(&mut app.mode, AppMode::Browse)
-            else { return Ok(false); };
+            else {
+                return Ok(false);
+            };
             app.mode = AppMode::Viewer(v);
         }
         KeyCode::F(10) => {
@@ -949,7 +1000,9 @@ fn handle_viewer_searching(app: &mut App, key: KeyEvent) -> Result<bool> {
         KeyCode::Enter => {
             // Confirm search, stay in viewer (normal mode)
             let AppMode::ViewerSearching(v) = std::mem::replace(&mut app.mode, AppMode::Browse)
-            else { return Ok(false); };
+            else {
+                return Ok(false);
+            };
             app.mode = AppMode::Viewer(v);
         }
         KeyCode::Backspace => {
@@ -1021,28 +1074,24 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             app.mode = AppMode::Browse;
 
             match action {
-                InputAction::Rename(path) => {
-                    match crate::file_ops::rename_entry(&path, &value) {
-                        Ok(_) => {
-                            app.status.text = format!("Renamed to '{}'", value);
-                            if app.config.auto_reload {
-                                app.reload_panels();
-                            }
+                InputAction::Rename(path) => match crate::file_ops::rename_entry(&path, &value) {
+                    Ok(_) => {
+                        app.status.text = format!("Renamed to '{}'", value);
+                        if app.config.auto_reload {
+                            app.reload_panels();
                         }
-                        Err(e) => app.status.text = format!("Rename error: {}", e),
                     }
-                }
-                InputAction::Mkdir(parent) => {
-                    match crate::file_ops::make_dir(&parent, &value) {
-                        Ok(_) => {
-                            app.status.text = format!("Created directory '{}'", value);
-                            if app.config.auto_reload {
-                                app.reload_panels();
-                            }
+                    Err(e) => app.status.text = format!("Rename error: {}", e),
+                },
+                InputAction::Mkdir(parent) => match crate::file_ops::make_dir(&parent, &value) {
+                    Ok(_) => {
+                        app.status.text = format!("Created directory '{}'", value);
+                        if app.config.auto_reload {
+                            app.reload_panels();
                         }
-                        Err(e) => app.status.text = format!("mkdir error: {}", e),
                     }
-                }
+                    Err(e) => app.status.text = format!("mkdir error: {}", e),
+                },
                 InputAction::RemoteRename { profile, path } => {
                     let Some(parent) = std::path::Path::new(&path).parent() else {
                         app.status.text = "Rename error: invalid remote path".into();
@@ -1101,15 +1150,21 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                             prompt: format!("Openers for .{} (comma-separated):", ext),
                             value: existing,
                             cursor: 0,
-                            action: InputAction::AssocAddOpeners { ext, edit_index: None },
+                            action: InputAction::AssocAddOpeners {
+                                ext,
+                                edit_index: None,
+                            },
                         });
                         // fix cursor to end
-                        let AppMode::Input(ref mut dlg) = app.mode else { return Ok(false); };
+                        let AppMode::Input(ref mut dlg) = app.mode else {
+                            return Ok(false);
+                        };
                         dlg.cursor = dlg.value.len();
                     }
                 }
                 InputAction::AssocAddOpeners { ext, edit_index } => {
-                    let openers: Vec<String> = value.split(',')
+                    let openers: Vec<String> = value
+                        .split(',')
                         .map(|s| s.trim().to_string())
                         .filter(|s| !s.is_empty())
                         .collect();
@@ -1126,15 +1181,17 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                                 app.config.file_assoc[idx].openers = openers;
                             }
                             _ => {
-                                if let Some(existing) = app.config.file_assoc.iter_mut()
+                                if let Some(existing) = app
+                                    .config
+                                    .file_assoc
+                                    .iter_mut()
                                     .find(|a| a.ext.eq_ignore_ascii_case(&ext))
                                 {
                                     existing.openers = openers;
                                 } else {
-                                    app.config.file_assoc.push(crate::config::FileAssoc {
-                                        ext,
-                                        openers,
-                                    });
+                                    app.config
+                                        .file_assoc
+                                        .push(crate::config::FileAssoc { ext, openers });
                                 }
                             }
                         }
@@ -1145,31 +1202,45 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             }
         }
         KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-            let AppMode::Input(ref mut dlg) = app.mode else { return Ok(false); };
+            let AppMode::Input(ref mut dlg) = app.mode else {
+                return Ok(false);
+            };
             dlg.insert_char(ch);
         }
         KeyCode::Backspace => {
-            let AppMode::Input(ref mut dlg) = app.mode else { return Ok(false); };
+            let AppMode::Input(ref mut dlg) = app.mode else {
+                return Ok(false);
+            };
             dlg.backspace();
         }
         KeyCode::Delete => {
-            let AppMode::Input(ref mut dlg) = app.mode else { return Ok(false); };
+            let AppMode::Input(ref mut dlg) = app.mode else {
+                return Ok(false);
+            };
             dlg.delete_char();
         }
         KeyCode::Left => {
-            let AppMode::Input(ref mut dlg) = app.mode else { return Ok(false); };
+            let AppMode::Input(ref mut dlg) = app.mode else {
+                return Ok(false);
+            };
             dlg.move_left();
         }
         KeyCode::Right => {
-            let AppMode::Input(ref mut dlg) = app.mode else { return Ok(false); };
+            let AppMode::Input(ref mut dlg) = app.mode else {
+                return Ok(false);
+            };
             dlg.move_right();
         }
         KeyCode::Home => {
-            let AppMode::Input(ref mut dlg) = app.mode else { return Ok(false); };
+            let AppMode::Input(ref mut dlg) = app.mode else {
+                return Ok(false);
+            };
             dlg.home();
         }
         KeyCode::End => {
-            let AppMode::Input(ref mut dlg) = app.mode else { return Ok(false); };
+            let AppMode::Input(ref mut dlg) = app.mode else {
+                return Ok(false);
+            };
             dlg.end();
         }
         _ => {}
@@ -1241,23 +1312,21 @@ fn handle_copy_dialog(app: &mut App, key: KeyEvent) -> Result<bool> {
                 dlg.cursor += ch.len_utf8();
             }
         }
-        KeyCode::Enter => {
-            match dlg.field {
-                CopyDialogState::OVERWRITE => dlg.overwrite = !dlg.overwrite,
-                CopyDialogState::NEWER_ONLY => dlg.newer_only = !dlg.newer_only,
-                CopyDialogState::KEEP_ATTRIBUTES => dlg.keep_attributes = !dlg.keep_attributes,
-                CopyDialogState::CANCEL => app.mode = AppMode::Browse,
-                _ => {
-                    if dlg.stats_pending {
-                        dlg.waiting_to_start = true;
-                    } else {
-                        let state = dlg.clone();
-                        app.mode = AppMode::Browse;
-                        app.execute_copy_dialog(state)?;
-                    }
+        KeyCode::Enter => match dlg.field {
+            CopyDialogState::OVERWRITE => dlg.overwrite = !dlg.overwrite,
+            CopyDialogState::NEWER_ONLY => dlg.newer_only = !dlg.newer_only,
+            CopyDialogState::KEEP_ATTRIBUTES => dlg.keep_attributes = !dlg.keep_attributes,
+            CopyDialogState::CANCEL => app.mode = AppMode::Browse,
+            _ => {
+                if dlg.stats_pending {
+                    dlg.waiting_to_start = true;
+                } else {
+                    let state = dlg.clone();
+                    app.mode = AppMode::Browse;
+                    app.execute_copy_dialog(state)?;
                 }
             }
-        }
+        },
         _ => {}
     }
     Ok(false)
@@ -1273,7 +1342,9 @@ fn handle_search(app: &mut App, key: KeyEvent) -> Result<bool> {
             app.mode = AppMode::Browse;
         }
         KeyCode::Tab => {
-            let AppMode::SearchPanel(ref mut s) = app.mode else { return Ok(false); };
+            let AppMode::SearchPanel(ref mut s) = app.mode else {
+                return Ok(false);
+            };
             s.input_field = 1 - s.input_field;
         }
         KeyCode::Enter => {
@@ -1281,19 +1352,25 @@ fn handle_search(app: &mut App, key: KeyEvent) -> Result<bool> {
             // After search completes, stay in search mode to show results
         }
         KeyCode::Up => {
-            let AppMode::SearchPanel(ref mut s) = app.mode else { return Ok(false); };
+            let AppMode::SearchPanel(ref mut s) = app.mode else {
+                return Ok(false);
+            };
             if s.cursor > 0 {
                 s.cursor -= 1;
             }
         }
         KeyCode::Down => {
-            let AppMode::SearchPanel(ref mut s) = app.mode else { return Ok(false); };
+            let AppMode::SearchPanel(ref mut s) = app.mode else {
+                return Ok(false);
+            };
             if s.cursor + 1 < s.results.len() {
                 s.cursor += 1;
             }
         }
         KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-            let AppMode::SearchPanel(ref mut s) = app.mode else { return Ok(false); };
+            let AppMode::SearchPanel(ref mut s) = app.mode else {
+                return Ok(false);
+            };
             if s.input_field == 0 {
                 s.query.push(ch);
             } else {
@@ -1301,7 +1378,9 @@ fn handle_search(app: &mut App, key: KeyEvent) -> Result<bool> {
             }
         }
         KeyCode::Backspace => {
-            let AppMode::SearchPanel(ref mut s) = app.mode else { return Ok(false); };
+            let AppMode::SearchPanel(ref mut s) = app.mode else {
+                return Ok(false);
+            };
             if s.input_field == 0 {
                 s.query.pop();
             } else {
@@ -1349,7 +1428,9 @@ fn handle_dir_bookmarks(app: &mut App, key: KeyEvent) -> Result<bool> {
                             let (profile_name, cwd) = rest.split_once('/').unwrap_or((rest, ""));
                             let target_cwd = format!("/{}", cwd);
                             let profiles = load_profiles().unwrap_or_default();
-                            if let Some(profile) = profiles.into_iter().find(|pr| pr.name == profile_name) {
+                            if let Some(profile) =
+                                profiles.into_iter().find(|pr| pr.name == profile_name)
+                            {
                                 app.start_remote_connect_with_cwd(profile, target_cwd);
                             }
                         } else if p.is_dir() {
@@ -1393,7 +1474,9 @@ fn handle_dir_bookmarks(app: &mut App, key: KeyEvent) -> Result<bool> {
 
 fn handle_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
     let (bar_pos, open, item_pos) = {
-        let AppMode::Menu(ref s) = app.mode else { return Ok(false); };
+        let AppMode::Menu(ref s) = app.mode else {
+            return Ok(false);
+        };
         (s.bar_pos, s.open, s.item_pos)
     };
 
@@ -1578,12 +1661,10 @@ fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<bool> {
         MenuAction::Associations => {
             app.mode = AppMode::AssocEditor(AssocEditorState::from_config(&app.config));
         }
-        MenuAction::SaveConfig => {
-            match app.save_config() {
-                Ok(_) => app.status.text = "Config saved".into(),
-                Err(e) => app.status.text = format!("Save error: {}", e),
-            }
-        }
+        MenuAction::SaveConfig => match app.save_config() {
+            Ok(_) => app.status.text = "Config saved".into(),
+            Err(e) => app.status.text = format!("Save error: {}", e),
+        },
         MenuAction::Help => {
             app.open_help();
         }
@@ -1603,13 +1684,15 @@ fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<bool> {
 // ---------------------------------------------------------------------------
 
 fn handle_config(app: &mut App, key: KeyEvent) -> Result<bool> {
-    let AppMode::Config(ref mut cs) = app.mode else { return Ok(false); };
+    let AppMode::Config(ref mut cs) = app.mode else {
+        return Ok(false);
+    };
 
-    let total = ConfigState::NUM_TOTAL;    // 8 booleans + 3 text + OK + Cancel
+    let total = ConfigState::NUM_TOTAL; // 8 booleans + 3 text + OK + Cancel
     let n_bool = ConfigState::NUM_CHECKBOXES; // 8
     let n_text = 3;
-    let ok_idx     = n_bool + n_text;      // 11
-    let cancel_idx = n_bool + n_text + 1;  // 12
+    let ok_idx = n_bool + n_text; // 11
+    let cancel_idx = n_bool + n_text + 1; // 12
 
     match key.code {
         KeyCode::Esc => {
@@ -1619,12 +1702,16 @@ fn handle_config(app: &mut App, key: KeyEvent) -> Result<bool> {
         // Navigate rows
         KeyCode::Up | KeyCode::BackTab => {
             if let AppMode::Config(ref mut cs) = app.mode {
-                if cs.cursor > 0 { cs.cursor -= 1; }
+                if cs.cursor > 0 {
+                    cs.cursor -= 1;
+                }
             }
         }
         KeyCode::Down | KeyCode::Tab => {
             if let AppMode::Config(ref mut cs) = app.mode {
-                if cs.cursor + 1 < total { cs.cursor += 1; }
+                if cs.cursor + 1 < total {
+                    cs.cursor += 1;
+                }
             }
         }
 
@@ -1632,18 +1719,20 @@ fn handle_config(app: &mut App, key: KeyEvent) -> Result<bool> {
         KeyCode::Char(' ') | KeyCode::Enter => {
             let cursor = cs.cursor;
             match cursor {
-                0 => cs.confirm_exit     = !cs.confirm_exit,
-                1 => cs.confirm_delete   = !cs.confirm_delete,
-                2 => cs.auto_reload      = !cs.auto_reload,
+                0 => cs.confirm_exit = !cs.confirm_exit,
+                1 => cs.confirm_delete = !cs.confirm_delete,
+                2 => cs.auto_reload = !cs.auto_reload,
                 3 => cs.insert_moves_down = !cs.insert_moves_down,
-                4 => cs.select_dirs      = !cs.select_dirs,
-                5 => cs.show_hidden      = !cs.show_hidden,
-                6 => cs.color_by_type    = !cs.color_by_type,
-                7 => cs.show_fkey_bar    = !cs.show_fkey_bar,
+                4 => cs.select_dirs = !cs.select_dirs,
+                5 => cs.show_hidden = !cs.show_hidden,
+                6 => cs.color_by_type = !cs.color_by_type,
+                7 => cs.show_fkey_bar = !cs.show_fkey_bar,
                 // text fields: Enter moves focus to next
                 8 | 9 | 10 => {
                     if let AppMode::Config(ref mut cs) = app.mode {
-                        if cs.cursor + 1 < total { cs.cursor += 1; }
+                        if cs.cursor + 1 < total {
+                            cs.cursor += 1;
+                        }
                     }
                 }
                 c if c == ok_idx => {
@@ -1672,20 +1761,26 @@ fn handle_config(app: &mut App, key: KeyEvent) -> Result<bool> {
         KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
             if let AppMode::Config(ref mut cs) = app.mode {
                 match cs.cursor {
-                    8  => cs.editor.push(ch),
-                    9  => cs.pager.push(ch),
+                    8 => cs.editor.push(ch),
+                    9 => cs.pager.push(ch),
                     10 => cs.dir_history_max.push(ch),
-                    _  => {}
+                    _ => {}
                 }
             }
         }
         KeyCode::Backspace => {
             if let AppMode::Config(ref mut cs) = app.mode {
                 match cs.cursor {
-                    8  => { cs.editor.pop(); }
-                    9  => { cs.pager.pop(); }
-                    10 => { cs.dir_history_max.pop(); }
-                    _  => {}
+                    8 => {
+                        cs.editor.pop();
+                    }
+                    9 => {
+                        cs.pager.pop();
+                    }
+                    10 => {
+                        cs.dir_history_max.pop();
+                    }
+                    _ => {}
                 }
             }
         }
@@ -1699,25 +1794,35 @@ fn handle_config(app: &mut App, key: KeyEvent) -> Result<bool> {
 // ---------------------------------------------------------------------------
 
 fn handle_opener(app: &mut App, key: KeyEvent) -> Result<bool> {
-    let AppMode::Opener(ref mut s) = app.mode else { return Ok(false); };
+    let AppMode::Opener(ref mut s) = app.mode else {
+        return Ok(false);
+    };
     let total = s.items.len();
 
     match key.code {
-        KeyCode::Esc => { app.mode = AppMode::Browse; }
+        KeyCode::Esc => {
+            app.mode = AppMode::Browse;
+        }
         KeyCode::Up | KeyCode::BackTab => {
             if let AppMode::Opener(ref mut s) = app.mode {
-                if s.cursor > 0 { s.cursor -= 1; }
+                if s.cursor > 0 {
+                    s.cursor -= 1;
+                }
             }
         }
         KeyCode::Down | KeyCode::Tab => {
             if let AppMode::Opener(ref mut s) = app.mode {
-                if s.cursor + 1 < total { s.cursor += 1; }
+                if s.cursor + 1 < total {
+                    s.cursor += 1;
+                }
             }
         }
         KeyCode::Enter => {
             let (cmd, path) = if let AppMode::Opener(s) = &app.mode {
                 (s.items[s.cursor].clone(), s.path.clone())
-            } else { return Ok(false); };
+            } else {
+                return Ok(false);
+            };
             app.mode = AppMode::Browse;
             launch_external(app, &cmd, &path)?;
         }
@@ -1731,18 +1836,28 @@ fn handle_opener(app: &mut App, key: KeyEvent) -> Result<bool> {
 // ---------------------------------------------------------------------------
 
 fn handle_assoc_editor(app: &mut App, key: KeyEvent) -> Result<bool> {
-    let total = if let AppMode::AssocEditor(ref s) = app.mode { s.assocs.len() } else { 0 };
+    let total = if let AppMode::AssocEditor(ref s) = app.mode {
+        s.assocs.len()
+    } else {
+        0
+    };
 
     match key.code {
-        KeyCode::Esc => { app.mode = AppMode::Browse; }
+        KeyCode::Esc => {
+            app.mode = AppMode::Browse;
+        }
         KeyCode::Up => {
             if let AppMode::AssocEditor(ref mut s) = app.mode {
-                if s.cursor > 0 { s.cursor -= 1; }
+                if s.cursor > 0 {
+                    s.cursor -= 1;
+                }
             }
         }
         KeyCode::Down => {
             if let AppMode::AssocEditor(ref mut s) = app.mode {
-                if s.cursor + 1 < total { s.cursor += 1; }
+                if s.cursor + 1 < total {
+                    s.cursor += 1;
+                }
             }
         }
         // Add new association
@@ -1758,24 +1873,35 @@ fn handle_assoc_editor(app: &mut App, key: KeyEvent) -> Result<bool> {
         // Edit selected
         KeyCode::Enter | KeyCode::Char('e') | KeyCode::Char('E') => {
             let (ext, openers_str, idx) = if let AppMode::AssocEditor(ref s) = app.mode {
-                if s.assocs.is_empty() { return Ok(false); }
+                if s.assocs.is_empty() {
+                    return Ok(false);
+                }
                 let (ext, openers) = &s.assocs[s.cursor];
                 (ext.clone(), openers.join(", "), s.cursor)
-            } else { return Ok(false); };
+            } else {
+                return Ok(false);
+            };
             app.mode = AppMode::Input(InputDialog {
                 title: "Edit association".into(),
                 prompt: format!("Openers for .{} (comma-separated):", ext),
                 value: openers_str.clone(),
                 cursor: openers_str.len(),
-                action: InputAction::AssocAddOpeners { ext, edit_index: Some(idx) },
+                action: InputAction::AssocAddOpeners {
+                    ext,
+                    edit_index: Some(idx),
+                },
             });
         }
         // Delete selected
         KeyCode::Delete | KeyCode::Char('d') | KeyCode::Char('D') => {
             let (idx, cursor) = if let AppMode::AssocEditor(ref s) = app.mode {
-                if s.assocs.is_empty() { return Ok(false); }
+                if s.assocs.is_empty() {
+                    return Ok(false);
+                }
                 (s.cursor, s.cursor)
-            } else { return Ok(false); };
+            } else {
+                return Ok(false);
+            };
             if idx < app.config.file_assoc.len() {
                 app.config.file_assoc.remove(idx);
             }
@@ -1862,7 +1988,9 @@ fn handle_remote_connecting(app: &mut App, key: KeyEvent) -> Result<bool> {
 }
 
 fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
-    let AppMode::RemoteEdit(ref mut s) = app.mode else { return Ok(false); };
+    let AppMode::RemoteEdit(ref mut s) = app.mode else {
+        return Ok(false);
+    };
     match key.code {
         KeyCode::Esc => app.mode = AppMode::RemoteConnect(crate::app::RemoteConnectState::load()),
         KeyCode::Tab | KeyCode::Down => {
@@ -1880,7 +2008,8 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
         }
         KeyCode::Right => {
             if s.cursor < 6 {
-                s.input_cursor = (s.input_cursor + 1).min(s.current_value().map(|v| v.len()).unwrap_or(0));
+                s.input_cursor =
+                    (s.input_cursor + 1).min(s.current_value().map(|v| v.len()).unwrap_or(0));
             }
         }
         KeyCode::Backspace => {
@@ -1895,13 +2024,18 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
         KeyCode::Delete => {
             if s.cursor < 6 {
                 let pos = s.input_cursor;
-                if let Some(value) = s.current_value_mut() && pos < value.len() {
+                if let Some(value) = s.current_value_mut()
+                    && pos < value.len()
+                {
                     value.remove(pos);
                 }
             }
         }
         KeyCode::Char(ch) => {
-            if s.cursor < 6 && !key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT) {
+            if s.cursor < 6
+                && !key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::ALT)
+            {
                 let pos = s.input_cursor;
                 if let Some(value) = s.current_value_mut() {
                     value.insert(pos, ch);
@@ -1916,7 +2050,10 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
                 if let Some(profile) = s.build_profile() {
                     let old_name = s.edit_original_name.clone();
                     match app.save_remote_profile(profile, old_name) {
-                        Ok(()) => app.mode = AppMode::RemoteConnect(crate::app::RemoteConnectState::load()),
+                        Ok(()) => {
+                            app.mode =
+                                AppMode::RemoteConnect(crate::app::RemoteConnectState::load())
+                        }
                         Err(e) => app.status.text = format!("Cannot save connection: {}", e),
                     }
                 } else {
@@ -1963,7 +2100,10 @@ fn handle_help(app: &mut App, key: KeyEvent) -> Result<bool> {
             }
             _ => {}
         },
-        HelpView::Topics { section, ref mut cursor } => match key.code {
+        HelpView::Topics {
+            section,
+            ref mut cursor,
+        } => match key.code {
             KeyCode::Esc => {
                 if !state.back() {
                     app.mode = AppMode::Browse;
@@ -1974,20 +2114,36 @@ fn handle_help(app: &mut App, key: KeyEvent) -> Result<bool> {
             }
             KeyCode::Up => *cursor = cursor.saturating_sub(1),
             KeyCode::Down => {
-                let max = state.system.sections[section].topics.len().saturating_sub(1);
+                let max = state.system.sections[section]
+                    .topics
+                    .len()
+                    .saturating_sub(1);
                 *cursor = (*cursor + 1).min(max);
             }
             KeyCode::Home => *cursor = 0,
-            KeyCode::End => *cursor = state.system.sections[section].topics.len().saturating_sub(1),
+            KeyCode::End => {
+                *cursor = state.system.sections[section]
+                    .topics
+                    .len()
+                    .saturating_sub(1)
+            }
             KeyCode::Enter => {
                 let topic = state.system.sections[section].topics[*cursor];
                 let prev = state.view;
                 state.history.push(prev);
-                state.view = HelpView::Page { topic, scroll: 0, selected_link: 0 };
+                state.view = HelpView::Page {
+                    topic,
+                    scroll: 0,
+                    selected_link: 0,
+                };
             }
             _ => {}
         },
-        HelpView::Page { topic, ref mut scroll, ref mut selected_link } => match key.code {
+        HelpView::Page {
+            topic,
+            ref mut scroll,
+            ref mut selected_link,
+        } => match key.code {
             KeyCode::Esc => {
                 if !state.back() {
                     app.mode = AppMode::Browse;
@@ -2010,7 +2166,11 @@ fn handle_help(app: &mut App, key: KeyEvent) -> Result<bool> {
             KeyCode::BackTab => {
                 let count = state.system.topics[topic].link_count();
                 if count > 0 {
-                    *selected_link = if *selected_link == 0 { count - 1 } else { *selected_link - 1 };
+                    *selected_link = if *selected_link == 0 {
+                        count - 1
+                    } else {
+                        *selected_link - 1
+                    };
                 }
             }
             KeyCode::Enter => {

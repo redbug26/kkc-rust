@@ -1,15 +1,21 @@
-use crate::app::{ActivePanel, App, AppMode, AssocEditorState, BookmarkListItem, ConfigState, ConfirmAction, ConfirmDialog, InputDialog, MenuState, MenuAction, OpenerState, RemoteConnectState, RemoteConnectingState, RemoteEditKind, RemoteEditState, SearchState, ViewerMenuKind, ViewerMenuState, MENU_DATA, MENU_HEADERS};
-use crate::copy::{CopyDialogState, CopyProgressState};
-use crate::help::HelpView;
-use crate::idf::{probe_path, IdfKind};
-use crate::remote::{RemoteProtocol, RemoteSource};
+use crate::app::{
+    ActivePanel, App, AppMode, AssocEditorState, BookmarkListItem, ConfigState, ConfirmAction,
+    ConfirmDialog, InputDialog, MENU_DATA, MENU_HEADERS, MenuAction, MenuState, OpenerState,
+    RemoteConnectState, RemoteConnectingState, RemoteEditKind, RemoteEditState, SearchState,
+    ViewerMenuKind, ViewerMenuState,
+};
 use crate::config::SortMode;
+use crate::copy::{CopyDialogState, CopyProgressState};
 use crate::file_ops::format_size;
 use crate::file_types::FileCategory;
+use crate::help::HelpView;
+use crate::idf::{IdfKind, probe_path};
 use crate::panel::Entry;
+use crate::remote::{RemoteProtocol, RemoteSource};
 use crate::viewer::{ViewMode, Viewer};
 use chrono::{DateTime, Local};
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
@@ -17,7 +23,6 @@ use ratatui::{
         Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Scrollbar,
         ScrollbarOrientation, ScrollbarState, Wrap,
     },
-    Frame,
 };
 
 // ---------------------------------------------------------------------------
@@ -108,7 +113,10 @@ fn entry_fg(entry: &Entry, color_by_type: bool) -> Color {
 // ---------------------------------------------------------------------------
 
 pub fn render(f: &mut Frame, app: &App) {
-    f.render_widget(Block::default().style(Style::default().bg(CLR_APP_BG)), f.area());
+    f.render_widget(
+        Block::default().style(Style::default().bg(CLR_APP_BG)),
+        f.area(),
+    );
 
     match &app.mode {
         AppMode::Viewer(v) => {
@@ -142,10 +150,7 @@ pub fn render(f: &mut Frame, app: &App) {
                 Constraint::Length(1), // fkey bar
             ]
         } else {
-            vec![
-                Constraint::Min(5),
-                Constraint::Length(1),
-            ]
+            vec![Constraint::Min(5), Constraint::Length(1)]
         })
         .split(f.area());
 
@@ -266,11 +271,18 @@ fn render_panel(
     color_by_type: bool,
 ) {
     let border_style = if active {
-        Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(CLR_PANEL_BORDER)
+            .bg(CLR_APP_BG)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)
     };
-    let border_type = if active { BorderType::Thick } else { BorderType::Rounded }; 
+    let border_type = if active {
+        BorderType::Thick
+    } else {
+        BorderType::Rounded
+    };
 
     let display_path = panel.display_path();
     let title_text = truncate_path(&display_path, area.width.saturating_sub(4) as usize);
@@ -281,7 +293,10 @@ fn render_panel(
         .border_type(border_type)
         .border_style(border_style)
         .style(Style::default().bg(CLR_PANEL_BG))
-        .title(Span::styled(title, Style::default().fg(CLR_PANEL_TITLE).bg(CLR_APP_BG)));
+        .title(Span::styled(
+            title,
+            Style::default().fg(CLR_PANEL_TITLE).bg(CLR_APP_BG),
+        ));
 
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -306,12 +321,15 @@ fn render_panel(
         width: inner.width,
         height: inner.height.saturating_sub(2),
     };
-    let footer_area = clamp_rect(area, Rect {
-        x: inner.x,
-        y: inner.y + inner.height - 1,
-        width: inner.width,
-        height: 1,
-    });
+    let footer_area = clamp_rect(
+        area,
+        Rect {
+            x: inner.x,
+            y: inner.y + inner.height - 1,
+            width: inner.width,
+            height: 1,
+        },
+    );
 
     let list_height = list_area.height as usize;
 
@@ -319,19 +337,45 @@ fn render_panel(
     let size_w = 10usize;
     let date_w = 8usize;
     let time_w = 5usize;
-    let name_w = (inner.width as usize)
-        .saturating_sub(size_w + date_w + time_w + 3);
+    let name_w = (inner.width as usize).saturating_sub(size_w + date_w + time_w + 3);
 
     let header_line = Line::from(vec![
-        Span::styled(format!("{:^width$}", "Name", width = name_w), Style::default().fg(CLR_HEADER_FG).bg(CLR_HEADER_BG).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!("{:^width$}", "Name", width = name_w),
+            Style::default()
+                .fg(CLR_HEADER_FG)
+                .bg(CLR_HEADER_BG)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled("│", Style::default().fg(CLR_PANEL_BORDER).bg(CLR_PANEL_BG)),
-        Span::styled(format!("{:^width$}", "Size", width = size_w), Style::default().fg(CLR_HEADER_FG).bg(CLR_HEADER_BG).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!("{:^width$}", "Size", width = size_w),
+            Style::default()
+                .fg(CLR_HEADER_FG)
+                .bg(CLR_HEADER_BG)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled("│", Style::default().fg(CLR_PANEL_BORDER).bg(CLR_PANEL_BG)),
-        Span::styled(format!("{:^width$}", "Date", width = date_w), Style::default().fg(CLR_HEADER_FG).bg(CLR_HEADER_BG).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!("{:^width$}", "Date", width = date_w),
+            Style::default()
+                .fg(CLR_HEADER_FG)
+                .bg(CLR_HEADER_BG)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled("│", Style::default().fg(CLR_PANEL_BORDER).bg(CLR_PANEL_BG)),
-        Span::styled(format!("{:^width$}", "Time", width = time_w), Style::default().fg(CLR_HEADER_FG).bg(CLR_HEADER_BG).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!("{:^width$}", "Time", width = time_w),
+            Style::default()
+                .fg(CLR_HEADER_FG)
+                .bg(CLR_HEADER_BG)
+                .add_modifier(Modifier::BOLD),
+        ),
     ]);
-    f.render_widget(Paragraph::new(header_line).style(Style::default().bg(CLR_PANEL_BG)), header_area);
+    f.render_widget(
+        Paragraph::new(header_line).style(Style::default().bg(CLR_PANEL_BG)),
+        header_area,
+    );
 
     let items: Vec<ListItem> = panel
         .entries
@@ -350,7 +394,10 @@ fn render_panel(
             };
 
             let base_style = if is_cursor {
-                Style::default().fg(fg).bg(CLR_CURSOR_BG).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(fg)
+                    .bg(CLR_CURSOR_BG)
+                    .add_modifier(Modifier::BOLD)
             } else if entry.selected {
                 Style::default().fg(fg).add_modifier(Modifier::BOLD)
             } else if entry.is_dir {
@@ -367,7 +414,11 @@ fn render_panel(
             } else if entry.is_dir {
                 format!("{:>width$}", "⌦sub--dir⌫", width = size_w)
             } else {
-                format!("{:>width$}", format_panel_size(entry.size, size_w), width = size_w)
+                format!(
+                    "{:>width$}",
+                    format_panel_size(entry.size, size_w),
+                    width = size_w
+                )
             };
 
             let date_str = match entry.modified {
@@ -381,11 +432,26 @@ fn render_panel(
 
             let line = Line::from(vec![
                 Span::styled(name_str, base_style),
-                Span::styled("│", Style::default().fg(CLR_PANEL_BORDER_DIM).bg(base_style.bg.unwrap_or(CLR_PANEL_BG))),
+                Span::styled(
+                    "│",
+                    Style::default()
+                        .fg(CLR_PANEL_BORDER_DIM)
+                        .bg(base_style.bg.unwrap_or(CLR_PANEL_BG)),
+                ),
                 Span::styled(size_str, base_style),
-                Span::styled("│", Style::default().fg(CLR_PANEL_BORDER_DIM).bg(base_style.bg.unwrap_or(CLR_PANEL_BG))),
+                Span::styled(
+                    "│",
+                    Style::default()
+                        .fg(CLR_PANEL_BORDER_DIM)
+                        .bg(base_style.bg.unwrap_or(CLR_PANEL_BG)),
+                ),
                 Span::styled(date_str, base_style),
-                Span::styled("│", Style::default().fg(CLR_PANEL_BORDER_DIM).bg(base_style.bg.unwrap_or(CLR_PANEL_BG))),
+                Span::styled(
+                    "│",
+                    Style::default()
+                        .fg(CLR_PANEL_BORDER_DIM)
+                        .bg(base_style.bg.unwrap_or(CLR_PANEL_BG)),
+                ),
                 Span::styled(time_str, base_style),
             ]);
 
@@ -398,8 +464,7 @@ fn render_panel(
 
     // Scrollbar
     if panel.entries.len() > list_height {
-        let mut sb_state = ScrollbarState::new(panel.entries.len())
-            .position(panel.scroll);
+        let mut sb_state = ScrollbarState::new(panel.entries.len()).position(panel.scroll);
         let sb_area = Rect {
             x: area.x + area.width - 1,
             y: list_area.y,
@@ -422,17 +487,37 @@ fn render_panel(
         let sel_count = panel.selected_count();
         let footer = if sel_count > 0 {
             if sel_count == 1 {
-                format!("{:<10} b. in one selected file", format_dos_number(panel.selected_bytes()))
+                format!(
+                    "{:<10} b. in one selected file",
+                    format_dos_number(panel.selected_bytes())
+                )
             } else {
-                format!("{:<10} b. in {:3} selected files", format_dos_number(panel.selected_bytes()), sel_count)
+                format!(
+                    "{:<10} b. in {:3} selected files",
+                    format_dos_number(panel.selected_bytes()),
+                    sel_count
+                )
             }
         } else {
-            let total: u64 = panel.entries.iter().filter(|e| !e.is_dir).map(|e| e.size).sum();
-            let files = panel.entries.iter().filter(|e| !e.is_dir && e.name != "..").count();
+            let total: u64 = panel
+                .entries
+                .iter()
+                .filter(|e| !e.is_dir)
+                .map(|e| e.size)
+                .sum();
+            let files = panel
+                .entries
+                .iter()
+                .filter(|e| !e.is_dir && e.name != "..")
+                .count();
             if files == 1 {
                 format!("{:<10} bytes in one file", format_dos_number(total))
             } else {
-                format!("{:<10} bytes in {:3} files", format_dos_number(total), files)
+                format!(
+                    "{:<10} bytes in {:3} files",
+                    format_dos_number(total),
+                    files
+                )
             }
         };
 
@@ -466,7 +551,10 @@ fn render_file_id_panel(f: &mut Frame, app: &App, area: Rect) {
         .border_type(BorderType::Thick)
         .border_style(Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG))
         .style(Style::default().bg(CLR_PANEL_BG))
-        .title(Span::styled(" FileID ", Style::default().fg(CLR_PANEL_TITLE).bg(CLR_APP_BG)));
+        .title(Span::styled(
+            " FileID ",
+            Style::default().fg(CLR_PANEL_TITLE).bg(CLR_APP_BG),
+        ));
     let inner = block.inner(area);
     f.render_widget(block, area);
 
@@ -477,7 +565,12 @@ fn render_file_id_panel(f: &mut Frame, app: &App, area: Rect) {
     let text = app.build_file_id_preview();
     let lines = text
         .lines()
-        .map(|line| Line::from(Span::styled(line.to_string(), Style::default().fg(CLR_TEXT))))
+        .map(|line| {
+            Line::from(Span::styled(
+                line.to_string(),
+                Style::default().fg(CLR_TEXT),
+            ))
+        })
         .collect::<Vec<_>>();
 
     f.render_widget(
@@ -490,7 +583,10 @@ fn render_file_id_panel(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_center_buttons(f: &mut Frame, area: Rect) {
-    f.render_widget(Block::default().style(Style::default().bg(CLR_APP_BG)), area);
+    f.render_widget(
+        Block::default().style(Style::default().bg(CLR_APP_BG)),
+        area,
+    );
 
     if area.height == 0 || area.width < 9 {
         return;
@@ -559,7 +655,9 @@ fn render_menu_button(f: &mut Frame, area: Rect, label: &str) {
     } else {
         area.width.saturating_sub(2)
     };
-    let text = truncate_str(label, content_w.max(1) as usize).trim_end().to_string();
+    let text = truncate_str(label, content_w.max(1) as usize)
+        .trim_end()
+        .to_string();
     if area.height < 3 {
         let top_pad = area.height.saturating_sub(1) / 2;
         let text_area = Rect {
@@ -575,9 +673,12 @@ fn render_menu_button(f: &mut Frame, area: Rect, label: &str) {
         );
         safe_render_widget(
             f,
-            Paragraph::new(text)
-                .alignment(Alignment::Center)
-                .style(Style::default().fg(CLR_BUTTON_FG).bg(CLR_BUTTON_BG).add_modifier(Modifier::BOLD)),
+            Paragraph::new(text).alignment(Alignment::Center).style(
+                Style::default()
+                    .fg(CLR_BUTTON_FG)
+                    .bg(CLR_BUTTON_BG)
+                    .add_modifier(Modifier::BOLD),
+            ),
             text_area,
         );
         return;
@@ -599,9 +700,12 @@ fn render_menu_button(f: &mut Frame, area: Rect, label: &str) {
     };
     safe_render_widget(
         f,
-        Paragraph::new(text)
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(CLR_BUTTON_FG).bg(CLR_BUTTON_BG).add_modifier(Modifier::BOLD)),
+        Paragraph::new(text).alignment(Alignment::Center).style(
+            Style::default()
+                .fg(CLR_BUTTON_FG)
+                .bg(CLR_BUTTON_BG)
+                .add_modifier(Modifier::BOLD),
+        ),
         text_area,
     );
 }
@@ -612,14 +716,25 @@ fn render_menu_button(f: &mut Frame, area: Rect, label: &str) {
 
 fn render_menu(f: &mut Frame, state: &MenuState, area: Rect) {
     // ── top bar ────────────────────────────────────────────────────────────
-    let bar_area = Rect { x: area.x, y: area.y, width: area.width, height: 1 };
+    let bar_area = Rect {
+        x: area.x,
+        y: area.y,
+        width: area.width,
+        height: 1,
+    };
 
     let mut spans = vec![Span::styled(" ", Style::default().bg(CLR_MENU_BAR_BG))];
     for (i, header) in MENU_HEADERS.iter().enumerate() {
         let style = if i == state.bar_pos && !state.open {
-            Style::default().bg(CLR_MENU_SEL_BG).fg(CLR_MENU_SEL_FG).add_modifier(Modifier::BOLD)
+            Style::default()
+                .bg(CLR_MENU_SEL_BG)
+                .fg(CLR_MENU_SEL_FG)
+                .add_modifier(Modifier::BOLD)
         } else if i == state.bar_pos {
-            Style::default().bg(CLR_MENU_SEL_BG).fg(CLR_MENU_SEL_FG).add_modifier(Modifier::BOLD)
+            Style::default()
+                .bg(CLR_MENU_SEL_BG)
+                .fg(CLR_MENU_SEL_FG)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().bg(CLR_MENU_BAR_BG).fg(CLR_MENU_BAR_FG)
         };
@@ -649,7 +764,12 @@ fn render_menu(f: &mut Frame, state: &MenuState, area: Rect) {
 
     // Width: widest label + key hint + padding
     let max_label = items.iter().map(|(l, _, _)| l.len()).max().unwrap_or(6);
-    let max_key = items.iter().filter_map(|(_, k, _)| *k).map(|k| k.len()).max().unwrap_or(0);
+    let max_key = items
+        .iter()
+        .filter_map(|(_, k, _)| *k)
+        .map(|k| k.len())
+        .max()
+        .unwrap_or(0);
     let inner_w = (max_label + max_key + 4).max(18) as u16;
     let dd_width = inner_w + 2; // borders
     let dd_height = items.len() as u16 + 2;
@@ -676,7 +796,12 @@ fn render_menu(f: &mut Frame, state: &MenuState, area: Rect) {
         if idx as u16 >= inner.height {
             break;
         }
-        let row = Rect { x: inner.x, y: inner.y + idx as u16, width: inner.width, height: 1 };
+        let row = Rect {
+            x: inner.x,
+            y: inner.y + idx as u16,
+            width: inner.width,
+            height: 1,
+        };
 
         if *action == MenuAction::Separator {
             let sep: String = std::iter::repeat('─').take(avail).collect();
@@ -686,7 +811,10 @@ fn render_menu(f: &mut Frame, state: &MenuState, area: Rect) {
             );
         } else {
             let style = if idx == state.item_pos {
-                Style::default().bg(CLR_MENU_SEL_BG).fg(CLR_MENU_SEL_FG).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .bg(CLR_MENU_SEL_BG)
+                    .fg(CLR_MENU_SEL_FG)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().bg(CLR_MENU_DD_BG).fg(CLR_MENU_DD_FG)
             };
@@ -695,10 +823,7 @@ fn render_menu(f: &mut Frame, state: &MenuState, area: Rect) {
             let used = label.len() + key_text.len() + 2; // leading " " + trailing " "
             let pad = avail.saturating_sub(used);
             let text = format!(" {}{}{} ", label, " ".repeat(pad), key_text);
-            f.render_widget(
-                Paragraph::new(truncate_str(&text, avail)).style(style),
-                row,
-            );
+            f.render_widget(Paragraph::new(truncate_str(&text, avail)).style(style), row);
         }
     }
 }
@@ -755,17 +880,28 @@ fn render_status(f: &mut Frame, app: &App, area: Rect) {
         SortMode::Size => "Size",
         SortMode::Unsorted => "---",
     };
-    let hidden_label = if app.active_panel().show_hidden { "H" } else { " " };
+    let hidden_label = if app.active_panel().show_hidden {
+        "H"
+    } else {
+        " "
+    };
     let right_info = format!(" Sort:{} [{}] ", sort_label, hidden_label);
 
     let left_w = area.width.saturating_sub(right_info.len() as u16);
 
     let line = Line::from(vec![
         Span::styled(
-            format!(" {:<width$}", status_text, width = left_w.saturating_sub(1) as usize),
+            format!(
+                " {:<width$}",
+                status_text,
+                width = left_w.saturating_sub(1) as usize
+            ),
             Style::default().fg(CLR_STATUS_FG).bg(CLR_STATUS_BG),
         ),
-        Span::styled(right_info, Style::default().fg(CLR_BUTTON_FG).bg(CLR_STATUS_BG)),
+        Span::styled(
+            right_info,
+            Style::default().fg(CLR_BUTTON_FG).bg(CLR_STATUS_BG),
+        ),
     ]);
     f.render_widget(Paragraph::new(line), area);
 }
@@ -857,12 +993,15 @@ pub fn kitty_image_area(v: &Viewer, area: Rect) -> Option<Rect> {
 }
 
 fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
-    let footer_area = clamp_rect(area, Rect {
-        x: area.x,
-        y: area.y + area.height.saturating_sub(1),
-        width: area.width,
-        height: 1,
-    });
+    let footer_area = clamp_rect(
+        area,
+        Rect {
+            x: area.x,
+            y: area.y + area.height.saturating_sub(1),
+            width: area.width,
+            height: 1,
+        },
+    );
     let viewer_host = Rect {
         x: area.x,
         y: area.y,
@@ -876,7 +1015,10 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
     } else {
         String::new()
     };
-    let col_info = if matches!(v.mode, ViewMode::Text | ViewMode::Ansi | ViewMode::Eml) && !v.wrap && v.hscroll > 0 {
+    let col_info = if matches!(v.mode, ViewMode::Text | ViewMode::Ansi | ViewMode::Eml)
+        && !v.wrap
+        && v.hscroll > 0
+    {
         format!(" Col:{} ", v.hscroll)
     } else {
         String::new()
@@ -935,18 +1077,21 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
 
     if v.is_image_mode() {
         let supported = crate::viewer::kitty_graphics_supported();
-        let mut lines = vec![
-            Line::from(Span::styled(
-                "Image preview",
-                Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
-            )),
-        ];
+        let mut lines = vec![Line::from(Span::styled(
+            "Image preview",
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ))];
         if let Some(image) = v.image_info() {
             let detail = match (image.width, image.height) {
                 (Some(w), Some(h)) => format!("{} - {}x{}", image.format, w, h),
                 _ => image.format.to_string(),
             };
-            lines.push(Line::from(Span::styled(detail, Style::default().fg(Color::Gray))));
+            lines.push(Line::from(Span::styled(
+                detail,
+                Style::default().fg(Color::Gray),
+            )));
         }
         lines.push(Line::from(Span::raw("")));
         lines.push(Line::from(Span::styled(
@@ -955,7 +1100,11 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
             } else {
                 "Kitty Graphics Protocol unavailable in this terminal"
             },
-            Style::default().fg(if supported { Color::Cyan } else { Color::Yellow }),
+            Style::default().fg(if supported {
+                Color::Cyan
+            } else {
+                Color::Yellow
+            }),
         )));
         lines.push(Line::from(Span::styled(
             if supported {
@@ -1013,7 +1162,12 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
         })
         .collect();
 
-    if v.wrap && matches!(v.mode, ViewMode::Text | ViewMode::Ansi | ViewMode::Html | ViewMode::Eml) {
+    if v.wrap
+        && matches!(
+            v.mode,
+            ViewMode::Text | ViewMode::Ansi | ViewMode::Html | ViewMode::Eml
+        )
+    {
         f.render_widget(Paragraph::new(items).wrap(Wrap { trim: false }), inner);
     } else {
         let list = List::new(items.into_iter().map(ListItem::new).collect::<Vec<_>>());
@@ -1034,7 +1188,8 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
                 .style(Style::default().fg(Color::Black).bg(Color::LightYellow)),
             footer_area,
         );
-        let cx = (footer_area.x + 9 + v.search.len() as u16).min(footer_area.x + footer_area.width - 1);
+        let cx =
+            (footer_area.x + 9 + v.search.len() as u16).min(footer_area.x + footer_area.width - 1);
         safe_set_cursor_position(f, cx, footer_area.y);
     } else {
         let help = Paragraph::new(" F10:Close  F2:Wrap  F3:LnFeed  F4:Mode  F5:Zoom  F6:Prepro  F7:Search  F8:Enc  F9:Mask ")
@@ -1084,10 +1239,16 @@ fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, ar
             items
         }
         ViewerMenuKind::Encoding => vec!["Plain ASCII".into(), "DOS CP437".into()],
-        ViewerMenuKind::Mask => vec!["C Style", "Pascal Style", "Assembler Style", "Ketchup Style", "Mask OFF"]
-            .into_iter()
-            .map(str::to_string)
-            .collect(),
+        ViewerMenuKind::Mask => vec![
+            "C Style",
+            "Pascal Style",
+            "Assembler Style",
+            "Ketchup Style",
+            "Mask OFF",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect(),
     };
 
     let title = match menu.kind {
@@ -1099,15 +1260,22 @@ fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, ar
     };
 
     let width = items.iter().map(|s| s.len()).max().unwrap_or(10) as u16 + 6;
-    let extra = if menu.kind == ViewerMenuKind::Preproc { 3 } else { 0 };
+    let extra = if menu.kind == ViewerMenuKind::Preproc {
+        3
+    } else {
+        0
+    };
     let desired_height = items.len() as u16 + 2 + extra;
     let height = desired_height.min(area.height.saturating_sub(2).max(4));
-    let popup = clamp_rect(area, Rect {
-        x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + area.height.saturating_sub(height) / 2,
-        width,
-        height,
-    });
+    let popup = clamp_rect(
+        area,
+        Rect {
+            x: area.x + area.width.saturating_sub(width) / 2,
+            y: area.y + area.height.saturating_sub(height) / 2,
+            width,
+            height,
+        },
+    );
 
     safe_render_widget(f, Clear, popup);
     let block = Block::default()
@@ -1122,11 +1290,16 @@ fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, ar
         .iter()
         .enumerate()
         .map(|(idx, item)| {
-            let is_separator = menu.kind == ViewerMenuKind::Preproc && viewer.preproc_len() > 0 && idx == viewer.preproc_len();
+            let is_separator = menu.kind == ViewerMenuKind::Preproc
+                && viewer.preproc_len() > 0
+                && idx == viewer.preproc_len();
             let style = if is_separator {
                 Style::default().fg(CLR_MENU_DD_SEP).bg(CLR_MENU_DD_BG)
             } else if idx == menu.cursor {
-                Style::default().fg(CLR_MENU_SEL_FG).bg(CLR_MENU_SEL_BG).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(CLR_MENU_SEL_FG)
+                    .bg(CLR_MENU_SEL_BG)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
             };
@@ -1140,7 +1313,12 @@ fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, ar
         .collect::<Vec<_>>();
 
     let list_height = inner.height.saturating_sub(extra);
-    let list_area = Rect { x: inner.x, y: inner.y, width: inner.width, height: list_height };
+    let list_area = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: inner.width,
+        height: list_height,
+    };
     let scroll = menu
         .scroll
         .min(items.len().saturating_sub(list_height as usize));
@@ -1158,7 +1336,10 @@ fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, ar
             width: inner.width,
             height: inner.height.saturating_sub(list_height),
         };
-        let info = format!(" Param:0x{:02X}  \u{2190}/\u{2192}:Edit  Ctrl+\u{2191}/\u{2193}:Move  Del:Remove ", menu.param);
+        let info = format!(
+            " Param:0x{:02X}  \u{2190}/\u{2192}:Edit  Ctrl+\u{2191}/\u{2193}:Move  Del:Remove ",
+            menu.param
+        );
         safe_render_widget(
             f,
             Paragraph::new(info).style(Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)),
@@ -1200,10 +1381,23 @@ fn render_confirm_quit(f: &mut Frame, area: Rect) {
     const H: u16 = 11;
     let x = (area.width.saturating_sub(W)) / 2 + area.x;
     let y = (area.height.saturating_sub(H)) / 2 + area.y;
-    let popup = clamp_rect(area, Rect { x, y, width: W, height: H });
+    let popup = clamp_rect(
+        area,
+        Rect {
+            x,
+            y,
+            width: W,
+            height: H,
+        },
+    );
 
     // Shadow
-    let sh = Rect { x: popup.x + 2, y: popup.y + 1, width: W, height: H };
+    let sh = Rect {
+        x: popup.x + 2,
+        y: popup.y + 1,
+        width: W,
+        height: H,
+    };
     if sh.x + sh.width <= area.x + area.width && sh.y + sh.height <= area.y + area.height {
         safe_render_widget(
             f,
@@ -1221,12 +1415,22 @@ fn render_confirm_quit(f: &mut Frame, area: Rect) {
     safe_render_widget(f, block, popup);
 
     // Title band
-    let logo_area = Rect { x: inner.x, y: inner.y, width: inner.width, height: 1 };
+    let logo_area = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: inner.width,
+        height: 1,
+    };
     safe_render_widget(
         f,
         Paragraph::new(" KK Commander ")
             .alignment(Alignment::Center)
-            .style(Style::default().fg(CLR_BUTTON_FG).bg(CLR_STATUS_BG).add_modifier(Modifier::BOLD)),
+            .style(
+                Style::default()
+                    .fg(CLR_BUTTON_FG)
+                    .bg(CLR_STATUS_BG)
+                    .add_modifier(Modifier::BOLD),
+            ),
         logo_area,
     );
 
@@ -1235,7 +1439,12 @@ fn render_confirm_quit(f: &mut Frame, area: Rect) {
     safe_render_widget(
         f,
         Paragraph::new(sep.clone()).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
-        Rect { x: inner.x, y: inner.y + 1, width: inner.width, height: 1 },
+        Rect {
+            x: inner.x,
+            y: inner.y + 1,
+            width: inner.width,
+            height: 1,
+        },
     );
 
     // Message
@@ -1244,14 +1453,24 @@ fn render_confirm_quit(f: &mut Frame, area: Rect) {
         Paragraph::new("\nDo you really want to quit?")
             .alignment(Alignment::Center)
             .style(Style::default().fg(Color::Rgb(50, 36, 22)).bg(CLR_APP_BG)),
-        Rect { x: inner.x, y: inner.y + 2, width: inner.width, height: 3 },
+        Rect {
+            x: inner.x,
+            y: inner.y + 2,
+            width: inner.width,
+            height: 3,
+        },
     );
 
     // Bottom separator
     safe_render_widget(
         f,
         Paragraph::new(sep).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
-        Rect { x: inner.x, y: inner.y + 5, width: inner.width, height: 1 },
+        Rect {
+            x: inner.x,
+            y: inner.y + 5,
+            width: inner.width,
+            height: 1,
+        },
     );
 
     // Buttons
@@ -1263,15 +1482,29 @@ fn render_confirm_quit(f: &mut Frame, area: Rect) {
 
     safe_render_widget(
         f,
-        Paragraph::new("  [ Yes ]  ")
-            .style(Style::default().fg(Color::Black).bg(CLR_PANEL_BORDER).add_modifier(Modifier::BOLD)),
-        Rect { x: btn_x, y: btn_y, width: yes_w, height: 1 },
+        Paragraph::new("  [ Yes ]  ").style(
+            Style::default()
+                .fg(Color::Black)
+                .bg(CLR_PANEL_BORDER)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Rect {
+            x: btn_x,
+            y: btn_y,
+            width: yes_w,
+            height: 1,
+        },
     );
     safe_render_widget(
         f,
         Paragraph::new("  [  No ]  ")
             .style(Style::default().fg(Color::Rgb(80, 60, 40)).bg(CLR_APP_BG)),
-        Rect { x: btn_x + yes_w + gap, y: btn_y, width: no_w, height: 1 },
+        Rect {
+            x: btn_x + yes_w + gap,
+            y: btn_y,
+            width: no_w,
+            height: 1,
+        },
     );
 
     // Key hints
@@ -1280,7 +1513,12 @@ fn render_confirm_quit(f: &mut Frame, area: Rect) {
         Paragraph::new("Y / Enter  ·  N / Esc")
             .alignment(Alignment::Center)
             .style(Style::default().fg(Color::Rgb(120, 90, 60)).bg(CLR_APP_BG)),
-        Rect { x: inner.x, y: inner.y + 8, width: inner.width, height: 1 },
+        Rect {
+            x: inner.x,
+            y: inner.y + 8,
+            width: inner.width,
+            height: 1,
+        },
     );
 }
 
@@ -1293,12 +1531,22 @@ fn render_confirm_delete(f: &mut Frame, message: &str, count: usize, area: Rect)
     const H: u16 = 9;
     let x = (area.width.saturating_sub(W)) / 2 + area.x;
     let y = (area.height.saturating_sub(H)) / 2 + area.y;
-    let popup = clamp_rect(area, Rect { x, y, width: W, height: H });
+    let popup = clamp_rect(
+        area,
+        Rect {
+            x,
+            y,
+            width: W,
+            height: H,
+        },
+    );
     safe_render_widget(f, Clear, popup);
 
     let title = Span::styled(
         " Delete ",
-        Style::default().fg(Color::Rgb(255, 100, 80)).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(Color::Rgb(255, 100, 80))
+            .add_modifier(Modifier::BOLD),
     );
     let block = Block::default()
         .title(title)
@@ -1309,13 +1557,27 @@ fn render_confirm_delete(f: &mut Frame, message: &str, count: usize, area: Rect)
     safe_render_widget(f, block, popup);
 
     // Warning header
-    let icon_label = if count == 1 { "\u{26a0}  Delete this item?" } else { "\u{26a0}  Delete these items?" };
+    let icon_label = if count == 1 {
+        "\u{26a0}  Delete this item?"
+    } else {
+        "\u{26a0}  Delete these items?"
+    };
     safe_render_widget(
         f,
         Paragraph::new(icon_label)
             .alignment(Alignment::Center)
-            .style(Style::default().fg(Color::Rgb(255, 160, 60)).bg(Color::Rgb(38, 18, 14)).add_modifier(Modifier::BOLD)),
-        Rect { x: inner.x, y: inner.y, width: inner.width, height: 1 },
+            .style(
+                Style::default()
+                    .fg(Color::Rgb(255, 160, 60))
+                    .bg(Color::Rgb(38, 18, 14))
+                    .add_modifier(Modifier::BOLD),
+            ),
+        Rect {
+            x: inner.x,
+            y: inner.y,
+            width: inner.width,
+            height: 1,
+        },
     );
 
     // Message
@@ -1324,8 +1586,17 @@ fn render_confirm_delete(f: &mut Frame, message: &str, count: usize, area: Rect)
         f,
         Paragraph::new(short_msg)
             .alignment(Alignment::Center)
-            .style(Style::default().fg(Color::Rgb(240, 200, 180)).bg(Color::Rgb(38, 18, 14))),
-        Rect { x: inner.x, y: inner.y + 2, width: inner.width, height: 2 },
+            .style(
+                Style::default()
+                    .fg(Color::Rgb(240, 200, 180))
+                    .bg(Color::Rgb(38, 18, 14)),
+            ),
+        Rect {
+            x: inner.x,
+            y: inner.y + 2,
+            width: inner.width,
+            height: 2,
+        },
     );
 
     // Buttons
@@ -1337,15 +1608,32 @@ fn render_confirm_delete(f: &mut Frame, message: &str, count: usize, area: Rect)
 
     safe_render_widget(
         f,
-        Paragraph::new("  [ Delete ]  ")
-            .style(Style::default().fg(Color::White).bg(Color::Rgb(160, 40, 30)).add_modifier(Modifier::BOLD)),
-        Rect { x: btn_x, y: btn_y, width: yes_w, height: 1 },
+        Paragraph::new("  [ Delete ]  ").style(
+            Style::default()
+                .fg(Color::White)
+                .bg(Color::Rgb(160, 40, 30))
+                .add_modifier(Modifier::BOLD),
+        ),
+        Rect {
+            x: btn_x,
+            y: btn_y,
+            width: yes_w,
+            height: 1,
+        },
     );
     safe_render_widget(
         f,
-        Paragraph::new("  [ Cancel ]  ")
-            .style(Style::default().fg(Color::Rgb(180, 140, 120)).bg(Color::Rgb(38, 18, 14))),
-        Rect { x: btn_x + yes_w + gap, y: btn_y, width: no_w, height: 1 },
+        Paragraph::new("  [ Cancel ]  ").style(
+            Style::default()
+                .fg(Color::Rgb(180, 140, 120))
+                .bg(Color::Rgb(38, 18, 14)),
+        ),
+        Rect {
+            x: btn_x + yes_w + gap,
+            y: btn_y,
+            width: no_w,
+            height: 1,
+        },
     );
 
     // Hints
@@ -1353,8 +1641,17 @@ fn render_confirm_delete(f: &mut Frame, message: &str, count: usize, area: Rect)
         f,
         Paragraph::new("Y / Enter  ·  N / Esc")
             .alignment(Alignment::Center)
-            .style(Style::default().fg(Color::Rgb(130, 90, 70)).bg(Color::Rgb(38, 18, 14))),
-        Rect { x: inner.x, y: btn_y + 1, width: inner.width, height: 1 },
+            .style(
+                Style::default()
+                    .fg(Color::Rgb(130, 90, 70))
+                    .bg(Color::Rgb(38, 18, 14)),
+            ),
+        Rect {
+            x: inner.x,
+            y: btn_y + 1,
+            width: inner.width,
+            height: 1,
+        },
     );
 }
 
@@ -1367,7 +1664,15 @@ fn render_input(f: &mut Frame, dlg: &InputDialog, area: Rect) {
     let height = 7u16;
     let x = (area.width.saturating_sub(width)) / 2 + area.x;
     let y = (area.height.saturating_sub(height)) / 2 + area.y;
-    let popup = clamp_rect(area, Rect { x, y, width, height });
+    let popup = clamp_rect(
+        area,
+        Rect {
+            x,
+            y,
+            width,
+            height,
+        },
+    );
 
     safe_render_widget(f, Clear, popup);
     let block = Block::default()
@@ -1394,7 +1699,13 @@ fn render_input(f: &mut Frame, dlg: &InputDialog, area: Rect) {
     ));
 
     f.render_widget(
-        Paragraph::new(vec![Line::default(), prompt_line, Line::default(), input_line, hint_line]),
+        Paragraph::new(vec![
+            Line::default(),
+            prompt_line,
+            Line::default(),
+            input_line,
+            hint_line,
+        ]),
         inner,
     );
 
@@ -1411,7 +1722,15 @@ fn render_copy_dialog(f: &mut Frame, dlg: &CopyDialogState, area: Rect) {
     let height = 14u16.min(area.height.saturating_sub(2));
     let x = (area.width.saturating_sub(width)) / 2 + area.x;
     let y = (area.height.saturating_sub(height)) / 2 + area.y;
-    let popup = clamp_rect(area, Rect { x, y, width, height });
+    let popup = clamp_rect(
+        area,
+        Rect {
+            x,
+            y,
+            width,
+            height,
+        },
+    );
 
     f.render_widget(Clear, popup);
     let block = Block::default()
@@ -1428,33 +1747,51 @@ fn render_copy_dialog(f: &mut Frame, dlg: &CopyDialogState, area: Rect) {
         Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
     };
     let overwrite_style = if dlg.field == CopyDialogState::OVERWRITE {
-        Style::default().fg(CLR_MENU_SEL_FG).bg(CLR_MENU_SEL_BG).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(CLR_MENU_SEL_FG)
+            .bg(CLR_MENU_SEL_BG)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
     };
     let newer_style = if dlg.field == CopyDialogState::NEWER_ONLY {
-        Style::default().fg(CLR_MENU_SEL_FG).bg(CLR_MENU_SEL_BG).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(CLR_MENU_SEL_FG)
+            .bg(CLR_MENU_SEL_BG)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
     };
     let keep_attr_style = if dlg.field == CopyDialogState::KEEP_ATTRIBUTES {
-        Style::default().fg(CLR_MENU_SEL_FG).bg(CLR_MENU_SEL_BG).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(CLR_MENU_SEL_FG)
+            .bg(CLR_MENU_SEL_BG)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
     };
     let start_style = if dlg.field == CopyDialogState::START {
-        Style::default().fg(CLR_MENU_SEL_FG).bg(CLR_MENU_SEL_BG).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(CLR_MENU_SEL_FG)
+            .bg(CLR_MENU_SEL_BG)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
     };
     let cancel_style = if dlg.field == CopyDialogState::CANCEL {
-        Style::default().fg(CLR_MENU_SEL_FG).bg(CLR_MENU_SEL_BG).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(CLR_MENU_SEL_FG)
+            .bg(CLR_MENU_SEL_BG)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
     };
 
     let dest_width = inner.width.saturating_sub(6) as usize;
-    let dest_value = truncate_str(&format!("{:<width$}", dlg.destination, width = dest_width), dest_width);
+    let dest_value = truncate_str(
+        &format!("{:<width$}", dlg.destination, width = dest_width),
+        dest_width,
+    );
     let summary = if dlg.waiting_to_start {
         "Waiting...".to_string()
     } else if dlg.stats_pending && dlg.file_count == 0 && dlg.total_bytes == 0 {
@@ -1462,7 +1799,10 @@ fn render_copy_dialog(f: &mut Frame, dlg: &CopyDialogState, area: Rect) {
     } else if dlg.file_count == 1 {
         format!("Copy one file ({} bytes) to", dlg.total_bytes)
     } else {
-        format!("Copy {} files ({} bytes) to", dlg.file_count, dlg.total_bytes)
+        format!(
+            "Copy {} files ({} bytes) to",
+            dlg.file_count, dlg.total_bytes
+        )
     };
     let counters = if dlg.file_count == 1 {
         format!(" 1 file  {} bytes", dlg.total_bytes)
@@ -1470,7 +1810,13 @@ fn render_copy_dialog(f: &mut Frame, dlg: &CopyDialogState, area: Rect) {
         format!(" {} files  {} bytes", dlg.file_count, dlg.total_bytes)
     };
     let lines = vec![
-        Line::from(Span::styled(summary, Style::default().fg(CLR_HEADER_FG).bg(CLR_MENU_DD_BG).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(
+            summary,
+            Style::default()
+                .fg(CLR_HEADER_FG)
+                .bg(CLR_MENU_DD_BG)
+                .add_modifier(Modifier::BOLD),
+        )),
         Line::from(Span::styled(
             if dlg.waiting_to_start {
                 " Waiting for size calculation to finish..."
@@ -1485,11 +1831,32 @@ fn render_copy_dialog(f: &mut Frame, dlg: &CopyDialogState, area: Rect) {
             counters,
             Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG),
         )),
-        Line::from(Span::styled(" Destination:", Style::default().fg(CLR_HEADER_FG).bg(CLR_MENU_DD_BG))),
+        Line::from(Span::styled(
+            " Destination:",
+            Style::default().fg(CLR_HEADER_FG).bg(CLR_MENU_DD_BG),
+        )),
         Line::from(Span::styled(format!(" {}", dest_value), dest_style)),
-        Line::from(Span::styled(format!(" [{}] Keep attributes", if dlg.keep_attributes { 'x' } else { ' ' }), keep_attr_style)),
-        Line::from(Span::styled(format!(" [{}] Overwrite existing", if dlg.overwrite { 'x' } else { ' ' }), overwrite_style)),
-        Line::from(Span::styled(format!(" [{}] Newer files only", if dlg.newer_only { 'x' } else { ' ' }), newer_style)),
+        Line::from(Span::styled(
+            format!(
+                " [{}] Keep attributes",
+                if dlg.keep_attributes { 'x' } else { ' ' }
+            ),
+            keep_attr_style,
+        )),
+        Line::from(Span::styled(
+            format!(
+                " [{}] Overwrite existing",
+                if dlg.overwrite { 'x' } else { ' ' }
+            ),
+            overwrite_style,
+        )),
+        Line::from(Span::styled(
+            format!(
+                " [{}] Newer files only",
+                if dlg.newer_only { 'x' } else { ' ' }
+            ),
+            newer_style,
+        )),
         Line::default(),
         Line::from(if dlg.waiting_to_start {
             vec![Span::styled(" [ Abort ] ", start_style)]
@@ -1510,10 +1877,15 @@ fn render_copy_dialog(f: &mut Frame, dlg: &CopyDialogState, area: Rect) {
             Style::default().fg(CLR_UNKNOWN).bg(CLR_MENU_DD_BG),
         )),
     ];
-    safe_render_widget(f, Paragraph::new(lines).style(Style::default().bg(CLR_MENU_DD_BG)), inner);
+    safe_render_widget(
+        f,
+        Paragraph::new(lines).style(Style::default().bg(CLR_MENU_DD_BG)),
+        inner,
+    );
 
     if dlg.field == CopyDialogState::DESTINATION && !dlg.stats_pending && !dlg.waiting_to_start {
-        let cursor_x = (inner.x + 1 + dlg.cursor as u16).min(inner.x + inner.width.saturating_sub(1));
+        let cursor_x =
+            (inner.x + 1 + dlg.cursor as u16).min(inner.x + inner.width.saturating_sub(1));
         let cursor_y = inner.y + 3;
         safe_set_cursor_position(f, cursor_x, cursor_y);
     }
@@ -1524,7 +1896,15 @@ fn render_copy_progress(f: &mut Frame, state: &CopyProgressState, area: Rect) {
     let height = 10u16.min(area.height.saturating_sub(2));
     let x = (area.width.saturating_sub(width)) / 2 + area.x;
     let y = (area.height.saturating_sub(height)) / 2 + area.y;
-    let popup = clamp_rect(area, Rect { x, y, width, height });
+    let popup = clamp_rect(
+        area,
+        Rect {
+            x,
+            y,
+            width,
+            height,
+        },
+    );
 
     safe_render_widget(f, Clear, popup);
     let block = Block::default()
@@ -1552,7 +1932,10 @@ fn render_copy_progress(f: &mut Frame, state: &CopyProgressState, area: Rect) {
     let lines = vec![
         Line::from(Span::styled(
             truncate_str(&state.current_name, inner.width as usize),
-            Style::default().fg(CLR_HEADER_FG).bg(CLR_MENU_DD_BG).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(CLR_HEADER_FG)
+                .bg(CLR_MENU_DD_BG)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
             format!("File  {}", progress_bar_string(bar_width, file_ratio)),
@@ -1570,7 +1953,13 @@ fn render_copy_progress(f: &mut Frame, state: &CopyProgressState, area: Rect) {
             Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG),
         )),
         Line::from(Span::styled(
-            format!("Remaining: {}", state.remaining_secs.map(|s| format!("{s} sec")).unwrap_or_else(|| "--".into())),
+            format!(
+                "Remaining: {}",
+                state
+                    .remaining_secs
+                    .map(|s| format!("{s} sec"))
+                    .unwrap_or_else(|| "--".into())
+            ),
             Style::default().fg(CLR_UNKNOWN).bg(CLR_MENU_DD_BG),
         )),
         Line::default(),
@@ -1579,7 +1968,11 @@ fn render_copy_progress(f: &mut Frame, state: &CopyProgressState, area: Rect) {
             Style::default().fg(CLR_UNKNOWN).bg(CLR_MENU_DD_BG),
         )),
     ];
-    safe_render_widget(f, Paragraph::new(lines).style(Style::default().bg(CLR_MENU_DD_BG)), inner);
+    safe_render_widget(
+        f,
+        Paragraph::new(lines).style(Style::default().bg(CLR_MENU_DD_BG)),
+        inner,
+    );
 }
 
 fn progress_bar_string(width: usize, ratio: f64) -> String {
@@ -1597,17 +1990,23 @@ fn progress_bar_string(width: usize, ratio: f64) -> String {
 fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, area: Rect) {
     let width = 76u16.min(area.width.saturating_sub(4));
     let height = 20u16.min(area.height.saturating_sub(2)).max(10);
-    let popup = clamp_rect(area, Rect {
-        x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + area.height.saturating_sub(height) / 2,
-        width,
-        height,
-    });
+    let popup = clamp_rect(
+        area,
+        Rect {
+            x: area.x + area.width.saturating_sub(width) / 2,
+            y: area.y + area.height.saturating_sub(height) / 2,
+            width,
+            height,
+        },
+    );
     safe_render_widget(f, Clear, popup);
     let block = Block::default()
         .title(Span::styled(
             " Remote Connections ",
-            Style::default().fg(CLR_MENU_BAR_FG).bg(CLR_MENU_DD_BG).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(CLR_MENU_BAR_FG)
+                .bg(CLR_MENU_DD_BG)
+                .add_modifier(Modifier::BOLD),
         ))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(CLR_MENU_BORDER).bg(CLR_MENU_DD_BG))
@@ -1618,20 +2017,33 @@ fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, area: Rect) 
         return;
     }
 
-    let input_area = Rect { x: inner.x, y: inner.y, width: inner.width, height: 1 };
-    let sep_area = Rect { x: inner.x, y: inner.y + 1, width: inner.width, height: 1 };
+    let input_area = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: inner.width,
+        height: 1,
+    };
+    let sep_area = Rect {
+        x: inner.x,
+        y: inner.y + 1,
+        width: inner.width,
+        height: 1,
+    };
     let list_area = Rect {
         x: inner.x,
         y: inner.y + 2,
         width: inner.width,
         height: inner.height.saturating_sub(3),
     };
-    let hint_area = clamp_rect(area, Rect {
-        x: inner.x,
-        y: inner.y + inner.height - 1,
-        width: inner.width,
-        height: 1,
-    });
+    let hint_area = clamp_rect(
+        area,
+        Rect {
+            x: inner.x,
+            y: inner.y + inner.height - 1,
+            width: inner.width,
+            height: 1,
+        },
+    );
 
     let matches = state.filtered_indices();
     let total = matches.len();
@@ -1701,21 +2113,29 @@ fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, area: Rect) 
                 let (proto, proto_style) = match item.protocol() {
                     RemoteProtocol::Sftp => (
                         "sftp",
-                        Style::default().fg(Color::Rgb(121, 214, 255)).bg(CLR_MENU_DD_BG),
+                        Style::default()
+                            .fg(Color::Rgb(121, 214, 255))
+                            .bg(CLR_MENU_DD_BG),
                     ),
                     RemoteProtocol::Imap => (
                         "imap",
-                        Style::default().fg(Color::Rgb(181, 238, 170)).bg(CLR_MENU_DD_BG),
+                        Style::default()
+                            .fg(Color::Rgb(181, 238, 170))
+                            .bg(CLR_MENU_DD_BG),
                     ),
                 };
                 let (source, badge_style) = match item.source {
                     RemoteSource::SshConfig => (
                         "ssh",
-                        Style::default().fg(Color::Rgb(255, 208, 124)).bg(CLR_MENU_DD_BG),
+                        Style::default()
+                            .fg(Color::Rgb(255, 208, 124))
+                            .bg(CLR_MENU_DD_BG),
                     ),
                     RemoteSource::UserToml => (
                         "toml",
-                        Style::default().fg(Color::Rgb(246, 237, 212)).bg(CLR_MENU_DD_BG),
+                        Style::default()
+                            .fg(Color::Rgb(246, 237, 212))
+                            .bg(CLR_MENU_DD_BG),
                     ),
                 };
                 let host = item.host_label();
@@ -1745,14 +2165,30 @@ fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, area: Rect) 
                         .bg(CLR_MENU_SEL_BG)
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(Color::Rgb(198, 184, 156)).bg(CLR_MENU_DD_BG)
+                    Style::default()
+                        .fg(Color::Rgb(198, 184, 156))
+                        .bg(CLR_MENU_DD_BG)
                 };
-                let alias_line = highlight_tokens(&format!("{:<16}", truncate_str(&item.name, 16)), &tokens, alias_style.fg.unwrap_or(CLR_MENU_DD_FG), alias_style.bg.unwrap_or(CLR_MENU_DD_BG), CLR_QS_MATCH_HI_SEL);
+                let alias_line = highlight_tokens(
+                    &format!("{:<16}", truncate_str(&item.name, 16)),
+                    &tokens,
+                    alias_style.fg.unwrap_or(CLR_MENU_DD_FG),
+                    alias_style.bg.unwrap_or(CLR_MENU_DD_BG),
+                    CLR_QS_MATCH_HI_SEL,
+                );
                 let host_text = truncate_str(&host, inner.width.saturating_sub(35) as usize);
-                let host_line = highlight_tokens(&host_text, &tokens, host_style.fg.unwrap_or(CLR_MENU_DD_FG), host_style.bg.unwrap_or(CLR_MENU_DD_BG), if selected { CLR_QS_MATCH_HI_SEL } else { CLR_QS_MATCH_HI });
-                let mut spans = vec![
-                    Span::styled(" ", row_style),
-                ];
+                let host_line = highlight_tokens(
+                    &host_text,
+                    &tokens,
+                    host_style.fg.unwrap_or(CLR_MENU_DD_FG),
+                    host_style.bg.unwrap_or(CLR_MENU_DD_BG),
+                    if selected {
+                        CLR_QS_MATCH_HI_SEL
+                    } else {
+                        CLR_QS_MATCH_HI
+                    },
+                );
+                let mut spans = vec![Span::styled(" ", row_style)];
                 spans.extend(alias_line.spans);
                 spans.extend([
                     Span::styled(" ", row_style),
@@ -1764,7 +2200,10 @@ fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, area: Rect) 
                 spans.extend(host_line.spans);
                 let used: usize = spans.iter().map(|s| s.content.len()).sum();
                 if used < list_area.width as usize {
-                    spans.push(Span::styled(" ".repeat(list_area.width as usize - used), row_style));
+                    spans.push(Span::styled(
+                        " ".repeat(list_area.width as usize - used),
+                        row_style,
+                    ));
                 }
                 ListItem::new(Line::from(spans))
             })
@@ -1782,12 +2221,15 @@ fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, area: Rect) 
 fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: Rect) {
     let width = 72u16.min(area.width.saturating_sub(4));
     let height = 14u16.min(area.height.saturating_sub(2)).max(10);
-    let popup = clamp_rect(area, Rect {
-        x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + area.height.saturating_sub(height) / 2,
-        width,
-        height,
-    });
+    let popup = clamp_rect(
+        area,
+        Rect {
+            x: area.x + area.width.saturating_sub(width) / 2,
+            y: area.y + area.height.saturating_sub(height) / 2,
+            width,
+            height,
+        },
+    );
     safe_render_widget(f, Clear, popup);
     let block = Block::default()
         .title(Span::styled(
@@ -1795,7 +2237,10 @@ fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: Rect) {
                 RemoteEditKind::Sftp => " Add SFTP Server ",
                 RemoteEditKind::Imap => " Add IMAP Server ",
             },
-            Style::default().fg(CLR_MENU_BAR_FG).bg(CLR_MENU_DD_BG).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(CLR_MENU_BAR_FG)
+                .bg(CLR_MENU_DD_BG)
+                .add_modifier(Modifier::BOLD),
         ))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(CLR_MENU_BORDER).bg(CLR_MENU_DD_BG))
@@ -1811,8 +2256,14 @@ fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: Rect) {
     for (idx, label) in labels.iter().enumerate() {
         let selected = state.cursor == idx;
         // Label: always dark background; arrow prefix on selected row
-        let label_style = Style::default().fg(CLR_HEADER_FG).bg(CLR_MENU_DD_BG)
-            .add_modifier(if selected { Modifier::BOLD } else { Modifier::empty() });
+        let label_style = Style::default()
+            .fg(CLR_HEADER_FG)
+            .bg(CLR_MENU_DD_BG)
+            .add_modifier(if selected {
+                Modifier::BOLD
+            } else {
+                Modifier::empty()
+            });
         let prefix = if selected { ">" } else { " " };
         // Active input field: white bg / black fg so the terminal cursor is clearly visible
         let value_style = if selected {
@@ -1822,17 +2273,26 @@ fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: Rect) {
         };
         lines.push(Line::from(vec![
             Span::styled(format!("{}{:<8}", prefix, format!("{label}:")), label_style),
-            Span::styled(format!("{:<width$}", state.fields[idx], width = value_w), value_style),
+            Span::styled(
+                format!("{:<width$}", state.fields[idx], width = value_w),
+                value_style,
+            ),
         ]));
     }
     lines.push(Line::default());
     let save_style = if state.cursor == RemoteEditState::SAVE {
-        Style::default().fg(CLR_MENU_SEL_FG).bg(CLR_MENU_SEL_BG).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(CLR_MENU_SEL_FG)
+            .bg(CLR_MENU_SEL_BG)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
     };
     let cancel_style = if state.cursor == RemoteEditState::CANCEL {
-        Style::default().fg(CLR_MENU_SEL_FG).bg(CLR_MENU_SEL_BG).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(CLR_MENU_SEL_FG)
+            .bg(CLR_MENU_SEL_BG)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
     };
@@ -1852,7 +2312,8 @@ fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: Rect) {
         inner,
     );
     if state.cursor < 6 {
-        let cursor_x = (inner.x + 9 + state.input_cursor as u16).min(inner.x + inner.width.saturating_sub(2));
+        let cursor_x =
+            (inner.x + 9 + state.input_cursor as u16).min(inner.x + inner.width.saturating_sub(2));
         let cursor_y = inner.y + state.cursor as u16;
         safe_set_cursor_position(f, cursor_x, cursor_y);
     }
@@ -1861,17 +2322,23 @@ fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: Rect) {
 fn render_remote_connecting(f: &mut Frame, state: &RemoteConnectingState, area: Rect) {
     let width = 46u16.min(area.width.saturating_sub(4)).max(30);
     let height = 7u16.min(area.height.saturating_sub(2)).max(6);
-    let popup = clamp_rect(area, Rect {
-        x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + area.height.saturating_sub(height) / 2,
-        width,
-        height,
-    });
+    let popup = clamp_rect(
+        area,
+        Rect {
+            x: area.x + area.width.saturating_sub(width) / 2,
+            y: area.y + area.height.saturating_sub(height) / 2,
+            width,
+            height,
+        },
+    );
     safe_render_widget(f, Clear, popup);
     let block = Block::default()
         .title(Span::styled(
             " Connecting ",
-            Style::default().fg(CLR_MENU_BAR_FG).bg(CLR_MENU_DD_BG).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(CLR_MENU_BAR_FG)
+                .bg(CLR_MENU_DD_BG)
+                .add_modifier(Modifier::BOLD),
         ))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(CLR_MENU_BORDER).bg(CLR_MENU_DD_BG))
@@ -1885,7 +2352,10 @@ fn render_remote_connecting(f: &mut Frame, state: &RemoteConnectingState, area: 
         )),
         Line::from(Span::styled(
             format!(" {}", state.profile_name),
-            Style::default().fg(CLR_HEADER_FG).bg(CLR_MENU_DD_BG).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(CLR_HEADER_FG)
+                .bg(CLR_MENU_DD_BG)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::default(),
         Line::from(Span::styled(
@@ -1902,7 +2372,10 @@ fn render_remote_connecting(f: &mut Frame, state: &RemoteConnectingState, area: 
             Style::default().fg(CLR_UNKNOWN).bg(CLR_MENU_DD_BG),
         )),
     ];
-    f.render_widget(Paragraph::new(lines).style(Style::default().bg(CLR_MENU_DD_BG)), inner);
+    f.render_widget(
+        Paragraph::new(lines).style(Style::default().bg(CLR_MENU_DD_BG)),
+        inner,
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1914,7 +2387,15 @@ fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
     let height = (area.height / 2).max(12);
     let x = (area.width.saturating_sub(width)) / 2 + area.x;
     let y = (area.height.saturating_sub(height)) / 2 + area.y;
-    let popup = clamp_rect(area, Rect { x, y, width, height });
+    let popup = clamp_rect(
+        area,
+        Rect {
+            x,
+            y,
+            width,
+            height,
+        },
+    );
 
     f.render_widget(Clear, popup);
     let block = Block::default()
@@ -1964,7 +2445,16 @@ fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
         )),
     ];
 
-    safe_render_widget(f, Paragraph::new(lines), Rect { x: inner.x, y: inner.y, width: inner.width, height: input_h });
+    safe_render_widget(
+        f,
+        Paragraph::new(lines),
+        Rect {
+            x: inner.x,
+            y: inner.y,
+            width: inner.width,
+            height: input_h,
+        },
+    );
 
     // --- Results ---
     let result_count = state.results.len();
@@ -2011,12 +2501,15 @@ fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
     safe_render_widget(f, List::new(items), result_inner);
 
     // Hint
-    let hint_area = clamp_rect(area, Rect {
-        x: inner.x,
-        y: inner.y + inner.height - 1,
-        width: inner.width,
-        height: 1,
-    });
+    let hint_area = clamp_rect(
+        area,
+        Rect {
+            x: inner.x,
+            y: inner.y + inner.height - 1,
+            width: inner.width,
+            height: 1,
+        },
+    );
     safe_render_widget(
         f,
         Paragraph::new(Span::styled(
@@ -2038,7 +2531,15 @@ fn render_dir_bookmarks(f: &mut Frame, app: &App, area: Rect) {
     let width = 64u16.min(area.width.saturating_sub(4));
     let x = (area.width.saturating_sub(width)) / 2 + area.x;
     let y = (area.height.saturating_sub(height)) / 2 + area.y;
-    let popup = clamp_rect(area, Rect { x, y, width, height });
+    let popup = clamp_rect(
+        area,
+        Rect {
+            x,
+            y,
+            width,
+            height,
+        },
+    );
 
     safe_render_widget(f, Clear, popup);
 
@@ -2050,8 +2551,18 @@ fn render_dir_bookmarks(f: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
 
-    let input_area = Rect { x: inner.x, y: inner.y, width: inner.width, height: 1 };
-    let sep_area = Rect { x: inner.x, y: inner.y + 1, width: inner.width, height: 1 };
+    let input_area = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: inner.width,
+        height: 1,
+    };
+    let sep_area = Rect {
+        x: inner.x,
+        y: inner.y + 1,
+        width: inner.width,
+        height: 1,
+    };
     let list_area = Rect {
         x: inner.x,
         y: inner.y + 2,
@@ -2136,9 +2647,15 @@ fn render_dir_bookmarks(f: &mut Frame, app: &App, area: Rect) {
                         let path = truncate_str(&path.to_string_lossy(), max_w.saturating_sub(20));
                         let label = format!(" <add current dir> {}", path);
                         let style = if selected {
-                            Style::default().fg(CLR_MENU_SEL_FG).bg(CLR_MENU_SEL_BG).add_modifier(Modifier::BOLD)
+                            Style::default()
+                                .fg(CLR_MENU_SEL_FG)
+                                .bg(CLR_MENU_SEL_BG)
+                                .add_modifier(Modifier::BOLD)
                         } else {
-                            Style::default().fg(CLR_HEADER_FG).bg(CLR_MENU_DD_BG).add_modifier(Modifier::BOLD)
+                            Style::default()
+                                .fg(CLR_HEADER_FG)
+                                .bg(CLR_MENU_DD_BG)
+                                .add_modifier(Modifier::BOLD)
                         };
                         (label, style)
                     }
@@ -2148,21 +2665,34 @@ fn render_dir_bookmarks(f: &mut Frame, app: &App, area: Rect) {
                         let is_remote = s.starts_with("remote://");
                         let label = if is_remote {
                             let rest = &s["remote://".len()..];
-                            format!(" \u{2039}remote\u{203a} {}", truncate_str(rest, max_w.saturating_sub(11)))
+                            format!(
+                                " \u{2039}remote\u{203a} {}",
+                                truncate_str(rest, max_w.saturating_sub(11))
+                            )
                         } else {
                             format!(" {}", truncate_str(&s, max_w.saturating_sub(1)))
                         };
                         let style = if selected {
-                            Style::default().fg(CLR_MENU_SEL_FG).bg(CLR_MENU_SEL_BG).add_modifier(Modifier::BOLD)
+                            Style::default()
+                                .fg(CLR_MENU_SEL_FG)
+                                .bg(CLR_MENU_SEL_BG)
+                                .add_modifier(Modifier::BOLD)
                         } else if !is_remote && !p.is_dir() {
-                            Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG).add_modifier(Modifier::DIM)
+                            Style::default()
+                                .fg(CLR_MENU_DD_FG)
+                                .bg(CLR_MENU_DD_BG)
+                                .add_modifier(Modifier::DIM)
                         } else {
                             Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
                         };
                         (label, style)
                     }
                 };
-                let hi = if selected { CLR_QS_MATCH_HI_SEL } else { CLR_QS_MATCH_HI };
+                let hi = if selected {
+                    CLR_QS_MATCH_HI_SEL
+                } else {
+                    CLR_QS_MATCH_HI
+                };
                 ListItem::new(highlight_tokens(
                     &label,
                     &tokens,
@@ -2173,10 +2703,17 @@ fn render_dir_bookmarks(f: &mut Frame, app: &App, area: Rect) {
             })
             .collect()
     };
-    safe_render_widget(f, List::new(items).style(Style::default().bg(CLR_MENU_DD_BG)), list_area);
+    safe_render_widget(
+        f,
+        List::new(items).style(Style::default().bg(CLR_MENU_DD_BG)),
+        list_area,
+    );
 
     // Hint
-    let key_style = Style::default().fg(CLR_HEADER_FG).bg(CLR_MENU_DD_BG).add_modifier(Modifier::BOLD);
+    let key_style = Style::default()
+        .fg(CLR_HEADER_FG)
+        .bg(CLR_MENU_DD_BG)
+        .add_modifier(Modifier::BOLD);
     let txt_style = Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG);
     safe_render_widget(
         f,
@@ -2189,7 +2726,8 @@ fn render_dir_bookmarks(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(":Remove  ", txt_style),
             Span::styled("Esc", key_style),
             Span::styled(":Cancel", txt_style),
-        ])).style(Style::default().bg(CLR_MENU_DD_BG)),
+        ]))
+        .style(Style::default().bg(CLR_MENU_DD_BG)),
         hint_area,
     );
 }
@@ -2234,7 +2772,10 @@ fn highlight_tokens(
     let mut seg_start = 0;
     let mut current_hi = mask.first().copied().unwrap_or(false);
     let base = Style::default().fg(base_fg).bg(base_bg);
-    let hi   = Style::default().fg(hi_fg).bg(base_bg).add_modifier(Modifier::BOLD);
+    let hi = Style::default()
+        .fg(hi_fg)
+        .bg(base_bg)
+        .add_modifier(Modifier::BOLD);
 
     for (byte_pos, ch) in name.char_indices() {
         let this_hi = mask[byte_pos];
@@ -2270,7 +2811,15 @@ fn render_quicksearch_palette(f: &mut Frame, app: &App, area: Rect) {
 
     let x = (area.width.saturating_sub(palette_w)) / 2 + area.x;
     let y = area.y + 2;
-    let popup = clamp_rect(area, Rect { x, y, width: palette_w, height: palette_h });
+    let popup = clamp_rect(
+        area,
+        Rect {
+            x,
+            y,
+            width: palette_w,
+            height: palette_h,
+        },
+    );
 
     safe_render_widget(f, Clear, popup);
 
@@ -2286,9 +2835,24 @@ fn render_quicksearch_palette(f: &mut Frame, app: &App, area: Rect) {
     }
 
     // ── input field ────────────────────────────────────────────────────────
-    let input_area = Rect { x: inner.x, y: inner.y, width: inner.width, height: 1 };
-    let sep_area   = Rect { x: inner.x, y: inner.y + 1, width: inner.width, height: 1 };
-    let list_area  = Rect { x: inner.x, y: inner.y + 2, width: inner.width, height: inner.height.saturating_sub(2) };
+    let input_area = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: inner.width,
+        height: 1,
+    };
+    let sep_area = Rect {
+        x: inner.x,
+        y: inner.y + 1,
+        width: inner.width,
+        height: 1,
+    };
+    let list_area = Rect {
+        x: inner.x,
+        y: inner.y + 2,
+        width: inner.width,
+        height: inner.height.saturating_sub(2),
+    };
 
     // counter hint on the right side of the input (e.g. "3/47")
     let count_hint = if !query.is_empty() && total > 0 {
@@ -2328,8 +2892,7 @@ fn render_quicksearch_palette(f: &mut Frame, app: &App, area: Rect) {
     if total == 0 && !query.is_empty() {
         safe_render_widget(
             f,
-            Paragraph::new(" No match")
-                .style(Style::default().fg(CLR_QS_NO_MATCH).bg(CLR_QS_BG)),
+            Paragraph::new(" No match").style(Style::default().fg(CLR_QS_NO_MATCH).bg(CLR_QS_BG)),
             list_area,
         );
         return;
@@ -2344,10 +2907,7 @@ fn render_quicksearch_palette(f: &mut Frame, app: &App, area: Rect) {
         0
     };
 
-    let tokens: Vec<String> = query
-        .split_whitespace()
-        .map(|t| t.to_lowercase())
-        .collect();
+    let tokens: Vec<String> = query.split_whitespace().map(|t| t.to_lowercase()).collect();
     let items: Vec<ListItem> = matches
         .iter()
         .enumerate()
@@ -2378,14 +2938,26 @@ fn render_quicksearch_palette(f: &mut Frame, app: &App, area: Rect) {
     let (render_area, sb_area) = if total > list_h {
         let list_w = list_area.width.saturating_sub(1);
         (
-            Rect { width: list_w, ..list_area },
-            Some(Rect { x: list_area.x + list_w, y: list_area.y, width: 1, height: list_area.height }),
+            Rect {
+                width: list_w,
+                ..list_area
+            },
+            Some(Rect {
+                x: list_area.x + list_w,
+                y: list_area.y,
+                width: 1,
+                height: list_area.height,
+            }),
         )
     } else {
         (list_area, None)
     };
 
-    safe_render_widget(f, List::new(items).style(Style::default().bg(CLR_QS_BG)), render_area);
+    safe_render_widget(
+        f,
+        List::new(items).style(Style::default().bg(CLR_QS_BG)),
+        render_area,
+    );
 
     if let Some(sb) = sb_area {
         let mut sb_state = ScrollbarState::new(total).position(scroll);
@@ -2407,12 +2979,15 @@ fn render_quicksearch_palette(f: &mut Frame, app: &App, area: Rect) {
 // ---------------------------------------------------------------------------
 
 fn render_help(f: &mut Frame, state: &crate::help::HelpState, area: Rect) {
-    let popup = clamp_rect(area, Rect {
-        x: area.x + 1,
-        y: area.y + 1,
-        width: area.width.saturating_sub(2),
-        height: area.height.saturating_sub(2),
-    });
+    let popup = clamp_rect(
+        area,
+        Rect {
+            x: area.x + 1,
+            y: area.y + 1,
+            width: area.width.saturating_sub(2),
+            height: area.height.saturating_sub(2),
+        },
+    );
 
     safe_render_widget(f, Clear, popup);
     let title = match state.view {
@@ -2429,12 +3004,7 @@ fn render_help(f: &mut Frame, state: &crate::help::HelpState, area: Rect) {
     render_help_with_title(f, popup, title, state);
 }
 
-fn render_help_with_title(
-    f: &mut Frame,
-    popup: Rect,
-    title: &str,
-    state: &crate::help::HelpState,
-) {
+fn render_help_with_title(f: &mut Frame, popup: Rect, title: &str, state: &crate::help::HelpState) {
     let block = Block::default()
         .title(format!(" {} ", title))
         .borders(Borders::ALL)
@@ -2447,18 +3017,24 @@ fn render_help_with_title(
         return;
     }
 
-    let body = clamp_rect(popup, Rect {
-        x: inner.x,
-        y: inner.y,
-        width: inner.width,
-        height: inner.height.saturating_sub(1),
-    });
-    let footer = clamp_rect(popup, Rect {
-        x: inner.x,
-        y: inner.y + inner.height.saturating_sub(1),
-        width: inner.width,
-        height: 1,
-    });
+    let body = clamp_rect(
+        popup,
+        Rect {
+            x: inner.x,
+            y: inner.y,
+            width: inner.width,
+            height: inner.height.saturating_sub(1),
+        },
+    );
+    let footer = clamp_rect(
+        popup,
+        Rect {
+            x: inner.x,
+            y: inner.y + inner.height.saturating_sub(1),
+            width: inner.width,
+            height: 1,
+        },
+    );
 
     match state.view {
         HelpView::Index { cursor } => {
@@ -2469,11 +3045,17 @@ fn render_help_with_title(
                 .enumerate()
                 .map(|(idx, section)| {
                     let style = if idx == cursor {
-                        Style::default().fg(Color::Black).bg(CLR_SELECTED).add_modifier(Modifier::BOLD)
+                        Style::default()
+                            .fg(Color::Black)
+                            .bg(CLR_SELECTED)
+                            .add_modifier(Modifier::BOLD)
                     } else {
                         Style::default().fg(Color::White)
                     };
-                    ListItem::new(Line::from(Span::styled(format!(" {}", section.title), style)))
+                    ListItem::new(Line::from(Span::styled(
+                        format!(" {}", section.title),
+                        style,
+                    )))
                 })
                 .collect();
             safe_render_widget(f, List::new(items), body);
@@ -2491,7 +3073,10 @@ fn render_help_with_title(
                 .enumerate()
                 .map(|(idx, topic_idx)| {
                     let style = if idx == cursor {
-                        Style::default().fg(Color::Black).bg(CLR_SELECTED).add_modifier(Modifier::BOLD)
+                        Style::default()
+                            .fg(Color::Black)
+                            .bg(CLR_SELECTED)
+                            .add_modifier(Modifier::BOLD)
                     } else {
                         Style::default().fg(Color::White)
                     };
@@ -2509,7 +3094,11 @@ fn render_help_with_title(
                 footer,
             );
         }
-        HelpView::Page { topic, scroll, selected_link } => {
+        HelpView::Page {
+            topic,
+            scroll,
+            selected_link,
+        } => {
             let topic = &state.system.topics[topic];
             safe_render_widget(
                 f,
@@ -2610,9 +3199,15 @@ fn truncate_path(p: &str, max: usize) -> String {
 
 fn format_mode(mode: u32) -> String {
     let chars: Vec<char> = [
-        (0o400, 'r'), (0o200, 'w'), (0o100, 'x'),
-        (0o040, 'r'), (0o020, 'w'), (0o010, 'x'),
-        (0o004, 'r'), (0o002, 'w'), (0o001, 'x'),
+        (0o400, 'r'),
+        (0o200, 'w'),
+        (0o100, 'x'),
+        (0o040, 'r'),
+        (0o020, 'w'),
+        (0o010, 'x'),
+        (0o004, 'r'),
+        (0o002, 'w'),
+        (0o001, 'x'),
     ]
     .iter()
     .map(|(bit, ch)| if mode & bit != 0 { *ch } else { '-' })
@@ -2629,10 +3224,23 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
     const H: u16 = 22;
     let x = area.x + (area.width.saturating_sub(W)) / 2;
     let y = area.y + (area.height.saturating_sub(H)) / 2;
-    let popup = clamp_rect(area, Rect { x, y, width: W, height: H });
+    let popup = clamp_rect(
+        area,
+        Rect {
+            x,
+            y,
+            width: W,
+            height: H,
+        },
+    );
 
     // Shadow
-    let sh = Rect { x: popup.x + 2, y: popup.y + 1, width: W, height: H };
+    let sh = Rect {
+        x: popup.x + 2,
+        y: popup.y + 1,
+        width: W,
+        height: H,
+    };
     if sh.right() <= area.right() && sh.bottom() <= area.bottom() {
         safe_render_widget(
             f,
@@ -2647,7 +3255,13 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG))
-        .title(Span::styled(" Setup ", Style::default().fg(CLR_BUTTON_FG).bg(CLR_APP_BG).add_modifier(Modifier::BOLD)))
+        .title(Span::styled(
+            " Setup ",
+            Style::default()
+                .fg(CLR_BUTTON_FG)
+                .bg(CLR_APP_BG)
+                .add_modifier(Modifier::BOLD),
+        ))
         .style(Style::default().bg(CLR_APP_BG));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
@@ -2676,12 +3290,17 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
 
     for (i, (label, val)) in LABELS.iter().zip(values.iter()).enumerate() {
         let row = inner.y + i as u16;
-        if row >= inner.y + inner.height { break; }
+        if row >= inner.y + inner.height {
+            break;
+        }
         let tick = if *val { "X" } else { " " };
         let text = format!("  [{}] {}", tick, label);
         let selected = cs.cursor == i;
         let style = if selected {
-            Style::default().fg(Color::Black).bg(CLR_CURSOR_BG).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Black)
+                .bg(CLR_CURSOR_BG)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::Rgb(50, 36, 22)).bg(CLR_APP_BG)
         };
@@ -2689,7 +3308,12 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
         safe_render_widget(
             f,
             Paragraph::new(padded).style(style),
-            Rect { x: inner.x, y: row, width: inner.width, height: 1 },
+            Rect {
+                x: inner.x,
+                y: row,
+                width: inner.width,
+                height: 1,
+            },
         );
     }
 
@@ -2700,21 +3324,30 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
         safe_render_widget(
             f,
             Paragraph::new(sep).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
-            Rect { x: inner.x, y: sep_y, width: inner.width, height: 1 },
+            Rect {
+                x: inner.x,
+                y: sep_y,
+                width: inner.width,
+                height: 1,
+            },
         );
     }
 
     // ── Text fields ────────────────────────────────────────────────────────
-    const TEXT_LABELS: [(&str, usize); 3] = [
-        ("Editor",       8),
-        ("Pager",        9),
-        ("History max", 10),
+    const TEXT_LABELS: [(&str, usize); 3] = [("Editor", 8), ("Pager", 9), ("History max", 10)];
+    let text_values = [
+        cs.editor.as_str(),
+        cs.pager.as_str(),
+        cs.dir_history_max.as_str(),
     ];
-    let text_values = [cs.editor.as_str(), cs.pager.as_str(), cs.dir_history_max.as_str()];
 
-    for (row_offset, ((label, cursor_idx), value)) in TEXT_LABELS.iter().zip(text_values.iter()).enumerate() {
+    for (row_offset, ((label, cursor_idx), value)) in
+        TEXT_LABELS.iter().zip(text_values.iter()).enumerate()
+    {
         let row = inner.y + 9 + row_offset as u16 * 3;
-        if row + 1 >= inner.y + inner.height { break; }
+        if row + 1 >= inner.y + inner.height {
+            break;
+        }
         let selected = cs.cursor == *cursor_idx;
 
         // Label row
@@ -2722,13 +3355,26 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
         safe_render_widget(
             f,
             Paragraph::new(format!("  {}:", label)).style(label_style),
-            Rect { x: inner.x, y: row, width: inner.width, height: 1 },
+            Rect {
+                x: inner.x,
+                y: row,
+                width: inner.width,
+                height: 1,
+            },
         );
 
         // Input row
         let field_w = inner.width.saturating_sub(4);
-        let input_bg = if selected { CLR_CURSOR_BG } else { Color::Rgb(160, 140, 115) };
-        let input_fg = if selected { Color::Black } else { Color::Rgb(40, 28, 18) };
+        let input_bg = if selected {
+            CLR_CURSOR_BG
+        } else {
+            Color::Rgb(160, 140, 115)
+        };
+        let input_fg = if selected {
+            Color::Black
+        } else {
+            Color::Rgb(40, 28, 18)
+        };
         let padded = format!("{:<width$}", value, width = field_w as usize);
         let display = if padded.len() > field_w as usize {
             padded[padded.len() - field_w as usize..].to_string()
@@ -2738,7 +3384,12 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
         safe_render_widget(
             f,
             Paragraph::new(display).style(Style::default().fg(input_fg).bg(input_bg)),
-            Rect { x: inner.x + 2, y: row + 1, width: field_w, height: 1 },
+            Rect {
+                x: inner.x + 2,
+                y: row + 1,
+                width: field_w,
+                height: 1,
+            },
         );
     }
 
@@ -2749,12 +3400,17 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
         safe_render_widget(
             f,
             Paragraph::new(sep).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
-            Rect { x: inner.x, y: bot_sep_y, width: inner.width, height: 1 },
+            Rect {
+                x: inner.x,
+                y: bot_sep_y,
+                width: inner.width,
+                height: 1,
+            },
         );
     }
 
     // ── OK / Cancel buttons ────────────────────────────────────────────────
-    let ok_idx     = ConfigState::NUM_CHECKBOXES + 3;     // 11
+    let ok_idx = ConfigState::NUM_CHECKBOXES + 3; // 11
     let cancel_idx = ConfigState::NUM_CHECKBOXES + 3 + 1; // 12
     let btn_y = inner.y + inner.height.saturating_sub(2);
     let btn_w: u16 = 10;
@@ -2762,12 +3418,18 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
     let btn_x = inner.x + (inner.width.saturating_sub(btn_w * 2 + gap)) / 2;
 
     let ok_style = if cs.cursor == ok_idx {
-        Style::default().fg(Color::Black).bg(CLR_PANEL_BORDER).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Black)
+            .bg(CLR_PANEL_BORDER)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::Rgb(80, 60, 40)).bg(CLR_APP_BG)
     };
     let cancel_style = if cs.cursor == cancel_idx {
-        Style::default().fg(Color::Black).bg(CLR_PANEL_BORDER).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Black)
+            .bg(CLR_PANEL_BORDER)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::Rgb(80, 60, 40)).bg(CLR_APP_BG)
     };
@@ -2775,12 +3437,22 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
     safe_render_widget(
         f,
         Paragraph::new("  [ OK ]  ").style(ok_style),
-        Rect { x: btn_x, y: btn_y, width: btn_w, height: 1 },
+        Rect {
+            x: btn_x,
+            y: btn_y,
+            width: btn_w,
+            height: 1,
+        },
     );
     safe_render_widget(
         f,
         Paragraph::new(" [Cancel] ").style(cancel_style),
-        Rect { x: btn_x + btn_w + gap, y: btn_y, width: btn_w, height: 1 },
+        Rect {
+            x: btn_x + btn_w + gap,
+            y: btn_y,
+            width: btn_w,
+            height: 1,
+        },
     );
 }
 
@@ -2793,10 +3465,23 @@ fn render_opener(f: &mut Frame, s: &OpenerState, area: Rect) {
     let h = (s.items.len() as u16 + 4).min(20).max(6);
     let x = area.x + (area.width.saturating_sub(w)) / 2;
     let y = area.y + (area.height.saturating_sub(h)) / 2;
-    let popup = clamp_rect(area, Rect { x, y, width: w, height: h });
+    let popup = clamp_rect(
+        area,
+        Rect {
+            x,
+            y,
+            width: w,
+            height: h,
+        },
+    );
 
     // Shadow
-    let sh = Rect { x: popup.x + 2, y: popup.y + 1, width: w, height: h };
+    let sh = Rect {
+        x: popup.x + 2,
+        y: popup.y + 1,
+        width: w,
+        height: h,
+    };
     if sh.right() <= area.right() && sh.bottom() <= area.bottom() {
         safe_render_widget(
             f,
@@ -2811,7 +3496,13 @@ fn render_opener(f: &mut Frame, s: &OpenerState, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG))
-        .title(Span::styled(title, Style::default().fg(CLR_BUTTON_FG).bg(CLR_APP_BG).add_modifier(Modifier::BOLD)))
+        .title(Span::styled(
+            title,
+            Style::default()
+                .fg(CLR_BUTTON_FG)
+                .bg(CLR_APP_BG)
+                .add_modifier(Modifier::BOLD),
+        ))
         .style(Style::default().bg(CLR_APP_BG));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
@@ -2821,22 +3512,37 @@ fn render_opener(f: &mut Frame, s: &OpenerState, area: Rect) {
         f,
         Paragraph::new("  ↑↓ select  Enter open  Esc cancel")
             .style(Style::default().fg(Color::Rgb(110, 88, 65)).bg(CLR_APP_BG)),
-        Rect { x: inner.x, y: inner.y, width: inner.width, height: 1 },
+        Rect {
+            x: inner.x,
+            y: inner.y,
+            width: inner.width,
+            height: 1,
+        },
     );
     let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
     safe_render_widget(
         f,
         Paragraph::new(sep).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
-        Rect { x: inner.x, y: inner.y + 1, width: inner.width, height: 1 },
+        Rect {
+            x: inner.x,
+            y: inner.y + 1,
+            width: inner.width,
+            height: 1,
+        },
     );
 
     // Item list
     for (i, cmd) in s.items.iter().enumerate() {
         let row = inner.y + 2 + i as u16;
-        if row >= inner.y + inner.height { break; }
+        if row >= inner.y + inner.height {
+            break;
+        }
         let selected = s.cursor == i;
         let style = if selected {
-            Style::default().fg(Color::Black).bg(CLR_CURSOR_BG).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Black)
+                .bg(CLR_CURSOR_BG)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::Rgb(50, 36, 22)).bg(CLR_APP_BG)
         };
@@ -2846,7 +3552,12 @@ fn render_opener(f: &mut Frame, s: &OpenerState, area: Rect) {
         safe_render_widget(
             f,
             Paragraph::new(padded).style(style),
-            Rect { x: inner.x, y: row, width: inner.width, height: 1 },
+            Rect {
+                x: inner.x,
+                y: row,
+                width: inner.width,
+                height: 1,
+            },
         );
     }
 }
@@ -2860,10 +3571,23 @@ fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rect) {
     const H: u16 = 24;
     let x = area.x + (area.width.saturating_sub(W)) / 2;
     let y = area.y + (area.height.saturating_sub(H)) / 2;
-    let popup = clamp_rect(area, Rect { x, y, width: W, height: H });
+    let popup = clamp_rect(
+        area,
+        Rect {
+            x,
+            y,
+            width: W,
+            height: H,
+        },
+    );
 
     // Shadow
-    let sh = Rect { x: popup.x + 2, y: popup.y + 1, width: W, height: H };
+    let sh = Rect {
+        x: popup.x + 2,
+        y: popup.y + 1,
+        width: W,
+        height: H,
+    };
     if sh.right() <= area.right() && sh.bottom() <= area.bottom() {
         safe_render_widget(
             f,
@@ -2876,7 +3600,13 @@ fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG))
-        .title(Span::styled(" Associations ", Style::default().fg(CLR_BUTTON_FG).bg(CLR_APP_BG).add_modifier(Modifier::BOLD)))
+        .title(Span::styled(
+            " Associations ",
+            Style::default()
+                .fg(CLR_BUTTON_FG)
+                .bg(CLR_APP_BG)
+                .add_modifier(Modifier::BOLD),
+        ))
         .style(Style::default().bg(CLR_APP_BG));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
@@ -2885,15 +3615,29 @@ fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rect) {
     let header = format!("  {:<8} {}", "Ext", "Openers");
     safe_render_widget(
         f,
-        Paragraph::new(header)
-            .style(Style::default().fg(CLR_HEADER_FG).bg(CLR_HEADER_BG).add_modifier(Modifier::BOLD)),
-        Rect { x: inner.x, y: inner.y, width: inner.width, height: 1 },
+        Paragraph::new(header).style(
+            Style::default()
+                .fg(CLR_HEADER_FG)
+                .bg(CLR_HEADER_BG)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Rect {
+            x: inner.x,
+            y: inner.y,
+            width: inner.width,
+            height: 1,
+        },
     );
     let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
     safe_render_widget(
         f,
         Paragraph::new(sep.clone()).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
-        Rect { x: inner.x, y: inner.y + 1, width: inner.width, height: 1 },
+        Rect {
+            x: inner.x,
+            y: inner.y + 1,
+            width: inner.width,
+            height: 1,
+        },
     );
 
     // List rows
@@ -2909,17 +3653,29 @@ fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rect) {
             f,
             Paragraph::new("  (no associations defined)")
                 .style(Style::default().fg(Color::Rgb(110, 88, 65)).bg(CLR_APP_BG)),
-            Rect { x: inner.x, y: inner.y + 2, width: inner.width, height: 1 },
+            Rect {
+                x: inner.x,
+                y: inner.y + 2,
+                width: inner.width,
+                height: 1,
+            },
         );
     } else {
         for (list_row, idx) in (start..).zip(0..list_h) {
-            if list_row >= s.assocs.len() { break; }
+            if list_row >= s.assocs.len() {
+                break;
+            }
             let row_y = inner.y + 2 + idx as u16;
-            if row_y >= inner.y + inner.height { break; }
+            if row_y >= inner.y + inner.height {
+                break;
+            }
             let (ext, openers) = &s.assocs[list_row];
             let selected = s.cursor == list_row;
             let style = if selected {
-                Style::default().fg(Color::Black).bg(CLR_CURSOR_BG).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(CLR_CURSOR_BG)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::Rgb(50, 36, 22)).bg(CLR_APP_BG)
             };
@@ -2936,7 +3692,12 @@ fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rect) {
             safe_render_widget(
                 f,
                 Paragraph::new(padded).style(style),
-                Rect { x: inner.x, y: row_y, width: inner.width, height: 1 },
+                Rect {
+                    x: inner.x,
+                    y: row_y,
+                    width: inner.width,
+                    height: 1,
+                },
             );
         }
     }
@@ -2946,13 +3707,23 @@ fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rect) {
     safe_render_widget(
         f,
         Paragraph::new(sep).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
-        Rect { x: inner.x, y: hint_sep_y, width: inner.width, height: 1 },
+        Rect {
+            x: inner.x,
+            y: hint_sep_y,
+            width: inner.width,
+            height: 1,
+        },
     );
     safe_render_widget(
         f,
         Paragraph::new("  A/+ Add   Enter/E Edit   Del/D Delete   Esc Close")
             .style(Style::default().fg(Color::Rgb(110, 88, 65)).bg(CLR_APP_BG)),
-        Rect { x: inner.x, y: hint_sep_y + 1, width: inner.width, height: 1 },
+        Rect {
+            x: inner.x,
+            y: hint_sep_y + 1,
+            width: inner.width,
+            height: 1,
+        },
     );
 }
 
@@ -2979,7 +3750,11 @@ fn render_terminal(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(if running { Color::Rgb(220, 160, 60) } else { CLR_TERM_BORDER }))
+            .border_style(Style::default().fg(if running {
+                Color::Rgb(220, 160, 60)
+            } else {
+                CLR_TERM_BORDER
+            }))
             .style(Style::default().bg(CLR_TERM_BG))
             .title(Span::styled(title, Style::default().fg(CLR_TERM_PROMPT))),
         area,
@@ -3006,10 +3781,12 @@ fn render_terminal(f: &mut Frame, app: &App, area: Rect) {
         .iter()
         .map(|l| {
             // Lines emitted by the prompt itself get a fixed style
-            if l.starts_with("$ ") {
+            if let Some(prompt_line) = l.strip_prefix(crate::terminal::PROMPT_LINE_MARKER) {
                 return Line::from(Span::styled(
-                    l.clone(),
-                    Style::default().fg(CLR_TERM_PROMPT).add_modifier(Modifier::BOLD),
+                    prompt_line.to_string(),
+                    Style::default()
+                        .fg(CLR_TERM_PROMPT)
+                        .add_modifier(Modifier::BOLD),
                 ));
             }
             if l.starts_with('[') {
@@ -3036,12 +3813,7 @@ fn render_terminal(f: &mut Frame, app: &App, area: Rect) {
     );
 
     // Prompt line (blocked while running)
-    let cwd = app.active_panel().path.display().to_string();
-    let prompt = if running {
-        format!("{}> ", cwd)
-    } else {
-        format!("{}$ ", cwd)
-    };
+    let prompt = crate::terminal::terminal_prompt(app, running);
     let prompt_len = prompt.chars().count() as u16;
     let input_x = inner.x + prompt_len;
 
@@ -3051,13 +3823,22 @@ fn render_terminal(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(
                 prompt,
                 Style::default()
-                    .fg(if running { Color::Rgb(220, 160, 60) } else { CLR_TERM_PROMPT })
+                    .fg(if running {
+                        Color::Rgb(220, 160, 60)
+                    } else {
+                        CLR_TERM_PROMPT
+                    })
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(ts.input.clone(), Style::default().fg(CLR_TERM_INPUT)),
         ]))
         .style(Style::default().bg(CLR_TERM_BG)),
-        Rect { x: inner.x, y: prompt_y, width: inner.width, height: 1 },
+        Rect {
+            x: inner.x,
+            y: prompt_y,
+            width: inner.width,
+            height: 1,
+        },
     );
 
     // Show cursor only when not running
