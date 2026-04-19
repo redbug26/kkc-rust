@@ -129,7 +129,7 @@ type ImapSession = Session<TlsStream<TcpStream>>;
 
 pub fn connections_path() -> Result<PathBuf> {
     let dirs = project_dirs()?;
-    let dir = dirs.config_dir();
+    let dir = dirs.preference_dir();
     fs::create_dir_all(dir)?;
     Ok(dir.join("connections.toml"))
 }

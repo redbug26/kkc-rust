@@ -12,7 +12,7 @@ pub fn project_dirs() -> Result<ProjectDirs> {
 /// Returns the path to the config file, creating parent dirs if needed.
 pub fn config_path() -> Result<PathBuf> {
     let dirs = project_dirs()?;
-    let dir = dirs.config_dir();
+    let dir = dirs.preference_dir();
     fs::create_dir_all(dir)?;
     Ok(dir.join("config.toml"))
 }
