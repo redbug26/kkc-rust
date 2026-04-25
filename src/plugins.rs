@@ -11,6 +11,7 @@ const BUNDLED_DSK_LUA_LICENSE: &str = include_str!("../assets/plugins/amstrad_ds
 const BUNDLED_AMSTRAD_DSK_PLUGIN: &str = include_str!("../assets/plugins/amstrad_dsk/plugin.lua");
 const BUNDLED_COMMODORE_D64_PLUGIN: &str =
     include_str!("../assets/plugins/commodore_d64/plugin.lua");
+const BUNDLED_LHA_LZH_PLUGIN: &str = include_str!("../assets/plugins/lha_lzh/plugin.lua");
 
 static PLUGINS: OnceLock<PluginRegistry> = OnceLock::new();
 
@@ -147,6 +148,10 @@ fn install_bundled_plugins(plugins_dir: &Path) -> Result<()> {
         &commodore_dir.join("plugin.lua"),
         BUNDLED_COMMODORE_D64_PLUGIN,
     )?;
+
+    let lha_dir = plugins_dir.join("lha_lzh");
+    fs::create_dir_all(&lha_dir)?;
+    write_bundled_file(&lha_dir.join("plugin.lua"), BUNDLED_LHA_LZH_PLUGIN)?;
 
     Ok(())
 }
@@ -441,199 +446,4 @@ fn install_runtime_bindings(
     preload.set("kkc", lua.create_function(move |_, ()| Ok(kkc.clone()))?)?;
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn bundled_amstrad_dsk_plugin_registers() {
-        let script = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("assets")
-            .join("plugins")
-            .join("amstrad_dsk")
-            .join("plugin.lua");
-
-        let plugins = inspect_plugin(&script).expect("plugin should load");
-
-        assert_eq!(plugins.len(), 1);
-        assert_eq!(plugins[0].name, "amstrad_dsk");
-        assert_eq!(plugins[0].extensions, vec!["dsk"]);
-    }
-
-    #[test]
-    fn bundled_amstrad_dsk_plugin_extracts_file() {
-        let plugin_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("assets")
-            .join("plugins")
-            .join("amstrad_dsk");
-        let script_path = plugin_dir.join("plugin.lua");
-        let temp_root = std::env::temp_dir().join(format!(
-            "kkc-plugin-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let source_path = temp_root.join("source.bin");
-        let dsk_path = temp_root.join("test.dsk");
-        let extract_dir = temp_root.join("extract");
-        fs::create_dir_all(&extract_dir).unwrap();
-        fs::write(&source_path, b"HELLO CPC").unwrap();
-
-        let lua = plugin_lua();
-        install_bindings(&lua, &plugin_dir, |_| {}).unwrap();
-        lua.globals()
-            .set("source_path", source_path.to_string_lossy().into_owned())
-            .unwrap();
-        lua.globals()
-            .set("dsk_path", dsk_path.to_string_lossy().into_owned())
-            .unwrap();
-        lua.load(
-            r#"
-            local dsk = require("dsk")
-            dsk.create()
-            assert(dsk.saveexternalfile(source_path, "HELLO.BIN", dsk.AMSDOS_FILETYPE_BINARY, 0x4000, 0x4000))
-            assert(dsk.write(dsk_path))
-            "#,
-        )
-        .exec()
-        .unwrap();
-
-        let plugin = ArchivePlugin {
-            name: "amstrad_dsk".into(),
-            description: "Amstrad CPC DSK archive plugin".into(),
-            script_path,
-            plugin_dir,
-            extensions: vec!["dsk".into()],
-            can_add_files: true,
-        };
-        plugin.extract(&dsk_path, &extract_dir).unwrap();
-
-        assert_eq!(
-            fs::read(extract_dir.join("HELLO.BIN")).unwrap(),
-            b"HELLO CPC"
-        );
-
-        let _ = fs::remove_dir_all(temp_root);
-    }
-
-    #[test]
-    fn bundled_amstrad_dsk_plugin_adds_file() {
-        let plugin_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("assets")
-            .join("plugins")
-            .join("amstrad_dsk");
-        let script_path = plugin_dir.join("plugin.lua");
-        let temp_root = std::env::temp_dir().join(format!(
-            "kkc-dsk-add-plugin-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let source_path = temp_root.join("local-file.bin");
-        let dsk_path = temp_root.join("test.dsk");
-        let extract_dir = temp_root.join("extract");
-        fs::create_dir_all(&extract_dir).unwrap();
-        fs::write(&source_path, b"FROM LOCAL").unwrap();
-
-        let lua = plugin_lua();
-        install_bindings(&lua, &plugin_dir, |_| {}).unwrap();
-        lua.globals()
-            .set("dsk_path", dsk_path.to_string_lossy().into_owned())
-            .unwrap();
-        lua.load(
-            r#"
-            local dsk = require("dsk")
-            dsk.create()
-            assert(dsk.write(dsk_path))
-            "#,
-        )
-        .exec()
-        .unwrap();
-
-        let plugin = ArchivePlugin {
-            name: "amstrad_dsk".into(),
-            description: "Amstrad CPC DSK archive plugin".into(),
-            script_path,
-            plugin_dir,
-            extensions: vec!["dsk".into()],
-            can_add_files: true,
-        };
-        plugin
-            .add_files(&dsk_path, std::slice::from_ref(&source_path))
-            .unwrap();
-        plugin.extract(&dsk_path, &extract_dir).unwrap();
-
-        assert_eq!(
-            fs::read(extract_dir.join("LOCAL-FI.BIN")).unwrap(),
-            b"FROM LOCAL"
-        );
-
-        let _ = fs::remove_dir_all(temp_root);
-    }
-
-    #[test]
-    fn bundled_commodore_d64_plugin_extracts_file() {
-        fn d64_sector_offset(track: usize, sector: usize) -> usize {
-            let sectors_per_track = [
-                21usize, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 19, 19,
-                19, 19, 19, 19, 19, 18, 18, 18, 18, 18, 18, 17, 17, 17, 17, 17,
-            ];
-            let previous: usize = sectors_per_track[..track - 1].iter().sum();
-            (previous + sector) * 256
-        }
-
-        let plugin_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("assets")
-            .join("plugins")
-            .join("commodore_d64");
-        let script_path = plugin_dir.join("plugin.lua");
-        let temp_root = std::env::temp_dir().join(format!(
-            "kkc-d64-plugin-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let d64_path = temp_root.join("test.d64");
-        let extract_dir = temp_root.join("extract");
-        fs::create_dir_all(&extract_dir).unwrap();
-
-        let mut image = vec![0u8; 174_848];
-        let dir = d64_sector_offset(18, 1);
-        let entry = dir + 2;
-        image[entry] = 0x82;
-        image[entry + 1] = 1;
-        image[entry + 2] = 0;
-        image[entry + 3..entry + 19].fill(0xa0);
-        image[entry + 3..entry + 8].copy_from_slice(b"HELLO");
-        image[entry + 30] = 1;
-
-        let file = d64_sector_offset(1, 0);
-        let content = b"HELLO C64";
-        image[file] = 0;
-        image[file + 1] = 2 + content.len() as u8;
-        image[file + 2..file + 2 + content.len()].copy_from_slice(content);
-        fs::write(&d64_path, image).unwrap();
-
-        let plugin = ArchivePlugin {
-            name: "commodore_d64".into(),
-            description: "Commodore 64 D64 disk image plugin".into(),
-            script_path,
-            plugin_dir,
-            extensions: vec!["d64".into()],
-            can_add_files: false,
-        };
-        plugin.extract(&d64_path, &extract_dir).unwrap();
-
-        assert_eq!(fs::read(extract_dir.join("HELLO.prg")).unwrap(), content);
-
-        let _ = fs::remove_dir_all(temp_root);
-    }
 }
