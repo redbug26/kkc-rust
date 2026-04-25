@@ -267,6 +267,31 @@ fn handle_enter(app: &mut App) -> Result<()> {
         app.go_parent()?;
     } else if entry.is_dir {
         app.enter_dir(entry.path.clone())?;
+    } else if crate::plugins::is_plugin_bundle(&entry.path) {
+        let bundle_path = if app.active_panel().is_remote_view() {
+            let Some(profile) = app.active_panel().remote_profile() else {
+                app.status.text = "Remote profile missing".into();
+                return Ok(());
+            };
+            match app.run_with_busy("Remote: downloading plugin...", |_| {
+                download_to_temp(&profile, &entry.path.to_string_lossy(), false)
+            }) {
+                Ok(path) => path,
+                Err(e) => {
+                    app.status.text = format!("Remote download failed: {}", e);
+                    return Ok(());
+                }
+            }
+        } else {
+            entry.path.clone()
+        };
+        match crate::plugins::install_plugin_bundle(&bundle_path) {
+            Ok(name) => {
+                app.status.text = format!("Plugin installed: {}", name);
+                app.reload_panels();
+            }
+            Err(e) => app.status.text = format!("Cannot install plugin: {}", e),
+        }
     } else if supports_archive_navigation(&entry.path) {
         if let Err(e) = app.enter_archive(entry.path.clone()) {
             app.status.text = format!("Cannot enter archive: {}", e);

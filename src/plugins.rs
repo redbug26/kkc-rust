@@ -2,9 +2,11 @@ use anyhow::{Context, Result, anyhow, bail};
 use mlua::{Function, Lua, Table};
 use std::cell::RefCell;
 use std::fs;
+use std::io::{self, Read, Seek};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::OnceLock;
+use std::sync::{OnceLock, RwLock};
+use zip::ZipArchive;
 
 const BUNDLED_DSK_LUA: &str = include_str!("../assets/plugins/amstrad_dsk/dsk.lua");
 const BUNDLED_DSK_LUA_LICENSE: &str = include_str!("../assets/plugins/amstrad_dsk/LICENSE.dsk-lua");
@@ -15,7 +17,7 @@ const BUNDLED_LHA_LZH_PLUGIN: &str = include_str!("../assets/plugins/lha_lzh/plu
 const BUNDLED_PDF_FILE_PLUGIN: &str = include_str!("../assets/plugins/pdf_file/plugin.lua");
 const BUNDLED_TEXT_SYNTAX_PLUGIN: &str = include_str!("../assets/plugins/text_syntax/plugin.lua");
 
-static PLUGINS: OnceLock<PluginRegistry> = OnceLock::new();
+static PLUGINS: OnceLock<RwLock<PluginRegistry>> = OnceLock::new();
 
 #[derive(Debug, Clone)]
 pub struct PluginRegistry {
@@ -80,7 +82,7 @@ pub fn initialize() -> Result<()> {
 
     let registry = load_plugins()?;
     PLUGINS
-        .set(registry)
+        .set(RwLock::new(registry))
         .map_err(|_| anyhow!("Plugin registry already initialized"))?;
     Ok(())
 }
@@ -88,7 +90,12 @@ pub fn initialize() -> Result<()> {
 pub fn supports_archive_navigation(path: &Path) -> bool {
     PLUGINS
         .get()
-        .map(|registry| registry.supports_archive(path))
+        .and_then(|registry| {
+            registry
+                .read()
+                .ok()
+                .map(|registry| registry.supports_archive(path))
+        })
         .unwrap_or(false)
 }
 
@@ -96,13 +103,21 @@ pub fn extract_archive_to_temp(path: &Path, destination: &Path) -> Result<bool> 
     let Some(registry) = PLUGINS.get() else {
         return Ok(false);
     };
-    registry.extract_archive(path, destination)
+    registry
+        .read()
+        .map_err(|_| anyhow!("Plugin registry lock poisoned"))?
+        .extract_archive(path, destination)
 }
 
 pub fn supports_archive_add_files(path: &Path) -> bool {
     PLUGINS
         .get()
-        .map(|registry| registry.supports_add_files(path))
+        .and_then(|registry| {
+            registry
+                .read()
+                .ok()
+                .map(|registry| registry.supports_add_files(path))
+        })
         .unwrap_or(false)
 }
 
@@ -110,7 +125,10 @@ pub fn add_files_to_archive(path: &Path, sources: &[PathBuf]) -> Result<bool> {
     let Some(registry) = PLUGINS.get() else {
         return Ok(false);
     };
-    registry.add_files(path, sources)
+    registry
+        .read()
+        .map_err(|_| anyhow!("Plugin registry lock poisoned"))?
+        .add_files(path, sources)
 }
 
 pub fn plugins_dir() -> Result<PathBuf> {
@@ -120,7 +138,7 @@ pub fn plugins_dir() -> Result<PathBuf> {
 pub fn plugin_infos() -> Vec<PluginInfo> {
     PLUGINS
         .get()
-        .map(PluginRegistry::plugin_infos)
+        .and_then(|registry| registry.read().ok().map(|registry| registry.plugin_infos()))
         .unwrap_or_default()
 }
 
@@ -132,6 +150,8 @@ pub fn highlight_viewer_lines(
 ) -> Option<Vec<Vec<ViewerSpan>>> {
     PLUGINS.get().and_then(|registry| {
         registry
+            .read()
+            .ok()?
             .highlight_viewer_lines(path, mode, plugin_name, lines)
             .ok()
             .flatten()
@@ -141,8 +161,40 @@ pub fn highlight_viewer_lines(
 pub fn viewer_plugin_infos() -> Vec<PluginInfo> {
     PLUGINS
         .get()
-        .map(PluginRegistry::viewer_plugin_infos)
+        .and_then(|registry| {
+            registry
+                .read()
+                .ok()
+                .map(|registry| registry.viewer_plugin_infos())
+        })
         .unwrap_or_default()
+}
+
+pub fn is_plugin_bundle(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("kkplug"))
+        .unwrap_or(false)
+}
+
+pub fn install_plugin_bundle(path: &Path) -> Result<String> {
+    let plugins_dir = ensure_plugins_dir()?;
+    let installed_dir = extract_plugin_bundle(path, &plugins_dir)?;
+    let registry = load_plugins()?;
+    if let Some(lock) = PLUGINS.get() {
+        *lock
+            .write()
+            .map_err(|_| anyhow!("Plugin registry lock poisoned"))? = registry;
+    } else {
+        PLUGINS
+            .set(RwLock::new(registry))
+            .map_err(|_| anyhow!("Plugin registry already initialized"))?;
+    }
+    Ok(installed_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("plugin")
+        .to_string())
 }
 
 fn load_plugins() -> Result<PluginRegistry> {
@@ -218,9 +270,9 @@ fn install_bundled_plugins(plugins_dir: &Path) -> Result<()> {
     fs::create_dir_all(&pdf_dir)?;
     write_bundled_file(&pdf_dir.join("plugin.lua"), BUNDLED_PDF_FILE_PLUGIN)?;
 
-    let syntax_dir = plugins_dir.join("text_syntax");
-    fs::create_dir_all(&syntax_dir)?;
-    write_bundled_file(&syntax_dir.join("plugin.lua"), BUNDLED_TEXT_SYNTAX_PLUGIN)?;
+    // let syntax_dir = plugins_dir.join("text_syntax");
+    // fs::create_dir_all(&syntax_dir)?;
+    // write_bundled_file(&syntax_dir.join("plugin.lua"), BUNDLED_TEXT_SYNTAX_PLUGIN)?;
 
     Ok(())
 }
@@ -230,6 +282,141 @@ fn write_bundled_file(path: &Path, content: &str) -> Result<()> {
         return Ok(());
     }
     fs::write(path, content).with_context(|| format!("Writing {}", path.display()))
+}
+
+fn extract_plugin_bundle(path: &Path, plugins_dir: &Path) -> Result<PathBuf> {
+    let file = fs::File::open(path).with_context(|| format!("Opening {}", path.display()))?;
+    let mut archive =
+        ZipArchive::new(file).with_context(|| format!("Reading {}", path.display()))?;
+    let entries = plugin_bundle_entries(&mut archive)?;
+    let strip_prefix = plugin_bundle_strip_prefix(&entries);
+    let plugin_name = plugin_bundle_name(path);
+    let temp_dir = plugins_dir.join(format!(".install-{}-{}", plugin_name, std::process::id()));
+    let install_dir = plugins_dir.join(&plugin_name);
+
+    if temp_dir.exists() {
+        fs::remove_dir_all(&temp_dir)
+            .with_context(|| format!("Cleaning {}", temp_dir.display()))?;
+    }
+    fs::create_dir_all(&temp_dir).with_context(|| format!("Creating {}", temp_dir.display()))?;
+
+    let mut has_plugin_lua = false;
+    for idx in 0..archive.len() {
+        let mut file = archive.by_index(idx)?;
+        let Some(mut enclosed_name) = file.enclosed_name() else {
+            bail!("Plugin bundle contains an unsafe path: {}", file.name());
+        };
+        if let Some(prefix) = &strip_prefix {
+            enclosed_name = enclosed_name
+                .strip_prefix(prefix)
+                .with_context(|| format!("Invalid plugin bundle path {}", file.name()))?
+                .to_path_buf();
+        }
+        if enclosed_name.as_os_str().is_empty() {
+            continue;
+        }
+        let output = temp_dir.join(&enclosed_name);
+        if !output.starts_with(&temp_dir) {
+            bail!(
+                "Plugin bundle path escapes install directory: {}",
+                file.name()
+            );
+        }
+
+        if file.is_dir() {
+            fs::create_dir_all(&output)
+                .with_context(|| format!("Creating {}", output.display()))?;
+            continue;
+        }
+        if enclosed_name == Path::new("plugin.lua") {
+            has_plugin_lua = true;
+        }
+        if let Some(parent) = output.parent() {
+            fs::create_dir_all(parent).with_context(|| format!("Creating {}", parent.display()))?;
+        }
+        let mut out =
+            fs::File::create(&output).with_context(|| format!("Writing {}", output.display()))?;
+        io::copy(&mut file, &mut out).with_context(|| format!("Extracting {}", file.name()))?;
+    }
+
+    if !has_plugin_lua {
+        let _ = fs::remove_dir_all(&temp_dir);
+        bail!("Plugin bundle does not contain plugin.lua at its root");
+    }
+
+    if install_dir.exists() {
+        fs::remove_dir_all(&install_dir)
+            .with_context(|| format!("Replacing {}", install_dir.display()))?;
+    }
+    fs::rename(&temp_dir, &install_dir).with_context(|| {
+        format!(
+            "Installing {} into {}",
+            path.display(),
+            install_dir.display()
+        )
+    })?;
+    Ok(install_dir)
+}
+
+fn plugin_bundle_entries<R: Read + Seek>(archive: &mut ZipArchive<R>) -> Result<Vec<PathBuf>> {
+    let mut entries = Vec::new();
+    for idx in 0..archive.len() {
+        let file = archive.by_index(idx)?;
+        let Some(path) = file.enclosed_name() else {
+            bail!("Plugin bundle contains an unsafe path: {}", file.name());
+        };
+        if !path.as_os_str().is_empty() {
+            entries.push(path);
+        }
+    }
+    Ok(entries)
+}
+
+fn plugin_bundle_strip_prefix(entries: &[PathBuf]) -> Option<PathBuf> {
+    let mut first_component = None;
+    for path in entries {
+        let mut components = path.components();
+        let first = components.next()?.as_os_str().to_os_string();
+        if components.next().is_none() {
+            return None;
+        }
+        match &first_component {
+            Some(existing) if existing != &first => return None,
+            None => first_component = Some(first),
+            _ => {}
+        }
+    }
+    let prefix = PathBuf::from(first_component?);
+    if entries
+        .iter()
+        .any(|path| path == &prefix.join("plugin.lua"))
+    {
+        Some(prefix)
+    } else {
+        None
+    }
+}
+
+fn plugin_bundle_name(path: &Path) -> String {
+    let raw = path
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("plugin");
+    let mut out = raw
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if out.is_empty() {
+        out.push_str("plugin");
+    }
+    out
 }
 
 fn plugin_scripts(plugins_dir: &Path) -> Result<Vec<PathBuf>> {
@@ -250,6 +437,7 @@ fn plugin_scripts(plugins_dir: &Path) -> Result<Vec<PathBuf>> {
     Ok(scripts)
 }
 
+#[cfg(test)]
 fn inspect_plugin(script_path: &Path) -> Result<Vec<RegisteredPlugin>> {
     let lua = plugin_lua();
     let registered = Rc::new(RefCell::new(Vec::new()));
@@ -292,6 +480,7 @@ fn inspect_plugins(
     ))
 }
 
+#[cfg(test)]
 fn inspect_viewer_plugin(script_path: &Path) -> Result<Vec<RegisteredViewerPlugin>> {
     let lua = plugin_lua();
     let registered = Rc::new(RefCell::new(Vec::new()));
@@ -797,5 +986,46 @@ mod tests {
                 .iter()
                 .all(|span| span.bg.as_deref() == Some("black"))
         );
+    }
+
+    #[test]
+    fn kkplug_bundle_extracts_plugin_root() {
+        let root = std::env::temp_dir().join(format!(
+            "kkc-kkplug-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let plugins_dir = root.join("plugins");
+        fs::create_dir_all(&plugins_dir).expect("temp plugins dir");
+        let bundle = root.join("sample.kkplug");
+        {
+            let file = fs::File::create(&bundle).expect("bundle file");
+            let mut zip = zip::ZipWriter::new(file);
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+            zip.start_file("wrapped/plugin.lua", options)
+                .expect("start plugin");
+            std::io::Write::write_all(
+                &mut zip,
+                br#"local kkc = require("kkc")
+kkc.register_viewer_plugin({ name = "wrapped", modes = { "text" }, render_line = function(_, _, line) return { { text = line, fg = "white" } } end })
+"#,
+            )
+            .expect("write plugin");
+            zip.start_file("wrapped/extra.lua", options)
+                .expect("start extra");
+            std::io::Write::write_all(&mut zip, b"return {}").expect("write extra");
+            zip.finish().expect("finish zip");
+        }
+
+        let installed = extract_plugin_bundle(&bundle, &plugins_dir).expect("install bundle");
+
+        assert_eq!(installed, plugins_dir.join("sample"));
+        assert!(installed.join("plugin.lua").is_file());
+        assert!(installed.join("extra.lua").is_file());
+        let _ = fs::remove_dir_all(root);
     }
 }
