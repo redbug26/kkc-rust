@@ -925,6 +925,12 @@ fn set_viewer_mode_or_plugin(viewer: &mut crate::viewer::Viewer, cursor: usize) 
 }
 
 fn viewer_mode_shortcut(ch: char) -> Option<usize> {
+    if let Some(digit) = ch.to_digit(10)
+        && (1..=9).contains(&digit)
+    {
+        return Some(digit as usize - 1);
+    }
+
     match ch.to_ascii_lowercase() {
         't' => Some(0),
         'b' => Some(1),

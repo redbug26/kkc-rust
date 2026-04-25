@@ -1081,6 +1081,10 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
         .border_style(Style::default().fg(CLR_PANEL_BORDER));
     let inner = block.inner(area);
     f.render_widget(block, area);
+    f.render_widget(
+        Block::default().style(Style::default().bg(Color::Black)),
+        inner,
+    );
 
     if v.is_image_mode() {
         let supported = crate::viewer::kitty_graphics_supported();
@@ -1173,9 +1177,15 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
             ViewMode::Text | ViewMode::Ansi | ViewMode::Html | ViewMode::Eml
         )
     {
-        f.render_widget(Paragraph::new(items).wrap(Wrap { trim: false }), inner);
+        f.render_widget(
+            Paragraph::new(items)
+                .wrap(Wrap { trim: false })
+                .style(Style::default().bg(Color::Black)),
+            inner,
+        );
     } else {
-        let list = List::new(items.into_iter().map(ListItem::new).collect::<Vec<_>>());
+        let list = List::new(items.into_iter().map(ListItem::new).collect::<Vec<_>>())
+            .style(Style::default().bg(Color::Black));
         f.render_widget(list, inner);
     }
 
@@ -1322,8 +1332,8 @@ fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, ar
             } else {
                 Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
             };
-            let line = if menu.kind == ViewerMenuKind::Mode && idx < 6 {
-                viewer_mode_menu_line(item, style)
+            let line = if menu.kind == ViewerMenuKind::Mode {
+                viewer_mode_menu_line(idx, item, style)
             } else {
                 Line::from(Span::styled(format!(" {}", item), style))
             };
@@ -1367,14 +1377,25 @@ fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, ar
     }
 }
 
-fn viewer_mode_menu_line(item: &str, style: Style) -> Line<'static> {
+fn viewer_mode_menu_line(idx: usize, item: &str, style: Style) -> Line<'static> {
+    let number = if idx < 9 {
+        format!("{} ", idx + 1)
+    } else {
+        "  ".into()
+    };
     let shortcut = item.chars().next().unwrap_or_default().to_string();
     let rest = item.chars().skip(1).collect::<String>();
-    Line::from(vec![
+    let mut spans = vec![
         Span::styled(" ", style),
-        Span::styled(shortcut, style.add_modifier(Modifier::BOLD)),
-        Span::styled(rest, style),
-    ])
+        Span::styled(number, style.add_modifier(Modifier::BOLD)),
+    ];
+    if idx < 6 {
+        spans.push(Span::styled(shortcut, style.add_modifier(Modifier::BOLD)));
+        spans.push(Span::styled(rest, style));
+    } else {
+        spans.push(Span::styled(item.to_string(), style));
+    }
+    Line::from(spans)
 }
 
 // ---------------------------------------------------------------------------

@@ -294,6 +294,9 @@ impl Viewer {
     }
 
     pub fn line_count(&self) -> usize {
+        if let Some(count) = self.plugin_document_line_count() {
+            return count.max(1);
+        }
         match self.mode {
             ViewMode::Html => self.html.lines.len().max(1),
             ViewMode::Eml => self.eml_lines.len().max(1),
@@ -568,6 +571,9 @@ impl Viewer {
         start: usize,
         height: usize,
     ) -> Vec<Line<'static>> {
+        if let Some(lines) = self.render_plugin_document_lines(start, height) {
+            return lines;
+        }
         match self.mode {
             ViewMode::Html => self
                 .render_html_lines()
@@ -823,6 +829,39 @@ impl Viewer {
         )
     }
 
+    fn plugin_document_line_count(&self) -> Option<usize> {
+        let mode = self.viewer_mode_key()?;
+        let plugin_name = self.viewer_plugin.as_deref()?;
+        crate::plugins::render_viewer_document(&self.path, mode, plugin_name)
+            .map(|lines| lines.len())
+    }
+
+    fn render_plugin_document_lines(
+        &self,
+        start: usize,
+        height: usize,
+    ) -> Option<Vec<Line<'static>>> {
+        let mode = self.viewer_mode_key()?;
+        let plugin_name = self.viewer_plugin.as_deref()?;
+        let lines = crate::plugins::render_viewer_document(&self.path, mode, plugin_name)?;
+        Some(
+            lines
+                .into_iter()
+                .skip(start)
+                .take(height)
+                .map(viewer_plugin_line)
+                .collect(),
+        )
+    }
+
+    fn viewer_mode_key(&self) -> Option<&'static str> {
+        match self.mode {
+            ViewMode::Text => Some("text"),
+            ViewMode::Ansi => Some("ansi"),
+            _ => None,
+        }
+    }
+
     fn rebuild_decoded_lines(&mut self) {
         self.text_lines = text_lines(&self.raw, self.line_feed, &self.preproc_ops, self.encoding);
         self.hex_lines = hex_lines(
@@ -924,6 +963,24 @@ fn viewer_plugin_color(name: &str) -> Color {
         "lightcyan" => Color::LightCyan,
         _ => Color::White,
     }
+}
+
+fn viewer_plugin_line(spans: Vec<crate::plugins::ViewerSpan>) -> Line<'static> {
+    Line::from(
+        spans
+            .into_iter()
+            .map(|span| {
+                let mut style = Style::default().fg(viewer_plugin_color(&span.fg));
+                if let Some(bg) = span.bg {
+                    style = style.bg(viewer_plugin_color(&bg));
+                }
+                if span.bold {
+                    style = style.add_modifier(Modifier::BOLD);
+                }
+                Span::styled(span.text, style)
+            })
+            .collect::<Vec<_>>(),
+    )
 }
 
 pub fn kitty_graphics_supported() -> bool {

@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, anyhow, bail};
-use mlua::{Function, Lua, Table};
+use mlua::{Function, Lua, Table, Value};
 use std::cell::RefCell;
 use std::fs;
 use std::io::{self, Read, Seek};
@@ -158,6 +158,21 @@ pub fn highlight_viewer_lines(
     })
 }
 
+pub fn render_viewer_document(
+    path: &Path,
+    mode: &str,
+    plugin_name: &str,
+) -> Option<Vec<Vec<ViewerSpan>>> {
+    PLUGINS.get().and_then(|registry| {
+        registry
+            .read()
+            .ok()?
+            .render_viewer_document(path, mode, plugin_name)
+            .ok()
+            .flatten()
+    })
+}
+
 pub fn viewer_plugin_infos() -> Vec<PluginInfo> {
     PLUGINS
         .get()
@@ -270,9 +285,9 @@ fn install_bundled_plugins(plugins_dir: &Path) -> Result<()> {
     fs::create_dir_all(&pdf_dir)?;
     write_bundled_file(&pdf_dir.join("plugin.lua"), BUNDLED_PDF_FILE_PLUGIN)?;
 
-    // let syntax_dir = plugins_dir.join("text_syntax");
-    // fs::create_dir_all(&syntax_dir)?;
-    // write_bundled_file(&syntax_dir.join("plugin.lua"), BUNDLED_TEXT_SYNTAX_PLUGIN)?;
+    let syntax_dir = plugins_dir.join("text_syntax");
+    fs::create_dir_all(&syntax_dir)?;
+    write_bundled_file(&syntax_dir.join("plugin.lua"), BUNDLED_TEXT_SYNTAX_PLUGIN)?;
 
     Ok(())
 }
@@ -671,6 +686,22 @@ impl PluginRegistry {
         };
         plugin.highlight_lines(path, mode, lines)
     }
+
+    fn render_viewer_document(
+        &self,
+        path: &Path,
+        mode: &str,
+        plugin_name: &str,
+    ) -> Result<Option<Vec<Vec<ViewerSpan>>>> {
+        let Some(plugin) = self
+            .viewer_plugins
+            .iter()
+            .find(|plugin| plugin.name == plugin_name && plugin.supports_mode(mode))
+        else {
+            return Ok(None);
+        };
+        plugin.render_document(path, mode)
+    }
 }
 
 impl ArchivePlugin {
@@ -780,7 +811,9 @@ impl ViewerPlugin {
             let table: Table = lua.registry_value(key)?;
             let name: String = table.get("name")?;
             if name == self.name {
-                let render_line: Function = table.get("render_line")?;
+                let Some(render_line) = table.get::<Option<Function>>("render_line")? else {
+                    return Ok(None);
+                };
                 let path = path.to_string_lossy().into_owned();
                 let mut highlighted = Vec::with_capacity(lines.len());
                 for line in lines {
@@ -797,22 +830,73 @@ impl ViewerPlugin {
 
         Ok(None)
     }
+
+    fn render_document(&self, path: &Path, mode: &str) -> Result<Option<Vec<Vec<ViewerSpan>>>> {
+        let lua = plugin_lua();
+        let handles = Rc::new(RefCell::new(Vec::new()));
+        install_bindings(&lua, &self.plugin_dir, |_| {})?;
+        install_runtime_viewer_bindings(&lua, Rc::clone(&handles))?;
+
+        let script = fs::read_to_string(&self.script_path)?;
+        lua.load(&script)
+            .set_name(self.script_path.to_string_lossy())
+            .exec()?;
+
+        let handles = handles.borrow();
+        for key in handles.iter() {
+            let table: Table = lua.registry_value(key)?;
+            let name: String = table.get("name")?;
+            if name == self.name {
+                let Some(render) = table.get::<Option<Function>>("render")? else {
+                    return Ok(None);
+                };
+                let result: Option<Table> =
+                    render.call((path.to_string_lossy().into_owned(), mode.to_string()))?;
+                let Some(lines) = result else {
+                    return Ok(None);
+                };
+                return lua_lines_to_viewer_spans(lines).map(Some);
+            }
+        }
+
+        Ok(None)
+    }
+}
+
+fn lua_lines_to_viewer_spans(table: Table) -> Result<Vec<Vec<ViewerSpan>>> {
+    table
+        .sequence_values::<Value>()
+        .map(|line| match line? {
+            Value::String(text) => Ok(vec![ViewerSpan {
+                text: text.to_str()?.to_string(),
+                fg: "white".into(),
+                bg: Some("black".into()),
+                bold: false,
+            }]),
+            Value::Table(spans) if spans.contains_key("text")? => {
+                Ok(vec![lua_span_to_viewer_span(spans)?])
+            }
+            Value::Table(spans) => lua_spans_to_viewer_spans(spans),
+            _ => Ok(Vec::new()),
+        })
+        .collect()
 }
 
 fn lua_spans_to_viewer_spans(table: Table) -> Result<Vec<ViewerSpan>> {
     table
         .sequence_values::<Table>()
-        .map(|span| {
-            let span = span?;
-            Ok(ViewerSpan {
-                text: span.get("text")?,
-                fg: span.get("fg").unwrap_or_else(|_| "white".into()),
-                bg: span.get("bg").ok(),
-                bold: span.get("bold").unwrap_or(false),
-            })
-        })
+        .map(|span| lua_span_to_viewer_span(span?))
         .collect::<mlua::Result<Vec<_>>>()
         .map_err(Into::into)
+}
+
+fn lua_span_to_viewer_span(span: Table) -> mlua::Result<ViewerSpan> {
+    Ok(ViewerSpan {
+        text: span.get("text")?,
+        fg: span.get("fg").unwrap_or_else(|_| "white".into()),
+        bg: span.get("bg").ok(),
+        bold: span.get("bold").unwrap_or(false),
+    })
 }
 
 fn plugin_lua() -> Lua {
@@ -865,9 +949,10 @@ where
             let name: String = table.get("name")?;
             let description: String = table.get("description").unwrap_or_else(|_| String::new());
             let render_line: Option<Function> = table.get("render_line").ok();
-            if render_line.is_none() {
+            let render: Option<Function> = table.get("render").ok();
+            if render_line.is_none() && render.is_none() {
                 return Err(mlua::Error::external(format!(
-                    "Viewer plugin '{name}' does not define render_line()"
+                    "Viewer plugin '{name}' does not define render_line() or render()"
                 )));
             }
             let modes = match table.get::<Option<Table>>("modes")? {
@@ -901,9 +986,10 @@ fn install_runtime_viewer_bindings(
         "register_viewer_plugin",
         lua.create_function(move |lua, table: Table| {
             let render_line: Option<Function> = table.get("render_line").ok();
-            if render_line.is_none() {
+            let render: Option<Function> = table.get("render").ok();
+            if render_line.is_none() && render.is_none() {
                 return Err(mlua::Error::external(
-                    "Viewer plugin does not define render_line()",
+                    "Viewer plugin does not define render_line() or render()",
                 ));
             }
             handles.borrow_mut().push(lua.create_registry_value(table)?);
@@ -945,6 +1031,21 @@ mod tests {
 
         assert_eq!(plugins.len(), 1);
         assert_eq!(plugins[0].name, "text_syntax");
+        assert_eq!(plugins[0].modes, vec!["text"]);
+    }
+
+    #[test]
+    fn bundled_amstrad_dsk_viewer_plugin_registers() {
+        let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("plugins")
+            .join("amstrad_dsk")
+            .join("plugin.lua");
+
+        let plugins = inspect_viewer_plugin(&script).expect("viewer plugin should load");
+
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(plugins[0].name, "amstrad_dsk_directory");
         assert_eq!(plugins[0].modes, vec!["text"]);
     }
 

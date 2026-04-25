@@ -77,6 +77,157 @@ local function basename(path)
     return path:match("([^/\\]+)$") or path
 end
 
+local function span(text, fg, bold)
+    return { text = text, fg = fg or "white", bg = "black", bold = bold or false }
+end
+
+local function line(...)
+    return { ... }
+end
+
+local function pad_right(value, width)
+    value = tostring(value or "")
+    if #value >= width then
+        return value:sub(1, width)
+    end
+    return value .. string.rep(" ", width - #value)
+end
+
+local function pad_left(value, width)
+    value = tostring(value or "")
+    if #value >= width then
+        return value:sub(1, width)
+    end
+    return string.rep(" ", width - #value) .. value
+end
+
+local function block_list(entry)
+    local out = {}
+    local range_start = nil
+    local previous = nil
+    local function flush_range()
+        if range_start == nil then
+            return
+        end
+        if range_start == previous then
+            table.insert(out, tostring(range_start))
+        else
+            table.insert(out, tostring(range_start) .. "-" .. tostring(previous))
+        end
+        range_start = nil
+        previous = nil
+    end
+
+    for _, block in ipairs(entry.blocks or {}) do
+        if range_start == nil then
+            range_start = block
+            previous = block
+        elseif block == previous + 1 then
+            previous = block
+        else
+            flush_range()
+            range_start = block
+            previous = block
+        end
+    end
+    flush_range()
+    return table.concat(out, " ")
+end
+
+local function catalog_rows()
+    local rows = {}
+    for _, entry in pairs(dsk.catalog or {}) do
+        if type(entry) == "table" and entry.filename then
+            table.insert(rows, entry)
+        end
+    end
+    table.sort(rows, function(left, right)
+        if left.filename == right.filename then
+            return (left.numextension or 0) < (right.numextension or 0)
+        end
+        return left.filename < right.filename
+    end)
+    return rows
+end
+
+local function free_block_count()
+    local free = 0
+    local total = 0
+    for _, available in pairs(dsk.freeblocks or {}) do
+        total = total + 1
+        if available then
+            free = free + 1
+        end
+    end
+    return free, total
+end
+
+local function render_dsk_directory(path, mode)
+    if mode ~= "text" or not path:lower():match("%.dsk$") then
+        return nil
+    end
+
+    dsk.init()
+    dsk.verbose = false
+    assert(dsk.read(path), "unable to read DSK")
+    dsk.cat()
+
+    local rows = catalog_rows()
+    local free, total = free_block_count()
+    local lines = {}
+    table.insert(lines, line(span("Amstrad CPC DSK directory", "yellow", true)))
+    table.insert(lines, line(span("Image: ", "gray"), span(basename(path), "white", true)))
+    table.insert(lines, line(
+        span("Format: ", "gray"),
+        span("DSK v" .. tostring(dsk.version or "?"), "cyan"),
+        span("  Tracks: ", "gray"),
+        span(tostring(dsk.tracksnumber or "?"), "cyan"),
+        span("  Sides: ", "gray"),
+        span(tostring(dsk.sidesnumber or "?"), "cyan"),
+        span("  Track size: ", "gray"),
+        span(tostring(dsk.tracksize or "?"), "cyan")
+    ))
+    table.insert(lines, line(
+        span("Entries: ", "gray"),
+        span(tostring(#rows), "cyan"),
+        span("  Free blocks: ", "gray"),
+        span(tostring(free) .. "/" .. tostring(total), "cyan")
+    ))
+    table.insert(lines, line(span("")))
+    table.insert(lines, line(
+        span("Usr ", "yellow", true),
+        span("Ext ", "yellow", true),
+        span("Name         ", "yellow", true),
+        span("Rec  ", "yellow", true),
+        span("Blk  ", "yellow", true),
+        span("Size   ", "yellow", true),
+        span("Blocks", "yellow", true)
+    ))
+    table.insert(lines, line(span(string.rep("-", 72), "gray")))
+
+    if #rows == 0 then
+        table.insert(lines, line(span("Empty directory", "gray")))
+        return lines
+    end
+
+    for _, entry in ipairs(rows) do
+        local records = entry.nbrecords or 0
+        local blocks = entry.blocks or {}
+        local size = records * 128
+        table.insert(lines, line(
+            span(pad_left(entry.user or 0, 3) .. " ", "white"),
+            span(pad_left(entry.numextension or 0, 3) .. " ", "white"),
+            span(pad_right(amsdos_name(entry.filename), 13), "lightcyan", true),
+            span(pad_left(records, 3) .. "  ", "cyan"),
+            span(pad_left(#blocks, 3) .. "  ", "cyan"),
+            span(pad_left(size, 5) .. "  ", "green"),
+            span(block_list(entry), "white")
+        ))
+    end
+
+    return lines
+end
+
 local function amsdos_import_name(path)
     local name = basename(path):upper()
     local stem, ext = name:match("^([^%.]+)%.([^%.]+)$")
@@ -166,4 +317,11 @@ kkc.register_archive_plugin({
     end,
     extract = extract_dsk,
     add_files = add_files_to_dsk,
+})
+
+kkc.register_viewer_plugin({
+    name = "amstrad_dsk_directory",
+    description = "Amstrad CPC DSK directory viewer",
+    modes = { "text" },
+    render = render_dsk_directory,
 })
