@@ -1099,6 +1099,7 @@ mod tests {
         image[dir + 1] = 255;
         image[dir + 2] = 0x80;
         image[dir + 5..dir + 8].copy_from_slice(&[0xc4, 0xc5, 0xcc]);
+        image[dir + 8] = 0xb3;
         image[dir + 34] = 0x82;
         image[dir + 35] = 17;
         image[dir + 36] = 0;
@@ -1131,7 +1132,8 @@ mod tests {
             .join("\n");
 
         assert!(text.contains("\"UIJK"));
-        assert!(text.contains("\"DEL"));
+        assert!(text.contains("┤"));
+        assert!(text.contains("\"DEL┤"));
         assert!(text.contains("DEL"));
         assert!(text.contains("\"FILE"));
         let _ = fs::remove_dir_all(root);

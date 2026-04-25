@@ -15,6 +15,92 @@ local file_types = {
     [4] = "rel",
 }
 
+local petscii_unicode = {
+    -- Control
+    [0x00] = "",
+    [0x0d] = "\n",
+
+    -- Arrows / symbols
+    [0x1c] = "←",
+    [0x1d] = "→",
+    [0x1e] = "↑",
+    [0x1f] = "↓",
+
+    -- Basic replacements
+    [0x5c] = "£",
+    [0x5e] = "↑",
+    [0x5f] = "←",
+
+    -- Box drawing (PETSCII graphics)
+    [0x60] = "─",
+    [0x61] = "│",
+    [0x62] = "┌",
+    [0x63] = "┐",
+    [0x64] = "└",
+    [0x65] = "┘",
+    [0x66] = "├",
+    [0x67] = "┤",
+    [0x68] = "┬",
+    [0x69] = "┴",
+    [0x6a] = "┼",
+
+    -- Corners / variants
+    [0x6b] = "╭",
+    [0x6c] = "╮",
+    [0x6d] = "╰",
+    [0x6e] = "╯",
+
+    -- Misc symbols
+    [0x6f] = "●",
+    [0x70] = "○",
+    [0x71] = "◆",
+    [0x72] = "◇",
+    [0x73] = "■",
+    [0x74] = "□",
+
+    -- Greek / math
+    [0x7e] = "π",
+
+    -- Shades / blocks
+    [0xa0] = " ",
+    [0xa1] = "▌",
+    [0xa2] = "▄",
+    [0xa3] = "▔",
+    [0xa4] = "▁",
+    [0xa5] = "▏",
+    [0xa6] = "▒",
+    [0xa7] = "▕",
+    [0xa8] = "▖",
+    [0xa9] = "▗",
+    [0xaa] = "▘",
+    [0xab] = "▝",
+    [0xac] = "▚",
+    [0xad] = "▞",
+    [0xae] = "▙",
+    [0xaf] = "▛",
+    [0xb0] = "▜",
+    [0xb1] = "▟",
+
+    -- Box drawing extended
+    [0xb2] = "┌",
+    [0xb3] = "│",
+    [0xb4] = "┐",
+    [0xb5] = "├",
+    [0xb6] = "┤",
+    [0xb7] = "└",
+    [0xb8] = "┘",
+    [0xb9] = "┬",
+    [0xba] = "┴",
+    [0xbb] = "┼",
+
+    -- Full blocks
+    [0xdb] = "█",
+    [0xdc] = "▄",
+    [0xdd] = "▌",
+    [0xde] = "▐",
+    [0xdf] = "▀",
+}
+
 local function sector_offset(track, sector)
     assert(track >= 1 and track <= #sectors_per_track, "invalid D64 track")
     assert(sector >= 0 and sector < sectors_per_track[track], "invalid D64 sector")
@@ -37,8 +123,17 @@ local function petscii_char(byte)
     if not byte or byte == 0xa0 or byte == 0x00 then
         return ""
     end
+    if petscii_unicode[byte] then
+        return petscii_unicode[byte]
+    end
     if byte >= 0xc1 and byte <= 0xda then
         return string.char(byte - 0x80)
+    end
+    if byte >= 0x01 and byte <= 0x1a then
+        return string.char(byte + 0x40)
+    end
+    if byte >= 0x81 and byte <= 0x9a then
+        return string.char(byte - 0x40)
     end
     if byte >= 0x41 and byte <= 0x5a then
         return string.char(byte)
@@ -52,7 +147,7 @@ local function petscii_char(byte)
     if byte >= 0x20 and byte <= 0x3f then
         return string.char(byte)
     end
-    return "."
+    return "�"
 end
 
 local function petscii_filename(raw)
@@ -96,20 +191,26 @@ local function line(...)
     return { ... }
 end
 
+local function text_len(value)
+    return utf8.len(value) or #value
+end
+
 local function pad_right(value, width)
     value = tostring(value or "")
-    if #value >= width then
-        return value:sub(1, width)
+    local len = text_len(value)
+    if len >= width then
+        return value
     end
-    return value .. string.rep(" ", width - #value)
+    return value .. string.rep(" ", width - len)
 end
 
 local function pad_left(value, width)
     value = tostring(value or "")
-    if #value >= width then
-        return value:sub(1, width)
+    local len = text_len(value)
+    if len >= width then
+        return value
     end
-    return string.rep(" ", width - #value) .. value
+    return string.rep(" ", width - len) .. value
 end
 
 local function read_image(path)
