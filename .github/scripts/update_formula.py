@@ -4,7 +4,6 @@
 Required env vars:
   VERSION   - release version, e.g. 0.2.0
   SHA_ARM64 - SHA256 of kkc-macos-arm64.tar.gz
-  SHA_X86_64 - SHA256 of kkc-macos-x86_64.tar.gz
   SHA_LINUX - SHA256 of kkc-linux-x86_64.tar.gz
 """
 import os
@@ -12,7 +11,6 @@ import pathlib
 
 v   = os.environ["VERSION"]
 a64 = os.environ["SHA_ARM64"]
-x64 = os.environ["SHA_X86_64"]
 lin = os.environ["SHA_LINUX"]
 
 formula = (
@@ -23,13 +21,8 @@ formula = (
     '  license "MIT"\n'
     '\n'
     '  on_macos do\n'
-    '    if Hardware::CPU.arm?\n'
-    f'      url "https://github.com/redbug26/kkc-rust/releases/download/v{v}/kkc-macos-arm64.tar.gz"\n'
-    f'      sha256 "{a64}"\n'
-    '    else\n'
-    f'      url "https://github.com/redbug26/kkc-rust/releases/download/v{v}/kkc-macos-x86_64.tar.gz"\n'
-    f'      sha256 "{x64}"\n'
-    '    end\n'
+    f'    url "https://github.com/redbug26/kkc-rust/releases/download/v{v}/kkc-macos-arm64.tar.gz"\n'
+    f'    sha256 "{a64}"\n'
     '  end\n'
     '\n'
     '  on_linux do\n'

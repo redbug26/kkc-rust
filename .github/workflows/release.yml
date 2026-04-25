@@ -61,6 +61,7 @@ jobs:
   build-macos-x86_64:
     name: Build macOS x86_64
     runs-on: macos-13
+    if: false   # disabled: macos-13 runners have very long queue times on free tier
     steps:
       - uses: actions/checkout@v4
 
@@ -81,7 +82,7 @@ jobs:
 
   release:
     name: Publish release
-    needs: [build-linux, build-macos-arm64, build-macos-x86_64]
+    needs: [build-linux, build-macos-arm64]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -111,14 +112,12 @@ jobs:
         id: sha
         run: |
           echo "arm64=$(sha256sum kkc-macos-arm64.tar.gz | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-          echo "x86_64=$(sha256sum kkc-macos-x86_64.tar.gz | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
           echo "linux=$(sha256sum kkc-linux-x86_64.tar.gz | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Regenerate Homebrew formula
         env:
           VERSION: ${{ steps.version.outputs.version }}
           SHA_ARM64: ${{ steps.sha.outputs.arm64 }}
-          SHA_X86_64: ${{ steps.sha.outputs.x86_64 }}
           SHA_LINUX: ${{ steps.sha.outputs.linux }}
         run: python3 .github/scripts/update_formula.py
 
@@ -137,5 +136,4 @@ jobs:
           generate_release_notes: true
           files: |
             kkc-macos-arm64.tar.gz
-            kkc-macos-x86_64.tar.gz
             kkc-linux-x86_64.tar.gz
