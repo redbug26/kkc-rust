@@ -8,6 +8,7 @@ mod file_types;
 mod help;
 mod idf;
 mod panel;
+mod plugins;
 mod remote;
 mod search;
 mod terminal;

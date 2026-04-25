@@ -1,8 +1,8 @@
 use crate::app::{
     ActivePanel, App, AppMode, AssocEditorState, BookmarkListItem, ConfigState, ConfirmAction,
     ConfirmDialog, InputDialog, MENU_DATA, MENU_HEADERS, MenuAction, MenuState, OpenerState,
-    RemoteConnectState, RemoteConnectingState, RemoteEditKind, RemoteEditState, SearchState,
-    ViewerMenuKind, ViewerMenuState,
+    PluginsState, RemoteConnectState, RemoteConnectingState, RemoteEditKind, RemoteEditState,
+    SearchState, ViewerMenuKind, ViewerMenuState,
 };
 use crate::config::SortMode;
 use crate::copy::{CopyDialogState, CopyProgressState};
@@ -201,6 +201,7 @@ pub fn render(f: &mut Frame, app: &App) {
         AppMode::SearchPanel(s) => render_search(f, s, f.area()),
         AppMode::DirBookmarks => render_dir_bookmarks(f, app, f.area()),
         AppMode::Config(cs) => render_config(f, cs, f.area()),
+        AppMode::Plugins(s) => render_plugins(f, s, f.area()),
         AppMode::Opener(s) => render_opener(f, s, f.area()),
         AppMode::AssocEditor(s) => render_assoc_editor(f, s, f.area()),
         AppMode::RemoteConnect(s) => render_remote_connect(f, s, f.area()),
@@ -3565,6 +3566,191 @@ fn render_opener(f: &mut Frame, s: &OpenerState, area: Rect) {
 // ---------------------------------------------------------------------------
 // Association editor
 // ---------------------------------------------------------------------------
+
+fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
+    const W: u16 = 76;
+    const H: u16 = 22;
+    let x = area.x + (area.width.saturating_sub(W)) / 2;
+    let y = area.y + (area.height.saturating_sub(H)) / 2;
+    let popup = clamp_rect(
+        area,
+        Rect {
+            x,
+            y,
+            width: W,
+            height: H,
+        },
+    );
+
+    let sh = Rect {
+        x: popup.x + 2,
+        y: popup.y + 1,
+        width: popup.width,
+        height: popup.height,
+    };
+    if sh.right() <= area.right() && sh.bottom() <= area.bottom() {
+        safe_render_widget(
+            f,
+            Block::default().style(Style::default().bg(Color::Rgb(20, 15, 10))),
+            sh,
+        );
+    }
+    safe_render_widget(f, Clear, popup);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG))
+        .title(Span::styled(
+            " Plugins ",
+            Style::default()
+                .fg(CLR_BUTTON_FG)
+                .bg(CLR_APP_BG)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .style(Style::default().bg(CLR_APP_BG));
+    let inner = block.inner(popup);
+    safe_render_widget(f, block, popup);
+
+    let dir_line = format!("  Directory: {}", s.plugins_dir.display());
+    safe_render_widget(
+        f,
+        Paragraph::new(truncate_str(&dir_line, inner.width as usize))
+            .style(Style::default().fg(Color::Rgb(110, 88, 65)).bg(CLR_APP_BG)),
+        Rect {
+            x: inner.x,
+            y: inner.y,
+            width: inner.width,
+            height: 1,
+        },
+    );
+
+    let header = format!(
+        "  {:<18} {:<9} {:<12} {}",
+        "Name", "Type", "Ext", "Description"
+    );
+    safe_render_widget(
+        f,
+        Paragraph::new(truncate_str(&header, inner.width as usize)).style(
+            Style::default()
+                .fg(CLR_HEADER_FG)
+                .bg(CLR_HEADER_BG)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Rect {
+            x: inner.x,
+            y: inner.y + 2,
+            width: inner.width,
+            height: 1,
+        },
+    );
+    let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
+    safe_render_widget(
+        f,
+        Paragraph::new(sep.clone()).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
+        Rect {
+            x: inner.x,
+            y: inner.y + 3,
+            width: inner.width,
+            height: 1,
+        },
+    );
+
+    let list_h = inner.height.saturating_sub(7) as usize;
+    let start = if s.plugins.is_empty() || s.cursor < list_h {
+        0
+    } else {
+        s.cursor.saturating_sub(list_h - 1)
+    };
+
+    if s.plugins.is_empty() {
+        safe_render_widget(
+            f,
+            Paragraph::new("  (no plugins loaded)")
+                .style(Style::default().fg(Color::Rgb(110, 88, 65)).bg(CLR_APP_BG)),
+            Rect {
+                x: inner.x,
+                y: inner.y + 4,
+                width: inner.width,
+                height: 1,
+            },
+        );
+    } else {
+        for (list_row, idx) in (start..).zip(0..list_h) {
+            if list_row >= s.plugins.len() {
+                break;
+            }
+            let plugin = &s.plugins[list_row];
+            let row_y = inner.y + 4 + idx as u16;
+            let selected = s.cursor == list_row;
+            let style = if selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(CLR_CURSOR_BG)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Rgb(50, 36, 22)).bg(CLR_APP_BG)
+            };
+            let exts = if plugin.extensions.is_empty() {
+                "-".into()
+            } else {
+                plugin
+                    .extensions
+                    .iter()
+                    .map(|ext| format!(".{ext}"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            };
+            let icon = if selected { "▶" } else { " " };
+            let text = format!(
+                " {} {:<18} {:<9} {:<12} {}",
+                icon, plugin.name, plugin.kind, exts, plugin.description
+            );
+            let padded = format!(
+                "{:<width$}",
+                truncate_str(&text, inner.width as usize),
+                width = inner.width as usize
+            );
+            safe_render_widget(
+                f,
+                Paragraph::new(padded).style(style),
+                Rect {
+                    x: inner.x,
+                    y: row_y,
+                    width: inner.width,
+                    height: 1,
+                },
+            );
+        }
+    }
+
+    let button_y = inner.y + inner.height.saturating_sub(2);
+    safe_render_widget(
+        f,
+        Paragraph::new(sep).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
+        Rect {
+            x: inner.x,
+            y: button_y - 1,
+            width: inner.width,
+            height: 1,
+        },
+    );
+    let buttons = "  [ Enter/O Open Dir ]   [ Esc Close ]";
+    safe_render_widget(
+        f,
+        Paragraph::new(buttons).style(
+            Style::default()
+                .fg(CLR_BUTTON_FG)
+                .bg(CLR_BUTTON_BG)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Rect {
+            x: inner.x,
+            y: button_y,
+            width: inner.width,
+            height: 1,
+        },
+    );
+}
 
 fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rect) {
     const W: u16 = 64;

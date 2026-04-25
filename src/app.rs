@@ -79,6 +79,8 @@ pub enum AppMode {
     Menu(MenuState),
     /// Configuration screen (Options > Setup).
     Config(ConfigState),
+    /// Plugin list (Options > Plugins).
+    Plugins(PluginsState),
     /// Choose from multiple registered openers.
     Opener(OpenerState),
     /// File-type association editor (Options > Associations).
@@ -100,6 +102,24 @@ pub enum AppMode {
 // ---------------------------------------------------------------------------
 // Config screen
 // ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct PluginsState {
+    pub plugins: Vec<crate::plugins::PluginInfo>,
+    pub plugins_dir: PathBuf,
+    pub cursor: usize,
+}
+
+impl PluginsState {
+    pub fn load() -> Self {
+        let plugins_dir = crate::plugins::plugins_dir().unwrap_or_else(|_| PathBuf::new());
+        Self {
+            plugins: crate::plugins::plugin_infos(),
+            plugins_dir,
+            cursor: 0,
+        }
+    }
+}
 
 /// State for the full configuration screen.
 #[derive(Debug, Clone)]
@@ -538,6 +558,7 @@ pub enum MenuAction {
     ToggleFBar,
     SaveConfig,
     Setup,
+    Plugins,
     Associations,
     Help,
     About,
@@ -660,6 +681,7 @@ pub static MENU_DATA: &[&[MenuEntry]] = &[
     // 5 – Options
     &[
         ("Setup..", None, MenuAction::Setup),
+        ("Plugins..", None, MenuAction::Plugins),
         ("Associations..", None, MenuAction::Associations),
         ("Tgl. F-Key Bar", None, MenuAction::ToggleFBar),
         ("Save Config", None, MenuAction::SaveConfig),
@@ -878,6 +900,10 @@ impl App {
 
         let (term_history, term_output) = crate::terminal::load_terminal_cache();
 
+        let plugin_status = crate::plugins::initialize()
+            .err()
+            .map(|err| format!("Plugin loading failed: {err}"));
+
         App {
             config,
             left,
@@ -885,7 +911,9 @@ impl App {
             active: ActivePanel::Left,
             file_id_preview: false,
             mode: AppMode::Browse,
-            status: StatusMessage::default(),
+            status: StatusMessage {
+                text: plugin_status.unwrap_or_default(),
+            },
             dir_history: history,
             bookmarks,
             bookmark_cursor: 0,
@@ -1110,8 +1138,12 @@ impl App {
     }
 
     pub fn open_copy_dialog(&mut self) {
-        if self.active_panel().is_archive_view() || self.other_panel().is_archive_view() {
+        if self.other_panel().is_archive_view() {
             self.status.text = "Copy in archive is not supported".into();
+            return;
+        }
+        if self.active_panel().is_archive_view() && self.other_panel().is_remote_view() {
+            self.status.text = "Copy from archive to remote is not supported".into();
             return;
         }
         let selection = self

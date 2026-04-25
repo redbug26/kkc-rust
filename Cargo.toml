@@ -24,6 +24,7 @@ imap = "2.4"
 native-tls = "0.2"
 base64 = "0.13"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp"] }
+mlua = { version = "0.10", features = ["lua54", "vendored", "error-send"] }
 
 [profile.release]
 opt-level = 3

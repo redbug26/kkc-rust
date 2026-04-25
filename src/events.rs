@@ -1,7 +1,7 @@
 use crate::app::{
     App, AppMode, AssocEditorState, BookmarkListItem, ConfigState, ConfirmAction, InputAction,
-    InputDialog, MENU_DATA, MENU_HEADERS, MenuAction, MenuState, OpenerState, RemoteEditKind,
-    ViewerMenuKind, ViewerMenuState,
+    InputDialog, MENU_DATA, MENU_HEADERS, MenuAction, MenuState, OpenerState, PluginsState,
+    RemoteEditKind, ViewerMenuKind, ViewerMenuState,
 };
 use crate::archive::supports_archive_navigation;
 use crate::config::SortMode;
@@ -38,6 +38,7 @@ pub fn handle_event(app: &mut App, event: Event) -> Result<bool> {
         AppMode::QuickSearch => return handle_quicksearch(app, key),
         AppMode::Menu(_) => return handle_menu(app, key),
         AppMode::Config(_) => return handle_config(app, key),
+        AppMode::Plugins(_) => return handle_plugins(app, key),
         AppMode::Opener(_) => return handle_opener(app, key),
         AppMode::AssocEditor(_) => return handle_assoc_editor(app, key),
         AppMode::RemoteConnect(_) => return handle_remote_connect(app, key),
@@ -1658,6 +1659,9 @@ fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<bool> {
             let cs = ConfigState::from_config(&app.config);
             app.mode = AppMode::Config(cs);
         }
+        MenuAction::Plugins => {
+            app.mode = AppMode::Plugins(PluginsState::load());
+        }
         MenuAction::Associations => {
             app.mode = AppMode::AssocEditor(AssocEditorState::from_config(&app.config));
         }
@@ -1675,6 +1679,44 @@ fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<bool> {
             );
         }
         MenuAction::Separator => {}
+    }
+    Ok(false)
+}
+
+fn handle_plugins(app: &mut App, key: KeyEvent) -> Result<bool> {
+    match key.code {
+        KeyCode::Esc | KeyCode::F(10) => {
+            app.mode = AppMode::Browse;
+        }
+        KeyCode::Up => {
+            if let AppMode::Plugins(ref mut s) = app.mode {
+                s.cursor = s.cursor.saturating_sub(1);
+            }
+        }
+        KeyCode::Down => {
+            if let AppMode::Plugins(ref mut s) = app.mode {
+                let max = s.plugins.len().saturating_sub(1);
+                s.cursor = (s.cursor + 1).min(max);
+            }
+        }
+        KeyCode::Enter | KeyCode::Char('o') | KeyCode::Char('O') => {
+            let dir = if let AppMode::Plugins(ref s) = app.mode {
+                s.plugins_dir.clone()
+            } else {
+                return Ok(false);
+            };
+            if dir.as_os_str().is_empty() {
+                app.status.text = "Plugin directory unavailable".into();
+            } else {
+                app.mode = AppMode::Browse;
+                if let Err(e) = app.enter_dir(dir.clone()) {
+                    app.status.text = format!("Cannot enter plugin directory: {}", e);
+                } else {
+                    app.status.text = format!("Plugin directory: {}", dir.display());
+                }
+            }
+        }
+        _ => {}
     }
     Ok(false)
 }

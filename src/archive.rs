@@ -8,10 +8,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 static ARCHIVE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub fn supports_archive_navigation(path: &Path) -> bool {
-    path.extension()
+    let builtin = path
+        .extension()
         .and_then(|s| s.to_str())
         .map(|ext| matches!(ext.to_ascii_lowercase().as_str(), "zip" | "rar"))
-        .unwrap_or(false)
+        .unwrap_or(false);
+
+    builtin || crate::plugins::supports_archive_navigation(path)
 }
 
 pub fn extract_archive_to_temp(path: &Path) -> Result<PathBuf> {
@@ -20,6 +23,10 @@ pub fn extract_archive_to_temp(path: &Path) -> Result<PathBuf> {
     }
 
     let temp_root = make_temp_dir(path)?;
+    if crate::plugins::extract_archive_to_temp(path, &temp_root)? {
+        return Ok(temp_root);
+    }
+
     let status = Command::new("bsdtar")
         .arg("-xf")
         .arg(path)
