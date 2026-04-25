@@ -323,5 +323,6 @@ kkc.register_viewer_plugin({
     name = "amstrad_dsk_directory",
     description = "Amstrad CPC DSK directory viewer",
     modes = { "text" },
+    extensions = { "dsk" },
     render = render_dsk_directory,
 })

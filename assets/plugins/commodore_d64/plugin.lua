@@ -445,5 +445,6 @@ kkc.register_viewer_plugin({
     name = "commodore_d64_directory",
     description = "Commodore 64 D64 directory viewer",
     modes = { "text" },
+    extensions = { "d64" },
     render = render_d64_directory,
 })

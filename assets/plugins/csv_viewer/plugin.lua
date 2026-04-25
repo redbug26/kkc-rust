@@ -411,7 +411,7 @@ local function handle_csv_key(path, mode, key, state)
             sort_col = sort_col - 1
             consumed = true
         elseif sort_col == 1 then
-            sort_col = 0  -- clear sort
+            sort_col = 0 -- clear sort
             consumed = true
         end
     elseif key == "char:>" then
@@ -439,6 +439,7 @@ kkc.register_viewer_plugin({
     name        = "csv_viewer",
     description = "CSV file viewer with column alignment",
     modes       = { "text" },
+    extensions  = { "csv" },
     render      = render_csv,
     handle_key  = handle_csv_key,
 })
