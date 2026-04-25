@@ -1605,17 +1605,30 @@ fn handle_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
             app.mode = AppMode::Browse;
         }
         KeyCode::Left => {
-            let new_pos = bar_pos.saturating_sub(1);
+            let new_pos = if bar_pos == 0 { MENU_HEADERS.len() - 1 } else { bar_pos - 1 };
             if let AppMode::Menu(ref mut s) = app.mode {
                 s.bar_pos = new_pos;
                 s.item_pos = first_selectable(MENU_DATA[new_pos]);
             }
         }
         KeyCode::Right => {
-            let new_pos = (bar_pos + 1).min(MENU_HEADERS.len() - 1);
+            let new_pos = if bar_pos + 1 >= MENU_HEADERS.len() { 0 } else { bar_pos + 1 };
             if let AppMode::Menu(ref mut s) = app.mode {
                 s.bar_pos = new_pos;
                 s.item_pos = first_selectable(MENU_DATA[new_pos]);
+            }
+        }
+        KeyCode::Char(c) => {
+            let c_lower = c.to_ascii_lowercase();
+            if let Some(pos) = MENU_HEADERS
+                .iter()
+                .position(|h| h.chars().next().map(|f| f.to_ascii_lowercase()) == Some(c_lower))
+            {
+                if let AppMode::Menu(ref mut s) = app.mode {
+                    s.bar_pos = pos;
+                    s.open = true;
+                    s.item_pos = first_selectable(MENU_DATA[pos]);
+                }
             }
         }
         KeyCode::Down if !open => {

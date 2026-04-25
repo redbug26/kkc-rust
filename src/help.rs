@@ -61,14 +61,36 @@ pub struct HelpState {
     pub system: HelpSystem,
     pub view: HelpView,
     pub history: Vec<HelpView>,
+    /// Path of the loaded .hlp file, or "(built-in)" if using the embedded one.
+    pub hlp_path: String,
+}
+
+fn load_help_system() -> (HelpSystem, String) {
+    if let Ok(dirs) = crate::config::project_dirs() {
+        let path = dirs.preference_dir().join("kkc.hlp");
+        if path.is_file() {
+            if let Ok(bytes) = std::fs::read(&path) {
+                return (
+                    HelpSystem::from_bytes(&bytes),
+                    path.to_string_lossy().into_owned(),
+                );
+            }
+        }
+    }
+    (
+        HelpSystem::from_bytes(include_bytes!("../assets/kkc.hlp")),
+        "(built-in)".to_string(),
+    )
 }
 
 impl HelpState {
     pub fn load() -> Self {
+        let (system, hlp_path) = load_help_system();
         Self {
-            system: HelpSystem::from_bytes(include_bytes!("../assets/kkc.hlp")),
+            system,
             view: HelpView::Index { cursor: 0 },
             history: Vec::new(),
+            hlp_path,
         }
     }
 

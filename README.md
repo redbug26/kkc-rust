@@ -167,11 +167,3 @@ Press `Enter` on a `.kkplug` file to install it automatically.
 ## Plugin development
 
 See [docs/plugins.md](docs/plugins.md) for the full Lua plugin API reference.
-
----
-
-## Themes
-
-KKC ships with 100+ themes. Switch theme from **F2 → Options → Theme**.  
-Theme files are `.toml` files located in `assets/themes/`.
-

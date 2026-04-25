@@ -22,6 +22,7 @@ use ratatui::{
     widgets::{
         Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Scrollbar,
         ScrollbarOrientation, ScrollbarState, Wrap,
+        block::{Position, Title},
     },
 };
 use unicode_width::UnicodeWidthStr;
@@ -68,6 +69,7 @@ const CLR_MENU_DD_BG: Color = Color::Rgb(44, 34, 24);
 const CLR_MENU_DD_FG: Color = Color::Rgb(241, 228, 193);
 const CLR_MENU_DD_SEP: Color = Color::Rgb(118, 95, 70);
 const CLR_MENU_BORDER: Color = Color::Rgb(180, 148, 108);
+const CLR_MENU_HOTKEY: Color = Color::Rgb(255, 200, 80);
 
 // Quick-palette (VSCode-style)
 const CLR_QS_BG: Color = Color::Rgb(30, 30, 30);
@@ -732,12 +734,8 @@ fn render_menu(f: &mut Frame, state: &MenuState, area: Rect) {
 
     let mut spans = vec![Span::styled(" ", Style::default().bg(CLR_MENU_BAR_BG))];
     for (i, header) in MENU_HEADERS.iter().enumerate() {
-        let style = if i == state.bar_pos && !state.open {
-            Style::default()
-                .bg(CLR_MENU_SEL_BG)
-                .fg(CLR_MENU_SEL_FG)
-                .add_modifier(Modifier::BOLD)
-        } else if i == state.bar_pos {
+        let selected = i == state.bar_pos;
+        let base_style = if selected {
             Style::default()
                 .bg(CLR_MENU_SEL_BG)
                 .fg(CLR_MENU_SEL_FG)
@@ -745,7 +743,22 @@ fn render_menu(f: &mut Frame, state: &MenuState, area: Rect) {
         } else {
             Style::default().bg(CLR_MENU_BAR_BG).fg(CLR_MENU_BAR_FG)
         };
-        spans.push(Span::styled(format!(" {} ", header), style));
+        let hotkey_style = if selected {
+            base_style
+        } else {
+            Style::default()
+                .bg(CLR_MENU_BAR_BG)
+                .fg(CLR_MENU_HOTKEY)
+                .add_modifier(Modifier::BOLD)
+        };
+        spans.push(Span::styled(" ", base_style));
+        let mut chars = header.chars();
+        if let Some(first) = chars.next() {
+            spans.push(Span::styled(first.to_string(), hotkey_style));
+            spans.push(Span::styled(format!("{} ", chars.as_str()), base_style));
+        } else {
+            spans.push(Span::styled(format!("{} ", header), base_style));
+        }
         spans.push(Span::styled("  ", Style::default().bg(CLR_MENU_BAR_BG)));
     }
     f.render_widget(
@@ -3306,6 +3319,14 @@ fn render_help(f: &mut Frame, state: &crate::help::HelpState, area: Rect) {
 fn render_help_with_title(f: &mut Frame, popup: Rect, title: &str, state: &crate::help::HelpState) {
     let block = Block::default()
         .title(format!(" {} ", title))
+        .title(
+            Title::from(Span::styled(
+                format!(" {} ", state.hlp_path),
+                Style::default().fg(Color::DarkGray).bg(CLR_APP_BG),
+            ))
+            .position(Position::Bottom)
+            .alignment(Alignment::Right),
+        )
         .borders(Borders::ALL)
         .border_style(Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG))
         .style(Style::default().bg(Color::Black));
@@ -3866,8 +3887,8 @@ fn render_opener(f: &mut Frame, s: &OpenerState, area: Rect) {
 // ---------------------------------------------------------------------------
 
 fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
-    const W: u16 = 76;
-    const H: u16 = 22;
+    let W: u16 = area.width.saturating_sub(4).min(120).max(76);
+    let H: u16 = area.height.saturating_sub(4).min(26).max(22);
     let x = area.x + (area.width.saturating_sub(W)) / 2;
     let y = area.y + (area.height.saturating_sub(H)) / 2;
     let popup = clamp_rect(
@@ -3922,9 +3943,30 @@ fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
         },
     );
 
+    // Dynamic column widths based on actual data
+    let col_name = s.plugins.iter().map(|p| p.name.len()).max().unwrap_or(0).max("Name".len());
+    let col_kind = s.plugins.iter().map(|p| p.kind.len()).max().unwrap_or(0).max("Type".len());
+    let col_ext = s
+        .plugins
+        .iter()
+        .map(|p| {
+            if p.extensions.is_empty() {
+                1
+            } else {
+                p.extensions.iter().map(|e| e.len() + 1).sum::<usize>()
+                    + p.extensions.len().saturating_sub(1)
+            }
+        })
+        .max()
+        .unwrap_or(0)
+        .max("Ext".len());
+
     let header = format!(
-        "  {:<18} {:<9} {:<12} {}",
-        "Name", "Type", "Ext", "Description"
+        "  {:<col_name$} {:<col_kind$} {:<col_ext$} {}",
+        "Name", "Type", "Ext", "Description",
+        col_name = col_name,
+        col_kind = col_kind,
+        col_ext = col_ext,
     );
     safe_render_widget(
         f,
@@ -4000,8 +4042,11 @@ fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
             };
             let icon = if selected { "▶" } else { " " };
             let text = format!(
-                " {} {:<18} {:<9} {:<12} {}",
-                icon, plugin.name, plugin.kind, exts, plugin.description
+                " {} {:<col_name$} {:<col_kind$} {:<col_ext$} {}",
+                icon, plugin.name, plugin.kind, exts, plugin.description,
+                col_name = col_name,
+                col_kind = col_kind,
+                col_ext = col_ext,
             );
             let padded = format!(
                 "{:<width$}",
