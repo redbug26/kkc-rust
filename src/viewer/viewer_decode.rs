@@ -4,10 +4,6 @@ use std::path::Path;
 pub(super) fn detect_mode(path: &Path, data: &[u8]) -> ViewMode {
     if looks_like_image(path, data) {
         ViewMode::Image
-    } else if looks_like_eml(path, data) {
-        ViewMode::Eml
-    } else if looks_like_html(data) {
-        ViewMode::Html
     } else if contains_ansi_escape(data) {
         ViewMode::Ansi
     } else if is_likely_binary(data) {
@@ -34,29 +30,8 @@ fn looks_like_image(path: &Path, data: &[u8]) -> bool {
         || (data.len() >= 12 && &data[..4] == b"RIFF" && &data[8..12] == b"WEBP")
 }
 
-fn looks_like_eml(path: &Path, data: &[u8]) -> bool {
-    let ext = path
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    if matches!(ext.as_str(), "eml" | "mbox") {
-        return true;
-    }
-    let sample = String::from_utf8_lossy(&data[..data.len().min(4096)]).to_ascii_lowercase();
-    sample.contains("\nsubject:") && sample.contains("\nfrom:")
-}
-
 fn contains_ansi_escape(data: &[u8]) -> bool {
     data.windows(2).any(|w| w == [0x1b, b'['])
-}
-
-fn looks_like_html(data: &[u8]) -> bool {
-    let sample = String::from_utf8_lossy(&data[..data.len().min(8192)]).to_lowercase();
-    sample.contains("<html")
-        || sample.contains("<body")
-        || sample.contains("<a href")
-        || sample.contains("<!doctype html")
 }
 
 fn is_likely_binary(data: &[u8]) -> bool {

@@ -315,7 +315,10 @@ The plugins bundled in `assets/plugins` can be used as examples:
 - `amstrad_dsk`: archive + Amstrad CPC DSK catalog viewer.
 - `commodore_d64`: archive + Commodore 64 D64 directory viewer.
 - `csv_viewer`: CSV table viewer with sortable columns.
+- `eml_viewer`: EML/MIME message viewer.
+- `html_viewer`: rendered HTML text viewer.
 - `json_viewer`: pretty/tree JSON viewer.
+- `markdown_viewer`: rendered Markdown viewer.
 - `text_syntax`: line-by-line syntax highlighting viewer.
 - `pdf_file`: read-only PDF exploration as an archive.
 - `lha_lzh`: LHA/LZH exploration in Lua.

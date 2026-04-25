@@ -742,11 +742,6 @@ fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
             KeyCode::Right => v.scroll_right(8),
             KeyCode::F(2) => v.toggle_wrap(),
             KeyCode::F(5) => v.toggle_zoom(),
-            KeyCode::Tab => v.html_next_link(),
-            KeyCode::BackTab => v.html_prev_link(),
-            KeyCode::Enter => {
-                let _ = v.html_follow_link();
-            }
             KeyCode::Char('n') => v.search_next(),
             KeyCode::Char('N') => v.search_prev(),
             _ => {}
@@ -910,15 +905,7 @@ fn handle_viewer_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
 
 fn viewer_menu_items(kind: ViewerMenuKind) -> &'static [&'static str] {
     match kind {
-        ViewerMenuKind::Mode => &[
-            "Text",
-            "Binary",
-            "Ansi",
-            "EML",
-            "Html",
-            "Image",
-            "Plugins viewer",
-        ],
+        ViewerMenuKind::Mode => &["Text", "Binary", "Ansi", "Image", "Plugins viewer"],
         ViewerMenuKind::LineFeed => &["DOS (CR/LF)", "Unix (LF)", "Mac (CR)", "Mixed"],
         ViewerMenuKind::Encoding => &["Plain ASCII", "DOS CP437"],
         ViewerMenuKind::Mask => &[
@@ -942,7 +929,7 @@ const PREPROC_ADD_ITEMS: &[(&str, PreprocOpKind)] = &[
     ("Add Latin", PreprocOpKind::Latin),
     ("Add Elite", PreprocOpKind::Elite),
 ];
-const VIEWER_PLUGIN_MENU_INDEX: usize = 6;
+const VIEWER_PLUGIN_MENU_INDEX: usize = 4;
 
 fn viewer_menu_len(viewer: &crate::viewer::Viewer, kind: ViewerMenuKind) -> usize {
     match kind {
@@ -961,9 +948,7 @@ fn set_viewer_mode(viewer: &mut crate::viewer::Viewer, cursor: usize) {
         0 => viewer.set_mode(ViewMode::Text),
         1 => viewer.set_mode(ViewMode::Hex),
         2 => viewer.set_mode(ViewMode::Ansi),
-        3 => viewer.set_mode(ViewMode::Eml),
-        4 => viewer.set_mode(ViewMode::Html),
-        5 => viewer.set_mode(ViewMode::Image),
+        3 => viewer.set_mode(ViewMode::Image),
         _ => {}
     }
 }
@@ -979,9 +964,7 @@ fn viewer_mode_shortcut(ch: char) -> Option<usize> {
         't' => Some(0),
         'b' => Some(1),
         'a' => Some(2),
-        'e' => Some(3),
-        'h' => Some(4),
-        'i' => Some(5),
+        'i' => Some(3),
         'p' => Some(VIEWER_PLUGIN_MENU_INDEX),
         _ => None,
     }

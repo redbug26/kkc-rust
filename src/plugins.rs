@@ -16,7 +16,11 @@ const BUNDLED_COMMODORE_D64_PLUGIN: &str =
     include_str!("../assets/plugins/commodore_d64/plugin.lua");
 const BUNDLED_LHA_LZH_PLUGIN: &str = include_str!("../assets/plugins/lha_lzh/plugin.lua");
 const BUNDLED_PDF_FILE_PLUGIN: &str = include_str!("../assets/plugins/pdf_file/plugin.lua");
+const BUNDLED_HTML_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/html_viewer/plugin.lua");
+const BUNDLED_EML_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/eml_viewer/plugin.lua");
 const BUNDLED_JSON_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/json_viewer/plugin.lua");
+const BUNDLED_MARKDOWN_VIEWER_PLUGIN: &str =
+    include_str!("../assets/plugins/markdown_viewer/plugin.lua");
 const BUNDLED_TEXT_SYNTAX_PLUGIN: &str = include_str!("../assets/plugins/text_syntax/plugin.lua");
 
 static PLUGINS: OnceLock<RwLock<PluginRegistry>> = OnceLock::new();
@@ -319,9 +323,24 @@ fn install_bundled_plugins(plugins_dir: &Path) -> Result<()> {
     fs::create_dir_all(&pdf_dir)?;
     write_bundled_file(&pdf_dir.join("plugin.lua"), BUNDLED_PDF_FILE_PLUGIN)?;
 
+    let html_dir = plugins_dir.join("html_viewer");
+    fs::create_dir_all(&html_dir)?;
+    write_bundled_file(&html_dir.join("plugin.lua"), BUNDLED_HTML_VIEWER_PLUGIN)?;
+
+    let eml_dir = plugins_dir.join("eml_viewer");
+    fs::create_dir_all(&eml_dir)?;
+    write_bundled_file(&eml_dir.join("plugin.lua"), BUNDLED_EML_VIEWER_PLUGIN)?;
+
     let json_dir = plugins_dir.join("json_viewer");
     fs::create_dir_all(&json_dir)?;
     write_bundled_file(&json_dir.join("plugin.lua"), BUNDLED_JSON_VIEWER_PLUGIN)?;
+
+    let markdown_dir = plugins_dir.join("markdown_viewer");
+    fs::create_dir_all(&markdown_dir)?;
+    write_bundled_file(
+        &markdown_dir.join("plugin.lua"),
+        BUNDLED_MARKDOWN_VIEWER_PLUGIN,
+    )?;
 
     let syntax_dir = plugins_dir.join("text_syntax");
     fs::create_dir_all(&syntax_dir)?;
@@ -1225,6 +1244,176 @@ mod tests {
         assert_eq!(plugins[0].name, "json_viewer");
         assert_eq!(plugins[0].modes, vec!["text"]);
         assert_eq!(plugins[0].extensions, vec!["json", "geojson"]);
+    }
+
+    #[test]
+    fn bundled_html_viewer_plugin_registers() {
+        let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("plugins")
+            .join("html_viewer")
+            .join("plugin.lua");
+
+        let plugins = inspect_viewer_plugin(&script).expect("viewer plugin should load");
+
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(plugins[0].name, "html_viewer");
+        assert_eq!(plugins[0].modes, vec!["text"]);
+        assert_eq!(plugins[0].extensions, vec!["html", "htm", "xhtml"]);
+    }
+
+    #[test]
+    fn bundled_eml_viewer_plugin_registers() {
+        let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("plugins")
+            .join("eml_viewer")
+            .join("plugin.lua");
+
+        let plugins = inspect_viewer_plugin(&script).expect("viewer plugin should load");
+
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(plugins[0].name, "eml_viewer");
+        assert_eq!(plugins[0].modes, vec!["text"]);
+        assert_eq!(plugins[0].extensions, vec!["eml", "mbox"]);
+    }
+
+    #[test]
+    fn bundled_markdown_viewer_plugin_registers() {
+        let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("plugins")
+            .join("markdown_viewer")
+            .join("plugin.lua");
+
+        let plugins = inspect_viewer_plugin(&script).expect("viewer plugin should load");
+
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(plugins[0].name, "markdown_viewer");
+        assert_eq!(plugins[0].modes, vec!["text"]);
+        assert_eq!(
+            plugins[0].extensions,
+            vec!["md", "markdown", "mdown", "mkd"]
+        );
+    }
+
+    #[test]
+    fn bundled_html_viewer_renders_document() {
+        let html_path =
+            std::env::temp_dir().join(format!("kkc-html-viewer-{}.html", std::process::id()));
+        fs::write(
+            &html_path,
+            r##"<html><body><h1>Title</h1><p>Hello <a href="#x">link</a></p><table><tr><th>Name</th><th>Score</th></tr><tr><td>Alice</td><td>42</td></tr></table></body></html>"##,
+        )
+        .expect("write html");
+
+        let script_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("plugins")
+            .join("html_viewer")
+            .join("plugin.lua");
+        let plugin = ViewerPlugin {
+            name: "html_viewer".into(),
+            description: String::new(),
+            plugin_dir: script_path.parent().expect("plugin dir").to_path_buf(),
+            script_path,
+            modes: vec!["text".into()],
+            extensions: vec!["html".into(), "htm".into(), "xhtml".into()],
+        };
+
+        let rendered = plugin
+            .render_document(&html_path, "text", &HashMap::new(), 120)
+            .expect("html viewer should render")
+            .expect("html viewer should return lines");
+        let text = lines_to_text(&rendered);
+        assert!(text.contains("HTML"));
+        assert!(text.contains("Title"));
+        assert!(text.contains("Hello"));
+        assert!(text.contains("link"));
+        assert!(text.contains("Name"));
+        assert!(text.contains("Score"));
+        assert!(text.contains("Alice"));
+        assert!(text.contains("│"));
+
+        let _ = fs::remove_file(&html_path);
+    }
+
+    #[test]
+    fn bundled_eml_viewer_renders_message() {
+        let eml_path =
+            std::env::temp_dir().join(format!("kkc-eml-viewer-{}.eml", std::process::id()));
+        fs::write(
+            &eml_path,
+            "From: sender@example.com\r\nTo: you@example.com\r\nSubject: Test message\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHello body\r\n",
+        )
+        .expect("write eml");
+
+        let script_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("plugins")
+            .join("eml_viewer")
+            .join("plugin.lua");
+        let plugin = ViewerPlugin {
+            name: "eml_viewer".into(),
+            description: String::new(),
+            plugin_dir: script_path.parent().expect("plugin dir").to_path_buf(),
+            script_path,
+            modes: vec!["text".into()],
+            extensions: vec!["eml".into(), "mbox".into()],
+        };
+
+        let rendered = plugin
+            .render_document(&eml_path, "text", &HashMap::new(), 120)
+            .expect("eml viewer should render")
+            .expect("eml viewer should return lines");
+        let text = lines_to_text(&rendered);
+        assert!(text.contains("Message"));
+        assert!(text.contains("Test message"));
+        assert!(text.contains("Hello body"));
+
+        let _ = fs::remove_file(&eml_path);
+    }
+
+    #[test]
+    fn bundled_markdown_viewer_renders_document() {
+        let md_path =
+            std::env::temp_dir().join(format!("kkc-markdown-viewer-{}.md", std::process::id()));
+        fs::write(
+            &md_path,
+            "# Title\n\nHello **bold** and [link](https://example.com).\n\n- Item\n\n| Name | Score |\n| --- | ---: |\n| Alice | 42 |\n\n```rust\nfn main() {}\n```\n",
+        )
+        .expect("write markdown");
+
+        let script_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("plugins")
+            .join("markdown_viewer")
+            .join("plugin.lua");
+        let plugin = ViewerPlugin {
+            name: "markdown_viewer".into(),
+            description: String::new(),
+            plugin_dir: script_path.parent().expect("plugin dir").to_path_buf(),
+            script_path,
+            modes: vec!["text".into()],
+            extensions: vec!["md".into(), "markdown".into(), "mdown".into(), "mkd".into()],
+        };
+
+        let rendered = plugin
+            .render_document(&md_path, "text", &HashMap::new(), 120)
+            .expect("markdown viewer should render")
+            .expect("markdown viewer should return lines");
+        let text = lines_to_text(&rendered);
+        assert!(text.contains("Markdown"));
+        assert!(text.contains("Title"));
+        assert!(text.contains("bold"));
+        assert!(text.contains("https://example.com"));
+        assert!(text.contains("Name"));
+        assert!(text.contains("Score"));
+        assert!(text.contains("Alice"));
+        assert!(text.contains("│"));
+        assert!(text.contains("fn main"));
+
+        let _ = fs::remove_file(&md_path);
     }
 
     #[test]

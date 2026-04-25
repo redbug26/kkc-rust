@@ -963,7 +963,6 @@ fn viewer_area(v: &Viewer, area: Rect) -> Rect {
 
     let max_width = match v.mode {
         ViewMode::Hex => 80u16,
-        ViewMode::Html => 82u16,
         ViewMode::Image => area.width.saturating_sub(4).max(40).min(area.width),
         _ => v
             .current_plain_lines()
@@ -1025,9 +1024,7 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
     } else {
         String::new()
     };
-    let col_info = if matches!(v.mode, ViewMode::Text | ViewMode::Ansi | ViewMode::Eml)
-        && !v.wrap
-        && v.hscroll > 0
+    let col_info = if matches!(v.mode, ViewMode::Text | ViewMode::Ansi) && !v.wrap && v.hscroll > 0
     {
         format!(" Col:{} ", v.hscroll)
     } else {
@@ -1169,7 +1166,7 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
                     truncate_str(&plain, width),
                     Style::default().fg(Color::Black).bg(Color::Yellow),
                 )])
-            } else if is_match && !matches!(v.mode, ViewMode::Html) {
+            } else if is_match {
                 Line::from(vec![Span::styled(
                     truncate_str(&plain, width),
                     Style::default().fg(Color::Black).bg(Color::LightYellow),
@@ -1180,13 +1177,7 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
         })
         .collect();
 
-    if v.viewer_plugin.is_none()
-        && v.wrap
-        && matches!(
-            v.mode,
-            ViewMode::Text | ViewMode::Ansi | ViewMode::Html | ViewMode::Eml
-        )
-    {
+    if v.viewer_plugin.is_none() && v.wrap && matches!(v.mode, ViewMode::Text | ViewMode::Ansi) {
         f.render_widget(
             Paragraph::new(items)
                 .wrap(Wrap { trim: false })
@@ -1229,8 +1220,6 @@ fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, ar
             "Text: as plain text",
             "Binary: as hex dump",
             "Ansi: with ANSI escapes",
-            "EML: as email",
-            "Html: as rendered HTML",
             "Image: as inline preview",
             "Plugins viewer",
         ]
@@ -1389,7 +1378,7 @@ fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, ar
 }
 
 fn viewer_mode_menu_line(idx: usize, item: &str, style: Style) -> Line<'static> {
-    if idx == 6 {
+    if idx == 4 {
         return Line::from(vec![
             Span::styled(" ", style),
             Span::styled("P. ", style.add_modifier(Modifier::BOLD)),

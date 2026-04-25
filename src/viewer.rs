@@ -13,16 +13,12 @@ use std::sync::{Mutex, OnceLock};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 mod viewer_decode;
-mod viewer_eml;
-mod viewer_html;
 mod viewer_render;
 mod viewer_search;
 
 use self::viewer_decode::{
     ansi_lines, detect_mode, hex_lines, preproc_op_label, preprocess_bytes, text_lines,
 };
-use self::viewer_eml::{eml_lines, eml_render_lines};
-use self::viewer_html::html_document;
 use self::viewer_render::{mask_keywords, pad_visible, slice_visible};
 use self::viewer_search::parse_hex_query;
 
@@ -44,7 +40,6 @@ pub struct Viewer {
     pub search: String,
     pub matches: Vec<usize>,
     pub match_pos: usize,
-    pub html_selected_link: usize,
     pub zoomed: bool,
     pub save_position: bool,
     pub encoding: EncodingMode,
@@ -55,9 +50,6 @@ pub struct Viewer {
     text_lines: Vec<String>,
     hex_lines: Vec<String>,
     ansi_lines: Vec<String>,
-    eml_lines: Vec<String>,
-    eml_rendered: Vec<Line<'static>>,
-    html: HtmlDocument,
     image: Option<ImageInfo>,
 }
 
@@ -66,8 +58,6 @@ pub enum ViewMode {
     Text,
     Hex,
     Ansi,
-    Eml,
-    Html,
     Image,
 }
 
@@ -125,31 +115,6 @@ pub enum PreprocOp {
     Elite,
 }
 
-#[derive(Debug, Clone)]
-pub struct HtmlDocument {
-    pub lines: Vec<HtmlLine>,
-    pub anchors: HashMap<String, usize>,
-    pub links: Vec<HtmlLinkRef>,
-}
-
-#[derive(Debug, Clone)]
-pub struct HtmlLine {
-    pub spans: Vec<HtmlSpan>,
-    pub plain: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct HtmlSpan {
-    pub text: String,
-    pub href: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct HtmlLinkRef {
-    pub line: usize,
-    pub href: String,
-}
-
 #[derive(Debug, Clone, Copy)]
 struct ViewerPosition {
     scroll: usize,
@@ -179,26 +144,6 @@ impl Viewer {
         } else {
             Vec::new()
         };
-        let eml_lines = if load_decoded {
-            eml_lines(&raw)
-        } else {
-            Vec::new()
-        };
-        let eml_rendered = if load_decoded {
-            eml_render_lines(&raw)
-        } else {
-            Vec::new()
-        };
-        let html = if load_decoded {
-            html_document(&raw)
-        } else {
-            HtmlDocument {
-                lines: Vec::new(),
-                anchors: HashMap::new(),
-                links: Vec::new(),
-            }
-        };
-
         let mut viewer = Self {
             path: path.to_path_buf(),
             raw,
@@ -211,7 +156,6 @@ impl Viewer {
             search: String::new(),
             matches: Vec::new(),
             match_pos: 0,
-            html_selected_link: 0,
             zoomed: false,
             save_position: true,
             encoding,
@@ -222,9 +166,6 @@ impl Viewer {
             text_lines,
             hex_lines,
             ansi_lines,
-            eml_lines,
-            eml_rendered,
-            html,
             image,
         };
         if matches!(viewer.mode, ViewMode::Image) {
@@ -246,8 +187,6 @@ impl Viewer {
             ViewMode::Text => "Text",
             ViewMode::Hex => "Hex",
             ViewMode::Ansi => "Ansi",
-            ViewMode::Eml => "EML",
-            ViewMode::Html => "Html",
             ViewMode::Image => "Image",
         }
     }
@@ -304,8 +243,6 @@ impl Viewer {
             return count.max(1);
         }
         match self.mode {
-            ViewMode::Html => self.html.lines.len().max(1),
-            ViewMode::Eml => self.eml_lines.len().max(1),
             ViewMode::Image => 1,
             _ => self.current_plain_lines().len().max(1),
         }
@@ -326,7 +263,6 @@ impl Viewer {
         self.ensure_mode_decoded(mode);
         self.scroll = 0;
         self.hscroll = 0;
-        self.html_selected_link = 0;
         self.rebuild_matches();
     }
 
@@ -337,7 +273,6 @@ impl Viewer {
         self.ensure_mode_decoded(ViewMode::Text);
         self.scroll = 0;
         self.hscroll = 0;
-        self.html_selected_link = 0;
         self.rebuild_matches();
     }
 
@@ -454,10 +389,7 @@ impl Viewer {
     }
 
     pub fn toggle_wrap(&mut self) {
-        if matches!(
-            self.mode,
-            ViewMode::Text | ViewMode::Ansi | ViewMode::Html | ViewMode::Eml
-        ) {
+        if matches!(self.mode, ViewMode::Text | ViewMode::Ansi) {
             self.wrap = !self.wrap;
         }
     }
@@ -494,19 +426,19 @@ impl Viewer {
     }
 
     pub fn scroll_left(&mut self, amount: usize) {
-        if matches!(self.mode, ViewMode::Text | ViewMode::Ansi | ViewMode::Eml) && !self.wrap {
+        if matches!(self.mode, ViewMode::Text | ViewMode::Ansi) && !self.wrap {
             self.hscroll = self.hscroll.saturating_sub(amount);
         }
     }
 
     pub fn scroll_right(&mut self, amount: usize) {
-        if matches!(self.mode, ViewMode::Text | ViewMode::Ansi | ViewMode::Eml) && !self.wrap {
+        if matches!(self.mode, ViewMode::Text | ViewMode::Ansi) && !self.wrap {
             self.hscroll = self.hscroll.saturating_add(amount);
         }
     }
 
     pub fn scroll_left_max(&mut self) {
-        if matches!(self.mode, ViewMode::Text | ViewMode::Ansi | ViewMode::Eml) {
+        if matches!(self.mode, ViewMode::Text | ViewMode::Ansi) {
             self.hscroll = 0;
         }
     }
@@ -539,40 +471,6 @@ impl Viewer {
         self.scroll = self.matches[self.match_pos];
     }
 
-    pub fn html_next_link(&mut self) {
-        if !matches!(self.mode, ViewMode::Html) || self.html.links.is_empty() {
-            return;
-        }
-        self.html_selected_link = (self.html_selected_link + 1) % self.html.links.len();
-        self.scroll = self.html.links[self.html_selected_link].line;
-    }
-
-    pub fn html_prev_link(&mut self) {
-        if !matches!(self.mode, ViewMode::Html) || self.html.links.is_empty() {
-            return;
-        }
-        self.html_selected_link = if self.html_selected_link == 0 {
-            self.html.links.len() - 1
-        } else {
-            self.html_selected_link - 1
-        };
-        self.scroll = self.html.links[self.html_selected_link].line;
-    }
-
-    pub fn html_follow_link(&mut self) -> bool {
-        if !matches!(self.mode, ViewMode::Html) || self.html.links.is_empty() {
-            return false;
-        }
-        let href = self.html.links[self.html_selected_link].href.clone();
-        if let Some(anchor) = href.strip_prefix('#') {
-            if let Some(line) = self.html.anchors.get(&anchor.to_ascii_lowercase()) {
-                self.scroll = *line;
-                return true;
-            }
-        }
-        false
-    }
-
     pub fn render_lines(
         &self,
         selected_width: usize,
@@ -583,22 +481,9 @@ impl Viewer {
             return lines;
         }
         match self.mode {
-            ViewMode::Html => self
-                .render_html_lines()
-                .into_iter()
-                .skip(start)
-                .take(height)
-                .collect(),
             ViewMode::Text | ViewMode::Ansi => {
                 self.render_text_like_lines(selected_width, start, height)
             }
-            ViewMode::Eml => self
-                .eml_rendered
-                .iter()
-                .skip(start)
-                .take(height)
-                .cloned()
-                .collect(),
             ViewMode::Image => vec![Line::from(Span::raw(String::new()))],
             ViewMode::Hex => self
                 .current_plain_lines()
@@ -647,8 +532,6 @@ impl Viewer {
             ViewMode::Text => &self.text_lines,
             ViewMode::Hex => &self.hex_lines,
             ViewMode::Ansi => &self.ansi_lines,
-            ViewMode::Eml => &self.eml_lines,
-            ViewMode::Html => &[],
             ViewMode::Image => &[],
         }
     }
@@ -658,13 +541,6 @@ impl Viewer {
             ViewMode::Text => self.text_lines.get(idx).cloned().unwrap_or_default(),
             ViewMode::Hex => self.hex_lines.get(idx).cloned().unwrap_or_default(),
             ViewMode::Ansi => self.ansi_lines.get(idx).cloned().unwrap_or_default(),
-            ViewMode::Eml => self.eml_lines.get(idx).cloned().unwrap_or_default(),
-            ViewMode::Html => self
-                .html
-                .lines
-                .get(idx)
-                .map(|line| line.plain.clone())
-                .unwrap_or_default(),
             ViewMode::Image => String::new(),
         }
     }
@@ -722,40 +598,6 @@ impl Viewer {
             matches.dedup();
             matches
         }
-    }
-
-    fn render_html_lines(&self) -> Vec<Line<'static>> {
-        let mut current_link = 0usize;
-        self.html
-            .lines
-            .iter()
-            .map(|line| {
-                let spans = line
-                    .spans
-                    .iter()
-                    .map(|span| {
-                        let style = if span.href.is_some() {
-                            let style = if current_link == self.html_selected_link {
-                                Style::default()
-                                    .fg(Color::Black)
-                                    .bg(Color::Yellow)
-                                    .add_modifier(Modifier::BOLD)
-                            } else {
-                                Style::default()
-                                    .fg(Color::Cyan)
-                                    .add_modifier(Modifier::UNDERLINED)
-                            };
-                            current_link += 1;
-                            style
-                        } else {
-                            Style::default().fg(Color::White)
-                        };
-                        Span::styled(span.text.clone(), style)
-                    })
-                    .collect::<Vec<_>>();
-                Line::from(spans)
-            })
-            .collect()
     }
 
     fn display_line(&self, line: &str, width: usize) -> String {
@@ -906,9 +748,6 @@ impl Viewer {
             self.encoding,
         );
         self.ansi_lines = ansi_lines(&self.raw, self.line_feed, &self.preproc_ops, self.encoding);
-        self.eml_lines = eml_lines(&self.raw);
-        self.eml_rendered = eml_render_lines(&self.raw);
-        self.html = html_document(&self.raw);
         self.image = detect_image_info(&self.path, &self.raw);
     }
 
@@ -932,21 +771,6 @@ impl Viewer {
                 if self.ansi_lines.is_empty() {
                     self.ansi_lines =
                         ansi_lines(&self.raw, self.line_feed, &self.preproc_ops, self.encoding);
-                }
-            }
-            ViewMode::Eml => {
-                if self.eml_lines.is_empty() {
-                    self.eml_lines = eml_lines(&self.raw);
-                }
-                if self.eml_rendered.is_empty() {
-                    self.eml_rendered = eml_render_lines(&self.raw);
-                }
-            }
-            ViewMode::Html => {
-                if self.html.lines.is_empty()
-                    && (self.html.anchors.is_empty() && self.html.links.is_empty())
-                {
-                    self.html = html_document(&self.raw);
                 }
             }
             ViewMode::Image => {}
