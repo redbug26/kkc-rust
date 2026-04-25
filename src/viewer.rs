@@ -10,6 +10,7 @@ use std::fs;
 use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 mod viewer_decode;
 mod viewer_eml;
@@ -38,6 +39,7 @@ pub struct Viewer {
     pub hscroll: usize,
     pub mode: ViewMode,
     pub viewer_plugin: Option<String>,
+    pub plugin_state: HashMap<String, String>,
     pub wrap: bool,
     pub search: String,
     pub matches: Vec<usize>,
@@ -204,6 +206,7 @@ impl Viewer {
             hscroll: 0,
             mode,
             viewer_plugin: None,
+            plugin_state: HashMap::new(),
             wrap,
             search: String::new(),
             matches: Vec::new(),
@@ -316,6 +319,7 @@ impl Viewer {
     pub fn set_mode(&mut self, mode: ViewMode) {
         self.mode = mode;
         self.viewer_plugin = None;
+        self.plugin_state = HashMap::new();
         self.ensure_mode_decoded(mode);
         self.scroll = 0;
         self.hscroll = 0;
@@ -326,6 +330,7 @@ impl Viewer {
     pub fn set_viewer_plugin(&mut self, plugin_name: String) {
         self.mode = ViewMode::Text;
         self.viewer_plugin = Some(plugin_name);
+        self.plugin_state = HashMap::new();
         self.ensure_mode_decoded(ViewMode::Text);
         self.scroll = 0;
         self.hscroll = 0;
@@ -571,7 +576,7 @@ impl Viewer {
         start: usize,
         height: usize,
     ) -> Vec<Line<'static>> {
-        if let Some(lines) = self.render_plugin_document_lines(start, height) {
+        if let Some(lines) = self.render_plugin_document_lines(start, height, selected_width) {
             return lines;
         }
         match self.mode {
@@ -624,7 +629,7 @@ impl Viewer {
             .map(|line| self.display_line(line, selected_width))
             .collect::<Vec<_>>();
 
-        if let Some(highlighted) = self.render_plugin_lines(&display_lines) {
+        if let Some(highlighted) = self.render_plugin_lines(&display_lines, selected_width) {
             return highlighted;
         }
 
@@ -796,7 +801,11 @@ impl Viewer {
         Line::from(spans)
     }
 
-    fn render_plugin_lines(&self, display_lines: &[String]) -> Option<Vec<Line<'static>>> {
+    fn render_plugin_lines(
+        &self,
+        display_lines: &[String],
+        width: usize,
+    ) -> Option<Vec<Line<'static>>> {
         let mode = match self.mode {
             ViewMode::Text => "text",
             ViewMode::Ansi => "ansi",
@@ -808,23 +817,7 @@ impl Viewer {
         Some(
             highlighted
                 .into_iter()
-                .map(|spans| {
-                    Line::from(
-                        spans
-                            .into_iter()
-                            .map(|span| {
-                                let mut style = Style::default().fg(viewer_plugin_color(&span.fg));
-                                if let Some(bg) = span.bg {
-                                    style = style.bg(viewer_plugin_color(&bg));
-                                }
-                                if span.bold {
-                                    style = style.add_modifier(Modifier::BOLD);
-                                }
-                                Span::styled(span.text, style)
-                            })
-                            .collect::<Vec<_>>(),
-                    )
-                })
+                .map(|spans| viewer_plugin_line(spans, width))
                 .collect(),
         )
     }
@@ -832,24 +825,39 @@ impl Viewer {
     fn plugin_document_line_count(&self) -> Option<usize> {
         let mode = self.viewer_mode_key()?;
         let plugin_name = self.viewer_plugin.as_deref()?;
-        crate::plugins::render_viewer_document(&self.path, mode, plugin_name)
-            .map(|lines| lines.len())
+        // Use a normal width for count-only calls so document renderers still
+        // apply their own width caps while building the temporary line list.
+        crate::plugins::render_viewer_document(
+            &self.path,
+            mode,
+            plugin_name,
+            &self.plugin_state,
+            120,
+        )
+        .map(|lines| lines.len())
     }
 
     fn render_plugin_document_lines(
         &self,
         start: usize,
         height: usize,
+        width: usize,
     ) -> Option<Vec<Line<'static>>> {
         let mode = self.viewer_mode_key()?;
         let plugin_name = self.viewer_plugin.as_deref()?;
-        let lines = crate::plugins::render_viewer_document(&self.path, mode, plugin_name)?;
+        let lines = crate::plugins::render_viewer_document(
+            &self.path,
+            mode,
+            plugin_name,
+            &self.plugin_state,
+            width,
+        )?;
         Some(
             lines
                 .into_iter()
                 .skip(start)
                 .take(height)
-                .map(viewer_plugin_line)
+                .map(|line| viewer_plugin_line(line, width))
                 .collect(),
         )
     }
@@ -859,6 +867,32 @@ impl Viewer {
             ViewMode::Text => Some("text"),
             ViewMode::Ansi => Some("ansi"),
             _ => None,
+        }
+    }
+
+    /// Forward a key event to the active viewer plugin.
+    /// Returns `true` if the plugin consumed the key (skip normal handling).
+    pub fn handle_plugin_key(&mut self, key: &str) -> bool {
+        let mode = match self.viewer_mode_key() {
+            Some(m) => m,
+            None => return false,
+        };
+        let plugin_name = match self.viewer_plugin.as_deref() {
+            Some(p) => p.to_string(),
+            None => return false,
+        };
+        match crate::plugins::handle_viewer_key(
+            &self.path,
+            mode,
+            &plugin_name,
+            key,
+            &self.plugin_state,
+        ) {
+            Some((consumed, new_state)) => {
+                self.plugin_state = new_state;
+                consumed
+            }
+            None => false,
         }
     }
 
@@ -965,22 +999,78 @@ fn viewer_plugin_color(name: &str) -> Color {
     }
 }
 
-fn viewer_plugin_line(spans: Vec<crate::plugins::ViewerSpan>) -> Line<'static> {
-    Line::from(
-        spans
-            .into_iter()
-            .map(|span| {
-                let mut style = Style::default().fg(viewer_plugin_color(&span.fg));
-                if let Some(bg) = span.bg {
-                    style = style.bg(viewer_plugin_color(&bg));
-                }
-                if span.bold {
-                    style = style.add_modifier(Modifier::BOLD);
-                }
-                Span::styled(span.text, style)
-            })
-            .collect::<Vec<_>>(),
-    )
+fn viewer_plugin_style(span: &crate::plugins::ViewerSpan) -> Style {
+    let mut style = Style::default().fg(viewer_plugin_color(&span.fg));
+    if let Some(bg) = &span.bg {
+        style = style.bg(viewer_plugin_color(bg));
+    }
+    if span.bold {
+        style = style.add_modifier(Modifier::BOLD);
+    }
+    style
+}
+
+fn take_display_width(s: &str, max_width: usize) -> (String, usize) {
+    let mut out = String::new();
+    let mut width = 0usize;
+    for ch in s.chars() {
+        let ch_width = ch.width().unwrap_or(1);
+        if width + ch_width > max_width {
+            break;
+        }
+        out.push(ch);
+        width += ch_width;
+    }
+    (out, width)
+}
+
+fn sanitize_plugin_text(s: &str) -> String {
+    let mut out = String::new();
+    for ch in s.chars() {
+        match ch {
+            '\t' => out.push_str("    "),
+            ch if ch.is_control() => out.push(' '),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+fn viewer_plugin_line(spans: Vec<crate::plugins::ViewerSpan>, width: usize) -> Line<'static> {
+    if width == 0 {
+        return Line::from(String::new());
+    }
+
+    let mut out = Vec::new();
+    let mut used = 0usize;
+    for span in spans {
+        if used >= width {
+            break;
+        }
+
+        let style = viewer_plugin_style(&span);
+        let available = width - used;
+        let safe_text = sanitize_plugin_text(&span.text);
+        let span_width = UnicodeWidthStr::width(safe_text.as_str());
+        let (text, rendered_width) = if span_width <= available {
+            (safe_text, span_width)
+        } else {
+            take_display_width(&safe_text, available)
+        };
+        if !text.is_empty() {
+            out.push(Span::styled(text, style));
+            used += rendered_width;
+        }
+    }
+
+    if used < width {
+        out.push(Span::styled(
+            " ".repeat(width - used),
+            Style::default().fg(Color::White).bg(Color::Black),
+        ));
+    }
+
+    Line::from(out)
 }
 
 pub fn kitty_graphics_supported() -> bool {

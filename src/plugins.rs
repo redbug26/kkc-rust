@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, anyhow, bail};
 use mlua::{Function, Lua, Table, Value};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Read, Seek};
 use std::path::{Path, PathBuf};
@@ -162,12 +163,31 @@ pub fn render_viewer_document(
     path: &Path,
     mode: &str,
     plugin_name: &str,
+    state: &HashMap<String, String>,
+    width: usize,
 ) -> Option<Vec<Vec<ViewerSpan>>> {
     PLUGINS.get().and_then(|registry| {
         registry
             .read()
             .ok()?
-            .render_viewer_document(path, mode, plugin_name)
+            .render_viewer_document(path, mode, plugin_name, state, width)
+            .ok()
+            .flatten()
+    })
+}
+
+pub fn handle_viewer_key(
+    path: &Path,
+    mode: &str,
+    plugin_name: &str,
+    key: &str,
+    state: &HashMap<String, String>,
+) -> Option<(bool, HashMap<String, String>)> {
+    PLUGINS.get().and_then(|registry| {
+        registry
+            .read()
+            .ok()?
+            .handle_viewer_key(path, mode, plugin_name, key, state)
             .ok()
             .flatten()
     })
@@ -692,6 +712,8 @@ impl PluginRegistry {
         path: &Path,
         mode: &str,
         plugin_name: &str,
+        state: &HashMap<String, String>,
+        width: usize,
     ) -> Result<Option<Vec<Vec<ViewerSpan>>>> {
         let Some(plugin) = self
             .viewer_plugins
@@ -700,7 +722,25 @@ impl PluginRegistry {
         else {
             return Ok(None);
         };
-        plugin.render_document(path, mode)
+        plugin.render_document(path, mode, state, width)
+    }
+
+    fn handle_viewer_key(
+        &self,
+        path: &Path,
+        mode: &str,
+        plugin_name: &str,
+        key: &str,
+        state: &HashMap<String, String>,
+    ) -> Result<Option<(bool, HashMap<String, String>)>> {
+        let Some(plugin) = self
+            .viewer_plugins
+            .iter()
+            .find(|plugin| plugin.name == plugin_name && plugin.supports_mode(mode))
+        else {
+            return Ok(None);
+        };
+        plugin.handle_key(path, mode, key, state)
     }
 }
 
@@ -831,7 +871,13 @@ impl ViewerPlugin {
         Ok(None)
     }
 
-    fn render_document(&self, path: &Path, mode: &str) -> Result<Option<Vec<Vec<ViewerSpan>>>> {
+    fn render_document(
+        &self,
+        path: &Path,
+        mode: &str,
+        state: &HashMap<String, String>,
+        width: usize,
+    ) -> Result<Option<Vec<Vec<ViewerSpan>>>> {
         let lua = plugin_lua();
         let handles = Rc::new(RefCell::new(Vec::new()));
         install_bindings(&lua, &self.plugin_dir, |_| {})?;
@@ -842,6 +888,7 @@ impl ViewerPlugin {
             .set_name(self.script_path.to_string_lossy())
             .exec()?;
 
+        let state_table = lua_state_table(&lua, state)?;
         let handles = handles.borrow();
         for key in handles.iter() {
             let table: Table = lua.registry_value(key)?;
@@ -850,8 +897,12 @@ impl ViewerPlugin {
                 let Some(render) = table.get::<Option<Function>>("render")? else {
                     return Ok(None);
                 };
-                let result: Option<Table> =
-                    render.call((path.to_string_lossy().into_owned(), mode.to_string()))?;
+                let result: Option<Table> = render.call((
+                    path.to_string_lossy().into_owned(),
+                    mode.to_string(),
+                    state_table.clone(),
+                    width as u64,
+                ))?;
                 let Some(lines) = result else {
                     return Ok(None);
                 };
@@ -861,6 +912,82 @@ impl ViewerPlugin {
 
         Ok(None)
     }
+
+    fn handle_key(
+        &self,
+        path: &Path,
+        mode: &str,
+        key: &str,
+        state: &HashMap<String, String>,
+    ) -> Result<Option<(bool, HashMap<String, String>)>> {
+        let lua = plugin_lua();
+        let handles = Rc::new(RefCell::new(Vec::new()));
+        install_bindings(&lua, &self.plugin_dir, |_| {})?;
+        install_runtime_viewer_bindings(&lua, Rc::clone(&handles))?;
+
+        let script = fs::read_to_string(&self.script_path)?;
+        lua.load(&script)
+            .set_name(self.script_path.to_string_lossy())
+            .exec()?;
+
+        let state_table = lua_state_table(&lua, state)?;
+        let handles = handles.borrow();
+        for reg_key in handles.iter() {
+            let table: Table = lua.registry_value(reg_key)?;
+            let name: String = table.get("name")?;
+            if name == self.name {
+                let Some(handle_key_fn) = table.get::<Option<Function>>("handle_key")? else {
+                    return Ok(None);
+                };
+                let result: Option<Table> = handle_key_fn.call((
+                    path.to_string_lossy().into_owned(),
+                    mode.to_string(),
+                    key.to_string(),
+                    state_table,
+                ))?;
+                let Some(result_table) = result else {
+                    return Ok(None);
+                };
+                let consumed: bool = result_table.get("consumed").unwrap_or(false);
+                let new_state_table: Table = result_table.get("state")?;
+                return Ok(Some((consumed, lua_table_to_state(new_state_table)?)));
+            }
+        }
+
+        Ok(None)
+    }
+}
+
+fn lua_state_table(lua: &Lua, state: &HashMap<String, String>) -> Result<Table> {
+    let t = lua.create_table()?;
+    for (k, v) in state {
+        t.set(k.clone(), v.clone())?;
+    }
+    Ok(t)
+}
+
+fn lua_table_to_state(table: Table) -> Result<HashMap<String, String>> {
+    let mut map = HashMap::new();
+    for pair in table.pairs::<Value, Value>() {
+        if let Ok((k, v)) = pair {
+            let k_str = match k {
+                Value::String(s) => Some(s.to_str()?.to_string()),
+                Value::Integer(i) => Some(i.to_string()),
+                _ => None,
+            };
+            let v_str = match v {
+                Value::String(s) => Some(s.to_str()?.to_string()),
+                Value::Integer(i) => Some(i.to_string()),
+                Value::Number(n) => Some(n.to_string()),
+                Value::Boolean(b) => Some(b.to_string()),
+                _ => None,
+            };
+            if let (Some(k), Some(v)) = (k_str, v_str) {
+                map.insert(k, v);
+            }
+        }
+    }
+    Ok(map)
 }
 
 fn lua_lines_to_viewer_spans(table: Table) -> Result<Vec<Vec<ViewerSpan>>> {

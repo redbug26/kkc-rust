@@ -619,6 +619,30 @@ fn handle_quicksearch(app: &mut App, key: KeyEvent) -> Result<bool> {
 // Viewer mode
 // ---------------------------------------------------------------------------
 
+/// Convert a viewer key event to a plugin-facing key string.
+/// Returns `None` for Ctrl-modified keys and unrecognised key codes.
+fn keyevent_to_plugin_key(key: KeyEvent) -> Option<String> {
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        return None;
+    }
+    Some(match key.code {
+        KeyCode::Char(c) => format!("char:{c}"),
+        KeyCode::Left => "left".into(),
+        KeyCode::Right => "right".into(),
+        KeyCode::Up => "up".into(),
+        KeyCode::Down => "down".into(),
+        KeyCode::Home => "home".into(),
+        KeyCode::End => "end".into(),
+        KeyCode::PageUp => "pgup".into(),
+        KeyCode::PageDown => "pgdown".into(),
+        KeyCode::Enter => "enter".into(),
+        KeyCode::Tab => "tab".into(),
+        KeyCode::BackTab => "backtab".into(),
+        KeyCode::F(n) => format!("f{n}"),
+        _ => return None,
+    })
+}
+
 fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
     // '/' and Esc/F3 require moving app.mode; handle them before borrowing.
     match key.code {
@@ -700,6 +724,12 @@ fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
             },
         }
     } else {
+        // Let the active viewer plugin intercept the key first.
+        if let Some(key_str) = keyevent_to_plugin_key(key) {
+            if v.handle_plugin_key(&key_str) {
+                return Ok(false);
+            }
+        }
         match key.code {
             KeyCode::Up => v.scroll_up(),
             KeyCode::Down => v.scroll_down(),

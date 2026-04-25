@@ -24,6 +24,7 @@ use ratatui::{
         ScrollbarOrientation, ScrollbarState, Wrap,
     },
 };
+use unicode_width::UnicodeWidthStr;
 
 // ---------------------------------------------------------------------------
 // Colour palette (closer to original KKC brown/beige theme)
@@ -948,7 +949,10 @@ fn render_fkey_bar(f: &mut Frame, area: Rect) {
 // ---------------------------------------------------------------------------
 
 fn viewer_area(v: &Viewer, area: Rect) -> Rect {
-    if v.zoomed {
+    // Plugin document views always use the full area (like zoomed) so that
+    // (a) no stale file-manager content bleeds through the margins, and
+    // (b) the actual panel width is available to the plugin renderer.
+    if v.zoomed || v.viewer_plugin.is_some() {
         return area;
     }
 
@@ -1171,7 +1175,8 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
         })
         .collect();
 
-    if v.wrap
+    if v.viewer_plugin.is_none()
+        && v.wrap
         && matches!(
             v.mode,
             ViewMode::Text | ViewMode::Ansi | ViewMode::Html | ViewMode::Eml
@@ -1288,7 +1293,12 @@ fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, ar
         ViewerMenuKind::Mask => " Change Mask ",
     };
 
-    let width = items.iter().map(|s| s.len()).max().unwrap_or(10) as u16 + 6;
+    let width = items
+        .iter()
+        .map(|s| UnicodeWidthStr::width(s.as_str()))
+        .max()
+        .unwrap_or(10) as u16
+        + 6;
     let extra = if menu.kind == ViewerMenuKind::Preproc {
         3
     } else {
@@ -1314,6 +1324,11 @@ fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, ar
         .style(Style::default().bg(CLR_MENU_DD_BG));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
+    safe_render_widget(
+        f,
+        Block::default().style(Style::default().bg(CLR_MENU_DD_BG)),
+        inner,
+    );
 
     let all_items = items
         .iter()
@@ -1337,7 +1352,7 @@ fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, ar
             } else {
                 Line::from(Span::styled(format!(" {}", item), style))
             };
-            ListItem::new(line)
+            ListItem::new(line).style(style)
         })
         .collect::<Vec<_>>();
 
@@ -1356,7 +1371,11 @@ fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, ar
         .skip(scroll)
         .take(list_height as usize)
         .collect::<Vec<_>>();
-    safe_render_widget(f, List::new(visible_items), list_area);
+    safe_render_widget(
+        f,
+        List::new(visible_items).style(Style::default().bg(CLR_MENU_DD_BG)),
+        list_area,
+    );
 
     if menu.kind == ViewerMenuKind::Preproc {
         let info_area = Rect {
