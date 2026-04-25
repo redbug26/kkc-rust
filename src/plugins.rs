@@ -34,6 +34,7 @@ struct ArchivePlugin {
     script_path: PathBuf,
     plugin_dir: PathBuf,
     extensions: Vec<String>,
+    can_add_files: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -41,6 +42,7 @@ struct RegisteredPlugin {
     name: String,
     description: String,
     extensions: Vec<String>,
+    can_add_files: bool,
 }
 
 pub fn initialize() -> Result<()> {
@@ -67,6 +69,20 @@ pub fn extract_archive_to_temp(path: &Path, destination: &Path) -> Result<bool> 
         return Ok(false);
     };
     registry.extract_archive(path, destination)
+}
+
+pub fn supports_archive_add_files(path: &Path) -> bool {
+    PLUGINS
+        .get()
+        .map(|registry| registry.supports_add_files(path))
+        .unwrap_or(false)
+}
+
+pub fn add_files_to_archive(path: &Path, sources: &[PathBuf]) -> Result<bool> {
+    let Some(registry) = PLUGINS.get() else {
+        return Ok(false);
+    };
+    registry.add_files(path, sources)
 }
 
 pub fn plugins_dir() -> Result<PathBuf> {
@@ -100,6 +116,7 @@ fn load_plugins() -> Result<PluginRegistry> {
                 script_path: script_path.clone(),
                 plugin_dir: plugin_dir.clone(),
                 extensions: plugin.extensions,
+                can_add_files: plugin.can_add_files,
             });
         }
     }
@@ -206,6 +223,7 @@ where
             let name: String = table.get("name")?;
             let description: String = table.get("description").unwrap_or_else(|_| String::new());
             let extract: Option<Function> = table.get("extract")?;
+            let add_files: Option<Function> = table.get("add_files").ok();
             if extract.is_none() {
                 return Err(mlua::Error::external(format!(
                     "Plugin '{name}' does not define extract()"
@@ -224,6 +242,7 @@ where
                 name,
                 description,
                 extensions,
+                can_add_files: add_files.is_some(),
             });
             Ok(())
         })?,
@@ -275,6 +294,12 @@ impl PluginRegistry {
             .any(|plugin| plugin.supports_path(path))
     }
 
+    fn supports_add_files(&self, path: &Path) -> bool {
+        self.archive_plugins
+            .iter()
+            .any(|plugin| plugin.supports_path(path) && plugin.can_add_files)
+    }
+
     fn extract_archive(&self, path: &Path, destination: &Path) -> Result<bool> {
         let Some(plugin) = self
             .archive_plugins
@@ -285,6 +310,19 @@ impl PluginRegistry {
         };
 
         plugin.extract(path, destination)?;
+        Ok(true)
+    }
+
+    fn add_files(&self, path: &Path, sources: &[PathBuf]) -> Result<bool> {
+        let Some(plugin) = self
+            .archive_plugins
+            .iter()
+            .find(|plugin| plugin.supports_path(path) && plugin.can_add_files)
+        else {
+            return Ok(false);
+        };
+
+        plugin.add_files(path, sources)?;
         Ok(true)
     }
 }
@@ -321,6 +359,43 @@ impl ArchivePlugin {
                 if !ok {
                     bail!(
                         "Plugin '{}' failed to extract {}",
+                        self.name,
+                        path.display()
+                    );
+                }
+                return Ok(());
+            }
+        }
+
+        bail!("Plugin '{}' was not registered at runtime", self.name)
+    }
+
+    fn add_files(&self, path: &Path, sources: &[PathBuf]) -> Result<()> {
+        let lua = plugin_lua();
+        let handles = Rc::new(RefCell::new(Vec::new()));
+        install_runtime_bindings(&lua, &self.plugin_dir, Rc::clone(&handles))?;
+
+        let script = fs::read_to_string(&self.script_path)?;
+        lua.load(&script)
+            .set_name(self.script_path.to_string_lossy())
+            .exec()?;
+
+        let source_table = lua.create_table()?;
+        for (idx, source) in sources.iter().enumerate() {
+            source_table.set(idx + 1, source.to_string_lossy().into_owned())?;
+        }
+
+        let handles = handles.borrow();
+        for key in handles.iter() {
+            let table: Table = lua.registry_value(key)?;
+            let name: String = table.get("name")?;
+            if name == self.name {
+                let add_files: Function = table.get("add_files")?;
+                let ok: bool =
+                    add_files.call((path.to_string_lossy().into_owned(), source_table))?;
+                if !ok {
+                    bail!(
+                        "Plugin '{}' failed to add files to {}",
                         self.name,
                         path.display()
                     );
@@ -433,12 +508,70 @@ mod tests {
             script_path,
             plugin_dir,
             extensions: vec!["dsk".into()],
+            can_add_files: true,
         };
         plugin.extract(&dsk_path, &extract_dir).unwrap();
 
         assert_eq!(
             fs::read(extract_dir.join("HELLO.BIN")).unwrap(),
             b"HELLO CPC"
+        );
+
+        let _ = fs::remove_dir_all(temp_root);
+    }
+
+    #[test]
+    fn bundled_amstrad_dsk_plugin_adds_file() {
+        let plugin_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("plugins")
+            .join("amstrad_dsk");
+        let script_path = plugin_dir.join("plugin.lua");
+        let temp_root = std::env::temp_dir().join(format!(
+            "kkc-dsk-add-plugin-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let source_path = temp_root.join("local-file.bin");
+        let dsk_path = temp_root.join("test.dsk");
+        let extract_dir = temp_root.join("extract");
+        fs::create_dir_all(&extract_dir).unwrap();
+        fs::write(&source_path, b"FROM LOCAL").unwrap();
+
+        let lua = plugin_lua();
+        install_bindings(&lua, &plugin_dir, |_| {}).unwrap();
+        lua.globals()
+            .set("dsk_path", dsk_path.to_string_lossy().into_owned())
+            .unwrap();
+        lua.load(
+            r#"
+            local dsk = require("dsk")
+            dsk.create()
+            assert(dsk.write(dsk_path))
+            "#,
+        )
+        .exec()
+        .unwrap();
+
+        let plugin = ArchivePlugin {
+            name: "amstrad_dsk".into(),
+            description: "Amstrad CPC DSK archive plugin".into(),
+            script_path,
+            plugin_dir,
+            extensions: vec!["dsk".into()],
+            can_add_files: true,
+        };
+        plugin
+            .add_files(&dsk_path, std::slice::from_ref(&source_path))
+            .unwrap();
+        plugin.extract(&dsk_path, &extract_dir).unwrap();
+
+        assert_eq!(
+            fs::read(extract_dir.join("LOCAL-FI.BIN")).unwrap(),
+            b"FROM LOCAL"
         );
 
         let _ = fs::remove_dir_all(temp_root);
@@ -495,6 +628,7 @@ mod tests {
             script_path,
             plugin_dir,
             extensions: vec!["d64".into()],
+            can_add_files: false,
         };
         plugin.extract(&d64_path, &extract_dir).unwrap();
 

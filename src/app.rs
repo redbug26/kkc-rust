@@ -1139,7 +1139,30 @@ impl App {
 
     pub fn open_copy_dialog(&mut self) {
         if self.other_panel().is_archive_view() {
-            self.status.text = "Copy in archive is not supported".into();
+            let Some(archive_path) = self.other_panel().archive_path() else {
+                self.status.text = "Archive destination is not available".into();
+                return;
+            };
+            if self.active_panel().is_archive_view() || self.active_panel().is_remote_view() {
+                self.status.text = "Copy to archive is supported from local files only".into();
+                return;
+            }
+            if !crate::plugins::supports_archive_add_files(archive_path) {
+                self.status.text = "Copy to this archive format is not supported".into();
+                return;
+            }
+            if self
+                .active_panel()
+                .effective_selection()
+                .iter()
+                .any(|entry| entry.is_dir)
+            {
+                self.status.text = "Copying directories to archive is not supported".into();
+                return;
+            }
+        }
+        if self.other_panel().is_archive_view() && self.active_panel().is_remote_view() {
+            self.status.text = "Copy from remote to archive is not supported".into();
             return;
         }
         if self.active_panel().is_archive_view() && self.other_panel().is_remote_view() {
@@ -1545,6 +1568,21 @@ impl App {
             .map(|e| (*e).clone())
             .collect::<Vec<_>>();
         if sources.is_empty() {
+            return Ok(());
+        }
+
+        if let Some(archive_path) = self.other_panel().archive_path().map(Path::to_path_buf) {
+            let source_paths = sources
+                .iter()
+                .map(|entry| entry.path.clone())
+                .collect::<Vec<_>>();
+            if crate::plugins::add_files_to_archive(&archive_path, &source_paths)? {
+                self.other_panel_mut().enter_archive(archive_path.clone())?;
+                self.mode = AppMode::Browse;
+                self.status.text = format!("Copied {} file(s) to archive", source_paths.len());
+                return Ok(());
+            }
+            self.status.text = "Copy to this archive format is not supported".into();
             return Ok(());
         }
 

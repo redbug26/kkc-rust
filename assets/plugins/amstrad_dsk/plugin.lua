@@ -73,6 +73,28 @@ local function read_catalog_file(entries)
     return strip_amsdos_header(entries[1].filename, data)
 end
 
+local function basename(path)
+    return path:match("([^/\\]+)$") or path
+end
+
+local function amsdos_import_name(path)
+    local name = basename(path):upper()
+    local stem, ext = name:match("^([^%.]+)%.([^%.]+)$")
+    if not stem then
+        stem = name
+        ext = "BIN"
+    end
+    stem = stem:gsub("[^A-Z0-9_%-]", "_"):sub(1, 8)
+    ext = ext:gsub("[^A-Z0-9_%-]", "_"):sub(1, 3)
+    if stem == "" then
+        stem = "FILE"
+    end
+    if ext == "" then
+        ext = "BIN"
+    end
+    return stem .. "." .. ext
+end
+
 local function extract_dsk(path, destination)
     dsk.init()
     dsk.verbose = false
@@ -97,6 +119,44 @@ local function extract_dsk(path, destination)
     return true
 end
 
+local function normalize_tracks_for_write()
+    for track = 0, (dsk.tracksnumber or 0) - 1 do
+        for side = 0, (dsk.sidesnumber or 1) - 1 do
+            local track_data = dsk.tracks and dsk.tracks[track] and dsk.tracks[track][side]
+            if track_data and track_data.sector then
+                local filler = string.char(track_data.filler or 0xe5)
+                for sector = 0, (track_data.sectorsnumber or 0) - 1 do
+                    local sector_data = track_data.sector[sector]
+                    if sector_data and not sector_data.data then
+                        local size = sector_data.size or track_data.sectorssize or 2
+                        sector_data.data = string.rep(filler, 256 << (size - 1))
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function add_files_to_dsk(path, files)
+    dsk.init()
+    dsk.verbose = false
+    assert(dsk.read(path), "unable to read DSK")
+    dsk.cat()
+
+    for _, source in ipairs(files) do
+        local handle = assert(io.open(source, "rb"))
+        handle:close()
+        assert(
+            dsk.saveexternalfile(source, amsdos_import_name(source), dsk.AMSDOS_FILETYPE_BINARY, 0x0000, 0x0000),
+            "unable to add file to DSK"
+        )
+    end
+
+    normalize_tracks_for_write()
+    assert(dsk.write(path), "unable to write DSK")
+    return true
+end
+
 kkc.register_archive_plugin({
     name = "amstrad_dsk",
     description = "Amstrad CPC DSK archive plugin",
@@ -105,4 +165,5 @@ kkc.register_archive_plugin({
         return path:lower():match("%.dsk$") ~= nil
     end,
     extract = extract_dsk,
+    add_files = add_files_to_dsk,
 })

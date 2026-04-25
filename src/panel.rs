@@ -560,6 +560,12 @@ impl Panel {
         self.archive.is_some()
     }
 
+    pub fn archive_path(&self) -> Option<&Path> {
+        self.archive
+            .as_ref()
+            .map(|mount| mount.archive_path.as_path())
+    }
+
     pub fn is_remote_view(&self) -> bool {
         self.remote.is_some()
     }
