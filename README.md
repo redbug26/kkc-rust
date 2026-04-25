@@ -45,12 +45,22 @@ Nearly three decades later, this Rust rewrite brings KKC back — same spirit, m
 
 ## Installation
 
-### Prerequisites
+### Homebrew (macOS / Linux)
 
-- [Rust](https://rustup.rs/) (stable toolchain)
-- **Linux only:** `libarchive-tools`
+```sh
+brew tap redbug26/kkc-rust https://github.com/redbug26/kkc-rust
+brew install redbug26/kkc-rust/kkc
+```
+
+To always get the latest development build from source:
+
+```sh
+brew install --HEAD redbug26/kkc-rust/kkc
+```
 
 ### Build from source
+
+Prerequisites: [Rust](https://rustup.rs/) stable toolchain — **Linux only:** also `libssl-dev`.
 
 ```sh
 git clone https://github.com/redbug26/kkc-rust.git
