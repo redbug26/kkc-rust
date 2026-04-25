@@ -1044,6 +1044,11 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
     } else {
         String::new()
     };
+    let plugin_info = v
+        .viewer_plugin
+        .as_ref()
+        .map(|name| format!(" Plugin:{} ", name))
+        .unwrap_or_default();
     let zoom_info = format!(" Zoom:{} ", v.zoom_label());
     let image_info = if let Some(image) = v.image_info() {
         match (image.width, image.height) {
@@ -1054,7 +1059,7 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
         String::new()
     };
     let title = format!(
-        " {} [{}] {}/{}{}{}{}{}{}{}{}{} ",
+        " {} [{}] {}/{}{}{}{}{}{}{}{}{}{} ",
         file_name,
         v.mode_label(),
         v.scroll + 1,
@@ -1064,6 +1069,7 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
         pre_info,
         enc_info,
         mask_info,
+        plugin_info,
         zoom_info,
         col_info,
         match_info,
@@ -1132,10 +1138,8 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
 
     let search_lower = v.search.to_lowercase();
     let items: Vec<Line> = v
-        .render_lines(width)
+        .render_lines(width, v.scroll, height)
         .into_iter()
-        .skip(v.scroll)
-        .take(height)
         .enumerate()
         .map(|(rel_idx, line)| {
             let abs_idx = v.scroll + rel_idx;
@@ -1201,17 +1205,31 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
 
 fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, area: Rect) {
     let items: Vec<String> = match menu.kind {
-        ViewerMenuKind::Mode => vec![
-            "Text: as plain text",
-            "Binary: as hex dump",
-            "Ansi: with ANSI escapes",
-            "EML: as email",
-            "Html: as rendered HTML",
-            "Image: as inline preview",
-        ]
-        .into_iter()
-        .map(str::to_string)
-        .collect(),
+        ViewerMenuKind::Mode => {
+            let mut items = vec![
+                "Text: as plain text",
+                "Binary: as hex dump",
+                "Ansi: with ANSI escapes",
+                "EML: as email",
+                "Html: as rendered HTML",
+                "Image: as inline preview",
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+            items.extend(
+                crate::plugins::viewer_plugin_infos()
+                    .into_iter()
+                    .map(|plugin| {
+                        if plugin.description.is_empty() {
+                            format!("Plugin: {}", plugin.name)
+                        } else {
+                            format!("Plugin: {} - {}", plugin.name, plugin.description)
+                        }
+                    }),
+            );
+            items
+        }
         ViewerMenuKind::LineFeed => vec!["DOS (CR/LF)", "Unix (LF)", "Mac (CR)", "Mixed"]
             .into_iter()
             .map(str::to_string)
@@ -1304,7 +1322,7 @@ fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, ar
             } else {
                 Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
             };
-            let line = if menu.kind == ViewerMenuKind::Mode {
+            let line = if menu.kind == ViewerMenuKind::Mode && idx < 6 {
                 viewer_mode_menu_line(item, style)
             } else {
                 Line::from(Span::styled(format!(" {}", item), style))

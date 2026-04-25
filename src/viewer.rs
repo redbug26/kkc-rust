@@ -37,6 +37,7 @@ pub struct Viewer {
     pub scroll: usize,
     pub hscroll: usize,
     pub mode: ViewMode,
+    pub viewer_plugin: Option<String>,
     pub wrap: bool,
     pub search: String,
     pub matches: Vec<usize>,
@@ -202,6 +203,7 @@ impl Viewer {
             scroll: 0,
             hscroll: 0,
             mode,
+            viewer_plugin: None,
             wrap,
             search: String::new(),
             matches: Vec::new(),
@@ -231,6 +233,9 @@ impl Viewer {
     }
 
     pub fn mode_label(&self) -> &'static str {
+        if self.viewer_plugin.is_some() {
+            return "Plugin";
+        }
         match self.mode {
             ViewMode::Text => "Text",
             ViewMode::Hex => "Hex",
@@ -307,7 +312,18 @@ impl Viewer {
 
     pub fn set_mode(&mut self, mode: ViewMode) {
         self.mode = mode;
+        self.viewer_plugin = None;
         self.ensure_mode_decoded(mode);
+        self.scroll = 0;
+        self.hscroll = 0;
+        self.html_selected_link = 0;
+        self.rebuild_matches();
+    }
+
+    pub fn set_viewer_plugin(&mut self, plugin_name: String) {
+        self.mode = ViewMode::Text;
+        self.viewer_plugin = Some(plugin_name);
+        self.ensure_mode_decoded(ViewMode::Text);
         self.scroll = 0;
         self.hscroll = 0;
         self.html_selected_link = 0;
@@ -546,19 +562,35 @@ impl Viewer {
         false
     }
 
-    pub fn render_lines(&self, selected_width: usize) -> Vec<Line<'static>> {
+    pub fn render_lines(
+        &self,
+        selected_width: usize,
+        start: usize,
+        height: usize,
+    ) -> Vec<Line<'static>> {
         match self.mode {
-            ViewMode::Html => self.render_html_lines(),
-            ViewMode::Text | ViewMode::Ansi => self
-                .current_plain_lines()
-                .iter()
-                .map(|line| self.render_masked_line(line, selected_width))
+            ViewMode::Html => self
+                .render_html_lines()
+                .into_iter()
+                .skip(start)
+                .take(height)
                 .collect(),
-            ViewMode::Eml => self.eml_rendered.clone(),
+            ViewMode::Text | ViewMode::Ansi => {
+                self.render_text_like_lines(selected_width, start, height)
+            }
+            ViewMode::Eml => self
+                .eml_rendered
+                .iter()
+                .skip(start)
+                .take(height)
+                .cloned()
+                .collect(),
             ViewMode::Image => vec![Line::from(Span::raw(String::new()))],
             ViewMode::Hex => self
                 .current_plain_lines()
                 .iter()
+                .skip(start)
+                .take(height)
                 .map(|line| {
                     let display = if self.wrap {
                         line.clone()
@@ -570,6 +602,30 @@ impl Viewer {
                 })
                 .collect(),
         }
+    }
+
+    fn render_text_like_lines(
+        &self,
+        selected_width: usize,
+        start: usize,
+        height: usize,
+    ) -> Vec<Line<'static>> {
+        let lines = self.current_plain_lines();
+        let display_lines = lines
+            .iter()
+            .skip(start)
+            .take(height)
+            .map(|line| self.display_line(line, selected_width))
+            .collect::<Vec<_>>();
+
+        if let Some(highlighted) = self.render_plugin_lines(&display_lines) {
+            return highlighted;
+        }
+
+        display_lines
+            .into_iter()
+            .map(|line| self.render_masked_display_line(line))
+            .collect()
     }
 
     pub fn current_plain_lines(&self) -> &[String] {
@@ -688,13 +744,16 @@ impl Viewer {
             .collect()
     }
 
-    fn render_masked_line(&self, line: &str, width: usize) -> Line<'static> {
-        let display = if self.wrap {
+    fn display_line(&self, line: &str, width: usize) -> String {
+        if self.wrap {
             line.to_string()
         } else {
             let shifted = slice_visible(line, self.hscroll, width);
             pad_visible(&shifted, width)
-        };
+        }
+    }
+
+    fn render_masked_display_line(&self, display: String) -> Line<'static> {
         if !self.mask_enabled {
             return Line::from(Span::raw(display));
         }
@@ -729,6 +788,39 @@ impl Viewer {
             }
         }
         Line::from(spans)
+    }
+
+    fn render_plugin_lines(&self, display_lines: &[String]) -> Option<Vec<Line<'static>>> {
+        let mode = match self.mode {
+            ViewMode::Text => "text",
+            ViewMode::Ansi => "ansi",
+            _ => return None,
+        };
+        let plugin_name = self.viewer_plugin.as_deref()?;
+        let highlighted =
+            crate::plugins::highlight_viewer_lines(&self.path, mode, plugin_name, display_lines)?;
+        Some(
+            highlighted
+                .into_iter()
+                .map(|spans| {
+                    Line::from(
+                        spans
+                            .into_iter()
+                            .map(|span| {
+                                let mut style = Style::default().fg(viewer_plugin_color(&span.fg));
+                                if let Some(bg) = span.bg {
+                                    style = style.bg(viewer_plugin_color(&bg));
+                                }
+                                if span.bold {
+                                    style = style.add_modifier(Modifier::BOLD);
+                                }
+                                Span::styled(span.text, style)
+                            })
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .collect(),
+        )
     }
 
     fn rebuild_decoded_lines(&mut self) {
@@ -810,6 +902,27 @@ impl Viewer {
             self.scroll = pos.scroll.min(self.line_count().saturating_sub(1));
             self.hscroll = pos.hscroll;
         }
+    }
+}
+
+fn viewer_plugin_color(name: &str) -> Color {
+    match name.to_ascii_lowercase().as_str() {
+        "black" => Color::Black,
+        "red" => Color::Red,
+        "green" => Color::Green,
+        "yellow" => Color::Yellow,
+        "blue" => Color::Blue,
+        "magenta" => Color::Magenta,
+        "cyan" => Color::Cyan,
+        "gray" | "grey" => Color::Gray,
+        "darkgray" | "darkgrey" => Color::DarkGray,
+        "lightred" => Color::LightRed,
+        "lightgreen" => Color::LightGreen,
+        "lightyellow" => Color::LightYellow,
+        "lightblue" => Color::LightBlue,
+        "lightmagenta" => Color::LightMagenta,
+        "lightcyan" => Color::LightCyan,
+        _ => Color::White,
     }
 }
 

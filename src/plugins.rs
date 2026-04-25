@@ -13,12 +13,14 @@ const BUNDLED_COMMODORE_D64_PLUGIN: &str =
     include_str!("../assets/plugins/commodore_d64/plugin.lua");
 const BUNDLED_LHA_LZH_PLUGIN: &str = include_str!("../assets/plugins/lha_lzh/plugin.lua");
 const BUNDLED_PDF_FILE_PLUGIN: &str = include_str!("../assets/plugins/pdf_file/plugin.lua");
+const BUNDLED_TEXT_SYNTAX_PLUGIN: &str = include_str!("../assets/plugins/text_syntax/plugin.lua");
 
 static PLUGINS: OnceLock<PluginRegistry> = OnceLock::new();
 
 #[derive(Debug, Clone)]
 pub struct PluginRegistry {
     archive_plugins: Vec<ArchivePlugin>,
+    viewer_plugins: Vec<ViewerPlugin>,
 }
 
 #[derive(Debug, Clone)]
@@ -40,11 +42,35 @@ struct ArchivePlugin {
 }
 
 #[derive(Debug, Clone)]
+struct ViewerPlugin {
+    name: String,
+    description: String,
+    script_path: PathBuf,
+    plugin_dir: PathBuf,
+    modes: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
 struct RegisteredPlugin {
     name: String,
     description: String,
     extensions: Vec<String>,
     can_add_files: bool,
+}
+
+#[derive(Debug, Clone)]
+struct RegisteredViewerPlugin {
+    name: String,
+    description: String,
+    modes: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ViewerSpan {
+    pub text: String,
+    pub fg: String,
+    pub bg: Option<String>,
+    pub bold: bool,
 }
 
 pub fn initialize() -> Result<()> {
@@ -98,13 +124,35 @@ pub fn plugin_infos() -> Vec<PluginInfo> {
         .unwrap_or_default()
 }
 
+pub fn highlight_viewer_lines(
+    path: &Path,
+    mode: &str,
+    plugin_name: &str,
+    lines: &[String],
+) -> Option<Vec<Vec<ViewerSpan>>> {
+    PLUGINS.get().and_then(|registry| {
+        registry
+            .highlight_viewer_lines(path, mode, plugin_name, lines)
+            .ok()
+            .flatten()
+    })
+}
+
+pub fn viewer_plugin_infos() -> Vec<PluginInfo> {
+    PLUGINS
+        .get()
+        .map(PluginRegistry::viewer_plugin_infos)
+        .unwrap_or_default()
+}
+
 fn load_plugins() -> Result<PluginRegistry> {
     let plugins_dir = ensure_plugins_dir()?;
     install_bundled_plugins(&plugins_dir)?;
 
     let mut archive_plugins = Vec::new();
+    let mut viewer_plugins = Vec::new();
     for script_path in plugin_scripts(&plugins_dir)? {
-        let registered = inspect_plugin(&script_path)
+        let (registered, registered_viewers) = inspect_plugins(&script_path)
             .with_context(|| format!("Loading plugin {}", script_path.display()))?;
         let plugin_dir = script_path
             .parent()
@@ -121,9 +169,21 @@ fn load_plugins() -> Result<PluginRegistry> {
                 can_add_files: plugin.can_add_files,
             });
         }
+        for plugin in registered_viewers {
+            viewer_plugins.push(ViewerPlugin {
+                name: plugin.name,
+                description: plugin.description,
+                script_path: script_path.clone(),
+                plugin_dir: plugin_dir.clone(),
+                modes: plugin.modes,
+            });
+        }
     }
 
-    Ok(PluginRegistry { archive_plugins })
+    Ok(PluginRegistry {
+        archive_plugins,
+        viewer_plugins,
+    })
 }
 
 fn ensure_plugins_dir() -> Result<PathBuf> {
@@ -158,6 +218,10 @@ fn install_bundled_plugins(plugins_dir: &Path) -> Result<()> {
     fs::create_dir_all(&pdf_dir)?;
     write_bundled_file(&pdf_dir.join("plugin.lua"), BUNDLED_PDF_FILE_PLUGIN)?;
 
+    let syntax_dir = plugins_dir.join("text_syntax");
+    fs::create_dir_all(&syntax_dir)?;
+    write_bundled_file(&syntax_dir.join("plugin.lua"), BUNDLED_TEXT_SYNTAX_PLUGIN)?;
+
     Ok(())
 }
 
@@ -190,6 +254,49 @@ fn inspect_plugin(script_path: &Path) -> Result<Vec<RegisteredPlugin>> {
     let lua = plugin_lua();
     let registered = Rc::new(RefCell::new(Vec::new()));
     install_bindings(&lua, script_path.parent().unwrap_or(Path::new("")), {
+        let registered = Rc::clone(&registered);
+        move |plugin| registered.borrow_mut().push(plugin)
+    })?;
+
+    let script = fs::read_to_string(script_path)?;
+    lua.load(&script)
+        .set_name(script_path.to_string_lossy())
+        .exec()?;
+
+    Ok(registered.borrow().clone())
+}
+
+fn inspect_plugins(
+    script_path: &Path,
+) -> Result<(Vec<RegisteredPlugin>, Vec<RegisteredViewerPlugin>)> {
+    let lua = plugin_lua();
+    let registered_archives = Rc::new(RefCell::new(Vec::new()));
+    let registered_viewers = Rc::new(RefCell::new(Vec::new()));
+    install_bindings(&lua, script_path.parent().unwrap_or(Path::new("")), {
+        let registered_archives = Rc::clone(&registered_archives);
+        move |plugin| registered_archives.borrow_mut().push(plugin)
+    })?;
+    install_viewer_registration(&lua, {
+        let registered_viewers = Rc::clone(&registered_viewers);
+        move |plugin| registered_viewers.borrow_mut().push(plugin)
+    })?;
+
+    let script = fs::read_to_string(script_path)?;
+    lua.load(&script)
+        .set_name(script_path.to_string_lossy())
+        .exec()?;
+
+    Ok((
+        registered_archives.borrow().clone(),
+        registered_viewers.borrow().clone(),
+    ))
+}
+
+fn inspect_viewer_plugin(script_path: &Path) -> Result<Vec<RegisteredViewerPlugin>> {
+    let lua = plugin_lua();
+    let registered = Rc::new(RefCell::new(Vec::new()));
+    install_bindings(&lua, script_path.parent().unwrap_or(Path::new("")), |_| {})?;
+    install_viewer_registration(&lua, {
         let registered = Rc::clone(&registered);
         move |plugin| registered.borrow_mut().push(plugin)
     })?;
@@ -258,6 +365,10 @@ where
         })?,
     )?;
     kkc.set(
+        "register_viewer_plugin",
+        lua.create_function(|_, _: Table| Ok(()))?,
+    )?;
+    kkc.set(
         "path_join",
         lua.create_function(|_, (base, child): (String, String)| {
             Ok(Path::new(&base).join(child).to_string_lossy().into_owned())
@@ -286,13 +397,33 @@ where
 
 impl PluginRegistry {
     fn plugin_infos(&self) -> Vec<PluginInfo> {
-        self.archive_plugins
+        let mut plugins = self
+            .archive_plugins
             .iter()
             .map(|plugin| PluginInfo {
                 name: plugin.name.clone(),
                 kind: "Archive".into(),
                 description: plugin.description.clone(),
                 extensions: plugin.extensions.clone(),
+            })
+            .collect::<Vec<_>>();
+        plugins.extend(self.viewer_plugins.iter().map(|plugin| PluginInfo {
+            name: plugin.name.clone(),
+            kind: "Viewer".into(),
+            description: plugin.description.clone(),
+            extensions: plugin.modes.clone(),
+        }));
+        plugins
+    }
+
+    fn viewer_plugin_infos(&self) -> Vec<PluginInfo> {
+        self.viewer_plugins
+            .iter()
+            .map(|plugin| PluginInfo {
+                name: plugin.name.clone(),
+                kind: "Viewer".into(),
+                description: plugin.description.clone(),
+                extensions: plugin.modes.clone(),
             })
             .collect()
     }
@@ -333,6 +464,23 @@ impl PluginRegistry {
 
         plugin.add_files(path, sources)?;
         Ok(true)
+    }
+
+    fn highlight_viewer_lines(
+        &self,
+        path: &Path,
+        mode: &str,
+        plugin_name: &str,
+        lines: &[String],
+    ) -> Result<Option<Vec<Vec<ViewerSpan>>>> {
+        let Some(plugin) = self
+            .viewer_plugins
+            .iter()
+            .find(|plugin| plugin.name == plugin_name && plugin.supports_mode(mode))
+        else {
+            return Ok(None);
+        };
+        plugin.highlight_lines(path, mode, lines)
     }
 }
 
@@ -417,6 +565,67 @@ impl ArchivePlugin {
     }
 }
 
+impl ViewerPlugin {
+    fn supports_mode(&self, mode: &str) -> bool {
+        self.modes.iter().any(|candidate| candidate == mode)
+    }
+
+    fn highlight_lines(
+        &self,
+        path: &Path,
+        mode: &str,
+        lines: &[String],
+    ) -> Result<Option<Vec<Vec<ViewerSpan>>>> {
+        let lua = plugin_lua();
+        let handles = Rc::new(RefCell::new(Vec::new()));
+        install_bindings(&lua, &self.plugin_dir, |_| {})?;
+        install_runtime_viewer_bindings(&lua, Rc::clone(&handles))?;
+
+        let script = fs::read_to_string(&self.script_path)?;
+        lua.load(&script)
+            .set_name(self.script_path.to_string_lossy())
+            .exec()?;
+
+        let handles = handles.borrow();
+        for key in handles.iter() {
+            let table: Table = lua.registry_value(key)?;
+            let name: String = table.get("name")?;
+            if name == self.name {
+                let render_line: Function = table.get("render_line")?;
+                let path = path.to_string_lossy().into_owned();
+                let mut highlighted = Vec::with_capacity(lines.len());
+                for line in lines {
+                    let result: Option<Table> =
+                        render_line.call((path.clone(), mode.to_string(), line.clone()))?;
+                    let Some(spans) = result else {
+                        return Ok(None);
+                    };
+                    highlighted.push(lua_spans_to_viewer_spans(spans)?);
+                }
+                return Ok(Some(highlighted));
+            }
+        }
+
+        Ok(None)
+    }
+}
+
+fn lua_spans_to_viewer_spans(table: Table) -> Result<Vec<ViewerSpan>> {
+    table
+        .sequence_values::<Table>()
+        .map(|span| {
+            let span = span?;
+            Ok(ViewerSpan {
+                text: span.get("text")?,
+                fg: span.get("fg").unwrap_or_else(|_| "white".into()),
+                bg: span.get("bg").ok(),
+                bold: span.get("bold").unwrap_or(false),
+            })
+        })
+        .collect::<mlua::Result<Vec<_>>>()
+        .map_err(Into::into)
+}
+
 fn plugin_lua() -> Lua {
     // Archive plugins need Lua's standard IO library; dsk-lua uses io.open().
     unsafe { Lua::unsafe_new() }
@@ -452,6 +661,70 @@ fn install_runtime_bindings(
     Ok(())
 }
 
+fn install_viewer_registration<F>(lua: &Lua, on_register: F) -> Result<()>
+where
+    F: Fn(RegisteredViewerPlugin) + 'static,
+{
+    let globals = lua.globals();
+    let package: Table = globals.get("package")?;
+    let preload: Table = package.get("preload")?;
+    let kkc_loader: Function = preload.get("kkc")?;
+    let kkc: Table = kkc_loader.call(())?;
+    kkc.set(
+        "register_viewer_plugin",
+        lua.create_function(move |_, table: Table| {
+            let name: String = table.get("name")?;
+            let description: String = table.get("description").unwrap_or_else(|_| String::new());
+            let render_line: Option<Function> = table.get("render_line").ok();
+            if render_line.is_none() {
+                return Err(mlua::Error::external(format!(
+                    "Viewer plugin '{name}' does not define render_line()"
+                )));
+            }
+            let modes = match table.get::<Option<Table>>("modes")? {
+                Some(values) => values
+                    .sequence_values::<String>()
+                    .collect::<mlua::Result<Vec<_>>>()?,
+                None => Vec::new(),
+            };
+            on_register(RegisteredViewerPlugin {
+                name,
+                description,
+                modes,
+            });
+            Ok(())
+        })?,
+    )?;
+    preload.set("kkc", lua.create_function(move |_, ()| Ok(kkc.clone()))?)?;
+    Ok(())
+}
+
+fn install_runtime_viewer_bindings(
+    lua: &Lua,
+    handles: Rc<RefCell<Vec<mlua::RegistryKey>>>,
+) -> Result<()> {
+    let globals = lua.globals();
+    let package: Table = globals.get("package")?;
+    let preload: Table = package.get("preload")?;
+    let kkc_loader: Function = preload.get("kkc")?;
+    let kkc: Table = kkc_loader.call(())?;
+    kkc.set(
+        "register_viewer_plugin",
+        lua.create_function(move |lua, table: Table| {
+            let render_line: Option<Function> = table.get("render_line").ok();
+            if render_line.is_none() {
+                return Err(mlua::Error::external(
+                    "Viewer plugin does not define render_line()",
+                ));
+            }
+            handles.borrow_mut().push(lua.create_registry_value(table)?);
+            Ok(())
+        })?,
+    )?;
+    preload.set("kkc", lua.create_function(move |_, ()| Ok(kkc.clone()))?)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -469,5 +742,60 @@ mod tests {
         assert_eq!(plugins.len(), 1);
         assert_eq!(plugins[0].name, "pdf_file");
         assert_eq!(plugins[0].extensions, vec!["pdf"]);
+    }
+
+    #[test]
+    fn bundled_text_syntax_viewer_plugin_registers() {
+        let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("plugins")
+            .join("text_syntax")
+            .join("plugin.lua");
+
+        let plugins = inspect_viewer_plugin(&script).expect("viewer plugin should load");
+
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(plugins[0].name, "text_syntax");
+        assert_eq!(plugins[0].modes, vec!["text"]);
+    }
+
+    #[test]
+    fn bundled_text_syntax_highlights_rust_keywords() {
+        let script_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("plugins")
+            .join("text_syntax")
+            .join("plugin.lua");
+        let plugin_dir = script_path.parent().expect("plugin dir").to_path_buf();
+        let plugin = ViewerPlugin {
+            name: "text_syntax".into(),
+            description: String::new(),
+            script_path,
+            plugin_dir,
+            modes: vec!["text".into()],
+        };
+        let lines = vec!["fn main() { let answer = 42; }".to_string()];
+
+        let highlighted = plugin
+            .highlight_lines(Path::new("main.rs"), "text", &lines)
+            .expect("highlight should run")
+            .expect("highlight should return spans");
+
+        assert_eq!(highlighted.len(), 1);
+        assert!(
+            highlighted[0]
+                .iter()
+                .any(|span| span.text == "fn" && span.fg == "yellow" && span.bold)
+        );
+        assert!(
+            highlighted[0]
+                .iter()
+                .any(|span| span.text == "42" && span.fg == "cyan")
+        );
+        assert!(
+            highlighted[0]
+                .iter()
+                .all(|span| span.bg.as_deref() == Some("black"))
+        );
     }
 }

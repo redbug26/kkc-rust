@@ -745,15 +745,7 @@ fn handle_viewer_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
         KeyCode::Char(ch) if menu.kind == ViewerMenuKind::Mode => {
             if let Some(cursor) = viewer_mode_shortcut(ch) {
                 let mut viewer = viewer;
-                let mode = match cursor {
-                    0 => ViewMode::Text,
-                    1 => ViewMode::Hex,
-                    2 => ViewMode::Ansi,
-                    3 => ViewMode::Eml,
-                    4 => ViewMode::Html,
-                    _ => ViewMode::Image,
-                };
-                viewer.set_mode(mode);
+                set_viewer_mode_or_plugin(&mut viewer, cursor);
                 app.mode = AppMode::Viewer(viewer);
                 return Ok(false);
             }
@@ -794,15 +786,7 @@ fn handle_viewer_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
             let mut viewer = viewer;
             match menu.kind {
                 ViewerMenuKind::Mode => {
-                    let mode = match menu.cursor {
-                        0 => ViewMode::Text,
-                        1 => ViewMode::Hex,
-                        2 => ViewMode::Ansi,
-                        3 => ViewMode::Eml,
-                        4 => ViewMode::Html,
-                        _ => ViewMode::Image,
-                    };
-                    viewer.set_mode(mode);
+                    set_viewer_mode_or_plugin(&mut viewer, menu.cursor);
                 }
                 ViewerMenuKind::LineFeed => {
                     let mode = match menu.cursor {
@@ -883,12 +867,31 @@ const PREPROC_ADD_ITEMS: &[(&str, PreprocOpKind)] = &[
 
 fn viewer_menu_len(viewer: &crate::viewer::Viewer, kind: ViewerMenuKind) -> usize {
     match kind {
+        ViewerMenuKind::Mode => {
+            viewer_menu_items(kind).len() + crate::plugins::viewer_plugin_infos().len()
+        }
         ViewerMenuKind::Preproc => {
             let existing = viewer.preproc_len();
             let separator = usize::from(existing > 0);
             existing + separator + PREPROC_ADD_ITEMS.len() + 1
         }
         _ => viewer_menu_items(kind).len(),
+    }
+}
+
+fn set_viewer_mode_or_plugin(viewer: &mut crate::viewer::Viewer, cursor: usize) {
+    match cursor {
+        0 => viewer.set_mode(ViewMode::Text),
+        1 => viewer.set_mode(ViewMode::Hex),
+        2 => viewer.set_mode(ViewMode::Ansi),
+        3 => viewer.set_mode(ViewMode::Eml),
+        4 => viewer.set_mode(ViewMode::Html),
+        5 => viewer.set_mode(ViewMode::Image),
+        idx => {
+            if let Some(plugin) = crate::plugins::viewer_plugin_infos().get(idx - 6) {
+                viewer.set_viewer_plugin(plugin.name.clone());
+            }
+        }
     }
 }
 

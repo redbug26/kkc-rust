@@ -584,14 +584,24 @@ pub struct ViewerMenuState {
 impl ViewerMenuState {
     pub fn new(kind: ViewerMenuKind, viewer: &Viewer) -> Self {
         let cursor = match kind {
-            ViewerMenuKind::Mode => match viewer.mode {
-                ViewMode::Text => 0,
-                ViewMode::Hex => 1,
-                ViewMode::Ansi => 2,
-                ViewMode::Eml => 3,
-                ViewMode::Html => 4,
-                ViewMode::Image => 5,
-            },
+            ViewerMenuKind::Mode => {
+                if let Some(plugin_name) = &viewer.viewer_plugin {
+                    crate::plugins::viewer_plugin_infos()
+                        .iter()
+                        .position(|plugin| &plugin.name == plugin_name)
+                        .map(|idx| 6 + idx)
+                        .unwrap_or(0)
+                } else {
+                    match viewer.mode {
+                        ViewMode::Text => 0,
+                        ViewMode::Hex => 1,
+                        ViewMode::Ansi => 2,
+                        ViewMode::Eml => 3,
+                        ViewMode::Html => 4,
+                        ViewMode::Image => 5,
+                    }
+                }
+            }
             ViewerMenuKind::LineFeed => match viewer.line_feed {
                 LineFeedMode::DosCrLf => 0,
                 LineFeedMode::UnixLf => 1,
