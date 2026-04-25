@@ -1,6 +1,6 @@
 [package]
 name = "kkc"
-version = "0.1.16"
+version = "0.1.17"
 edition = "2024"
 description = "KKC — Ketchup Killers Commander, a Norton Commander clone in Rust"
 authors = ["RedBug26"]
