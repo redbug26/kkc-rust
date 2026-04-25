@@ -287,8 +287,12 @@ fn handle_enter(app: &mut App) -> Result<()> {
         };
         match crate::plugins::install_plugin_bundle(&bundle_path) {
             Ok(name) => {
-                app.status.text = format!("Plugin installed: {}", name);
                 app.reload_panels();
+                app.mode = AppMode::Confirm(crate::app::ConfirmDialog {
+                    title: "Plugin installed".into(),
+                    message: format!("Plugin installed: {}", name),
+                    action: ConfirmAction::Message,
+                });
             }
             Err(e) => app.status.text = format!("Cannot install plugin: {}", e),
         }
@@ -1067,6 +1071,7 @@ fn handle_confirm(app: &mut App, key: KeyEvent) -> Result<bool> {
             let action = dlg.action.clone();
             app.mode = AppMode::Browse;
             match action {
+                ConfirmAction::Message => {}
                 ConfirmAction::Quit => return Ok(true),
                 ConfirmAction::Delete(paths) => {
                     app.cmd_delete_confirmed(paths)?;

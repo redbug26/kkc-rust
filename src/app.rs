@@ -717,6 +717,7 @@ pub struct ConfirmDialog {
 
 #[derive(Debug, Clone)]
 pub enum ConfirmAction {
+    Message,
     Quit,
     Delete(Vec<PathBuf>),
     DeleteRemote(Vec<RemoteDeleteTarget>),

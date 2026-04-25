@@ -1383,12 +1383,78 @@ fn viewer_mode_menu_line(item: &str, style: Style) -> Line<'static> {
 
 fn render_confirm(f: &mut Frame, dlg: &ConfirmDialog, area: Rect) {
     match &dlg.action {
+        ConfirmAction::Message => render_confirm_message(f, dlg, area),
         ConfirmAction::Quit => render_confirm_quit(f, area),
         ConfirmAction::Delete(paths) => render_confirm_delete(f, &dlg.message, paths.len(), area),
         ConfirmAction::DeleteRemote(targets) => {
             render_confirm_delete(f, &dlg.message, targets.len(), area)
         }
     }
+}
+
+fn render_confirm_message(f: &mut Frame, dlg: &ConfirmDialog, area: Rect) {
+    let width = 56u16.min(area.width.saturating_sub(4));
+    let height = 9u16.min(area.height.saturating_sub(2).max(4));
+    let popup = clamp_rect(
+        area,
+        Rect {
+            x: area.x + area.width.saturating_sub(width) / 2,
+            y: area.y + area.height.saturating_sub(height) / 2,
+            width,
+            height,
+        },
+    );
+    safe_render_widget(f, Clear, popup);
+
+    let block = Block::default()
+        .title(format!(" {} ", dlg.title))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(CLR_PANEL_BORDER))
+        .style(Style::default().bg(CLR_MENU_DD_BG));
+    let inner = block.inner(popup);
+    safe_render_widget(f, block, popup);
+
+    safe_render_widget(
+        f,
+        Paragraph::new(dlg.message.as_str())
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)),
+        Rect {
+            x: inner.x,
+            y: inner.y + 1,
+            width: inner.width,
+            height: inner.height.saturating_sub(3).max(1),
+        },
+    );
+    safe_render_widget(
+        f,
+        Paragraph::new(" [ OK ] ")
+            .alignment(Alignment::Center)
+            .style(
+                Style::default()
+                    .fg(CLR_MENU_SEL_FG)
+                    .bg(CLR_MENU_SEL_BG)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        Rect {
+            x: inner.x + inner.width.saturating_sub(8) / 2,
+            y: inner.y + inner.height.saturating_sub(2),
+            width: 8,
+            height: 1,
+        },
+    );
+    safe_render_widget(
+        f,
+        Paragraph::new("Enter / Esc")
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(CLR_MENU_DD_SEP).bg(CLR_MENU_DD_BG)),
+        Rect {
+            x: inner.x,
+            y: inner.y + inner.height.saturating_sub(1),
+            width: inner.width,
+            height: 1,
+        },
+    );
 }
 
 // ---------------------------------------------------------------------------
