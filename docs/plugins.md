@@ -87,6 +87,7 @@ Fields:
 - `extensions`: supported extensions, without leading dots.
 - `extract(path, destination)`: extracts content into `destination`, then returns `true`.
 - `add_files(path, files)`: optional. Allows copying local files into the archive. `files` is a Lua table of paths.
+- `can_handle(path)`: optional. Some bundled plugins use this for their own checks, but KKC currently discovers archive support from `extensions`.
 
 Example with archive writing:
 
@@ -114,12 +115,23 @@ A viewer plugin can be selected in the internal viewer with `F4: Change Viewer`.
 There are two forms:
 
 - `render_line(path, mode, line)`: colors a line already decoded by the viewer.
-- `render(path, mode)`: produces the whole document to display. This is useful for disk catalogs, indexes, and other generated views.
+- `render(path, mode, state, width)`: produces the whole document to display. This is useful for disk catalogs, indexes, formatted data, and other generated views.
+- `handle_key(path, mode, key, state)`: optional. Handles keys while the plugin viewer is active and can update plugin state.
+
+Viewer plugin fields:
+
+- `name`: stable unique plugin identifier.
+- `description`: text shown in `Options > Plugins` and `F4: Change Viewer`.
+- `modes`: supported viewer modes, usually `{ "text" }`.
+- `extensions`: optional. File extensions, without leading dots, for automatic viewer plugin selection.
 
 Currently useful modes:
 
 - `text`
 - `ansi`
+
+Viewer plugins are listed after KKC's built-in viewer modes in `F4: Change Viewer`.
+When a full-document plugin is active, KKC gives it the full viewer panel width and disables automatic wrapping for the plugin output.
 
 ### Coloring Lines
 
@@ -159,7 +171,8 @@ kkc.register_viewer_plugin({
     name = "index_viewer",
     description = "Displays a custom index",
     modes = { "text" },
-    render = function(path, mode)
+    extensions = { "idx" },
+    render = function(path, mode, state, width)
         if mode ~= "text" then
             return nil
         end
@@ -174,11 +187,93 @@ kkc.register_viewer_plugin({
 ```
 
 `render()` returns a table of lines. Each line is a table of spans.
+Arguments:
+
+- `path`: file being viewed.
+- `mode`: current viewer mode, usually `text`.
+- `state`: a Lua table containing string keys and string values previously returned by `handle_key`.
+- `width`: current content width in terminal cells. Use this to keep generated tables inside the viewer.
+
 A span is a table:
 
 ```lua
 { text = "text", fg = "white", bg = "black", bold = false }
 ```
+
+The host clips plugin spans to the viewer width and replaces control characters with printable spacing before drawing. Plugins should still avoid returning control codes, raw carriage returns, or terminal escape sequences.
+
+### Handling Keys And State
+
+Full-document viewer plugins can react to keys. This is useful for sorting, changing a view mode, or expanding/collapsing generated content.
+
+```lua
+local kkc = require("kkc")
+
+local function span(text, fg, bold)
+    return { text = text, fg = fg or "white", bg = "black", bold = bold or false }
+end
+
+local function render(path, mode, state, width)
+    if mode ~= "text" or not path:lower():match("%.foo$") then
+        return nil
+    end
+    state = state or {}
+    local view = state.view or "summary"
+    return {
+        {
+            span("FOO", "yellow", true),
+            span("  view: ", "gray"),
+            span(view, "lightcyan"),
+            span("  [v] switch view", "darkgray"),
+        },
+    }
+end
+
+local function handle_key(path, mode, key, state)
+    if mode ~= "text" or not path:lower():match("%.foo$") then
+        return nil
+    end
+    state = state or {}
+    local view = state.view or "summary"
+    if key == "char:v" then
+        if view == "summary" then
+            view = "details"
+        else
+            view = "summary"
+        end
+        return {
+            consumed = true,
+            state = { view = view },
+        }
+    end
+    return {
+        consumed = false,
+        state = state,
+    }
+end
+
+kkc.register_viewer_plugin({
+    name = "foo_viewer",
+    description = "Example stateful viewer",
+    modes = { "text" },
+    render = render,
+    handle_key = handle_key,
+})
+```
+
+`handle_key()` result:
+
+- `consumed`: `true` if KKC should not also process the key.
+- `state`: string-key/string-value table saved in the `Viewer` and passed to the next `render()` and `handle_key()` calls.
+
+Plugin-facing key strings:
+
+- characters: `char:x`, for example `char:s`, `char:<`, `char:>`.
+- arrows/navigation: `left`, `right`, `up`, `down`, `home`, `end`, `pgup`, `pgdown`.
+- actions: `enter`, `tab`, `backtab`.
+- function keys: `f1`, `f2`, ... using the terminal function-key number.
+
+Ctrl-modified keys are reserved by KKC and are not sent to plugins.
 
 Supported colors:
 
@@ -207,7 +302,10 @@ Tip: use `bg = "black"` for viewer plugins. KKC's viewer content area is black.
 - Return only valid UTF-8 strings. If you read an old character set, convert it to Unicode before returning spans.
 - Never write outside `destination` in `extract`.
 - For archive plugins, group all chunks of a single file before writing it.
-- For a viewer over a binary format, prefer `render(path, mode)` over `render_line`.
+- For a viewer over a binary format or generated document, prefer `render(path, mode, state, width)` over `render_line`.
+- For tabular viewers, use the `width` argument when computing column sizes.
+- Normalize line endings before returning text. For example, strip trailing `\r` from CRLF files.
+- Keep `handle_key()` state small and string-based; it is copied back into the Rust `Viewer`.
 - Keep `name` stable: KKC uses it to select the viewer plugin.
 
 ## Bundled Examples
@@ -216,6 +314,8 @@ The plugins bundled in `assets/plugins` can be used as examples:
 
 - `amstrad_dsk`: archive + Amstrad CPC DSK catalog viewer.
 - `commodore_d64`: archive + Commodore 64 D64 directory viewer.
+- `csv_viewer`: CSV table viewer with sortable columns.
+- `json_viewer`: pretty/tree JSON viewer.
 - `text_syntax`: line-by-line syntax highlighting viewer.
 - `pdf_file`: read-only PDF exploration as an archive.
 - `lha_lzh`: LHA/LZH exploration in Lua.

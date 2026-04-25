@@ -126,7 +126,7 @@ end
 local function fit_widths(widths, max_w)
     local SEP = 5
     local n   = #widths
-    max_w = max_w or MAX_TOTAL_WIDTH
+    max_w     = max_w or MAX_TOTAL_WIDTH
 
     local function total(list)
         local t = n > 1 and (n - 1) * SEP or 0
@@ -183,9 +183,9 @@ local function render_csv(path, mode, state, width)
     if max_width < 20 then max_width = MAX_TOTAL_WIDTH end
 
     -- Read sort state (passed from previous handle_key calls)
-    state        = state or {}
-    local sort_col = tonumber(state.sort_col) or 0   -- 0 = no sort
-    local sort_dir = state.sort_dir or "asc"
+    state           = state or {}
+    local sort_col  = tonumber(state.sort_col) or 0 -- 0 = no sort
+    local sort_dir  = state.sort_dir or "asc"
 
     -- Read file line by line, capping at MAX_ROWS + header
     local file, err = io.open(path, "r")
@@ -224,7 +224,7 @@ local function render_csv(path, mode, state, width)
     end
 
     -- Clamp sort_col to valid range
-    sort_col = math.min(sort_col, col_count)
+    sort_col          = math.min(sort_col, col_count)
 
     local col_widths  = {}
     local col_numeric = {}
@@ -257,8 +257,8 @@ local function render_csv(path, mode, state, width)
 
     -- Sort data rows (keep header at position 1)
     if sort_col > 0 and #rows > 1 then
-        local header      = rows[1]
-        local data        = {}
+        local header = rows[1]
+        local data   = {}
         for i = 2, #rows do
             data[i - 1] = rows[i]
         end
@@ -311,8 +311,8 @@ local function render_csv(path, mode, state, width)
         span("  rows: ", "gray"),
         span(tostring(data_rows), "cyan"),
         total_rows > MAX_ROWS + 1
-            and span(string.format("  (first %d)", MAX_ROWS), "yellow")
-            or  span("", "gray"),
+        and span(string.format("  (first %d)", MAX_ROWS), "yellow")
+        or span("", "gray"),
         span("  sort: ", "gray"),
         span(sort_hint, "lightyellow"),
         span("  [< >] col  [s] dir", "darkgray"),
@@ -324,9 +324,9 @@ local function render_csv(path, mode, state, width)
         local spans     = {}
 
         for col = 1, col_count do
-            local val     = row[col] or ""
-            local width   = col_widths[col]
-            local is_sort = col == sort_col
+            local val         = row[col] or ""
+            local width       = col_widths[col]
+            local is_sort     = col == sort_col
 
             -- Add sort indicator to the header of the active sort column
             local display_val = val
@@ -389,13 +389,13 @@ local function handle_csv_key(path, mode, key, state)
         return nil
     end
 
-    state        = state or {}
-    local sort_col = tonumber(state.sort_col) or 0
-    local sort_dir = state.sort_dir or "asc"
+    state           = state or {}
+    local sort_col  = tonumber(state.sort_col) or 0
+    local sort_dir  = state.sort_dir or "asc"
 
     -- Determine column count from the first line of the file
     local col_count = 0
-    local f = io.open(path, "r")
+    local f         = io.open(path, "r")
     if f then
         local first = f:read("*l")
         f:close()
@@ -408,11 +408,11 @@ local function handle_csv_key(path, mode, key, state)
     local consumed = false
     if key == "char:<" then
         if sort_col > 1 then
-            sort_col  = sort_col - 1
-            consumed  = true
+            sort_col = sort_col - 1
+            consumed = true
         elseif sort_col == 1 then
-            sort_col  = 0           -- clear sort
-            consumed  = true
+            sort_col = 0  -- clear sort
+            consumed = true
         end
     elseif key == "char:>" then
         if col_count > 0 then

@@ -230,6 +230,9 @@ impl Viewer {
         if matches!(viewer.mode, ViewMode::Image) {
             viewer.zoomed = true;
         }
+        if let Some(plugin_name) = crate::plugins::default_viewer_plugin_for_path(path) {
+            viewer.set_viewer_plugin(plugin_name);
+        }
         viewer.restore_position();
         viewer.rebuild_matches();
         Ok(viewer)

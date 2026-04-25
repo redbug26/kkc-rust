@@ -130,7 +130,7 @@ local function petscii_char(byte)
         return petscii_unicode[byte]
     end
     if byte >= 0xc1 and byte <= 0xda then
-        return string.char(byte - 0x60)
+        return string.char(byte - 0x80)
     end
     if byte >= 0x01 and byte <= 0x1a then
         return string.char(byte + 0x40)

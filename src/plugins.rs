@@ -16,6 +16,7 @@ const BUNDLED_COMMODORE_D64_PLUGIN: &str =
     include_str!("../assets/plugins/commodore_d64/plugin.lua");
 const BUNDLED_LHA_LZH_PLUGIN: &str = include_str!("../assets/plugins/lha_lzh/plugin.lua");
 const BUNDLED_PDF_FILE_PLUGIN: &str = include_str!("../assets/plugins/pdf_file/plugin.lua");
+const BUNDLED_JSON_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/json_viewer/plugin.lua");
 const BUNDLED_TEXT_SYNTAX_PLUGIN: &str = include_str!("../assets/plugins/text_syntax/plugin.lua");
 
 static PLUGINS: OnceLock<RwLock<PluginRegistry>> = OnceLock::new();
@@ -51,6 +52,7 @@ struct ViewerPlugin {
     script_path: PathBuf,
     plugin_dir: PathBuf,
     modes: Vec<String>,
+    extensions: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -66,6 +68,7 @@ struct RegisteredViewerPlugin {
     name: String,
     description: String,
     modes: Vec<String>,
+    extensions: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -205,6 +208,16 @@ pub fn viewer_plugin_infos() -> Vec<PluginInfo> {
         .unwrap_or_default()
 }
 
+pub fn default_viewer_plugin_for_path(path: &Path) -> Option<String> {
+    PLUGINS.get().and_then(|registry| {
+        registry
+            .read()
+            .ok()?
+            .default_viewer_plugin_for_path(path)
+            .map(str::to_string)
+    })
+}
+
 pub fn is_plugin_bundle(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
@@ -263,6 +276,7 @@ fn load_plugins() -> Result<PluginRegistry> {
                 script_path: script_path.clone(),
                 plugin_dir: plugin_dir.clone(),
                 modes: plugin.modes,
+                extensions: plugin.extensions,
             });
         }
     }
@@ -304,6 +318,10 @@ fn install_bundled_plugins(plugins_dir: &Path) -> Result<()> {
     let pdf_dir = plugins_dir.join("pdf_file");
     fs::create_dir_all(&pdf_dir)?;
     write_bundled_file(&pdf_dir.join("plugin.lua"), BUNDLED_PDF_FILE_PLUGIN)?;
+
+    let json_dir = plugins_dir.join("json_viewer");
+    fs::create_dir_all(&json_dir)?;
+    write_bundled_file(&json_dir.join("plugin.lua"), BUNDLED_JSON_VIEWER_PLUGIN)?;
 
     let syntax_dir = plugins_dir.join("text_syntax");
     fs::create_dir_all(&syntax_dir)?;
@@ -635,7 +653,11 @@ impl PluginRegistry {
             name: plugin.name.clone(),
             kind: "Viewer".into(),
             description: plugin.description.clone(),
-            extensions: plugin.modes.clone(),
+            extensions: if plugin.extensions.is_empty() {
+                plugin.modes.clone()
+            } else {
+                plugin.extensions.clone()
+            },
         }));
         plugins
     }
@@ -647,9 +669,21 @@ impl PluginRegistry {
                 name: plugin.name.clone(),
                 kind: "Viewer".into(),
                 description: plugin.description.clone(),
-                extensions: plugin.modes.clone(),
+                extensions: if plugin.extensions.is_empty() {
+                    plugin.modes.clone()
+                } else {
+                    plugin.extensions.clone()
+                },
             })
             .collect()
+    }
+
+    fn default_viewer_plugin_for_path(&self, path: &Path) -> Option<&str> {
+        let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+        self.viewer_plugins
+            .iter()
+            .find(|plugin| plugin.extensions.iter().any(|value| value == &ext))
+            .map(|plugin| plugin.name.as_str())
     }
 
     fn supports_archive(&self, path: &Path) -> bool {
@@ -1088,10 +1122,18 @@ where
                     .collect::<mlua::Result<Vec<_>>>()?,
                 None => Vec::new(),
             };
+            let extensions = match table.get::<Option<Table>>("extensions")? {
+                Some(values) => values
+                    .sequence_values::<String>()
+                    .map(|value| value.map(|ext| ext.trim_start_matches('.').to_ascii_lowercase()))
+                    .collect::<mlua::Result<Vec<_>>>()?,
+                None => Vec::new(),
+            };
             on_register(RegisteredViewerPlugin {
                 name,
                 description,
                 modes,
+                extensions,
             });
             Ok(())
         })?,
@@ -1131,6 +1173,14 @@ fn install_runtime_viewer_bindings(
 mod tests {
     use super::*;
 
+    fn lines_to_text(lines: &[Vec<ViewerSpan>]) -> String {
+        lines
+            .iter()
+            .flat_map(|line| line.iter().map(|span| span.text.as_str()))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     #[test]
     fn bundled_pdf_plugin_registers() {
         let script = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1159,6 +1209,68 @@ mod tests {
         assert_eq!(plugins.len(), 1);
         assert_eq!(plugins[0].name, "text_syntax");
         assert_eq!(plugins[0].modes, vec!["text"]);
+    }
+
+    #[test]
+    fn bundled_json_viewer_plugin_registers() {
+        let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("plugins")
+            .join("json_viewer")
+            .join("plugin.lua");
+
+        let plugins = inspect_viewer_plugin(&script).expect("viewer plugin should load");
+
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(plugins[0].name, "json_viewer");
+        assert_eq!(plugins[0].modes, vec!["text"]);
+        assert_eq!(plugins[0].extensions, vec!["json", "geojson"]);
+    }
+
+    #[test]
+    fn bundled_json_viewer_renders_pretty_and_tree() {
+        let json_path =
+            std::env::temp_dir().join(format!("kkc-json-viewer-{}.json", std::process::id()));
+        fs::write(
+            &json_path,
+            r#"{"name":"KKC","items":[1,true,null],"nested":{"ok":false}}"#,
+        )
+        .expect("write json");
+
+        let script_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("plugins")
+            .join("json_viewer")
+            .join("plugin.lua");
+        let plugin = ViewerPlugin {
+            name: "json_viewer".into(),
+            description: String::new(),
+            plugin_dir: script_path.parent().expect("plugin dir").to_path_buf(),
+            script_path,
+            modes: vec!["text".into()],
+            extensions: vec!["json".into(), "geojson".into()],
+        };
+
+        let pretty = plugin
+            .render_document(&json_path, "text", &HashMap::new(), 120)
+            .expect("json viewer should render")
+            .expect("json viewer should return lines");
+        let pretty_text = lines_to_text(&pretty);
+        assert!(pretty_text.contains("JSON"));
+        assert!(pretty_text.contains("name"));
+        assert!(pretty_text.contains("items"));
+
+        let mut state = HashMap::new();
+        state.insert("view".into(), "tree".into());
+        let tree = plugin
+            .render_document(&json_path, "text", &state, 120)
+            .expect("json viewer tree should render")
+            .expect("json viewer tree should return lines");
+        let tree_text = lines_to_text(&tree);
+        assert!(tree_text.contains("$.items[2]"));
+        assert!(tree_text.contains("$.nested.ok"));
+
+        let _ = fs::remove_file(&json_path);
     }
 
     #[test]
@@ -1226,7 +1338,7 @@ mod tests {
         image[dir + 1] = 255;
         image[dir + 2] = 0x80;
         image[dir + 5..dir + 8].copy_from_slice(&[0xc4, 0xc5, 0xcc]);
-        image[dir + 8] = 0xb3;
+        image[dir + 8] = 0xb6;
         image[dir + 34] = 0x82;
         image[dir + 35] = 17;
         image[dir + 36] = 0;
@@ -1246,10 +1358,11 @@ mod tests {
             plugin_dir: script_path.parent().expect("plugin dir").to_path_buf(),
             script_path,
             modes: vec!["text".into()],
+            extensions: Vec::new(),
         };
 
         let lines = plugin
-            .render_document(&image_path, "text")
+            .render_document(&image_path, "text", &HashMap::new(), 120)
             .expect("viewer should render")
             .expect("viewer should return lines");
         let text = lines
@@ -1280,6 +1393,7 @@ mod tests {
             script_path,
             plugin_dir,
             modes: vec!["text".into()],
+            extensions: Vec::new(),
         };
         let lines = vec!["fn main() { let answer = 42; }".to_string()];
 
