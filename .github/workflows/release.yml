@@ -112,49 +112,56 @@ jobs:
           SHA_X86_64: ${{ steps.sha.outputs.x86_64 }}
           SHA_LINUX: ${{ steps.sha.outputs.linux }}
         run: |
-          cat > Formula/kkc.rb << RUBY
-          class Kkc < Formula
-            desc "Dual-panel file manager inspired by Norton Commander, written in Rust"
-            homepage "https://github.com/redbug26/kkc-rust"
-            version "${VERSION}"
-            license "MIT"
+          python3 - <<'PY'
+          import os
+          v   = os.environ["VERSION"]
+          a64 = os.environ["SHA_ARM64"]
+          x64 = os.environ["SHA_X86_64"]
+          lin = os.environ["SHA_LINUX"]
+          formula = f'''\
+class Kkc < Formula
+  desc "Dual-panel file manager inspired by Norton Commander, written in Rust"
+  homepage "https://github.com/redbug26/kkc-rust"
+  version "{v}"
+  license "MIT"
 
-            on_macos do
-              if Hardware::CPU.arm?
-                url "https://github.com/redbug26/kkc-rust/releases/download/v${VERSION}/kkc-macos-arm64.tar.gz"
-                sha256 "${SHA_ARM64}"
-              else
-                url "https://github.com/redbug26/kkc-rust/releases/download/v${VERSION}/kkc-macos-x86_64.tar.gz"
-                sha256 "${SHA_X86_64}"
-              end
-            end
+  on_macos do
+    if Hardware::CPU.arm?
+      url "https://github.com/redbug26/kkc-rust/releases/download/v{v}/kkc-macos-arm64.tar.gz"
+      sha256 "{a64}"
+    else
+      url "https://github.com/redbug26/kkc-rust/releases/download/v{v}/kkc-macos-x86_64.tar.gz"
+      sha256 "{x64}"
+    end
+  end
 
-            on_linux do
-              url "https://github.com/redbug26/kkc-rust/releases/download/v${VERSION}/kkc-linux-x86_64.tar.gz"
-              sha256 "${SHA_LINUX}"
-            end
+  on_linux do
+    url "https://github.com/redbug26/kkc-rust/releases/download/v{v}/kkc-linux-x86_64.tar.gz"
+    sha256 "{lin}"
+  end
 
-            # Build from source with: brew install --HEAD redbug26/kkc-rust/kkc
-            head do
-              url "https://github.com/redbug26/kkc-rust.git", branch: "main"
-              depends_on "rust" => :build
-            end
+  # Build from source with: brew install --HEAD redbug26/kkc-rust/kkc
+  head do
+    url "https://github.com/redbug26/kkc-rust.git", branch: "main"
+    depends_on "rust" => :build
+  end
 
-            def install
-              if build.head?
-                system "cargo", "install", *std_cargo_args
-              else
-                bin.install "kkc"
-              end
-            end
+  def install
+    if build.head?
+      system "cargo", "install", *std_cargo_args
+    else
+      bin.install "kkc"
+    end
+  end
 
-            test do
-              assert_predicate bin/"kkc", :exist?
-            end
-          end
-          RUBY
-          # Remove leading spaces introduced by the heredoc indentation
-          sed -i 's/^          //' Formula/kkc.rb
+  test do
+    assert_predicate bin/"kkc", :exist?
+  end
+end
+'''
+          open("Formula/kkc.rb", "w").write(formula)
+          print("Formula/kkc.rb written.")
+          PY
 
       - name: Commit updated formula
         run: |
