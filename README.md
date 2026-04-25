@@ -52,6 +52,8 @@ brew tap redbug26/kkc-rust https://github.com/redbug26/kkc-rust
 brew install redbug26/kkc-rust/kkc
 ```
 
+> **Note:** the two commands are both required — `brew tap` must be run first with the full URL since the repository is not named `homebrew-*`.
+
 To always get the latest development build from source:
 
 ```sh
