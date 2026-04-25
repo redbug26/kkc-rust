@@ -1050,6 +1050,94 @@ mod tests {
     }
 
     #[test]
+    fn bundled_commodore_d64_viewer_plugin_registers() {
+        let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("plugins")
+            .join("commodore_d64")
+            .join("plugin.lua");
+
+        let plugins = inspect_viewer_plugin(&script).expect("viewer plugin should load");
+
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(plugins[0].name, "commodore_d64_directory");
+        assert_eq!(plugins[0].modes, vec!["text"]);
+    }
+
+    #[test]
+    fn commodore_d64_viewer_handles_petscii_and_del_entries() {
+        fn d64_offset(track: usize, sector: usize) -> usize {
+            const SECTORS_PER_TRACK: [usize; 35] = [
+                21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 19, 19, 19, 19,
+                19, 19, 19, 18, 18, 18, 18, 18, 18, 17, 17, 17, 17, 17,
+            ];
+            (SECTORS_PER_TRACK[..track - 1].iter().sum::<usize>() + sector) * 256
+        }
+
+        let root = std::env::temp_dir().join(format!(
+            "kkc-d64-view-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).expect("temp dir");
+        let image_path = root.join("petscii.d64");
+        let mut image = vec![0u8; 174_848];
+
+        let bam = d64_offset(18, 0);
+        image[bam] = 18;
+        image[bam + 1] = 1;
+        image[bam + 2] = b'A';
+        image[bam + 144..bam + 148].copy_from_slice(&[0xd5, 0xc9, 0xca, 0xcb]);
+        image[bam + 162..bam + 164].copy_from_slice(b"42");
+        image[bam + 165..bam + 167].copy_from_slice(b"2A");
+
+        let dir = d64_offset(18, 1);
+        image[dir] = 0;
+        image[dir + 1] = 255;
+        image[dir + 2] = 0x80;
+        image[dir + 5..dir + 8].copy_from_slice(&[0xc4, 0xc5, 0xcc]);
+        image[dir + 34] = 0x82;
+        image[dir + 35] = 17;
+        image[dir + 36] = 0;
+        image[dir + 37..dir + 41].copy_from_slice(b"FILE");
+        image[dir + 62] = 5;
+
+        fs::write(&image_path, image).expect("write d64");
+
+        let script_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("plugins")
+            .join("commodore_d64")
+            .join("plugin.lua");
+        let plugin = ViewerPlugin {
+            name: "commodore_d64_directory".into(),
+            description: String::new(),
+            plugin_dir: script_path.parent().expect("plugin dir").to_path_buf(),
+            script_path,
+            modes: vec!["text".into()],
+        };
+
+        let lines = plugin
+            .render_document(&image_path, "text")
+            .expect("viewer should render")
+            .expect("viewer should return lines");
+        let text = lines
+            .iter()
+            .flat_map(|line| line.iter().map(|span| span.text.as_str()))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("\"UIJK"));
+        assert!(text.contains("\"DEL"));
+        assert!(text.contains("DEL"));
+        assert!(text.contains("\"FILE"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn bundled_text_syntax_highlights_rust_keywords() {
         let script_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("assets")
