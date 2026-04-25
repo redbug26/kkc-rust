@@ -1,7 +1,7 @@
 use crate::app::{
     App, AppMode, AssocEditorState, BookmarkListItem, ConfigState, ConfirmAction, InputAction,
     InputDialog, MENU_DATA, MENU_HEADERS, MenuAction, MenuState, OpenerState, PluginsState,
-    RemoteEditKind, ViewerMenuKind, ViewerMenuState,
+    RemoteEditKind, ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,
 };
 use crate::archive::supports_archive_navigation;
 use crate::config::SortMode;
@@ -29,6 +29,7 @@ pub fn handle_event(app: &mut App, event: Event) -> Result<bool> {
         AppMode::Viewer(_) => return handle_viewer(app, key),
         AppMode::ViewerSearching(_) => return handle_viewer_searching(app, key),
         AppMode::ViewerMenu(_, _) => return handle_viewer_menu(app, key),
+        AppMode::ViewerPluginPalette(_, _) => return handle_viewer_plugin_palette(app, key),
         AppMode::Confirm(_) => return handle_confirm(app, key),
         AppMode::Input(_) => return handle_input(app, key),
         AppMode::CopyDialog(_) => return handle_copy_dialog(app, key),
@@ -804,8 +805,13 @@ fn handle_viewer_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
         KeyCode::Char(ch) if menu.kind == ViewerMenuKind::Mode => {
             if let Some(cursor) = viewer_mode_shortcut(ch) {
                 let mut viewer = viewer;
-                set_viewer_mode_or_plugin(&mut viewer, cursor);
-                app.mode = AppMode::Viewer(viewer);
+                if cursor == VIEWER_PLUGIN_MENU_INDEX {
+                    let state = ViewerPluginPaletteState::load(&viewer);
+                    app.mode = AppMode::ViewerPluginPalette(viewer, state);
+                } else {
+                    set_viewer_mode(&mut viewer, cursor);
+                    app.mode = AppMode::Viewer(viewer);
+                }
                 return Ok(false);
             }
         }
@@ -845,7 +851,12 @@ fn handle_viewer_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
             let mut viewer = viewer;
             match menu.kind {
                 ViewerMenuKind::Mode => {
-                    set_viewer_mode_or_plugin(&mut viewer, menu.cursor);
+                    if menu.cursor == VIEWER_PLUGIN_MENU_INDEX {
+                        let state = ViewerPluginPaletteState::load(&viewer);
+                        app.mode = AppMode::ViewerPluginPalette(viewer, state);
+                        return Ok(false);
+                    }
+                    set_viewer_mode(&mut viewer, menu.cursor);
                 }
                 ViewerMenuKind::LineFeed => {
                     let mode = match menu.cursor {
@@ -899,7 +910,15 @@ fn handle_viewer_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
 
 fn viewer_menu_items(kind: ViewerMenuKind) -> &'static [&'static str] {
     match kind {
-        ViewerMenuKind::Mode => &["Text", "Binary", "Ansi", "EML", "Html", "Image"],
+        ViewerMenuKind::Mode => &[
+            "Text",
+            "Binary",
+            "Ansi",
+            "EML",
+            "Html",
+            "Image",
+            "Plugins viewer",
+        ],
         ViewerMenuKind::LineFeed => &["DOS (CR/LF)", "Unix (LF)", "Mac (CR)", "Mixed"],
         ViewerMenuKind::Encoding => &["Plain ASCII", "DOS CP437"],
         ViewerMenuKind::Mask => &[
@@ -923,12 +942,11 @@ const PREPROC_ADD_ITEMS: &[(&str, PreprocOpKind)] = &[
     ("Add Latin", PreprocOpKind::Latin),
     ("Add Elite", PreprocOpKind::Elite),
 ];
+const VIEWER_PLUGIN_MENU_INDEX: usize = 6;
 
 fn viewer_menu_len(viewer: &crate::viewer::Viewer, kind: ViewerMenuKind) -> usize {
     match kind {
-        ViewerMenuKind::Mode => {
-            viewer_menu_items(kind).len() + crate::plugins::viewer_plugin_infos().len()
-        }
+        ViewerMenuKind::Mode => viewer_menu_items(kind).len(),
         ViewerMenuKind::Preproc => {
             let existing = viewer.preproc_len();
             let separator = usize::from(existing > 0);
@@ -938,7 +956,7 @@ fn viewer_menu_len(viewer: &crate::viewer::Viewer, kind: ViewerMenuKind) -> usiz
     }
 }
 
-fn set_viewer_mode_or_plugin(viewer: &mut crate::viewer::Viewer, cursor: usize) {
+fn set_viewer_mode(viewer: &mut crate::viewer::Viewer, cursor: usize) {
     match cursor {
         0 => viewer.set_mode(ViewMode::Text),
         1 => viewer.set_mode(ViewMode::Hex),
@@ -946,11 +964,7 @@ fn set_viewer_mode_or_plugin(viewer: &mut crate::viewer::Viewer, cursor: usize) 
         3 => viewer.set_mode(ViewMode::Eml),
         4 => viewer.set_mode(ViewMode::Html),
         5 => viewer.set_mode(ViewMode::Image),
-        idx => {
-            if let Some(plugin) = crate::plugins::viewer_plugin_infos().get(idx - 6) {
-                viewer.set_viewer_plugin(plugin.name.clone());
-            }
-        }
+        _ => {}
     }
 }
 
@@ -968,8 +982,61 @@ fn viewer_mode_shortcut(ch: char) -> Option<usize> {
         'e' => Some(3),
         'h' => Some(4),
         'i' => Some(5),
+        'p' => Some(VIEWER_PLUGIN_MENU_INDEX),
         _ => None,
     }
+}
+
+fn handle_viewer_plugin_palette(app: &mut App, key: KeyEvent) -> Result<bool> {
+    let (viewer, mut state) = match std::mem::replace(&mut app.mode, AppMode::Browse) {
+        AppMode::ViewerPluginPalette(viewer, state) => (viewer, state),
+        other => {
+            app.mode = other;
+            return Ok(false);
+        }
+    };
+
+    match key.code {
+        KeyCode::Esc => {
+            let mut menu = ViewerMenuState::new(ViewerMenuKind::Mode, &viewer);
+            menu.cursor = VIEWER_PLUGIN_MENU_INDEX;
+            app.mode = AppMode::ViewerMenu(viewer, menu);
+            return Ok(false);
+        }
+        KeyCode::Up => state.move_prev(),
+        KeyCode::Down => state.move_next(),
+        KeyCode::Home => state.match_pos = 0,
+        KeyCode::End => {
+            state.match_pos = state.filtered_indices().len().saturating_sub(1);
+        }
+        KeyCode::Backspace => state.pop_query(),
+        KeyCode::Enter => {
+            let selected = state
+                .filtered_indices()
+                .get(state.match_pos)
+                .and_then(|idx| state.items.get(*idx))
+                .cloned();
+            let mut viewer = viewer;
+            if let Some(plugin) = selected {
+                viewer.set_viewer_plugin(plugin.name);
+                app.mode = AppMode::Viewer(viewer);
+            } else {
+                app.mode = AppMode::ViewerPluginPalette(viewer, state);
+            }
+            return Ok(false);
+        }
+        KeyCode::Char(ch)
+            if !key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::ALT)
+                && !ch.is_control() =>
+        {
+            state.append_query(ch);
+        }
+        _ => {}
+    }
+
+    app.mode = AppMode::ViewerPluginPalette(viewer, state);
+    Ok(false)
 }
 
 fn clamp_viewer_menu_scroll(

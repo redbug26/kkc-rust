@@ -2,7 +2,7 @@ use crate::app::{
     ActivePanel, App, AppMode, AssocEditorState, BookmarkListItem, ConfigState, ConfirmAction,
     ConfirmDialog, InputDialog, MENU_DATA, MENU_HEADERS, MenuAction, MenuState, OpenerState,
     PluginsState, RemoteConnectState, RemoteConnectingState, RemoteEditKind, RemoteEditState,
-    SearchState, ViewerMenuKind, ViewerMenuState,
+    SearchState, ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,
 };
 use crate::config::SortMode;
 use crate::copy::{CopyDialogState, CopyProgressState};
@@ -131,6 +131,11 @@ pub fn render(f: &mut Frame, app: &App) {
         AppMode::ViewerMenu(v, menu) => {
             render_viewer(f, v, false, f.area());
             render_viewer_menu(f, v, menu, f.area());
+            return;
+        }
+        AppMode::ViewerPluginPalette(v, state) => {
+            render_viewer(f, v, false, f.area());
+            render_viewer_plugin_palette(f, state, f.area());
             return;
         }
         AppMode::Help(state) => {
@@ -1220,31 +1225,18 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
 
 fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, area: Rect) {
     let items: Vec<String> = match menu.kind {
-        ViewerMenuKind::Mode => {
-            let mut items = vec![
-                "Text: as plain text",
-                "Binary: as hex dump",
-                "Ansi: with ANSI escapes",
-                "EML: as email",
-                "Html: as rendered HTML",
-                "Image: as inline preview",
-            ]
-            .into_iter()
-            .map(str::to_string)
-            .collect::<Vec<_>>();
-            items.extend(
-                crate::plugins::viewer_plugin_infos()
-                    .into_iter()
-                    .map(|plugin| {
-                        if plugin.description.is_empty() {
-                            format!("Plugin: {}", plugin.name)
-                        } else {
-                            format!("Plugin: {} - {}", plugin.name, plugin.description)
-                        }
-                    }),
-            );
-            items
-        }
+        ViewerMenuKind::Mode => vec![
+            "Text: as plain text",
+            "Binary: as hex dump",
+            "Ansi: with ANSI escapes",
+            "EML: as email",
+            "Html: as rendered HTML",
+            "Image: as inline preview",
+            "Plugins viewer",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>(),
         ViewerMenuKind::LineFeed => vec!["DOS (CR/LF)", "Unix (LF)", "Mac (CR)", "Mixed"]
             .into_iter()
             .map(str::to_string)
@@ -1397,6 +1389,14 @@ fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, ar
 }
 
 fn viewer_mode_menu_line(idx: usize, item: &str, style: Style) -> Line<'static> {
+    if idx == 6 {
+        return Line::from(vec![
+            Span::styled(" ", style),
+            Span::styled("P. ", style.add_modifier(Modifier::BOLD)),
+            Span::styled(item.to_string(), style),
+        ]);
+    }
+
     let number = if idx < 9 {
         format!("{} ", idx + 1)
     } else {
@@ -3060,6 +3060,191 @@ fn render_quicksearch_palette(f: &mut Frame, app: &App, area: Rect) {
         .collect();
 
     // Reserve the rightmost column for the scrollbar when the list overflows
+    let (render_area, sb_area) = if total > list_h {
+        let list_w = list_area.width.saturating_sub(1);
+        (
+            Rect {
+                width: list_w,
+                ..list_area
+            },
+            Some(Rect {
+                x: list_area.x + list_w,
+                y: list_area.y,
+                width: 1,
+                height: list_area.height,
+            }),
+        )
+    } else {
+        (list_area, None)
+    };
+
+    safe_render_widget(
+        f,
+        List::new(items).style(Style::default().bg(CLR_QS_BG)),
+        render_area,
+    );
+
+    if let Some(sb) = sb_area {
+        let mut sb_state = ScrollbarState::new(total).position(scroll);
+        safe_render_stateful_widget(
+            f,
+            Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .thumb_style(Style::default().fg(CLR_QS_BORDER))
+                .track_style(Style::default().bg(CLR_QS_BG))
+                .begin_symbol(None)
+                .end_symbol(None),
+            sb,
+            &mut sb_state,
+        );
+    }
+}
+
+fn render_viewer_plugin_palette(f: &mut Frame, state: &ViewerPluginPaletteState, area: Rect) {
+    let query = &state.query;
+    let matches = state.filtered_indices();
+    let qs_pos = state.match_pos;
+    let total = matches.len();
+
+    let palette_w = ((area.width as u32 * 62 / 100) as u16)
+        .max(50)
+        .min(area.width.saturating_sub(4));
+    let visible_items = (total as u16).min(14);
+    let palette_h = (1 + 1 + visible_items.max(3) + 2).min(area.height.saturating_sub(3));
+
+    let popup = clamp_rect(
+        area,
+        Rect {
+            x: (area.width.saturating_sub(palette_w)) / 2 + area.x,
+            y: area.y + 2,
+            width: palette_w,
+            height: palette_h,
+        },
+    );
+
+    safe_render_widget(f, Clear, popup);
+
+    let block = Block::default()
+        .title(" Viewer Plugins ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(CLR_QS_BORDER))
+        .style(Style::default().bg(CLR_QS_BG));
+    let inner = block.inner(popup);
+    safe_render_widget(f, block, popup);
+
+    if inner.height < 2 {
+        return;
+    }
+
+    let input_area = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: inner.width,
+        height: 1,
+    };
+    let sep_area = Rect {
+        x: inner.x,
+        y: inner.y + 1,
+        width: inner.width,
+        height: 1,
+    };
+    let list_area = Rect {
+        x: inner.x,
+        y: inner.y + 2,
+        width: inner.width,
+        height: inner.height.saturating_sub(2),
+    };
+
+    let count_hint = if !query.is_empty() && total > 0 {
+        format!(" {}/{} ", qs_pos + 1, total)
+    } else if !query.is_empty() {
+        " 0/0 ".to_owned()
+    } else {
+        format!(" {} ", state.items.len())
+    };
+    let hint_w = count_hint.len() as u16;
+    let input_inner_w = inner.width.saturating_sub(hint_w) as usize;
+    let input_text = format!(" \u{2315} {}\u{2581}", query);
+    let input_row = Line::from(vec![
+        Span::styled(
+            truncate_str(&input_text, input_inner_w),
+            Style::default().fg(CLR_QS_INPUT_FG).bg(CLR_QS_INPUT_BG),
+        ),
+        Span::styled(
+            count_hint,
+            Style::default().fg(CLR_QS_NO_MATCH).bg(CLR_QS_INPUT_BG),
+        ),
+    ]);
+    safe_render_widget(
+        f,
+        Paragraph::new(input_row).style(Style::default().bg(CLR_QS_INPUT_BG)),
+        input_area,
+    );
+
+    let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
+    safe_render_widget(
+        f,
+        Paragraph::new(sep).style(Style::default().fg(CLR_QS_SEP).bg(CLR_QS_BG)),
+        sep_area,
+    );
+
+    if total == 0 {
+        let message = if query.is_empty() {
+            " No viewer plugin"
+        } else {
+            " No match"
+        };
+        safe_render_widget(
+            f,
+            Paragraph::new(message).style(Style::default().fg(CLR_QS_NO_MATCH).bg(CLR_QS_BG)),
+            list_area,
+        );
+        return;
+    }
+
+    let list_h = list_area.height as usize;
+    let scroll = if qs_pos >= list_h {
+        qs_pos - list_h + 1
+    } else {
+        0
+    };
+    let tokens: Vec<String> = query.split_whitespace().map(|t| t.to_lowercase()).collect();
+
+    let items: Vec<ListItem> = matches
+        .iter()
+        .enumerate()
+        .skip(scroll)
+        .take(list_h)
+        .map(|(match_idx, &plugin_idx)| {
+            let plugin = &state.items[plugin_idx];
+            let is_sel = match_idx == qs_pos;
+            let (bg, fg, hi) = if is_sel {
+                (CLR_QS_SEL_BG, CLR_QS_SEL_FG, CLR_QS_MATCH_HI_SEL)
+            } else {
+                (CLR_QS_BG, CLR_QS_LIST_FG, CLR_QS_MATCH_HI)
+            };
+
+            let mut spans = vec![Span::styled("   ", Style::default().fg(fg).bg(bg))];
+            let name = highlight_tokens(&plugin.name, &tokens, fg, bg, hi);
+            spans.extend(name.spans);
+            if !plugin.description.is_empty() {
+                spans.push(Span::styled("  ", Style::default().fg(fg).bg(bg)));
+                spans.push(Span::styled(
+                    truncate_str(&plugin.description, 42),
+                    Style::default().fg(Color::Gray).bg(bg),
+                ));
+            }
+            if !plugin.extensions.is_empty() {
+                spans.push(Span::styled("  ", Style::default().fg(fg).bg(bg)));
+                spans.push(Span::styled(
+                    plugin.extensions.join(","),
+                    Style::default().fg(Color::DarkGray).bg(bg),
+                ));
+            }
+
+            ListItem::new(Line::from(spans))
+        })
+        .collect();
+
     let (render_area, sb_area) = if total > list_h {
         let list_w = list_area.width.saturating_sub(1);
         (

@@ -130,7 +130,7 @@ Currently useful modes:
 - `text`
 - `ansi`
 
-Viewer plugins are listed after KKC's built-in viewer modes in `F4: Change Viewer`.
+Viewer plugins are available from `F4: Change Viewer > P. Plugins viewer`.
 When a full-document plugin is active, KKC gives it the full viewer panel width and disables automatic wrapping for the plugin output.
 
 ### Coloring Lines

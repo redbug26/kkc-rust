@@ -65,6 +65,8 @@ pub enum AppMode {
     ViewerSearching(Viewer),
     /// Viewer with a popup choice menu.
     ViewerMenu(Viewer, ViewerMenuState),
+    /// Viewer plugin picker with a quick-palette filter.
+    ViewerPluginPalette(Viewer, ViewerPluginPaletteState),
     /// Search panel (Alt-F7).
     SearchPanel(SearchState),
     /// Confirmation dialog.
@@ -581,16 +583,114 @@ pub struct ViewerMenuState {
     pub param: u8,
 }
 
+#[derive(Debug, Clone)]
+pub struct ViewerPluginPaletteState {
+    pub items: Vec<crate::plugins::PluginInfo>,
+    pub query: String,
+    pub match_pos: usize,
+}
+
+impl ViewerPluginPaletteState {
+    pub fn load(viewer: &Viewer) -> Self {
+        let mut state = Self {
+            items: crate::plugins::viewer_plugin_infos(),
+            query: String::new(),
+            match_pos: 0,
+        };
+        if let Some(plugin_name) = &viewer.viewer_plugin
+            && let Some(pos) = state
+                .items
+                .iter()
+                .position(|plugin| &plugin.name == plugin_name)
+        {
+            state.match_pos = pos;
+        }
+        state
+    }
+
+    pub fn filtered_indices(&self) -> Vec<usize> {
+        if self.query.trim().is_empty() {
+            return (0..self.items.len()).collect();
+        }
+
+        let tokens: Vec<String> = self
+            .query
+            .split_whitespace()
+            .map(|token| token.to_lowercase())
+            .filter(|token| !token.is_empty())
+            .collect();
+        if tokens.is_empty() {
+            return (0..self.items.len()).collect();
+        }
+
+        let first = &tokens[0];
+        let rest = &tokens[1..];
+        let mut starts = Vec::new();
+        let mut contains = Vec::new();
+
+        for (idx, item) in self.items.iter().enumerate() {
+            let searchable = format!(
+                "{} {} {}",
+                item.name,
+                item.description,
+                item.extensions.join(" ")
+            );
+            let lowered = searchable.to_lowercase();
+            if !rest.iter().all(|token| lowered.contains(token.as_str())) {
+                continue;
+            }
+            if item.name.to_lowercase().starts_with(first.as_str()) {
+                starts.push(idx);
+            } else if lowered.contains(first.as_str()) {
+                contains.push(idx);
+            }
+        }
+
+        starts.extend(contains);
+        starts
+    }
+
+    pub fn append_query(&mut self, ch: char) {
+        self.query.push(ch);
+        self.match_pos = 0;
+        self.clamp_match();
+    }
+
+    pub fn pop_query(&mut self) {
+        self.query.pop();
+        self.match_pos = 0;
+        self.clamp_match();
+    }
+
+    pub fn move_prev(&mut self) {
+        self.match_pos = self.match_pos.saturating_sub(1);
+        self.clamp_match();
+    }
+
+    pub fn move_next(&mut self) {
+        let len = self.filtered_indices().len();
+        if self.match_pos + 1 < len {
+            self.match_pos += 1;
+        }
+        self.clamp_match();
+    }
+
+    fn clamp_match(&mut self) {
+        let len = self.filtered_indices().len();
+        if len == 0 {
+            self.match_pos = 0;
+        } else {
+            self.match_pos = self.match_pos.min(len.saturating_sub(1));
+        }
+    }
+}
+
 impl ViewerMenuState {
     pub fn new(kind: ViewerMenuKind, viewer: &Viewer) -> Self {
         let cursor = match kind {
             ViewerMenuKind::Mode => {
-                if let Some(plugin_name) = &viewer.viewer_plugin {
-                    crate::plugins::viewer_plugin_infos()
-                        .iter()
-                        .position(|plugin| &plugin.name == plugin_name)
-                        .map(|idx| 6 + idx)
-                        .unwrap_or(0)
+                if viewer.viewer_plugin.is_some() {
+                    6
                 } else {
                     match viewer.mode {
                         ViewMode::Text => 0,
