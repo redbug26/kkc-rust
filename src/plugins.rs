@@ -12,6 +12,7 @@ const BUNDLED_AMSTRAD_DSK_PLUGIN: &str = include_str!("../assets/plugins/amstrad
 const BUNDLED_COMMODORE_D64_PLUGIN: &str =
     include_str!("../assets/plugins/commodore_d64/plugin.lua");
 const BUNDLED_LHA_LZH_PLUGIN: &str = include_str!("../assets/plugins/lha_lzh/plugin.lua");
+const BUNDLED_PDF_FILE_PLUGIN: &str = include_str!("../assets/plugins/pdf_file/plugin.lua");
 
 static PLUGINS: OnceLock<PluginRegistry> = OnceLock::new();
 
@@ -153,6 +154,10 @@ fn install_bundled_plugins(plugins_dir: &Path) -> Result<()> {
     fs::create_dir_all(&lha_dir)?;
     write_bundled_file(&lha_dir.join("plugin.lua"), BUNDLED_LHA_LZH_PLUGIN)?;
 
+    let pdf_dir = plugins_dir.join("pdf_file");
+    fs::create_dir_all(&pdf_dir)?;
+    write_bundled_file(&pdf_dir.join("plugin.lua"), BUNDLED_PDF_FILE_PLUGIN)?;
+
     Ok(())
 }
 
@@ -273,7 +278,6 @@ where
             fs::write(path, content.as_bytes()).map_err(mlua::Error::external)
         })?,
     )?;
-
     let preload: Table = package.get("preload")?;
     preload.set("kkc", lua.create_function(move |_, ()| Ok(kkc.clone()))?)?;
 
@@ -446,4 +450,24 @@ fn install_runtime_bindings(
     preload.set("kkc", lua.create_function(move |_, ()| Ok(kkc.clone()))?)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bundled_pdf_plugin_registers() {
+        let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("plugins")
+            .join("pdf_file")
+            .join("plugin.lua");
+
+        let plugins = inspect_plugin(&script).expect("plugin should load");
+
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(plugins[0].name, "pdf_file");
+        assert_eq!(plugins[0].extensions, vec!["pdf"]);
+    }
 }
