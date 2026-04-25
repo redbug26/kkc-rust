@@ -19,6 +19,7 @@ const BUNDLED_PDF_FILE_PLUGIN: &str = include_str!("../assets/plugins/pdf_file/p
 const BUNDLED_HTML_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/html_viewer/plugin.lua");
 const BUNDLED_EML_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/eml_viewer/plugin.lua");
 const BUNDLED_JSON_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/json_viewer/plugin.lua");
+const BUNDLED_CSV_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/csv_viewer/plugin.lua");
 const BUNDLED_MARKDOWN_VIEWER_PLUGIN: &str =
     include_str!("../assets/plugins/markdown_viewer/plugin.lua");
 const BUNDLED_TEXT_SYNTAX_PLUGIN: &str = include_str!("../assets/plugins/text_syntax/plugin.lua");
@@ -334,6 +335,10 @@ fn install_bundled_plugins(plugins_dir: &Path) -> Result<()> {
     let json_dir = plugins_dir.join("json_viewer");
     fs::create_dir_all(&json_dir)?;
     write_bundled_file(&json_dir.join("plugin.lua"), BUNDLED_JSON_VIEWER_PLUGIN)?;
+
+     let csv_dir = plugins_dir.join("csv_viewer");
+    fs::create_dir_all(&csv_dir)?;
+    write_bundled_file(&csv_dir.join("plugin.lua"), BUNDLED_CSV_VIEWER_PLUGIN)?;
 
     let markdown_dir = plugins_dir.join("markdown_viewer");
     fs::create_dir_all(&markdown_dir)?;

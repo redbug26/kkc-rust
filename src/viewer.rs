@@ -128,22 +128,6 @@ impl Viewer {
         let encoding = EncodingMode::Cp437;
         let image = detect_image_info(path, &raw);
         let mode = detect_mode(path, &raw);
-        let load_decoded = !matches!(mode, ViewMode::Image);
-        let text_lines = if load_decoded {
-            text_lines(&raw, line_feed, &[], encoding)
-        } else {
-            Vec::new()
-        };
-        let hex_lines = if load_decoded {
-            hex_lines(&raw, encoding)
-        } else {
-            Vec::new()
-        };
-        let ansi_lines = if load_decoded {
-            ansi_lines(&raw, line_feed, &[], encoding)
-        } else {
-            Vec::new()
-        };
         let mut viewer = Self {
             path: path.to_path_buf(),
             raw,
@@ -163,11 +147,13 @@ impl Viewer {
             mask: MaskKind::Ketchup,
             mask_enabled: true,
             preproc_ops: Vec::new(),
-            text_lines,
-            hex_lines,
-            ansi_lines,
+            text_lines: Vec::new(),
+            hex_lines: Vec::new(),
+            ansi_lines: Vec::new(),
             image,
         };
+        // Only decode the initial mode — other modes are built lazily on first access.
+        viewer.ensure_mode_decoded(mode);
         if matches!(viewer.mode, ViewMode::Image) {
             viewer.zoomed = true;
         }
@@ -742,13 +728,14 @@ impl Viewer {
     }
 
     fn rebuild_decoded_lines(&mut self) {
-        self.text_lines = text_lines(&self.raw, self.line_feed, &self.preproc_ops, self.encoding);
-        self.hex_lines = hex_lines(
-            &preprocess_bytes(&self.raw, &self.preproc_ops),
-            self.encoding,
-        );
-        self.ansi_lines = ansi_lines(&self.raw, self.line_feed, &self.preproc_ops, self.encoding);
+        // Clear cached lines — other modes will be rebuilt lazily when accessed.
+        self.text_lines = Vec::new();
+        self.hex_lines = Vec::new();
+        self.ansi_lines = Vec::new();
         self.image = detect_image_info(&self.path, &self.raw);
+        // Immediately rebuild only the currently active mode.
+        let mode = self.mode;
+        self.ensure_mode_decoded(mode);
     }
 
     fn ensure_mode_decoded(&mut self, mode: ViewMode) {
