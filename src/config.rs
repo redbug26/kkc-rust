@@ -54,6 +54,36 @@ pub enum SortMode {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PanelTabConfig {
+    /// Last visited local fallback path for this tab.
+    pub path: PathBuf,
+    /// Remote profile name if this tab was on a remote location.
+    #[serde(default)]
+    pub remote_name: Option<String>,
+    /// Remote current directory for persisted remote tabs.
+    #[serde(default)]
+    pub remote_path: Option<String>,
+    /// How files are sorted.
+    #[serde(default)]
+    pub sort: SortMode,
+    /// Show hidden files.
+    #[serde(default)]
+    pub show_hidden: bool,
+}
+
+impl Default for PanelTabConfig {
+    fn default() -> Self {
+        Self {
+            path: dirs_home(),
+            remote_name: None,
+            remote_path: None,
+            sort: SortMode::Name,
+            show_hidden: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PanelConfig {
     /// Last visited path for this panel.
     pub path: PathBuf,
@@ -69,6 +99,12 @@ pub struct PanelConfig {
     /// Show hidden files.
     #[serde(default)]
     pub show_hidden: bool,
+    /// Persisted tabs for this panel, including the active tab.
+    #[serde(default)]
+    pub tabs: Vec<PanelTabConfig>,
+    /// Index of the active tab inside `tabs`.
+    #[serde(default)]
+    pub active_tab: usize,
 }
 
 impl Default for PanelConfig {
@@ -79,6 +115,20 @@ impl Default for PanelConfig {
             remote_path: None,
             sort: SortMode::Name,
             show_hidden: false,
+            tabs: Vec::new(),
+            active_tab: 0,
+        }
+    }
+}
+
+impl PanelConfig {
+    pub fn active_tab_config(&self) -> PanelTabConfig {
+        PanelTabConfig {
+            path: self.path.clone(),
+            remote_name: self.remote_name.clone(),
+            remote_path: self.remote_path.clone(),
+            sort: self.sort,
+            show_hidden: self.show_hidden,
         }
     }
 }
@@ -198,6 +248,8 @@ impl Default for Config {
                 remote_path: None,
                 sort: SortMode::Name,
                 show_hidden: false,
+                tabs: Vec::new(),
+                active_tab: 0,
             },
             show_fkey_bar: true,
             confirm_exit: true,

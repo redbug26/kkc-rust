@@ -1,4 +1,4 @@
-use crate::config::{Config, SortMode};
+use crate::config::{Config, PanelConfig, PanelTabConfig, SortMode};
 use crate::copy::{
     CopyDestination, CopyDialogState, CopyJob, CopyProgressState, CopyScanTask, CopySource,
     CopyTask, CopyTaskMessage, count_local_files, spawn_copy_scan, spawn_copy_task,
@@ -1032,30 +1032,28 @@ impl PanelTabs {
         }
         true
     }
+
+    fn export_configs(&self, current: &Panel) -> (Vec<PanelTabConfig>, usize) {
+        let mut tabs = Vec::with_capacity(self.count());
+        tabs.extend(self.before.iter().map(panel_to_tab_config));
+        let active_tab = tabs.len();
+        tabs.push(panel_to_tab_config(current));
+        tabs.extend(self.after.iter().map(panel_to_tab_config));
+        (tabs, active_tab)
+    }
 }
 
 impl App {
     pub fn new(config: Config) -> Self {
-        let mut left = Panel::new(
-            config.left.path.clone(),
-            config.left.sort,
-            config.left.show_hidden,
-        );
-        let mut right = Panel::new(
-            config.right.path.clone(),
-            config.right.sort,
-            config.right.show_hidden,
-        );
+        let profiles = load_profiles().unwrap_or_default();
+        let (left, left_tabs) = restore_panel_side(&config.left, &profiles);
+        let (right, right_tabs) = restore_panel_side(&config.right, &profiles);
         let max = config.dir_history_max;
         let mut history: VecDeque<PathBuf> = config.dir_history.iter().cloned().take(max).collect();
         // Always seed with the left panel path if history is empty
         if history.is_empty() {
             history.push_front(config.left.path.clone());
         }
-
-        let profiles = load_profiles().unwrap_or_default();
-        restore_remote_panel(&mut left, &config.left, &profiles);
-        restore_remote_panel(&mut right, &config.right, &profiles);
 
         let bookmarks = {
             let mut bm = config.bookmarks.clone();
@@ -1078,8 +1076,8 @@ impl App {
             config,
             left,
             right,
-            left_tabs: PanelTabs::default(),
-            right_tabs: PanelTabs::default(),
+            left_tabs,
+            right_tabs,
             active: ActivePanel::Left,
             file_id_preview: false,
             mode: AppMode::Browse,
@@ -2204,16 +2202,8 @@ impl App {
     // -----------------------------------------------------------------------
 
     pub fn save_config(&mut self) -> Result<()> {
-        self.config.left.path = self.left.persisted_path();
-        self.config.left.remote_name = self.left.remote_profile().map(|p| p.name);
-        self.config.left.remote_path = self.left.remote_cwd().map(|s| s.to_string());
-        self.config.left.sort = self.left.sort;
-        self.config.left.show_hidden = self.left.show_hidden;
-        self.config.right.path = self.right.persisted_path();
-        self.config.right.remote_name = self.right.remote_profile().map(|p| p.name);
-        self.config.right.remote_path = self.right.remote_cwd().map(|s| s.to_string());
-        self.config.right.sort = self.right.sort;
-        self.config.right.show_hidden = self.right.show_hidden;
+        self.config.left = panel_config_for_save(&self.left, &self.left_tabs);
+        self.config.right = panel_config_for_save(&self.right, &self.right_tabs);
         self.config.dir_history = self.dir_history.iter().cloned().collect();
         self.config.bookmarks = self.bookmarks.clone();
         // Save terminal history and output to cache (not config)
@@ -2259,18 +2249,80 @@ fn same_remote_target(a: &RemoteProfile, b: &RemoteProfile) -> bool {
     }
 }
 
+fn panel_to_tab_config(panel: &Panel) -> PanelTabConfig {
+    PanelTabConfig {
+        path: panel.persisted_path(),
+        remote_name: panel.remote_profile().map(|p| p.name),
+        remote_path: panel.remote_cwd().map(|s| s.to_string()),
+        sort: panel.sort,
+        show_hidden: panel.show_hidden,
+    }
+}
+
+fn panel_config_for_save(panel: &Panel, tabs: &PanelTabs) -> PanelConfig {
+    let active = panel_to_tab_config(panel);
+    let (all_tabs, active_tab) = tabs.export_configs(panel);
+    PanelConfig {
+        path: active.path,
+        remote_name: active.remote_name,
+        remote_path: active.remote_path,
+        sort: active.sort,
+        show_hidden: active.show_hidden,
+        tabs: all_tabs,
+        active_tab,
+    }
+}
+
+fn restore_panel_side(cfg: &PanelConfig, profiles: &[RemoteProfile]) -> (Panel, PanelTabs) {
+    let tab_configs = if cfg.tabs.is_empty() {
+        vec![cfg.active_tab_config()]
+    } else {
+        cfg.tabs.clone()
+    };
+    let active_idx = cfg.active_tab.min(tab_configs.len().saturating_sub(1));
+    let mut current = None;
+    let mut tabs = PanelTabs::default();
+
+    for (idx, tab_cfg) in tab_configs.iter().enumerate() {
+        let panel = panel_from_tab_config(tab_cfg, profiles);
+        if idx < active_idx {
+            tabs.before.push(panel);
+        } else if idx == active_idx {
+            current = Some(panel);
+        } else {
+            tabs.after.push(panel);
+        }
+    }
+
+    let current =
+        current.unwrap_or_else(|| panel_from_tab_config(&cfg.active_tab_config(), profiles));
+    (current, tabs)
+}
+
+fn panel_from_tab_config(cfg: &PanelTabConfig, profiles: &[RemoteProfile]) -> Panel {
+    let mut panel = Panel::new(cfg.path.clone(), cfg.sort, cfg.show_hidden);
+    restore_remote_panel(
+        &mut panel,
+        cfg.remote_name.as_ref(),
+        cfg.remote_path.as_ref(),
+        profiles,
+    );
+    panel
+}
+
 fn restore_remote_panel(
     panel: &mut Panel,
-    cfg: &crate::config::PanelConfig,
+    remote_name: Option<&String>,
+    remote_path: Option<&String>,
     profiles: &[RemoteProfile],
 ) {
-    let Some(remote_name) = cfg.remote_name.as_ref() else {
+    let Some(remote_name) = remote_name else {
         return;
     };
     let Some(mut profile) = profiles.iter().find(|p| p.name == *remote_name).cloned() else {
         return;
     };
-    if let Some(remote_path) = cfg.remote_path.clone() {
+    if let Some(remote_path) = remote_path.cloned() {
         match &mut profile.kind {
             RemoteKind::Sftp(sftp) => sftp.path = Some(remote_path),
             RemoteKind::Imap(imap) => imap.path = Some(remote_path),
@@ -2373,6 +2425,35 @@ mod tests {
         assert_eq!(tabs.count(), 1);
         assert_eq!(current.path, two);
         assert!(!PanelTabs::close_tab(&mut current, &mut tabs));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn panel_tabs_roundtrip_through_config() {
+        let root = std::env::temp_dir().join(format!("kkc-tabs-config-{}", std::process::id()));
+        let one = root.join("one");
+        let two = root.join("two");
+        fs::create_dir_all(&one).expect("create first tab dir");
+        fs::create_dir_all(&two).expect("create second tab dir");
+
+        let mut current = Panel::new(one.clone(), SortMode::Name, false);
+        let mut tabs = PanelTabs::default();
+        PanelTabs::new_tab(&mut current, &mut tabs);
+        current.enter_dir(two.clone()).expect("enter second dir");
+
+        let cfg = panel_config_for_save(&current, &tabs);
+        assert_eq!(cfg.active_tab, 1);
+        assert_eq!(cfg.tabs.len(), 2);
+
+        let text = toml::to_string(&cfg).expect("serialize panel config");
+        let parsed: PanelConfig = toml::from_str(&text).expect("parse panel config");
+        let (restored, restored_tabs) = restore_panel_side(&parsed, &[]);
+
+        assert_eq!(restored.path, two);
+        assert_eq!(restored_tabs.count(), 2);
+        assert_eq!(restored_tabs.current_index(), 1);
+        assert_eq!(restored_tabs.before[0].path, one);
 
         let _ = fs::remove_dir_all(root);
     }
