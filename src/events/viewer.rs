@@ -180,18 +180,16 @@ pub(super) fn handle_viewer_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
         KeyCode::Down => menu.cursor = viewer_menu_next_cursor(&viewer, menu.kind, menu.cursor),
         KeyCode::Home => menu.cursor = viewer_menu_first_cursor(&viewer, menu.kind),
         KeyCode::End => menu.cursor = viewer_menu_last_cursor(&viewer, menu.kind),
-        KeyCode::Char(ch) if menu.kind == ViewerMenuKind::Mode => {
-            if let Some(cursor) = viewer_mode_shortcut(ch) {
-                let mut viewer = viewer;
-                if cursor == VIEWER_PLUGIN_MENU_INDEX {
-                    let state = ViewerPluginPaletteState::load(&viewer);
-                    app.mode = AppMode::ViewerPluginPalette(viewer, state);
-                } else {
-                    set_viewer_mode(&mut viewer, cursor);
-                    app.mode = AppMode::Viewer(viewer);
-                }
+        KeyCode::Char(ch) => {
+            if let Some(cursor) = viewer_menu_shortcut(&viewer, menu.kind, menu.cursor, ch) {
+                menu.cursor = cursor;
+                apply_viewer_menu_selection(app, viewer, menu);
                 return Ok(false);
             }
+        }
+        KeyCode::Enter => {
+            apply_viewer_menu_selection(app, viewer, menu);
+            return Ok(false);
         }
         KeyCode::Left if menu.kind == ViewerMenuKind::Preproc => {
             let mut viewer = viewer;
@@ -223,59 +221,6 @@ pub(super) fn handle_viewer_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
                 menu.cursor = viewer_menu_first_cursor(&viewer, menu.kind);
             }
             app.mode = AppMode::ViewerMenu(viewer, menu);
-            return Ok(false);
-        }
-        KeyCode::Enter => {
-            let mut viewer = viewer;
-            match menu.kind {
-                ViewerMenuKind::Mode => {
-                    if menu.cursor == VIEWER_PLUGIN_MENU_INDEX {
-                        let state = ViewerPluginPaletteState::load(&viewer);
-                        app.mode = AppMode::ViewerPluginPalette(viewer, state);
-                        return Ok(false);
-                    }
-                    set_viewer_mode(&mut viewer, menu.cursor);
-                }
-                ViewerMenuKind::LineFeed => {
-                    let mode = match menu.cursor {
-                        0 => LineFeedMode::DosCrLf,
-                        1 => LineFeedMode::UnixLf,
-                        2 => LineFeedMode::MacCr,
-                        _ => LineFeedMode::Mixed,
-                    };
-                    viewer.set_line_feed(mode);
-                }
-                ViewerMenuKind::Preproc => {
-                    if menu.cursor < viewer.preproc_len() {
-                        app.mode = AppMode::ViewerMenu(viewer, menu);
-                        return Ok(false);
-                    }
-                    if let Some(kind) = preproc_add_item_kind(&viewer, menu.cursor) {
-                        viewer.push_preproc(kind, menu.param);
-                        menu.cursor = viewer.preproc_len().saturating_sub(1);
-                    } else if is_preproc_clear_item(&viewer, menu.cursor) {
-                        viewer.clear_preproc();
-                        menu.cursor = viewer_menu_first_cursor(&viewer, menu.kind);
-                    }
-                    app.mode = AppMode::ViewerMenu(viewer, menu);
-                    return Ok(false);
-                }
-                ViewerMenuKind::Encoding => {
-                    let mode = match menu.cursor {
-                        0 => EncodingMode::Plain,
-                        _ => EncodingMode::Cp437,
-                    };
-                    viewer.set_encoding(mode);
-                }
-                ViewerMenuKind::Mask => match menu.cursor {
-                    0 => viewer.set_mask(Some(MaskKind::C)),
-                    1 => viewer.set_mask(Some(MaskKind::Pascal)),
-                    2 => viewer.set_mask(Some(MaskKind::Assembler)),
-                    3 => viewer.set_mask(Some(MaskKind::Ketchup)),
-                    _ => viewer.set_mask(None),
-                },
-            }
-            app.mode = AppMode::Viewer(viewer);
             return Ok(false);
         }
         _ => {}
@@ -336,21 +281,153 @@ fn set_viewer_mode(viewer: &mut crate::viewer::Viewer, cursor: usize) {
     }
 }
 
-fn viewer_mode_shortcut(ch: char) -> Option<usize> {
+fn apply_viewer_menu_selection(
+    app: &mut App,
+    mut viewer: crate::viewer::Viewer,
+    mut menu: ViewerMenuState,
+) {
+    match menu.kind {
+        ViewerMenuKind::Mode => {
+            if menu.cursor == VIEWER_PLUGIN_MENU_INDEX {
+                let state = ViewerPluginPaletteState::load(&viewer);
+                app.mode = AppMode::ViewerPluginPalette(viewer, state);
+                return;
+            }
+            set_viewer_mode(&mut viewer, menu.cursor);
+        }
+        ViewerMenuKind::LineFeed => {
+            let mode = match menu.cursor {
+                0 => LineFeedMode::DosCrLf,
+                1 => LineFeedMode::UnixLf,
+                2 => LineFeedMode::MacCr,
+                _ => LineFeedMode::Mixed,
+            };
+            viewer.set_line_feed(mode);
+        }
+        ViewerMenuKind::Preproc => {
+            if menu.cursor < viewer.preproc_len() {
+                app.mode = AppMode::ViewerMenu(viewer, menu);
+                return;
+            }
+            if let Some(kind) = preproc_add_item_kind(&viewer, menu.cursor) {
+                viewer.push_preproc(kind, menu.param);
+                menu.cursor = viewer.preproc_len().saturating_sub(1);
+            } else if is_preproc_clear_item(&viewer, menu.cursor) {
+                viewer.clear_preproc();
+                menu.cursor = viewer_menu_first_cursor(&viewer, menu.kind);
+            }
+            app.mode = AppMode::ViewerMenu(viewer, menu);
+            return;
+        }
+        ViewerMenuKind::Encoding => {
+            let mode = match menu.cursor {
+                0 => EncodingMode::Plain,
+                _ => EncodingMode::Cp437,
+            };
+            viewer.set_encoding(mode);
+        }
+        ViewerMenuKind::Mask => match menu.cursor {
+            0 => viewer.set_mask(Some(MaskKind::C)),
+            1 => viewer.set_mask(Some(MaskKind::Pascal)),
+            2 => viewer.set_mask(Some(MaskKind::Assembler)),
+            3 => viewer.set_mask(Some(MaskKind::Ketchup)),
+            _ => viewer.set_mask(None),
+        },
+    }
+    app.mode = AppMode::Viewer(viewer);
+}
+
+fn viewer_menu_shortcut(
+    viewer: &crate::viewer::Viewer,
+    kind: ViewerMenuKind,
+    current: usize,
+    ch: char,
+) -> Option<usize> {
     if let Some(digit) = ch.to_digit(10)
         && (1..=9).contains(&digit)
     {
-        return Some(digit as usize - 1);
+        let cursor = digit as usize - 1;
+        return (cursor < viewer_menu_len(viewer, kind)
+            && !(kind == ViewerMenuKind::Preproc && is_preproc_separator(viewer, cursor)))
+        .then_some(cursor);
     }
 
-    match ch.to_ascii_lowercase() {
-        't' => Some(0),
-        'b' => Some(1),
-        'a' => Some(2),
-        'i' => Some(3),
-        'p' => Some(VIEWER_PLUGIN_MENU_INDEX),
-        _ => None,
+    let ch = ch.to_ascii_lowercase();
+    if kind == ViewerMenuKind::Preproc {
+        return viewer_preproc_shortcut(viewer, current, ch);
     }
+
+    let labels = viewer_menu_labels(viewer, kind);
+    let mnemonics = mnemonics_for_labels(&labels);
+    let len = labels.len();
+    (1..=len)
+        .map(|offset| (current + offset) % len)
+        .find(|&idx| mnemonics.get(idx).copied().flatten() == Some(ch))
+}
+
+fn viewer_preproc_shortcut(
+    viewer: &crate::viewer::Viewer,
+    current: usize,
+    ch: char,
+) -> Option<usize> {
+    let labels = viewer_menu_labels(viewer, ViewerMenuKind::Preproc);
+    let mnemonics = mnemonics_for_labels(&labels);
+    let len = labels.len();
+    (1..=len)
+        .map(|offset| (current + offset) % len)
+        .find(|&idx| {
+            !is_preproc_separator(viewer, idx) && mnemonics.get(idx).copied().flatten() == Some(ch)
+        })
+}
+
+fn viewer_menu_labels(viewer: &crate::viewer::Viewer, kind: ViewerMenuKind) -> Vec<String> {
+    match kind {
+        ViewerMenuKind::Preproc => {
+            let mut labels = Vec::new();
+            for idx in 0..viewer.preproc_len() {
+                if let Some(label) = viewer.preproc_item_label(idx) {
+                    labels.push(label);
+                }
+            }
+            if viewer.preproc_len() > 0 {
+                labels.push(String::new());
+            }
+            labels.extend(
+                PREPROC_ADD_ITEMS
+                    .iter()
+                    .map(|(label, _)| (*label).to_string()),
+            );
+            labels.push("Clear All".into());
+            labels
+        }
+        _ => viewer_menu_items(kind)
+            .iter()
+            .map(|label| (*label).to_string())
+            .collect(),
+    }
+}
+
+fn mnemonics_for_labels(labels: &[String]) -> Vec<Option<char>> {
+    let mut used = Vec::new();
+    labels
+        .iter()
+        .map(|label| {
+            let candidates = label
+                .chars()
+                .filter(|ch| ch.is_alphanumeric())
+                .map(|ch| ch.to_ascii_lowercase())
+                .collect::<Vec<_>>();
+            let chosen = candidates
+                .iter()
+                .copied()
+                .find(|candidate| !used.contains(candidate))
+                .or_else(|| candidates.first().copied());
+            if let Some(ch) = chosen {
+                used.push(ch);
+            }
+            chosen
+        })
+        .collect()
 }
 
 pub(super) fn handle_viewer_plugin_palette(app: &mut App, key: KeyEvent) -> Result<bool> {

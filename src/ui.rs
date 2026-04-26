@@ -367,6 +367,17 @@ fn render_menu(f: &mut Frame, state: &MenuState, area: Rect) {
     f.render_widget(block, dd_area);
 
     let avail = inner.width as usize;
+    let menu_labels = items
+        .iter()
+        .map(|(label, _, action)| {
+            if *action == MenuAction::Separator {
+                String::new()
+            } else {
+                (*label).to_string()
+            }
+        })
+        .collect::<Vec<_>>();
+    let menu_mnemonics = mnemonics_for_labels(&menu_labels);
     for (idx, (label, key_hint, action)) in items.iter().enumerate() {
         if idx as u16 >= inner.height {
             break;
@@ -394,11 +405,16 @@ fn render_menu(f: &mut Frame, state: &MenuState, area: Rect) {
                 Style::default().bg(CLR_MENU_DD_BG).fg(CLR_MENU_DD_FG)
             };
             let key_text = key_hint.unwrap_or("");
-            // " label .......... key "
             let used = label.len() + key_text.len() + 2; // leading " " + trailing " "
             let pad = avail.saturating_sub(used);
-            let text = format!(" {}{}{} ", label, " ".repeat(pad), key_text);
-            f.render_widget(Paragraph::new(truncate_str(&text, avail)).style(style), row);
+            let line = menu_dropdown_line(
+                label,
+                key_text,
+                pad,
+                menu_mnemonics.get(idx).copied().flatten(),
+                style,
+            );
+            f.render_widget(Paragraph::new(line).style(style), row);
         }
     }
 }
@@ -898,8 +914,10 @@ fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, ar
             };
             let line = if menu.kind == ViewerMenuKind::Mode {
                 viewer_mode_menu_line(idx, item, style)
-            } else {
+            } else if is_separator {
                 Line::from(Span::styled(format!(" {}", item), style))
+            } else {
+                viewer_submenu_line(viewer, menu.kind, idx, item, style)
             };
             ListItem::new(line).style(style)
         })
@@ -972,6 +990,131 @@ fn viewer_mode_menu_line(idx: usize, item: &str, style: Style) -> Line<'static> 
         spans.push(Span::styled(item.to_string(), style));
     }
     Line::from(spans)
+}
+
+fn viewer_submenu_line(
+    viewer: &Viewer,
+    kind: ViewerMenuKind,
+    idx: usize,
+    item: &str,
+    style: Style,
+) -> Line<'static> {
+    let labels = viewer_menu_render_labels(viewer, kind);
+    let mnemonics = mnemonics_for_labels(&labels);
+    let shortcut = mnemonics.get(idx).copied().flatten();
+    let mut spans = vec![Span::styled(" ", style)];
+    append_highlighted_mnemonic(&mut spans, item, shortcut, style);
+    Line::from(spans)
+}
+
+fn viewer_menu_render_labels(viewer: &Viewer, kind: ViewerMenuKind) -> Vec<String> {
+    match kind {
+        ViewerMenuKind::Mode => Vec::new(),
+        ViewerMenuKind::Preproc => {
+            let mut labels = Vec::new();
+            for idx in 0..viewer.preproc_len() {
+                if let Some(label) = viewer.preproc_item_label(idx) {
+                    labels.push(label);
+                }
+            }
+            if viewer.preproc_len() > 0 {
+                labels.push(String::new());
+            }
+            labels.extend(
+                [
+                    "Add XOR",
+                    "Add AND",
+                    "Add OR",
+                    "Add NEG",
+                    "Add ROR",
+                    "Add ADD",
+                    "Add Latin",
+                    "Add Elite",
+                    "Clear All",
+                ]
+                .into_iter()
+                .map(String::from),
+            );
+            labels
+        }
+        ViewerMenuKind::LineFeed => vec!["DOS (CR/LF)", "Unix (LF)", "Mac (CR)", "Mixed"]
+            .into_iter()
+            .map(String::from)
+            .collect(),
+        ViewerMenuKind::Encoding => vec!["Plain ASCII", "DOS CP437"]
+            .into_iter()
+            .map(String::from)
+            .collect(),
+        ViewerMenuKind::Mask => vec![
+            "C Style",
+            "Pascal Style",
+            "Assembler Style",
+            "Ketchup Style",
+            "Mask OFF",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect(),
+    }
+}
+
+fn menu_dropdown_line(
+    label: &str,
+    key_text: &str,
+    pad: usize,
+    mnemonic: Option<char>,
+    style: Style,
+) -> Line<'static> {
+    let mut spans = vec![Span::styled(" ", style)];
+    append_highlighted_mnemonic(&mut spans, label, mnemonic, style);
+    spans.push(Span::styled(" ".repeat(pad), style));
+    if !key_text.is_empty() {
+        spans.push(Span::styled(key_text.to_string(), style));
+    }
+    spans.push(Span::styled(" ", style));
+    Line::from(spans)
+}
+
+fn append_highlighted_mnemonic(
+    spans: &mut Vec<Span<'static>>,
+    label: &str,
+    mnemonic: Option<char>,
+    style: Style,
+) {
+    let mut highlighted = false;
+    for ch in label.chars() {
+        let matches = mnemonic == Some(ch.to_ascii_lowercase()) && !highlighted;
+        let item_style = if matches {
+            highlighted = true;
+            style.add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+        } else {
+            style
+        };
+        spans.push(Span::styled(ch.to_string(), item_style));
+    }
+}
+
+fn mnemonics_for_labels(labels: &[String]) -> Vec<Option<char>> {
+    let mut used = Vec::new();
+    labels
+        .iter()
+        .map(|label| {
+            let candidates = label
+                .chars()
+                .filter(|ch| ch.is_alphanumeric())
+                .map(|ch| ch.to_ascii_lowercase())
+                .collect::<Vec<_>>();
+            let chosen = candidates
+                .iter()
+                .copied()
+                .find(|candidate| !used.contains(candidate))
+                .or_else(|| candidates.first().copied());
+            if let Some(ch) = chosen {
+                used.push(ch);
+            }
+            chosen
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------

@@ -1287,10 +1287,7 @@ mod tests {
         assert_eq!(plugins[0].name, "xml_viewer");
         assert_eq!(plugins[0].version, "1.0.0");
         assert_eq!(plugins[0].modes, vec!["text"]);
-        assert_eq!(
-            plugins[0].extensions,
-            vec!["xml", "plist"]
-        );
+        assert_eq!(plugins[0].extensions, vec!["xml", "plist"]);
     }
 
     #[test]
@@ -1341,10 +1338,7 @@ mod tests {
         assert_eq!(plugins[0].name, "markdown_viewer");
         assert_eq!(plugins[0].version, "1.0.0");
         assert_eq!(plugins[0].modes, vec!["text"]);
-        assert_eq!(
-            plugins[0].extensions,
-            vec!["md"]
-        );
+        assert_eq!(plugins[0].extensions, vec!["md"]);
     }
 
     #[test]

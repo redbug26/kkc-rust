@@ -41,6 +41,13 @@ pub(super) fn handle_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
                 s.item_pos = first_selectable(MENU_DATA[new_pos]);
             }
         }
+        KeyCode::Char(c) if open => {
+            if let Some(pos) = menu_item_shortcut(MENU_DATA[bar_pos], item_pos, c) {
+                let action = MENU_DATA[bar_pos][pos].2;
+                app.mode = AppMode::Browse;
+                return execute_menu_action(app, action);
+            }
+        }
         KeyCode::Char(c) => {
             let c_lower = c.to_ascii_lowercase();
             if let Some(pos) = MENU_HEADERS
@@ -124,6 +131,53 @@ fn prev_selectable(items: &[crate::app::MenuEntry], current: usize) -> usize {
         }
     }
     pos
+}
+
+fn menu_item_shortcut(items: &[crate::app::MenuEntry], current: usize, ch: char) -> Option<usize> {
+    let ch = ch.to_ascii_lowercase();
+    let n = items.len();
+    if n == 0 {
+        return None;
+    }
+    let labels = items
+        .iter()
+        .map(|(label, _, action)| {
+            if *action == MenuAction::Separator {
+                String::new()
+            } else {
+                (*label).to_string()
+            }
+        })
+        .collect::<Vec<_>>();
+    let mnemonics = mnemonics_for_labels(&labels);
+
+    (1..=n).map(|offset| (current + offset) % n).find(|&idx| {
+        let (_, _, action) = items[idx];
+        action != MenuAction::Separator && mnemonics.get(idx).copied().flatten() == Some(ch)
+    })
+}
+
+fn mnemonics_for_labels(labels: &[String]) -> Vec<Option<char>> {
+    let mut used = Vec::new();
+    labels
+        .iter()
+        .map(|label| {
+            let candidates = label
+                .chars()
+                .filter(|ch| ch.is_alphanumeric())
+                .map(|ch| ch.to_ascii_lowercase())
+                .collect::<Vec<_>>();
+            let chosen = candidates
+                .iter()
+                .copied()
+                .find(|candidate| !used.contains(candidate))
+                .or_else(|| candidates.first().copied());
+            if let Some(ch) = chosen {
+                used.push(ch);
+            }
+            chosen
+        })
+        .collect()
 }
 
 fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<bool> {
