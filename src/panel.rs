@@ -705,11 +705,16 @@ impl Panel {
         if self.is_remote_view() {
             return None;
         }
+        // Only look for file_id.diz when the cursor is on a directory entry;
+        // for regular files we want the IDF card, not the folder's file_id.diz.
+        let entry = self.current_entry()?;
+        if !entry.is_dir {
+            return None;
+        }
+
         let mut bases = Vec::new();
-        if let Some(entry) = self.current_entry() {
-            if entry.name != ".." && entry.is_dir {
-                bases.push(entry.path.clone());
-            }
+        if entry.name != ".." {
+            bases.push(entry.path.clone());
         }
         bases.push(self.path.clone());
 
