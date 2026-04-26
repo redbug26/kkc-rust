@@ -94,14 +94,8 @@ pub fn render_idf_card(path: &Path) -> Option<String> {
     if let Some(title) = info.title.as_ref().filter(|s| !s.is_empty()) {
         out.push_str(&format!("Title: {}\n", clean_field(title)));
     }
-    out.push_str(&format!(
-        "Type: {}\n",
-        clean_field(&info.format),
-    ));
-     out.push_str(&format!(
-        "Mime: {}\n",
-        clean_field(&info.mime_type)
-    ));
+    out.push_str(&format!("Type: {}\n", clean_field(&info.format),));
+    out.push_str(&format!("Mime: {}\n", clean_field(&info.mime_type)));
     out.push_str(&format!("Name: {}\n", clean_field(&info.detail)));
     if let Some(composer) = info.composer.as_ref().filter(|s| !s.is_empty()) {
         out.push_str(&format!("Composer: {}\n", clean_field(composer)));
@@ -487,6 +481,60 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             vec![],
         ))
+    } else if is_amstrad_dsk(&data, &ext) {
+        Some(info(
+            "application/x-amstrad-cpc-dsk",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
+    } else if is_commodore_d64(&data, &ext) {
+        Some(info(
+            "application/x-c64-d64",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
+    } else if is_torrent(&data, &ext) {
+        Some(info(
+            "application/x-bittorrent",
+            path,
+            IdfKind::Other,
+            torrent_name(&data),
+            None,
+            vec![],
+        ))
+    } else if is_vcard(&data, &ext) {
+        Some(info(
+            "text/vcard",
+            path,
+            IdfKind::Other,
+            vcard_name(&data),
+            None,
+            vec![],
+        ))
+    } else if is_json(&data, &ext) {
+        Some(info(
+            "application/json",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if is_svg(&data, &ext) {
+        Some(info(
+            "image/svg+xml",
+            path,
+            IdfKind::Bitmap,
+            svg_title(&data),
+            None,
+            vec![],
+        ))
     } else if matches!(ext.as_str(), "htm" | "html") || looks_like_html(&data) {
         Some(info(
             "text/html",
@@ -616,6 +664,12 @@ fn format_from_mime_type(mime_type: &str) -> Option<&'static str> {
         "audio/x-xm" => Some("FastTracker module"),
         "audio/x-it" => Some("Impulse Tracker module"),
         "audio/x-mod" => Some("ProTracker module"),
+        "application/x-amstrad-cpc-dsk" => Some("Amstrad CPC DSK image"),
+        "application/x-c64-d64" => Some("Commodore 64 D64 disk image"),
+        "application/x-bittorrent" => Some("BitTorrent metadata"),
+        "text/vcard" => Some("vCard contact"),
+        "application/json" => Some("JSON document"),
+        "image/svg+xml" => Some("SVG vector image"),
         "text/html" => Some("HTML document"),
         "text/plain" => Some("Text file"),
         _ => None,
@@ -1029,6 +1083,97 @@ fn looks_like_html(data: &[u8]) -> bool {
     sample.contains("<html") || sample.contains("<body") || sample.contains("<a href")
 }
 
+fn is_torrent(data: &[u8], ext: &str) -> bool {
+    ext == "torrent"
+        && data.starts_with(b"d")
+        && data.ends_with(b"e")
+        && (data
+            .windows(b"8:announce".len())
+            .any(|w| w == b"8:announce")
+            || data.windows(b"4:info".len()).any(|w| w == b"4:info"))
+}
+
+fn torrent_name(data: &[u8]) -> Option<String> {
+    bencode_string_after_key(data, b"4:name").and_then(|name| String::from_utf8(name).ok())
+}
+
+fn bencode_string_after_key(data: &[u8], key: &[u8]) -> Option<Vec<u8>> {
+    let pos = data.windows(key.len()).position(|w| w == key)? + key.len();
+    let mut idx = pos;
+    while idx < data.len() && data[idx].is_ascii_digit() {
+        idx += 1;
+    }
+    if idx == pos || data.get(idx) != Some(&b':') {
+        return None;
+    }
+    let len = std::str::from_utf8(&data[pos..idx])
+        .ok()?
+        .parse::<usize>()
+        .ok()?;
+    let start = idx + 1;
+    let end = start.checked_add(len)?;
+    (end <= data.len()).then(|| data[start..end].to_vec())
+}
+
+fn is_vcard(data: &[u8], ext: &str) -> bool {
+    ext == "vcf"
+        || String::from_utf8_lossy(&data[..data.len().min(512)])
+            .to_ascii_uppercase()
+            .contains("BEGIN:VCARD")
+}
+
+fn vcard_name(data: &[u8]) -> Option<String> {
+    let text = String::from_utf8_lossy(&data[..data.len().min(4096)]);
+    text.lines()
+        .find_map(|line| {
+            line.strip_prefix("FN:")
+                .or_else(|| line.strip_prefix("fn:"))
+        })
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
+}
+
+fn is_json(data: &[u8], ext: &str) -> bool {
+    if !matches!(ext, "json" | "geojson") {
+        return false;
+    }
+    let sample = String::from_utf8_lossy(&data[..data.len().min(1024)]);
+    let trimmed = sample.trim_start_matches('\u{feff}').trim_start();
+    trimmed.starts_with('{') || trimmed.starts_with('[')
+}
+
+fn is_svg(data: &[u8], ext: &str) -> bool {
+    if ext != "svg" {
+        return false;
+    }
+    let sample = String::from_utf8_lossy(&data[..data.len().min(2048)]).to_ascii_lowercase();
+    sample.contains("<svg") || sample.contains("<!doctype svg")
+}
+
+fn svg_title(data: &[u8]) -> Option<String> {
+    let sample = String::from_utf8_lossy(&data[..data.len().min(8192)]);
+    let lower = sample.to_ascii_lowercase();
+    let start = lower.find("<title>")?;
+    let end = lower[start + 7..].find("</title>")?;
+    let title = sample[start + 7..start + 7 + end].trim();
+    if title.is_empty() {
+        None
+    } else {
+        Some(title.to_string())
+    }
+}
+
+fn is_amstrad_dsk(data: &[u8], ext: &str) -> bool {
+    ext == "dsk"
+        && (data.starts_with(b"MV - CPCEMU Disk-File\r\nDisk-Info\r\n")
+            || data.starts_with(b"EXTENDED CPC DSK File\r\nDisk-Info\r\n"))
+}
+
+fn is_commodore_d64(data: &[u8], ext: &str) -> bool {
+    const D64_SIZES: &[usize] = &[174_848, 175_531, 196_608, 197_376, 205_312];
+    ext == "d64" && D64_SIZES.contains(&data.len())
+}
+
 fn seems_text(data: &[u8]) -> bool {
     let sample = &data[..data.len().min(4096)];
     let bad = sample
@@ -1120,5 +1265,76 @@ mod tests {
         assert_eq!(info.kind, IdfKind::Archive);
 
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn text_formats_are_detected_before_plain_text() {
+        let root = std::env::temp_dir().join(format!("kkc-idf-text-{}", std::process::id()));
+        fs::create_dir_all(&root).expect("temp dir");
+
+        let cases = [
+            (
+                "sample.json",
+                br#"{"name":"KKC"}"#.as_slice(),
+                "application/json",
+                "JSON document",
+            ),
+            (
+                "contact.vcf",
+                b"BEGIN:VCARD\nFN:Test User\nEND:VCARD\n".as_slice(),
+                "text/vcard",
+                "vCard contact",
+            ),
+            (
+                "image.svg",
+                b"<svg><title>Logo</title></svg>".as_slice(),
+                "image/svg+xml",
+                "SVG vector image",
+            ),
+            (
+                "download.torrent",
+                b"d8:announce13:http://tracker4:infod4:name4:demoee".as_slice(),
+                "application/x-bittorrent",
+                "BitTorrent metadata",
+            ),
+        ];
+
+        for (name, data, mime_type, format) in cases {
+            let path = root.join(name);
+            fs::write(&path, data).expect("write sample");
+            let info = probe_file(&path)
+                .expect("probe should not fail")
+                .expect("sample should be detected");
+            assert_eq!(info.mime_type, mime_type);
+            assert_eq!(info.format, format);
+        }
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn disk_images_are_detected() {
+        let root = std::env::temp_dir().join(format!("kkc-idf-disk-{}", std::process::id()));
+        fs::create_dir_all(&root).expect("temp dir");
+
+        let dsk_path = root.join("disk.dsk");
+        let mut dsk = b"MV - CPCEMU Disk-File\r\nDisk-Info\r\n".to_vec();
+        dsk.resize(256, 0);
+        fs::write(&dsk_path, dsk).expect("write dsk");
+        let dsk_info = probe_file(&dsk_path)
+            .expect("probe dsk should not fail")
+            .expect("dsk should be detected");
+        assert_eq!(dsk_info.mime_type, "application/x-amstrad-cpc-dsk");
+        assert_eq!(dsk_info.format, "Amstrad CPC DSK image");
+
+        let d64_path = root.join("disk.d64");
+        fs::write(&d64_path, vec![0u8; 174_848]).expect("write d64");
+        let d64_info = probe_file(&d64_path)
+            .expect("probe d64 should not fail")
+            .expect("d64 should be detected");
+        assert_eq!(d64_info.mime_type, "application/x-c64-d64");
+        assert_eq!(d64_info.format, "Commodore 64 D64 disk image");
+
+        let _ = fs::remove_dir_all(root);
     }
 }
