@@ -552,13 +552,16 @@ fn viewer_area(v: &Viewer, area: Rect) -> Rect {
     let max_width = match v.mode {
         ViewMode::Hex => 80u16,
         ViewMode::Image => area.width.saturating_sub(4).max(40).min(area.width),
-        _ => v
-            .current_plain_lines()
-            .iter()
-            .map(|line| line.chars().count() as u16)
-            .max()
-            .unwrap_or(40)
-            .clamp(40, area.width.saturating_sub(4).max(40)),
+        _ => {
+            let ln = v.line_number_width() as u16;
+            let text_max = v
+                .current_plain_lines()
+                .iter()
+                .map(|line| line.chars().count() as u16)
+                .max()
+                .unwrap_or(40);
+            (text_max + ln).clamp(40, area.width.saturating_sub(4).max(40))
+        }
     };
     let width = (max_width + 2).min(area.width);
     let height = (v.line_count() as u16 + 3).clamp(8, area.height);
