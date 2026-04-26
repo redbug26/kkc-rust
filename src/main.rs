@@ -127,7 +127,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
                 Ok(true) => break,
                 Ok(false) => {}
                 Err(e) => {
-                    app.status.text = format!("Error: {}", e);
+                    app.notify(format!("Error: {}", e));
                 }
             }
         }

@@ -1123,7 +1123,9 @@ fn mnemonics_for_labels(labels: &[String]) -> Vec<Option<char>> {
 
 fn render_confirm(f: &mut Frame, dlg: &ConfirmDialog, area: Rect) {
     match &dlg.action {
-        ConfirmAction::Message => render_confirm_message(f, dlg, area),
+        ConfirmAction::Message | ConfirmAction::MessageThen(_) => {
+            render_confirm_message(f, dlg, area)
+        }
         ConfirmAction::Quit => render_confirm_quit(f, area),
         ConfirmAction::Delete(paths) => render_confirm_delete(f, &dlg.message, paths.len(), area),
         ConfirmAction::DeleteRemote(targets) => {
@@ -1132,9 +1134,71 @@ fn render_confirm(f: &mut Frame, dlg: &ConfirmDialog, area: Rect) {
     }
 }
 
+/// Hard-wrap `msg` to fit within `max_width` display columns.
+/// Tabs are expanded to 2 spaces. Word-breaks are preferred; hard-breaks
+/// are used when a single token exceeds the available width.
+fn wrap_message(msg: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return msg.to_string();
+    }
+    let mut result = String::new();
+    for raw_line in msg.lines() {
+        let line = raw_line.replace('\t', "  ");
+        if line.is_empty() {
+            result.push('\n');
+            continue;
+        }
+        let mut remaining: &str = &line;
+        while !remaining.is_empty() {
+            let mut acc = 0usize;
+            let mut last_space: Option<usize> = None;
+            let mut hard_cut: Option<usize> = None;
+            for (i, ch) in remaining.char_indices() {
+                let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+                if acc + cw > max_width {
+                    hard_cut = Some(i);
+                    break;
+                }
+                acc += cw;
+                if ch == ' ' {
+                    last_space = Some(i);
+                }
+            }
+            match hard_cut {
+                None => {
+                    result.push_str(remaining);
+                    result.push('\n');
+                    break;
+                }
+                Some(cut) => {
+                    let split = last_space.unwrap_or(cut);
+                    result.push_str(&remaining[..split]);
+                    result.push('\n');
+                    remaining = remaining[split..].trim_start_matches(' ');
+                }
+            }
+        }
+    }
+    result
+}
+
 fn render_confirm_message(f: &mut Frame, dlg: &ConfirmDialog, area: Rect) {
-    let width = 56u16.min(area.width.saturating_sub(4));
-    let height = 9u16.min(area.height.saturating_sub(2).max(4));
+    let max_w = area.width.saturating_sub(4);
+    let width = 72u16.min(max_w).max(40);
+    // 2 border cols + 2 padding cols = 4 reserved
+    let text_w = width.saturating_sub(4) as usize;
+
+    // Pre-wrap so we know the exact row count (and avoid ratatui overflowing
+    // long unbreakable tokens like Lua file paths).
+    let wrapped = wrap_message(&dlg.message, text_w);
+    let msg_rows = wrapped.lines().count().max(1) as u16;
+
+    // borders(2) + top_pad(1) + text rows + bottom_pad(1) + ok_btn(1) + hint(1)
+    let desired_h = msg_rows + 6;
+    let height = desired_h
+        .max(8)
+        .min(area.height.saturating_sub(2).max(8));
+
     let popup = clamp_rect(
         area,
         Rect {
@@ -1146,26 +1210,34 @@ fn render_confirm_message(f: &mut Frame, dlg: &ConfirmDialog, area: Rect) {
     );
     safe_render_widget(f, Clear, popup);
 
+    let title_str = if dlg.title.is_empty() {
+        " Notice ".to_string()
+    } else {
+        format!(" {} ", dlg.title)
+    };
+
     let block = Block::default()
-        .title(format!(" {} ", dlg.title))
+        .title(title_str)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(CLR_PANEL_BORDER))
         .style(Style::default().bg(CLR_MENU_DD_BG));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
 
+    // Available rows for message text (leave room for OK button + hint)
+    let msg_h = inner.height.saturating_sub(3).max(1);
     safe_render_widget(
         f,
-        Paragraph::new(dlg.message.as_str())
-            .alignment(Alignment::Center)
+        Paragraph::new(wrapped.as_str())
             .style(Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)),
         Rect {
-            x: inner.x,
+            x: inner.x + 1,
             y: inner.y + 1,
-            width: inner.width,
-            height: inner.height.saturating_sub(3).max(1),
+            width: inner.width.saturating_sub(2),
+            height: msg_h,
         },
     );
+
     safe_render_widget(
         f,
         Paragraph::new(" [ OK ] ")

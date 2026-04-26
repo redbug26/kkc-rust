@@ -523,17 +523,18 @@ impl AssocEditorState {
 // Dialogs
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ConfirmDialog {
-    #[allow(dead_code)]
     pub title: String,
     pub message: String,
     pub action: ConfirmAction,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum ConfirmAction {
     Message,
+    /// Show message, then switch to this mode on dismiss.
+    MessageThen(Box<AppMode>),
     Quit,
     Delete(Vec<PathBuf>),
     DeleteRemote(Vec<RemoteDeleteTarget>),
@@ -730,10 +731,16 @@ impl App {
             right_tabs,
             active: ActivePanel::Left,
             file_id_preview: false,
-            mode: AppMode::Browse,
-            status: StatusMessage {
-                text: plugin_status.unwrap_or_default(),
+            mode: if let Some(msg) = plugin_status {
+                AppMode::Confirm(ConfirmDialog {
+                    title: String::new(),
+                    message: msg,
+                    action: ConfirmAction::Message,
+                })
+            } else {
+                AppMode::Browse
             },
+            status: StatusMessage::default(),
             dir_history: history,
             bookmarks,
             bookmark_cursor: 0,
@@ -847,15 +854,15 @@ impl App {
             ActivePanel::Left => PanelTabs::close_tab(&mut self.left, &mut self.left_tabs),
             ActivePanel::Right => PanelTabs::close_tab(&mut self.right, &mut self.right_tabs),
         };
-        self.status.text = if closed {
-            format!(
+        if closed {
+            self.status.text = format!(
                 "Tab {}/{}",
                 self.active_panel_tab_index() + 1,
                 self.active_panel_tab_count()
-            )
+            );
         } else {
-            "Cannot close last tab".into()
-        };
+            self.notify("Cannot close last tab");
+        }
     }
 
     pub fn next_active_tab(&mut self) {
@@ -870,6 +877,15 @@ impl App {
                 self.active_panel_tab_count()
             );
         }
+    }
+
+    /// Show a notification dialog (dismissible with Enter/Esc).
+    pub fn notify(&mut self, message: impl Into<String>) {
+        self.mode = AppMode::Confirm(ConfirmDialog {
+            title: String::new(),
+            message: message.into(),
+            action: ConfirmAction::Message,
+        });
     }
 
     pub fn open_dir_bookmarks(&mut self) {
@@ -1033,15 +1049,15 @@ impl App {
     pub fn open_copy_dialog(&mut self) {
         if self.other_panel().is_archive_view() {
             let Some(archive_path) = self.other_panel().archive_path() else {
-                self.status.text = "Archive destination is not available".into();
+                self.notify("Archive destination is not available");
                 return;
             };
             if self.active_panel().is_archive_view() || self.active_panel().is_remote_view() {
-                self.status.text = "Copy to archive is supported from local files only".into();
+                self.notify("Copy to archive is supported from local files only");
                 return;
             }
             if !crate::plugins::supports_archive_add_files(archive_path) {
-                self.status.text = "Copy to this archive format is not supported".into();
+                self.notify("Copy to this archive format is not supported");
                 return;
             }
             if self
@@ -1050,16 +1066,16 @@ impl App {
                 .iter()
                 .any(|entry| entry.is_dir)
             {
-                self.status.text = "Copying directories to archive is not supported".into();
+                self.notify("Copying directories to archive is not supported");
                 return;
             }
         }
         if self.other_panel().is_archive_view() && self.active_panel().is_remote_view() {
-            self.status.text = "Copy from remote to archive is not supported".into();
+            self.notify("Copy from remote to archive is not supported");
             return;
         }
         if self.active_panel().is_archive_view() && self.other_panel().is_remote_view() {
-            self.status.text = "Copy from archive to remote is not supported".into();
+            self.notify("Copy from archive to remote is not supported");
             return;
         }
         let selection = self
@@ -1205,7 +1221,7 @@ impl App {
         if let Some(profile) = profile {
             self.mode = AppMode::RemoteEdit(RemoteEditState::from_profile(&profile));
         } else {
-            self.status.text = "Only user-defined (toml) connections can be edited".into();
+            self.notify("Only user-defined (toml) connections can be edited");
         }
     }
 
@@ -1315,12 +1331,17 @@ impl App {
                     self.mode = AppMode::Browse;
                 }
                 RemoteConnectMessage::Failed(err) => {
-                    self.status.text = format!("Remote connect failed: {}", err);
-                    self.mode = AppMode::RemoteConnect(
-                        self.remote_connect_return
-                            .take()
-                            .unwrap_or_else(RemoteConnectState::load),
-                    );
+                    let return_state = self
+                        .remote_connect_return
+                        .take()
+                        .unwrap_or_else(RemoteConnectState::load);
+                    self.mode = AppMode::Confirm(ConfirmDialog {
+                        title: String::new(),
+                        message: format!("Remote connect failed: {}", err),
+                        action: ConfirmAction::MessageThen(Box::new(
+                            AppMode::RemoteConnect(return_state),
+                        )),
+                    });
                 }
             }
         }
@@ -1393,13 +1414,14 @@ impl App {
             if self.config.auto_reload {
                 self.reload_panels();
             }
-            self.status.text = if aborted {
-                "Copy aborted".into()
+            let msg = if aborted {
+                "Copy aborted".to_string()
             } else if errors.is_empty() {
                 format!("Copied {} item(s)", copied_items)
             } else {
                 format!("Errors: {}", errors.join("; "))
             };
+            self.notify(msg);
         }
     }
 
@@ -1471,11 +1493,10 @@ impl App {
                 .collect::<Vec<_>>();
             if crate::plugins::add_files_to_archive(&archive_path, &source_paths)? {
                 self.other_panel_mut().enter_archive(archive_path.clone())?;
-                self.mode = AppMode::Browse;
-                self.status.text = format!("Copied {} file(s) to archive", source_paths.len());
+                self.notify(format!("Copied {} file(s) to archive", source_paths.len()));
                 return Ok(());
             }
-            self.status.text = "Copy to this archive format is not supported".into();
+            self.notify("Copy to this archive format is not supported");
             return Ok(());
         }
 
@@ -1531,7 +1552,7 @@ impl App {
 
     pub fn cmd_move(&mut self) -> Result<()> {
         if self.active_panel().is_archive_view() || self.other_panel().is_archive_view() {
-            self.status.text = "Move in archive is not supported".into();
+            self.notify("Move in archive is not supported");
             return Ok(());
         }
         let sources = self
@@ -1560,16 +1581,16 @@ impl App {
             self.reload_panels();
         }
         if errors.is_empty() {
-            self.status.text = format!("Moved {} item(s)", sources.len());
+            self.notify(format!("Moved {} item(s)", sources.len()));
         } else {
-            self.status.text = format!("Errors: {}", errors.join("; "));
+            self.notify(format!("Errors: {}", errors.join("; ")));
         }
         Ok(())
     }
 
     pub fn cmd_delete_confirmed(&mut self, paths: Vec<PathBuf>) -> Result<()> {
         if self.active_panel().is_archive_view() {
-            self.status.text = "Delete in archive is not supported".into();
+            self.notify("Delete in archive is not supported");
             return Ok(());
         }
         let mut errors = Vec::new();
@@ -1582,9 +1603,9 @@ impl App {
             self.reload_panels();
         }
         if errors.is_empty() {
-            self.status.text = format!("Deleted {} item(s)", paths.len());
+            self.notify(format!("Deleted {} item(s)", paths.len()));
         } else {
-            self.status.text = format!("Errors: {}", errors.join("; "));
+            self.notify(format!("Errors: {}", errors.join("; ")));
         }
         Ok(())
     }
@@ -1603,9 +1624,9 @@ impl App {
             self.reload_panels();
         }
         if errors.is_empty() {
-            self.status.text = format!("Deleted {} item(s)", targets.len());
+            self.notify(format!("Deleted {} item(s)", targets.len()));
         } else {
-            self.status.text = format!("Errors: {}", errors.join("; "));
+            self.notify(format!("Errors: {}", errors.join("; ")));
         }
         Ok(())
     }
@@ -1669,12 +1690,12 @@ impl App {
     pub fn open_viewer(&mut self) {
         if let Some(entry) = self.active_panel().current_entry().cloned() {
             if entry.is_dir || entry.name == ".." {
-                self.status.text = "Cannot view a directory".into();
+                self.notify("Cannot view a directory");
                 return;
             }
             let view_path = if self.active_panel().is_remote_view() {
                 let Some(profile) = self.active_panel().remote_profile() else {
-                    self.status.text = "Remote profile missing".into();
+                    self.notify("Remote profile missing");
                     return;
                 };
                 match self.run_with_busy("Remote: downloading file...", |_| {
@@ -1682,7 +1703,7 @@ impl App {
                 }) {
                     Ok(path) => path,
                     Err(e) => {
-                        self.status.text = format!("Remote download failed: {}", e);
+                        self.notify(format!("Remote download failed: {}", e));
                         return;
                     }
                 }
@@ -1691,7 +1712,7 @@ impl App {
             };
             match Viewer::open(&view_path, self.config.viewer.word_wrap) {
                 Ok(v) => self.mode = AppMode::Viewer(v),
-                Err(e) => self.status.text = format!("Cannot open viewer: {}", e),
+                Err(e) => self.notify(format!("Cannot open viewer: {}", e)),
             }
         }
     }

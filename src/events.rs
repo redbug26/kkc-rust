@@ -288,7 +288,7 @@ fn handle_enter(app: &mut App) -> Result<()> {
     } else if crate::plugins::is_plugin_bundle(&entry.path) {
         let bundle_path = if app.active_panel().is_remote_view() {
             let Some(profile) = app.active_panel().remote_profile() else {
-                app.status.text = "Remote profile missing".into();
+                app.notify("Remote profile missing");
                 return Ok(());
             };
             match app.run_with_busy("Remote: downloading plugin...", |_| {
@@ -296,7 +296,7 @@ fn handle_enter(app: &mut App) -> Result<()> {
             }) {
                 Ok(path) => path,
                 Err(e) => {
-                    app.status.text = format!("Remote download failed: {}", e);
+                    app.notify(format!("Remote download failed: {}", e));
                     return Ok(());
                 }
             }
@@ -312,16 +312,16 @@ fn handle_enter(app: &mut App) -> Result<()> {
                     action: ConfirmAction::Message,
                 });
             }
-            Err(e) => app.status.text = format!("Cannot install plugin: {}", e),
+            Err(e) => app.notify(format!("Cannot install plugin: {}", e)),
         }
     } else if supports_archive_navigation(&entry.path) {
         if let Err(e) = app.enter_archive(entry.path.clone()) {
-            app.status.text = format!("Cannot enter archive: {}", e);
+            app.notify(format!("Cannot enter archive: {}", e));
         }
     } else {
         let launch_path = if app.active_panel().is_remote_view() {
             let Some(profile) = app.active_panel().remote_profile() else {
-                app.status.text = "Remote profile missing".into();
+                app.notify("Remote profile missing");
                 return Ok(());
             };
             match app.run_with_busy("Remote: downloading file...", |_| {
@@ -329,7 +329,7 @@ fn handle_enter(app: &mut App) -> Result<()> {
             }) {
                 Ok(path) => path,
                 Err(e) => {
-                    app.status.text = format!("Remote download failed: {}", e);
+                    app.notify(format!("Remote download failed: {}", e));
                     return Ok(());
                 }
             }
@@ -347,7 +347,7 @@ fn handle_enter(app: &mut App) -> Result<()> {
             0 => {
                 // No association: fall back to system default
                 if let Err(e) = open::that(&launch_path) {
-                    app.status.text = format!("Cannot open: {}", e);
+                    app.notify(format!("Cannot open: {}", e));
                 }
             }
             1 => {
@@ -389,7 +389,7 @@ fn launch_external(app: &mut App, command: &str, path: &std::path::Path) -> Resu
     };
 
     if args.is_empty() {
-        app.status.text = "Empty opener command".into();
+        app.notify("Empty opener command");
         return Ok(());
     }
 
@@ -422,7 +422,7 @@ fn confirm_quit(app: &mut App) -> Result<bool> {
 
 fn launch_editor(app: &mut App) -> Result<()> {
     if app.active_panel().is_archive_view() {
-        app.status.text = "Editing in archive is not supported".into();
+        app.notify("Editing in archive is not supported");
         return Ok(());
     }
     let entry = match app.active_panel().current_entry() {
@@ -433,7 +433,7 @@ fn launch_editor(app: &mut App) -> Result<()> {
     let editor = app.config.editor.clone();
     let path = if app.active_panel().is_remote_view() {
         let Some(profile) = app.active_panel().remote_profile() else {
-            app.status.text = "Remote profile missing".into();
+            app.notify("Remote profile missing");
             return Ok(());
         };
         match app.run_with_busy("Remote: downloading file...", |_| {
@@ -441,7 +441,7 @@ fn launch_editor(app: &mut App) -> Result<()> {
         }) {
             Ok(path) => path,
             Err(e) => {
-                app.status.text = format!("Remote download failed: {}", e);
+                app.notify(format!("Remote download failed: {}", e));
                 return Ok(());
             }
         }
@@ -464,7 +464,7 @@ fn launch_editor(app: &mut App) -> Result<()> {
         if let Err(e) = app.run_with_busy("Remote: uploading file...", |_| {
             upload_into_dir(&profile, &path, &remote_dir, false).map(|_| ())
         }) {
-            app.status.text = format!("Remote upload failed: {}", e);
+            app.notify(format!("Remote upload failed: {}", e));
         }
     }
 
@@ -481,7 +481,7 @@ fn launch_editor(app: &mut App) -> Result<()> {
 
 fn start_rename(app: &mut App) {
     if app.active_panel().is_archive_view() {
-        app.status.text = "Rename in archive is not supported".into();
+        app.notify("Rename in archive is not supported");
         return;
     }
     if let Some(entry) = app.active_panel().current_entry() {
@@ -510,7 +510,7 @@ fn start_rename(app: &mut App) {
 
 fn start_mkdir(app: &mut App) {
     if app.active_panel().is_archive_view() {
-        app.status.text = "Create directory in archive is not supported".into();
+        app.notify("Create directory in archive is not supported");
         return;
     }
     let action = if let Some(profile) = app.active_panel().remote_profile() {
@@ -638,16 +638,22 @@ fn handle_quicksearch(app: &mut App, key: KeyEvent) -> Result<bool> {
 // ---------------------------------------------------------------------------
 
 fn handle_confirm(app: &mut App, key: KeyEvent) -> Result<bool> {
-    let AppMode::Confirm(ref dlg) = app.mode else {
+    let AppMode::Confirm(_) = &app.mode else {
         return Ok(false);
     };
 
     match key.code {
         KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-            let action = dlg.action.clone();
-            app.mode = AppMode::Browse;
-            match action {
+            let AppMode::Confirm(dlg) =
+                std::mem::replace(&mut app.mode, AppMode::Browse)
+            else {
+                return Ok(false);
+            };
+            match dlg.action {
                 ConfirmAction::Message => {}
+                ConfirmAction::MessageThen(next) => {
+                    app.mode = *next;
+                }
                 ConfirmAction::Quit => return Ok(true),
                 ConfirmAction::Delete(paths) => {
                     app.cmd_delete_confirmed(paths)?;
@@ -686,25 +692,25 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             match action {
                 InputAction::Rename(path) => match crate::file_ops::rename_entry(&path, &value) {
                     Ok(_) => {
-                        app.status.text = format!("Renamed to '{}'", value);
+                        app.notify(format!("Renamed to '{}'", value));
                         if app.config.auto_reload {
                             app.reload_panels();
                         }
                     }
-                    Err(e) => app.status.text = format!("Rename error: {}", e),
+                    Err(e) => app.notify(format!("Rename error: {}", e)),
                 },
                 InputAction::Mkdir(parent) => match crate::file_ops::make_dir(&parent, &value) {
                     Ok(_) => {
-                        app.status.text = format!("Created directory '{}'", value);
+                        app.notify(format!("Created directory '{}'", value));
                         if app.config.auto_reload {
                             app.reload_panels();
                         }
                     }
-                    Err(e) => app.status.text = format!("mkdir error: {}", e),
+                    Err(e) => app.notify(format!("mkdir error: {}", e)),
                 },
                 InputAction::RemoteRename { profile, path } => {
                     let Some(parent) = std::path::Path::new(&path).parent() else {
-                        app.status.text = "Rename error: invalid remote path".into();
+                        app.notify("Rename error: invalid remote path");
                         return Ok(false);
                     };
                     let dst = join_remote(&parent.to_string_lossy(), &value);
@@ -712,12 +718,12 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                         remote_rename_path(&profile, &path, &dst)
                     }) {
                         Ok(_) => {
-                            app.status.text = format!("Renamed to '{}'", value);
+                            app.notify(format!("Renamed to '{}'", value));
                             if app.config.auto_reload {
                                 app.reload_panels();
                             }
                         }
-                        Err(e) => app.status.text = format!("Rename error: {}", e),
+                        Err(e) => app.notify(format!("Rename error: {}", e)),
                     }
                 }
                 InputAction::RemoteMkdir { profile, parent } => {
@@ -726,12 +732,12 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                         remote_make_dir(&profile, &path)
                     }) {
                         Ok(_) => {
-                            app.status.text = format!("Created directory '{}'", value);
+                            app.notify(format!("Created directory '{}'", value));
                             if app.config.auto_reload {
                                 app.reload_panels();
                             }
                         }
-                        Err(e) => app.status.text = format!("mkdir error: {}", e),
+                        Err(e) => app.notify(format!("mkdir error: {}", e)),
                     }
                 }
                 InputAction::SelectPattern => {
@@ -745,7 +751,7 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                     if path.is_dir() {
                         app.enter_dir(path)?;
                     } else {
-                        app.status.text = format!("Not a directory: {}", value);
+                        app.notify(format!("Not a directory: {}", value));
                     }
                 }
                 InputAction::AssocAddExt => {
