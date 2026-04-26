@@ -414,6 +414,25 @@ impl Viewer {
         self.scroll = self.line_count().saturating_sub(height.max(1));
     }
 
+    /// Jump to a 0-based line index, clamped to the valid range.
+    pub fn goto_line(&mut self, line: usize) {
+        self.scroll = line.min(self.line_count().saturating_sub(1));
+    }
+
+    /// Width (in terminal columns) of the line-number gutter for text/ansi modes.
+    /// e.g. for 999 lines → "999│ " = 5, for 9 lines → "9│ " = 3.
+    /// Returns 0 for hex/image/plugin-document modes.
+    pub fn line_number_width(&self) -> usize {
+        if !matches!(self.mode, ViewMode::Text | ViewMode::Ansi)
+            || self.viewer_plugin.is_some()
+        {
+            return 0;
+        }
+        let n = self.line_count().max(1);
+        let digits = n.ilog10() as usize + 1;
+        digits + 2 // digits + "│ "
+    }
+
     pub fn scroll_left(&mut self, amount: usize) {
         if matches!(self.mode, ViewMode::Text | ViewMode::Ansi) && !self.wrap {
             self.hscroll = self.hscroll.saturating_sub(amount);

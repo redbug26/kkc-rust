@@ -84,6 +84,13 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
             app.mode = AppMode::ViewerMenu(v, menu);
             return Ok(false);
         }
+        KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            let AppMode::Viewer(v) = std::mem::replace(&mut app.mode, AppMode::Browse) else {
+                return Ok(false);
+            };
+            app.mode = AppMode::ViewerGotoLine(v, String::new());
+            return Ok(false);
+        }
         _ => {}
     }
 
@@ -592,6 +599,50 @@ pub(super) fn handle_viewer_searching(app: &mut App, key: KeyEvent) -> Result<bo
                 v.search.push(ch);
                 let s = v.search.clone();
                 v.search_set(&s);
+            }
+        }
+        _ => {}
+    }
+    Ok(false)
+}
+
+pub(super) fn handle_viewer_goto_line(app: &mut App, key: KeyEvent) -> Result<bool> {
+    match key.code {
+        KeyCode::Esc => {
+            let AppMode::ViewerGotoLine(v, _) =
+                std::mem::replace(&mut app.mode, AppMode::Browse)
+            else {
+                return Ok(false);
+            };
+            app.mode = AppMode::Viewer(v);
+        }
+        KeyCode::F(10) => {
+            if let AppMode::ViewerGotoLine(ref v, _) = app.mode {
+                v.save_position();
+            }
+            app.mode = AppMode::Browse;
+        }
+        KeyCode::Enter => {
+            let AppMode::ViewerGotoLine(mut v, input) =
+                std::mem::replace(&mut app.mode, AppMode::Browse)
+            else {
+                return Ok(false);
+            };
+            if let Ok(n) = input.parse::<usize>() {
+                if n > 0 {
+                    v.goto_line(n - 1);
+                }
+            }
+            app.mode = AppMode::Viewer(v);
+        }
+        KeyCode::Backspace => {
+            if let AppMode::ViewerGotoLine(_, ref mut input) = app.mode {
+                input.pop();
+            }
+        }
+        KeyCode::Char(ch) if ch.is_ascii_digit() => {
+            if let AppMode::ViewerGotoLine(_, ref mut input) = app.mode {
+                input.push(ch);
             }
         }
         _ => {}

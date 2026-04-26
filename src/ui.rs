@@ -125,20 +125,24 @@ pub fn render(f: &mut Frame, app: &App) {
 
     match &app.mode {
         AppMode::Viewer(v) => {
-            render_viewer(f, v, false, f.area());
+            render_viewer(f, v, false, None, f.area());
             return;
         }
         AppMode::ViewerSearching(v) => {
-            render_viewer(f, v, true, f.area());
+            render_viewer(f, v, true, None, f.area());
+            return;
+        }
+        AppMode::ViewerGotoLine(v, input) => {
+            render_viewer(f, v, false, Some(input), f.area());
             return;
         }
         AppMode::ViewerMenu(v, menu) => {
-            render_viewer(f, v, false, f.area());
+            render_viewer(f, v, false, None, f.area());
             render_viewer_menu(f, v, menu, f.area());
             return;
         }
         AppMode::ViewerPluginPalette(v, state) => {
-            render_viewer(f, v, false, f.area());
+            render_viewer(f, v, false, None, f.area());
             render_viewer_plugin_palette(f, state, f.area());
             return;
         }
@@ -585,7 +589,7 @@ pub fn kitty_image_area(v: &Viewer, area: Rect) -> Option<Rect> {
     }
 }
 
-fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
+fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, goto_input: Option<&str>, area: Rect) {
     let footer_area = clamp_rect(
         area,
         Rect {
@@ -730,9 +734,19 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
     let height = inner.height as usize;
     let width = inner.width as usize;
 
+    // Line-number gutter (text/ansi modes only, not for plugin documents).
+    let ln_width = v.line_number_width();
+    let total_lines = v.line_count();
+    let ln_digits = if ln_width > 0 {
+        total_lines.max(1).ilog10() as usize + 1
+    } else {
+        0
+    };
+    let text_width = width.saturating_sub(ln_width);
+
     let search_lower = v.search.to_lowercase();
     let items: Vec<Line> = v
-        .render_lines(width, v.scroll, height)
+        .render_lines(text_width, v.scroll, height)
         .into_iter()
         .enumerate()
         .map(|(rel_idx, line)| {
@@ -745,18 +759,30 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
             let is_match = !search_lower.is_empty() && plain.to_lowercase().contains(&search_lower);
             let is_current_match = is_match && v.matches.get(v.match_pos).copied() == Some(abs_idx);
 
-            if is_current_match {
+            let content_line = if is_current_match {
                 Line::from(vec![Span::styled(
-                    truncate_str(&plain, width),
+                    truncate_str(&plain, text_width),
                     Style::default().fg(Color::Black).bg(Color::Yellow),
                 )])
             } else if is_match {
                 Line::from(vec![Span::styled(
-                    truncate_str(&plain, width),
+                    truncate_str(&plain, text_width),
                     Style::default().fg(Color::Black).bg(Color::LightYellow),
                 )])
             } else {
                 line
+            };
+
+            if ln_width > 0 {
+                let num_str = format!("{:>width$}\u{2502} ", abs_idx + 1, width = ln_digits);
+                let mut spans = vec![Span::styled(
+                    num_str,
+                    Style::default().fg(Color::Rgb(90, 110, 150)),
+                )];
+                spans.extend(content_line.spans);
+                Line::from(spans)
+            } else {
+                content_line
             }
         })
         .collect();
@@ -791,8 +817,18 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, area: Rect) {
         let cx =
             (footer_area.x + 9 + v.search.len() as u16).min(footer_area.x + footer_area.width - 1);
         safe_set_cursor_position(f, cx, footer_area.y);
+    } else if let Some(input) = goto_input {
+        let bar_text = format!(" Goto line: {}_ ", input);
+        f.render_widget(
+            Paragraph::new(bar_text)
+                .style(Style::default().fg(Color::Black).bg(Color::LightCyan)),
+            footer_area,
+        );
+        let cx = (footer_area.x + 12 + input.len() as u16)
+            .min(footer_area.x + footer_area.width - 1);
+        safe_set_cursor_position(f, cx, footer_area.y);
     } else {
-        let help = Paragraph::new(" F10:Close  F2:Wrap  F3:LnFeed  F4:Mode  F5:Zoom  F6:Prepro  F7:Search  F8:Enc  F9:Mask ")
+        let help = Paragraph::new(" F10:Close  F2:Wrap  F3:LnFeed  F4:Mode  F5:Zoom  F6:Prepro  F7:Search  F8:Enc  F9:Mask  ^G:Goto ")
             .style(Style::default().fg(Color::Black).bg(Color::Cyan));
         f.render_widget(help, footer_area);
     }

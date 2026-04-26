@@ -71,6 +71,8 @@ pub enum AppMode {
     Viewer(Viewer),
     /// Viewer with the '/' search bar active.
     ViewerSearching(Viewer),
+    /// Viewer with the Ctrl-G goto-line input active.
+    ViewerGotoLine(Viewer, String),
     /// Viewer with a popup choice menu.
     ViewerMenu(Viewer, ViewerMenuState),
     /// Viewer plugin picker with a quick-palette filter.
