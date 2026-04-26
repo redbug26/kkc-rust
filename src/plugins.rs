@@ -24,6 +24,7 @@ const BUNDLED_CSV_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/csv_view
 const BUNDLED_MARKDOWN_VIEWER_PLUGIN: &str =
     include_str!("../assets/plugins/markdown_viewer/plugin.lua");
 const BUNDLED_TEXT_SYNTAX_PLUGIN: &str = include_str!("../assets/plugins/text_syntax/plugin.lua");
+const BUNDLED_GIT_ACTION_PLUGIN: &str = include_str!("../assets/plugins/git_action/plugin.lua");
 
 static PLUGINS: OnceLock<RwLock<PluginRegistry>> = OnceLock::new();
 
@@ -31,6 +32,7 @@ static PLUGINS: OnceLock<RwLock<PluginRegistry>> = OnceLock::new();
 pub struct PluginRegistry {
     archive_plugins: Vec<ArchivePlugin>,
     viewer_plugins: Vec<ViewerPlugin>,
+    action_plugins: Vec<ActionPlugin>,
 }
 
 #[derive(Debug, Clone)]
@@ -67,6 +69,15 @@ struct ViewerPlugin {
 }
 
 #[derive(Debug, Clone)]
+struct ActionPlugin {
+    name: String,
+    version: String,
+    description: String,
+    script_path: PathBuf,
+    plugin_dir: PathBuf,
+}
+
+#[derive(Debug, Clone)]
 struct RegisteredPlugin {
     name: String,
     version: String,
@@ -84,6 +95,22 @@ struct RegisteredViewerPlugin {
     modes: Vec<String>,
     mime_types: Vec<String>,
     extensions: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct RegisteredActionPlugin {
+    name: String,
+    version: String,
+    description: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ActionItem {
+    pub plugin: String,
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub prompt: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -250,6 +277,33 @@ pub fn viewer_plugins_for_path(path: &Path) -> Vec<String> {
         .unwrap_or_default()
 }
 
+pub fn action_items(cwd: &Path) -> Vec<ActionItem> {
+    PLUGINS
+        .get()
+        .and_then(|registry| {
+            registry
+                .read()
+                .ok()
+                .map(|registry| registry.action_items(cwd).unwrap_or_default())
+        })
+        .unwrap_or_default()
+}
+
+pub fn run_action(
+    plugin: &str,
+    action_id: &str,
+    cwd: &Path,
+    input: Option<&str>,
+) -> Result<String> {
+    let Some(registry) = PLUGINS.get() else {
+        bail!("Plugin registry is not initialized");
+    };
+    registry
+        .read()
+        .map_err(|_| anyhow!("Plugin registry lock poisoned"))?
+        .run_action(plugin, action_id, cwd, input)
+}
+
 pub fn is_plugin_bundle(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
@@ -283,8 +337,9 @@ fn load_plugins() -> Result<PluginRegistry> {
 
     let mut archive_plugins = Vec::new();
     let mut viewer_plugins = Vec::new();
+    let mut action_plugins = Vec::new();
     for script_path in plugin_scripts(&plugins_dir)? {
-        let (registered, registered_viewers) = inspect_plugins(&script_path)
+        let (registered, registered_viewers, registered_actions) = inspect_plugins(&script_path)
             .with_context(|| format!("Loading plugin {}", script_path.display()))?;
         let plugin_dir = script_path
             .parent()
@@ -315,11 +370,21 @@ fn load_plugins() -> Result<PluginRegistry> {
                 extensions: plugin.extensions,
             });
         }
+        for plugin in registered_actions {
+            action_plugins.push(ActionPlugin {
+                name: plugin.name,
+                version: plugin.version,
+                description: plugin.description,
+                script_path: script_path.clone(),
+                plugin_dir: plugin_dir.clone(),
+            });
+        }
     }
 
     Ok(PluginRegistry {
         archive_plugins,
         viewer_plugins,
+        action_plugins,
     })
 }
 
@@ -385,6 +450,13 @@ fn install_bundled_plugins(plugins_dir: &Path) -> Result<()> {
     let syntax_dir = plugins_dir.join("text_syntax");
     fs::create_dir_all(&syntax_dir)?;
     write_bundled_file(&syntax_dir.join("plugin.lua"), BUNDLED_TEXT_SYNTAX_PLUGIN)?;
+
+    let git_action_dir = plugins_dir.join("git_action");
+    fs::create_dir_all(&git_action_dir)?;
+    write_bundled_file(
+        &git_action_dir.join("plugin.lua"),
+        BUNDLED_GIT_ACTION_PLUGIN,
+    )?;
 
     Ok(())
 }
@@ -568,10 +640,15 @@ fn inspect_plugin(script_path: &Path) -> Result<Vec<RegisteredPlugin>> {
 
 fn inspect_plugins(
     script_path: &Path,
-) -> Result<(Vec<RegisteredPlugin>, Vec<RegisteredViewerPlugin>)> {
+) -> Result<(
+    Vec<RegisteredPlugin>,
+    Vec<RegisteredViewerPlugin>,
+    Vec<RegisteredActionPlugin>,
+)> {
     let lua = plugin_lua();
     let registered_archives = Rc::new(RefCell::new(Vec::new()));
     let registered_viewers = Rc::new(RefCell::new(Vec::new()));
+    let registered_actions = Rc::new(RefCell::new(Vec::new()));
     install_bindings(&lua, script_path.parent().unwrap_or(Path::new("")), {
         let registered_archives = Rc::clone(&registered_archives);
         move |plugin| registered_archives.borrow_mut().push(plugin)
@@ -579,6 +656,10 @@ fn inspect_plugins(
     install_viewer_registration(&lua, {
         let registered_viewers = Rc::clone(&registered_viewers);
         move |plugin| registered_viewers.borrow_mut().push(plugin)
+    })?;
+    install_action_registration(&lua, {
+        let registered_actions = Rc::clone(&registered_actions);
+        move |plugin| registered_actions.borrow_mut().push(plugin)
     })?;
 
     let script = fs::read_to_string(script_path)?;
@@ -589,6 +670,7 @@ fn inspect_plugins(
     Ok((
         registered_archives.borrow().clone(),
         registered_viewers.borrow().clone(),
+        registered_actions.borrow().clone(),
     ))
 }
 
@@ -598,6 +680,24 @@ fn inspect_viewer_plugin(script_path: &Path) -> Result<Vec<RegisteredViewerPlugi
     let registered = Rc::new(RefCell::new(Vec::new()));
     install_bindings(&lua, script_path.parent().unwrap_or(Path::new("")), |_| {})?;
     install_viewer_registration(&lua, {
+        let registered = Rc::clone(&registered);
+        move |plugin| registered.borrow_mut().push(plugin)
+    })?;
+
+    let script = fs::read_to_string(script_path)?;
+    lua.load(&script)
+        .set_name(script_path.to_string_lossy())
+        .exec()?;
+
+    Ok(registered.borrow().clone())
+}
+
+#[cfg(test)]
+fn inspect_action_plugin(script_path: &Path) -> Result<Vec<RegisteredActionPlugin>> {
+    let lua = plugin_lua();
+    let registered = Rc::new(RefCell::new(Vec::new()));
+    install_bindings(&lua, script_path.parent().unwrap_or(Path::new("")), |_| {})?;
+    install_action_registration(&lua, {
         let registered = Rc::clone(&registered);
         move |plugin| registered.borrow_mut().push(plugin)
     })?;
@@ -674,6 +774,10 @@ where
         lua.create_function(|_, _: Table| Ok(()))?,
     )?;
     kkc.set(
+        "register_action_plugin",
+        lua.create_function(|_, _: Table| Ok(()))?,
+    )?;
+    kkc.set(
         "path_join",
         lua.create_function(|_, (base, child): (String, String)| {
             Ok(Path::new(&base).join(child).to_string_lossy().into_owned())
@@ -684,6 +788,43 @@ where
         lua.create_function(|_, path: String| {
             fs::create_dir_all(path).map_err(mlua::Error::external)
         })?,
+    )?;
+    kkc.set(
+        "is_dir",
+        lua.create_function(|_, path: String| Ok(Path::new(&path).is_dir()))?,
+    )?;
+    kkc.set(
+        "path_exists",
+        lua.create_function(|_, path: String| Ok(Path::new(&path).exists()))?,
+    )?;
+    kkc.set(
+        "exec",
+        lua.create_function(
+            |lua, (program, args, cwd): (String, Option<Table>, Option<String>)| {
+                let mut command = std::process::Command::new(program);
+                if let Some(args) = args {
+                    for arg in args.sequence_values::<String>() {
+                        command.arg(arg?);
+                    }
+                }
+                if let Some(cwd) = cwd {
+                    command.current_dir(cwd);
+                }
+                let output = command.output().map_err(mlua::Error::external)?;
+                let result = lua.create_table()?;
+                result.set("status", output.status.code().unwrap_or(-1))?;
+                result.set("success", output.status.success())?;
+                result.set(
+                    "stdout",
+                    String::from_utf8_lossy(&output.stdout).to_string(),
+                )?;
+                result.set(
+                    "stderr",
+                    String::from_utf8_lossy(&output.stderr).to_string(),
+                )?;
+                Ok(result)
+            },
+        )?,
     )?;
     kkc.set(
         "write_file",
@@ -732,6 +873,13 @@ impl PluginRegistry {
             } else {
                 plugin.extensions.clone()
             },
+        }));
+        plugins.extend(self.action_plugins.iter().map(|plugin| PluginInfo {
+            name: plugin.name.clone(),
+            version: plugin.version.clone(),
+            kind: "Action".into(),
+            description: plugin.description.clone(),
+            extensions: Vec::new(),
         }));
         plugins
     }
@@ -854,6 +1002,31 @@ impl PluginRegistry {
             return Ok(None);
         };
         plugin.handle_key(path, mode, key, state)
+    }
+
+    fn action_items(&self, cwd: &Path) -> Result<Vec<ActionItem>> {
+        let mut actions = Vec::new();
+        for plugin in &self.action_plugins {
+            actions.extend(plugin.discover(cwd)?);
+        }
+        Ok(actions)
+    }
+
+    fn run_action(
+        &self,
+        plugin_name: &str,
+        action_id: &str,
+        cwd: &Path,
+        input: Option<&str>,
+    ) -> Result<String> {
+        let Some(plugin) = self
+            .action_plugins
+            .iter()
+            .find(|plugin| plugin.name == plugin_name)
+        else {
+            bail!("Action plugin '{}' is not registered", plugin_name);
+        };
+        plugin.run(action_id, cwd, input)
     }
 }
 
@@ -1079,6 +1252,98 @@ impl ViewerPlugin {
     }
 }
 
+impl ActionPlugin {
+    fn discover(&self, cwd: &Path) -> Result<Vec<ActionItem>> {
+        let lua = plugin_lua();
+        let handles = Rc::new(RefCell::new(Vec::new()));
+        install_bindings(&lua, &self.plugin_dir, |_| {})?;
+        install_runtime_action_bindings(&lua, Rc::clone(&handles))?;
+
+        let script = fs::read_to_string(&self.script_path)?;
+        lua.load(&script)
+            .set_name(self.script_path.to_string_lossy())
+            .exec()?;
+
+        let handles = handles.borrow();
+        for key in handles.iter() {
+            let table: Table = lua.registry_value(key)?;
+            let name: String = table.get("name")?;
+            if name == self.name {
+                let discover: Function = table.get("discover")?;
+                let result: Option<Table> = discover.call(cwd.to_string_lossy().into_owned())?;
+                let Some(result) = result else {
+                    return Ok(Vec::new());
+                };
+                return lua_action_items(result, &self.name);
+            }
+        }
+
+        Ok(Vec::new())
+    }
+
+    fn run(&self, action_id: &str, cwd: &Path, input: Option<&str>) -> Result<String> {
+        let lua = plugin_lua();
+        let handles = Rc::new(RefCell::new(Vec::new()));
+        install_bindings(&lua, &self.plugin_dir, |_| {})?;
+        install_runtime_action_bindings(&lua, Rc::clone(&handles))?;
+
+        let script = fs::read_to_string(&self.script_path)?;
+        lua.load(&script)
+            .set_name(self.script_path.to_string_lossy())
+            .exec()?;
+
+        let handles = handles.borrow();
+        for key in handles.iter() {
+            let table: Table = lua.registry_value(key)?;
+            let name: String = table.get("name")?;
+            if name == self.name {
+                let run: Function = table.get("run")?;
+                let result: Value = run.call((
+                    cwd.to_string_lossy().into_owned(),
+                    action_id.to_string(),
+                    input.unwrap_or("").to_string(),
+                ))?;
+                return lua_action_result(result);
+            }
+        }
+
+        bail!(
+            "Action plugin '{}' was not registered at runtime",
+            self.name
+        )
+    }
+}
+
+fn lua_action_items(table: Table, plugin_name: &str) -> Result<Vec<ActionItem>> {
+    table
+        .sequence_values::<Table>()
+        .map(|item| {
+            let item = item?;
+            Ok(ActionItem {
+                plugin: plugin_name.to_string(),
+                id: item.get("id")?,
+                title: item.get("title")?,
+                description: item.get("description").unwrap_or_else(|_| String::new()),
+                prompt: item.get("prompt").ok(),
+            })
+        })
+        .collect::<mlua::Result<Vec<_>>>()
+        .map_err(Into::into)
+}
+
+fn lua_action_result(value: Value) -> Result<String> {
+    match value {
+        Value::String(text) => Ok(text.to_str()?.to_string()),
+        Value::Table(table) => {
+            let ok = table.get("ok").unwrap_or(true);
+            let message = table.get("message").unwrap_or_else(|_| String::new());
+            if ok { Ok(message) } else { bail!(message) }
+        }
+        Value::Nil => Ok(String::new()),
+        _ => bail!("Action plugin returned an unsupported result"),
+    }
+}
+
 fn lua_state_table(lua: &Lua, state: &HashMap<String, String>) -> Result<Table> {
     let t = lua.create_table()?;
     for (k, v) in state {
@@ -1287,6 +1552,67 @@ fn install_runtime_viewer_bindings(
     Ok(())
 }
 
+fn install_action_registration<F>(lua: &Lua, on_register: F) -> Result<()>
+where
+    F: Fn(RegisteredActionPlugin) + 'static,
+{
+    let globals = lua.globals();
+    let package: Table = globals.get("package")?;
+    let preload: Table = package.get("preload")?;
+    let kkc_loader: Function = preload.get("kkc")?;
+    let kkc: Table = kkc_loader.call(())?;
+    kkc.set(
+        "register_action_plugin",
+        lua.create_function(move |_, table: Table| {
+            let name: String = table.get("name")?;
+            let version: String = table.get("version").unwrap_or_else(|_| "0.0.0".into());
+            let description: String = table.get("description").unwrap_or_else(|_| String::new());
+            let discover: Option<Function> = table.get("discover").ok();
+            let run: Option<Function> = table.get("run").ok();
+            if discover.is_none() || run.is_none() {
+                return Err(mlua::Error::external(format!(
+                    "Action plugin '{name}' does not define discover() and run()"
+                )));
+            }
+            on_register(RegisteredActionPlugin {
+                name,
+                version,
+                description,
+            });
+            Ok(())
+        })?,
+    )?;
+    preload.set("kkc", lua.create_function(move |_, ()| Ok(kkc.clone()))?)?;
+    Ok(())
+}
+
+fn install_runtime_action_bindings(
+    lua: &Lua,
+    handles: Rc<RefCell<Vec<mlua::RegistryKey>>>,
+) -> Result<()> {
+    let globals = lua.globals();
+    let package: Table = globals.get("package")?;
+    let preload: Table = package.get("preload")?;
+    let kkc_loader: Function = preload.get("kkc")?;
+    let kkc: Table = kkc_loader.call(())?;
+    kkc.set(
+        "register_action_plugin",
+        lua.create_function(move |lua, table: Table| {
+            let discover: Option<Function> = table.get("discover").ok();
+            let run: Option<Function> = table.get("run").ok();
+            if discover.is_none() || run.is_none() {
+                return Err(mlua::Error::external(
+                    "Action plugin does not define discover() and run()",
+                ));
+            }
+            handles.borrow_mut().push(lua.create_registry_value(table)?);
+            Ok(())
+        })?,
+    )?;
+    preload.set("kkc", lua.create_function(move |_, ()| Ok(kkc.clone()))?)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1430,6 +1756,21 @@ mod tests {
         assert_eq!(plugins[0].version, "1.0.0");
         assert_eq!(plugins[0].modes, vec!["text"]);
         assert_eq!(plugins[0].mime_types, vec!["text/markdown"]);
+    }
+
+    #[test]
+    fn bundled_git_action_plugin_registers() {
+        let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("plugins")
+            .join("git_action")
+            .join("plugin.lua");
+
+        let plugins = inspect_action_plugin(&script).expect("action plugin should load");
+
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(plugins[0].name, "git_action");
+        assert_eq!(plugins[0].version, "1.0.0");
     }
 
     #[test]

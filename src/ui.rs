@@ -2,10 +2,10 @@ mod panel;
 
 use self::panel::{render_center_buttons, render_panel_or_file_id};
 use crate::app::{
-    ActivePanel, App, AppMode, AssocEditorState, BookmarkListItem, ConfigState, ConfirmAction,
-    ConfirmDialog, InputDialog, MENU_DATA, MENU_HEADERS, MenuAction, MenuState, OpenerState,
-    PluginsState, RemoteConnectState, RemoteConnectingState, RemoteEditKind, RemoteEditState,
-    SearchState, ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,
+    ActionPaletteState, ActivePanel, App, AppMode, AssocEditorState, BookmarkListItem, ConfigState,
+    ConfirmAction, ConfirmDialog, InputDialog, MENU_DATA, MENU_HEADERS, MenuAction, MenuState,
+    OpenerState, PluginsState, RemoteConnectState, RemoteConnectingState, RemoteEditKind,
+    RemoteEditState, SearchState, ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,
 };
 use crate::config::SortMode;
 use crate::copy::{CopyDialogState, CopyProgressState};
@@ -220,6 +220,7 @@ pub fn render(f: &mut Frame, app: &App) {
         AppMode::DirBookmarks => render_dir_bookmarks(f, app, f.area()),
         AppMode::Config(cs) => render_config(f, cs, f.area()),
         AppMode::Plugins(s) => render_plugins(f, s, f.area()),
+        AppMode::ActionPalette(s) => render_action_palette(f, s, f.area()),
         AppMode::Opener(s) => render_opener(f, s, f.area()),
         AppMode::AssocEditor(s) => render_assoc_editor(f, s, f.area()),
         AppMode::RemoteConnect(s) => render_remote_connect(f, s, f.area()),
@@ -823,12 +824,11 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, goto_input: Option<
     } else if let Some(input) = goto_input {
         let bar_text = format!(" Goto line: {}_ ", input);
         f.render_widget(
-            Paragraph::new(bar_text)
-                .style(Style::default().fg(Color::Black).bg(Color::LightCyan)),
+            Paragraph::new(bar_text).style(Style::default().fg(Color::Black).bg(Color::LightCyan)),
             footer_area,
         );
-        let cx = (footer_area.x + 12 + input.len() as u16)
-            .min(footer_area.x + footer_area.width - 1);
+        let cx =
+            (footer_area.x + 12 + input.len() as u16).min(footer_area.x + footer_area.width - 1);
         safe_set_cursor_position(f, cx, footer_area.y);
     } else {
         let help = Paragraph::new(" F10:Close  F2:Wrap  F3:LnFeed  F4:Mode  F5:Zoom  F6:Prepro  F7:Search  F8:Enc  F9:Mask  ^G:Goto ")
@@ -1234,9 +1234,7 @@ fn render_confirm_message(f: &mut Frame, dlg: &ConfirmDialog, area: Rect) {
 
     // borders(2) + top_pad(1) + text rows + bottom_pad(1) + ok_btn(1) + hint(1)
     let desired_h = msg_rows + 6;
-    let height = desired_h
-        .max(8)
-        .min(area.height.saturating_sub(2).max(8));
+    let height = desired_h.max(8).min(area.height.saturating_sub(2).max(8));
 
     let popup = clamp_rect(
         area,
@@ -2324,7 +2322,15 @@ fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
     let height = (area.height * 4 / 5).clamp(18, area.height.saturating_sub(2));
     let x = area.x + area.width.saturating_sub(width) / 2;
     let y = area.y + area.height.saturating_sub(height) / 2;
-    let popup = clamp_rect(area, Rect { x, y, width, height });
+    let popup = clamp_rect(
+        area,
+        Rect {
+            x,
+            y,
+            width,
+            height,
+        },
+    );
 
     f.render_widget(Clear, popup);
 
@@ -2398,10 +2404,20 @@ fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
             (format!("{:<w$}", "", w = iw), clr_placeholder)
         } else if placeholder_star && text == "*" && !focused {
             // Show '*' in dim color as default
-            (format!("*{:<w$}", cursor, w = avail.saturating_sub(1)), clr_placeholder)
+            (
+                format!("*{:<w$}", cursor, w = avail.saturating_sub(1)),
+                clr_placeholder,
+            )
         } else {
             let displayed = truncate_str(text, avail);
-            (format!("{displayed}{cursor}{:<w$}", "", w = avail.saturating_sub(displayed.len())), clr_input_fg)
+            (
+                format!(
+                    "{displayed}{cursor}{:<w$}",
+                    "",
+                    w = avail.saturating_sub(displayed.len())
+                ),
+                clr_input_fg,
+            )
         }
     };
 
@@ -2413,17 +2429,26 @@ fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
         Line::default(),
         Line::from(vec![
             Span::raw("  "),
-            Span::styled("\u{25b6} Name   : ", Style::default().fg(lbl0).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "\u{25b6} Name   : ",
+                Style::default().fg(lbl0).add_modifier(Modifier::BOLD),
+            ),
             Span::styled(format!(" {pat_str} "), Style::default().fg(pat_fg).bg(bg0)),
         ]),
         Line::from(vec![
             Span::raw("  "),
-            Span::styled("\u{25b6} Content: ", Style::default().fg(lbl1).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "\u{25b6} Content: ",
+                Style::default().fg(lbl1).add_modifier(Modifier::BOLD),
+            ),
             Span::styled(format!(" {cnt_str} "), Style::default().fg(cnt_fg).bg(bg1)),
         ]),
         Line::from(vec![
             Span::raw("  "),
-            Span::styled("\u{25b6} Dir    : ", Style::default().fg(lbl2).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "\u{25b6} Dir    : ",
+                Style::default().fg(lbl2).add_modifier(Modifier::BOLD),
+            ),
             Span::styled(format!(" {dir_str} "), Style::default().fg(dir_fg).bg(bg2)),
         ]),
         Line::default(),
@@ -2432,12 +2457,21 @@ fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
     safe_render_widget(
         f,
         Paragraph::new(input_lines).style(Style::default().bg(Color::Rgb(18, 18, 24))),
-        Rect { x: inner.x, y: inner.y, width: inner.width, height: input_h },
+        Rect {
+            x: inner.x,
+            y: inner.y,
+            width: inner.width,
+            height: input_h,
+        },
     );
 
     // --- separator with result count --------------------------------------
     let result_count = state.results.len();
-    let suffix = if result_count >= 1000 { " (limit 1000)" } else { "" };
+    let suffix = if result_count >= 1000 {
+        " (limit 1000)"
+    } else {
+        ""
+    };
     let sep_title = if state.running {
         " Searching\u{2026} ".to_string()
     } else if result_count > 0 {
@@ -2463,10 +2497,14 @@ fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
     let date_w = 14usize;
     let size_w = 9usize;
     let name_w = 26usize;
-    let dir_w = (results_body.width as usize)
-        .saturating_sub(name_w + size_w + date_w + 4);
+    let dir_w = (results_body.width as usize).saturating_sub(name_w + size_w + date_w + 4);
 
-    let header_area = Rect { x: results_body.x, y: results_body.y, width: results_body.width, height: 1 };
+    let header_area = Rect {
+        x: results_body.x,
+        y: results_body.y,
+        width: results_body.width,
+        height: 1,
+    };
     let result_inner = Rect {
         x: results_body.x,
         y: results_body.y + 1,
@@ -2477,11 +2515,23 @@ fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
     safe_render_widget(
         f,
         Paragraph::new(Line::from(vec![
-            Span::styled(format!(" {:<name_w$}", "Name"), Style::default().fg(clr_hdr).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!(" {:<name_w$}", "Name"),
+                Style::default().fg(clr_hdr).add_modifier(Modifier::BOLD),
+            ),
             Span::styled(" ", Style::default().fg(clr_hdr)),
-            Span::styled(format!("{:<dir_w$}", "Directory"), Style::default().fg(clr_hdr).add_modifier(Modifier::BOLD)),
-            Span::styled(format!(" {:>size_w$}", "Size"), Style::default().fg(clr_hdr).add_modifier(Modifier::BOLD)),
-            Span::styled(format!(" {:>date_w$}", "Modified"), Style::default().fg(clr_hdr).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("{:<dir_w$}", "Directory"),
+                Style::default().fg(clr_hdr).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" {:>size_w$}", "Size"),
+                Style::default().fg(clr_hdr).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" {:>date_w$}", "Modified"),
+                Style::default().fg(clr_hdr).add_modifier(Modifier::BOLD),
+            ),
         ]))
         .style(Style::default().bg(Color::Rgb(24, 26, 36))),
         header_area,
@@ -2516,11 +2566,7 @@ fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
                 Color::Rgb(22, 22, 32)
             };
 
-            let row_bg = if is_cursor {
-                CLR_CURSOR_BG
-            } else {
-                zebra_bg
-            };
+            let row_bg = if is_cursor { CLR_CURSOR_BG } else { zebra_bg };
 
             let file_name = r
                 .path
@@ -2534,7 +2580,9 @@ fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_default();
 
-            let ext = r.path.extension()
+            let ext = r
+                .path
+                .extension()
                 .and_then(|e| e.to_str())
                 .unwrap_or("")
                 .to_ascii_lowercase();
@@ -2543,7 +2591,9 @@ fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
             } else {
                 match ext.as_str() {
                     "rs" | "c" | "h" | "cpp" | "py" | "js" | "ts" => CLR_SOURCE,
-                    "zip" | "tar" | "gz" | "bz2" | "xz" | "7z" | "rar" | "lha" | "lzh" => CLR_ARCHIVE,
+                    "zip" | "tar" | "gz" | "bz2" | "xz" | "7z" | "rar" | "lha" | "lzh" => {
+                        CLR_ARCHIVE
+                    }
                     "mp3" | "flac" | "ogg" | "wav" | "mod" | "xm" | "s3m" => CLR_AUDIO,
                     "png" | "jpg" | "jpeg" | "gif" | "bmp" | "svg" | "webp" => CLR_IMAGE,
                     "mp4" | "mkv" | "avi" | "mov" => CLR_VIDEO,
@@ -2554,9 +2604,17 @@ fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
                 }
             };
 
-            let dir_clr = if is_cursor { Color::Black } else { Color::Rgb(100, 110, 130) };
+            let dir_clr = if is_cursor {
+                Color::Black
+            } else {
+                Color::Rgb(100, 110, 130)
+            };
             let size_clr = if is_cursor { Color::Black } else { CLR_DATA };
-            let date_clr = if is_cursor { Color::Black } else { Color::Rgb(130, 140, 160) };
+            let date_clr = if is_cursor {
+                Color::Black
+            } else {
+                Color::Rgb(130, 140, 160)
+            };
 
             let name_str = truncate_str(&file_name, name_w);
             let dir_str = truncate_str(&dir, dir_w);
@@ -2571,11 +2629,23 @@ fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
             let date_str = format!("{:>width$}", date_str, width = date_w);
 
             ListItem::new(Line::from(vec![
-                Span::styled(format!(" {name_str:<name_w$}"), Style::default().fg(name_clr).bg(row_bg)),
+                Span::styled(
+                    format!(" {name_str:<name_w$}"),
+                    Style::default().fg(name_clr).bg(row_bg),
+                ),
                 Span::styled(" ", Style::default().bg(row_bg)),
-                Span::styled(format!("{dir_str:<dir_w$}"), Style::default().fg(dir_clr).bg(row_bg)),
-                Span::styled(format!(" {size_str}"), Style::default().fg(size_clr).bg(row_bg)),
-                Span::styled(format!(" {date_str}"), Style::default().fg(date_clr).bg(row_bg)),
+                Span::styled(
+                    format!("{dir_str:<dir_w$}"),
+                    Style::default().fg(dir_clr).bg(row_bg),
+                ),
+                Span::styled(
+                    format!(" {size_str}"),
+                    Style::default().fg(size_clr).bg(row_bg),
+                ),
+                Span::styled(
+                    format!(" {date_str}"),
+                    Style::default().fg(date_clr).bg(row_bg),
+                ),
             ]))
         })
         .collect();
@@ -2599,9 +2669,13 @@ fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
 
     // --- hint bar ---------------------------------------------------------
     let hint = match state.input_field {
-        3 => " \u{23ce}:Go to file   \u{2191}\u{2193} PgUp PgDn:Navigate   Tab:Fields   F5:Backend   Esc:Close ",
+        3 => {
+            " \u{23ce}:Go to file   \u{2191}\u{2193} PgUp PgDn:Navigate   Tab:Fields   F5:Backend   Esc:Close "
+        }
         2 => " \u{23ce}:Search   Tab:Switch field   Del:Reset dir   F5:Backend   Esc:Close ",
-        _ => " \u{23ce}:Search   Tab:Switch field   \u{2193}:Results   F5:Backend   Del:Reset   Esc:Close ",
+        _ => {
+            " \u{23ce}:Search   Tab:Switch field   \u{2193}:Results   F5:Backend   Del:Reset   Esc:Close "
+        }
     };
     safe_render_widget(
         f,
@@ -4080,6 +4154,112 @@ fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
         Rect {
             x: inner.x,
             y: button_y,
+            width: inner.width,
+            height: 1,
+        },
+    );
+}
+
+fn render_action_palette(f: &mut Frame, s: &ActionPaletteState, area: Rect) {
+    let w: u16 = area.width.saturating_sub(4).min(100).max(60);
+    let visible = (s.actions.len() as u16).min(12).max(4);
+    let h: u16 = (visible + 6).min(area.height.saturating_sub(4)).max(8);
+    let popup = clamp_rect(
+        area,
+        Rect {
+            x: area.x + (area.width.saturating_sub(w)) / 2,
+            y: area.y + 2,
+            width: w,
+            height: h,
+        },
+    );
+
+    safe_render_widget(f, Clear, popup);
+    let block = Block::default()
+        .title(" Actions ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(CLR_QS_BORDER))
+        .style(Style::default().bg(CLR_QS_BG));
+    let inner = block.inner(popup);
+    safe_render_widget(f, block, popup);
+
+    let dir = format!("  {}", s.cwd.display());
+    safe_render_widget(
+        f,
+        Paragraph::new(truncate_str(&dir, inner.width as usize))
+            .style(Style::default().fg(Color::DarkGray).bg(CLR_QS_BG)),
+        Rect {
+            x: inner.x,
+            y: inner.y,
+            width: inner.width,
+            height: 1,
+        },
+    );
+
+    let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
+    safe_render_widget(
+        f,
+        Paragraph::new(sep.clone()).style(Style::default().fg(CLR_QS_SEP).bg(CLR_QS_BG)),
+        Rect {
+            x: inner.x,
+            y: inner.y + 1,
+            width: inner.width,
+            height: 1,
+        },
+    );
+
+    let list_area = Rect {
+        x: inner.x,
+        y: inner.y + 2,
+        width: inner.width,
+        height: inner.height.saturating_sub(4),
+    };
+    let list_h = list_area.height as usize;
+    let start = if s.cursor >= list_h {
+        s.cursor - list_h + 1
+    } else {
+        0
+    };
+
+    for (idx, action_idx) in (start..s.actions.len()).take(list_h).enumerate() {
+        let action = &s.actions[action_idx];
+        let selected = action_idx == s.cursor;
+        let (fg, bg) = if selected {
+            (CLR_QS_SEL_FG, CLR_QS_SEL_BG)
+        } else {
+            (CLR_QS_LIST_FG, CLR_QS_BG)
+        };
+        let marker = if selected { ">" } else { " " };
+        let mut text = format!(" {} {}  {}", marker, action.title, action.description);
+        if let Some(prompt) = &action.prompt {
+            text.push_str("  ");
+            text.push_str(prompt);
+        }
+        let padded = format!(
+            "{:<width$}",
+            truncate_str(&text, inner.width as usize),
+            width = inner.width as usize
+        );
+        safe_render_widget(
+            f,
+            Paragraph::new(padded).style(Style::default().fg(fg).bg(bg)),
+            Rect {
+                x: list_area.x,
+                y: list_area.y + idx as u16,
+                width: list_area.width,
+                height: 1,
+            },
+        );
+    }
+
+    let hint_y = inner.y + inner.height.saturating_sub(1);
+    safe_render_widget(
+        f,
+        Paragraph::new("  Enter Run   Esc Close ")
+            .style(Style::default().fg(CLR_BUTTON_FG).bg(CLR_BUTTON_BG)),
+        Rect {
+            x: inner.x,
+            y: hint_y,
             width: inner.width,
             height: 1,
         },

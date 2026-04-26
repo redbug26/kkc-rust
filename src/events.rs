@@ -7,8 +7,8 @@ use self::viewer::{
     handle_viewer_searching,
 };
 use crate::app::{
-    App, AppMode, AssocEditorState, BookmarkListItem, ConfigState, ConfirmAction, InputAction,
-    InputDialog, MenuState, OpenerState, RemoteEditKind,
+    ActionPaletteState, App, AppMode, AssocEditorState, BookmarkListItem, ConfigState,
+    ConfirmAction, InputAction, InputDialog, MenuState, OpenerState, RemoteEditKind,
 };
 use crate::archive::supports_archive_navigation;
 use crate::config::SortMode;
@@ -47,6 +47,7 @@ pub fn handle_event(app: &mut App, event: Event) -> Result<bool> {
         AppMode::Menu(_) => return handle_menu(app, key),
         AppMode::Config(_) => return handle_config(app, key),
         AppMode::Plugins(_) => return handle_plugins(app, key),
+        AppMode::ActionPalette(_) => return handle_action_palette(app, key),
         AppMode::Opener(_) => return handle_opener(app, key),
         AppMode::AssocEditor(_) => return handle_assoc_editor(app, key),
         AppMode::RemoteConnect(_) => return handle_remote_connect(app, key),
@@ -166,6 +167,16 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
             }
             KeyCode::Char('u') => {
                 app.mode = AppMode::Terminal;
+                return Ok(false);
+            }
+            KeyCode::Char('a') => {
+                let cwd = app.active_panel().path.clone();
+                let state = ActionPaletteState::load(cwd);
+                if state.actions.is_empty() {
+                    app.notify("No plugin action available");
+                } else {
+                    app.mode = AppMode::ActionPalette(state);
+                }
                 return Ok(false);
             }
             KeyCode::Char('t') => {
@@ -677,9 +688,7 @@ fn handle_confirm(app: &mut App, key: KeyEvent) -> Result<bool> {
 
     match key.code {
         KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-            let AppMode::Confirm(dlg) =
-                std::mem::replace(&mut app.mode, AppMode::Browse)
-            else {
+            let AppMode::Confirm(dlg) = std::mem::replace(&mut app.mode, AppMode::Browse) else {
                 return Ok(false);
             };
             match dlg.action {
@@ -847,6 +856,21 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                     }
                     app.save_config().ok();
                     app.mode = AppMode::AssocEditor(AssocEditorState::from_config(&app.config));
+                }
+                InputAction::PluginAction { plugin, id, cwd } => {
+                    match app.run_with_busy("Running plugin action...", |_| {
+                        crate::plugins::run_action(&plugin, &id, &cwd, Some(&value))
+                    }) {
+                        Ok(message) => app.notify(if message.trim().is_empty() {
+                            "Action complete".to_string()
+                        } else {
+                            message
+                        }),
+                        Err(e) => app.notify(format!("Action error: {}", e)),
+                    }
+                    if app.config.auto_reload {
+                        app.reload_panels();
+                    }
                 }
             }
         }
@@ -1141,9 +1165,15 @@ fn handle_search(app: &mut App, key: KeyEvent) -> Result<bool> {
                 return Ok(false);
             };
             match s.input_field {
-                0 => { s.query.pop(); }
-                1 => { s.content_query.pop(); }
-                2 => { s.dir_query.pop(); }
+                0 => {
+                    s.query.pop();
+                }
+                1 => {
+                    s.content_query.pop();
+                }
+                2 => {
+                    s.dir_query.pop();
+                }
                 _ => {}
             }
         }
@@ -1153,7 +1183,10 @@ fn handle_search(app: &mut App, key: KeyEvent) -> Result<bool> {
             };
             // Clear the active input field
             match s.input_field {
-                0 => { s.query.clear(); s.query.push('*'); }
+                0 => {
+                    s.query.clear();
+                    s.query.push('*');
+                }
                 1 => s.content_query.clear(),
                 2 => s.dir_query = s.start_dir.to_string_lossy().into_owned(),
                 _ => {}
@@ -1270,6 +1303,67 @@ fn handle_plugins(app: &mut App, key: KeyEvent) -> Result<bool> {
                     app.status.text = format!("Cannot enter plugin directory: {}", e);
                 } else {
                     app.status.text = format!("Plugin directory: {}", dir.display());
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(false)
+}
+
+fn handle_action_palette(app: &mut App, key: KeyEvent) -> Result<bool> {
+    match key.code {
+        KeyCode::Esc | KeyCode::F(10) => {
+            app.mode = AppMode::Browse;
+        }
+        KeyCode::Up => {
+            if let AppMode::ActionPalette(ref mut state) = app.mode {
+                state.cursor = state.cursor.saturating_sub(1);
+            }
+        }
+        KeyCode::Down => {
+            if let AppMode::ActionPalette(ref mut state) = app.mode {
+                let max = state.actions.len().saturating_sub(1);
+                state.cursor = (state.cursor + 1).min(max);
+            }
+        }
+        KeyCode::Enter => {
+            let (action, cwd) = if let AppMode::ActionPalette(ref state) = app.mode {
+                let Some(action) = state.actions.get(state.cursor).cloned() else {
+                    app.mode = AppMode::Browse;
+                    return Ok(false);
+                };
+                (action, state.cwd.clone())
+            } else {
+                return Ok(false);
+            };
+
+            app.mode = AppMode::Browse;
+            if let Some(prompt) = action.prompt.clone() {
+                app.mode = AppMode::Input(InputDialog {
+                    title: action.title,
+                    prompt,
+                    value: String::new(),
+                    cursor: 0,
+                    action: InputAction::PluginAction {
+                        plugin: action.plugin,
+                        id: action.id,
+                        cwd,
+                    },
+                });
+            } else {
+                match app.run_with_busy("Running plugin action...", |_| {
+                    crate::plugins::run_action(&action.plugin, &action.id, &cwd, None)
+                }) {
+                    Ok(message) => app.notify(if message.trim().is_empty() {
+                        "Action complete".to_string()
+                    } else {
+                        message
+                    }),
+                    Err(e) => app.notify(format!("Action error: {}", e)),
+                }
+                if app.config.auto_reload {
+                    app.reload_panels();
                 }
             }
         }

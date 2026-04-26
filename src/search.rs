@@ -41,7 +41,11 @@ impl SearchBackend {
 
     /// Returns the next available backend in cycle order: Walk → Spotlight → Locate → Walk.
     pub fn next_available(self) -> Self {
-        let cycle = [SearchBackend::Walk, SearchBackend::Spotlight, SearchBackend::Locate];
+        let cycle = [
+            SearchBackend::Walk,
+            SearchBackend::Spotlight,
+            SearchBackend::Locate,
+        ];
         let pos = cycle.iter().position(|&b| b == self).unwrap_or(0);
         for i in 1..=cycle.len() {
             let next = cycle[(pos + i) % cycle.len()];
@@ -317,7 +321,10 @@ pub fn search_locate(query: &SearchQuery, limit: usize) -> Vec<SearchResult> {
                 modified: meta.as_ref().and_then(|m| m.modified().ok()),
             })
         })
-        .filter(|_| { let _ = &start_prefix; true }) // suppress lint
+        .filter(|_| {
+            let _ = &start_prefix;
+            true
+        }) // suppress lint
         .take(limit)
         .collect()
 }

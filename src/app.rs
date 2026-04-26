@@ -20,7 +20,9 @@ use crate::remote::{
     download_into_dir, download_to_temp, join_remote, load_profiles, normalize_remote_cwd,
     prepare_connection, rename_path as remote_rename_path, save_profile, upload_into_dir,
 };
-use crate::search::{SearchBackend, SearchQuery, SearchResult, search, search_locate, search_spotlight};
+use crate::search::{
+    SearchBackend, SearchQuery, SearchResult, search, search_locate, search_spotlight,
+};
 use crate::terminal::{CmdLine, RunningCmd, TerminalState};
 use crate::viewer::Viewer;
 use anyhow::Result;
@@ -93,6 +95,8 @@ pub enum AppMode {
     Config(ConfigState),
     /// Plugin list (Options > Plugins).
     Plugins(PluginsState),
+    /// Context actions returned by Lua action plugins (Ctrl-A).
+    ActionPalette(ActionPaletteState),
     /// Choose from multiple registered openers.
     Opener(OpenerState),
     /// File-type association editor (Options > Associations).
@@ -120,6 +124,23 @@ pub struct PluginsState {
     pub plugins: Vec<crate::plugins::PluginInfo>,
     pub plugins_dir: PathBuf,
     pub cursor: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct ActionPaletteState {
+    pub actions: Vec<crate::plugins::ActionItem>,
+    pub cwd: PathBuf,
+    pub cursor: usize,
+}
+
+impl ActionPaletteState {
+    pub fn load(cwd: PathBuf) -> Self {
+        Self {
+            actions: crate::plugins::action_items(&cwd),
+            cwd,
+            cursor: 0,
+        }
+    }
 }
 
 impl PluginsState {
@@ -583,6 +604,11 @@ pub enum InputAction {
         ext: String,
         /// Some(idx) = editing existing row, None = new
         edit_index: Option<usize>,
+    },
+    PluginAction {
+        plugin: String,
+        id: String,
+        cwd: PathBuf,
     },
 }
 
@@ -1348,9 +1374,9 @@ impl App {
                     self.mode = AppMode::Confirm(ConfirmDialog {
                         title: String::new(),
                         message: format!("Remote connect failed: {}", err),
-                        action: ConfirmAction::MessageThen(Box::new(
-                            AppMode::RemoteConnect(return_state),
-                        )),
+                        action: ConfirmAction::MessageThen(Box::new(AppMode::RemoteConnect(
+                            return_state,
+                        ))),
                     });
                 }
             }

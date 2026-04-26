@@ -423,9 +423,7 @@ impl Viewer {
     /// e.g. for 999 lines → "999│ " = 5, for 9 lines → "9│ " = 3.
     /// Returns 0 for hex/image/plugin-document modes.
     pub fn line_number_width(&self) -> usize {
-        if !matches!(self.mode, ViewMode::Text | ViewMode::Ansi)
-            || self.viewer_plugin.is_some()
-        {
+        if !matches!(self.mode, ViewMode::Text | ViewMode::Ansi) || self.viewer_plugin.is_some() {
             return 0;
         }
         let n = self.line_count().max(1);

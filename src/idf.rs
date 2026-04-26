@@ -122,11 +122,23 @@ pub fn render_idf_card(path: &Path) -> Option<String> {
 fn file_attrs(meta: &fs::Metadata) -> String {
     use std::os::unix::fs::PermissionsExt;
     let mode = meta.permissions().mode();
-    let ftype = if meta.is_dir() { 'd' } else if meta.file_type().is_symlink() { 'l' } else { '-' };
+    let ftype = if meta.is_dir() {
+        'd'
+    } else if meta.file_type().is_symlink() {
+        'l'
+    } else {
+        '-'
+    };
     let bits = [
-        (0o400, 'r'), (0o200, 'w'), (0o100, 'x'),
-        (0o040, 'r'), (0o020, 'w'), (0o010, 'x'),
-        (0o004, 'r'), (0o002, 'w'), (0o001, 'x'),
+        (0o400, 'r'),
+        (0o200, 'w'),
+        (0o100, 'x'),
+        (0o040, 'r'),
+        (0o020, 'w'),
+        (0o010, 'x'),
+        (0o004, 'r'),
+        (0o002, 'w'),
+        (0o001, 'x'),
     ];
     let mut s = String::with_capacity(10);
     s.push(ftype);
@@ -1449,7 +1461,11 @@ fn read_gd3_string(data: &[u8]) -> Option<String> {
         .collect();
     let s = String::from_utf16(&words).ok()?;
     let trimmed = s.trim().to_string();
-    if trimmed.is_empty() { None } else { Some(trimmed) }
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
 }
 
 fn uf2_lines(data: &[u8]) -> Vec<String> {
@@ -1477,7 +1493,10 @@ fn svg_lines(data: &[u8]) -> Vec<String> {
         Some(p) => p,
         None => return Vec::new(),
     };
-    let tag_end = lower[svg_start..].find('>').map(|p| p + svg_start).unwrap_or(sample.len());
+    let tag_end = lower[svg_start..]
+        .find('>')
+        .map(|p| p + svg_start)
+        .unwrap_or(sample.len());
     let tag = &sample[svg_start..tag_end];
     let mut out = Vec::new();
 
@@ -1505,8 +1524,6 @@ fn attr_value<'a>(tag: &'a str, attr: &str) -> Option<&'a str> {
         None
     }
 }
-
-
 
 fn is_it(data: &[u8]) -> bool {
     data.starts_with(b"IMPM")

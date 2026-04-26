@@ -73,3 +73,53 @@ echo "✓ Tag v${new_version} pushed"
 echo ""
 echo "🚀 Release v${new_version} triggered!"
 echo "   Follow progress at: https://github.com/redbug26/kkc-rust/actions"
+echo ""
+
+# ── Wait for GitHub Actions to publish the Homebrew formula ──────────────
+FORMULA_URL="https://raw.githubusercontent.com/redbug26/kkc-rust/refs/heads/main/Formula/kkc.rb"
+HOMEBREW_TAP_DIR="/Users/miguelvanhove/Dropbox/Sources/homebrew-tap"
+echo "⏳ Waiting for GitHub release workflow to complete…"
+echo "   Polling ${FORMULA_URL}"
+echo "   (checking every 30 seconds)"
+
+while true; do
+  remote_version=$(curl -sf "$FORMULA_URL" \
+    | grep -Eo 'version "[^"]+"' \
+    | head -1 \
+    | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' \
+    || true)
+
+  if [[ "$remote_version" == "$new_version" ]]; then
+    echo "✓ Formula updated to v${new_version}"
+    break
+  fi
+
+  echo "   Remote formula version: ${remote_version:-<not found>} (waiting for ${new_version})…"
+  sleep 30
+done
+
+# ── Pull latest changes (formula was committed by CI) ────────────────────
+echo ""
+echo "Pulling latest changes…"
+git pull origin main
+echo "✓ git pull done"
+
+# ── Copy formula to homebrew-tap and push ────────────────────────────────
+echo ""
+echo "Copying Formula/kkc.rb to ${HOMEBREW_TAP_DIR}/Formula/"
+mkdir -p "${HOMEBREW_TAP_DIR}/Formula"
+cp Formula/kkc.rb "${HOMEBREW_TAP_DIR}/Formula/kkc.rb"
+
+pushd "${HOMEBREW_TAP_DIR}" > /dev/null
+git add Formula/kkc.rb
+if git diff --cached --quiet; then
+  echo "ℹ️  No changes to commit in homebrew-tap (formula already up to date)."
+else
+  git commit -m "chore: update kkc to v${new_version}"
+  git push
+  echo "✓ homebrew-tap pushed"
+fi
+popd > /dev/null
+
+echo ""
+echo "✅ All done! kkc v${new_version} is released and the tap is updated."

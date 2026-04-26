@@ -3,7 +3,8 @@
 KKC loads Lua plugins at startup. Plugins can add:
 
 - archive access, so a file can be entered like a directory;
-- viewer extensions, selected from FileID mime types, to improve the internal viewer display.
+- viewer extensions, selected from FileID mime types, to improve the internal viewer display;
+- context actions, queried with `Ctrl-A` from the active panel directory.
 
 User plugins are installed in the `data_dir()/plugins` directory from the `ProjectDirs` crate.
 From KKC, this directory is available through `Options > Plugins > Open Dir`.
@@ -56,9 +57,13 @@ Available functions:
 
 - `kkc.register_archive_plugin(table)`: registers an archive plugin.
 - `kkc.register_viewer_plugin(table)`: registers a viewer plugin.
+- `kkc.register_action_plugin(table)`: registers a context action plugin.
 - `kkc.path_join(base, child)`: builds a path.
 - `kkc.create_dir_all(path)`: creates a directory and its parents.
+- `kkc.is_dir(path)`: returns `true` if `path` is a directory.
+- `kkc.path_exists(path)`: returns `true` if `path` exists.
 - `kkc.write_file(path, content)`: writes a file, creating parent directories when needed.
+- `kkc.exec(program, args, cwd)`: runs a program without a shell and returns `{ success, status, stdout, stderr }`.
 
 `sj.error(message)` is also available and raises a Lua error.
 
@@ -283,6 +288,68 @@ Plugin-facing key strings:
 - function keys: `f1`, `f2`, ... using the terminal function-key number.
 
 Ctrl-modified keys are reserved by KKC and are not sent to plugins.
+
+## Action Plugins
+
+Action plugins are queried when the user presses `Ctrl-A` in browse mode. KKC calls every registered action plugin with the active panel directory. Each plugin can return zero or more actions. When the user selects one, KKC calls the plugin's `run()` function.
+
+Declaration:
+
+```lua
+local kkc = require("kkc")
+
+kkc.register_action_plugin({
+    name = "example_actions",
+    version = "1.0.0",
+    description = "Example context actions",
+
+    discover = function(cwd)
+        if not kkc.path_exists(kkc.path_join(cwd, ".marker")) then
+            return {}
+        end
+        return {
+            {
+                id = "info",
+                title = "Show information",
+                description = "Display information about this directory",
+            },
+            {
+                id = "rename",
+                title = "Rename marker",
+                description = "Ask for a new marker name",
+                prompt = "New name:",
+            },
+        }
+    end,
+
+    run = function(cwd, action_id, input)
+        if action_id == "info" then
+            return "Current directory: " .. cwd
+        end
+        if action_id == "rename" then
+            return "Typed value: " .. input
+        end
+        error("Unknown action: " .. tostring(action_id), 0)
+    end,
+})
+```
+
+Fields:
+
+- `name`: stable unique plugin identifier.
+- `version`: optional semantic version string shown in `Options > Plugins`.
+- `description`: text shown in `Options > Plugins`.
+- `discover(cwd)`: returns a Lua array of action tables for the active directory.
+- `run(cwd, action_id, input)`: executes the selected action and returns a message to display.
+
+Action table fields:
+
+- `id`: stable action identifier passed back to `run()`.
+- `title`: label shown in the `Ctrl-A` action palette.
+- `description`: optional detail shown next to the title.
+- `prompt`: optional input prompt. If present, KKC asks the user for text before calling `run()`.
+
+Bundled example: `git_action` detects Git repositories and provides status, stage all, commit, and push actions.
 
 Supported colors:
 

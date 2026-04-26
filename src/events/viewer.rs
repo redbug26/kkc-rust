@@ -609,8 +609,7 @@ pub(super) fn handle_viewer_searching(app: &mut App, key: KeyEvent) -> Result<bo
 pub(super) fn handle_viewer_goto_line(app: &mut App, key: KeyEvent) -> Result<bool> {
     match key.code {
         KeyCode::Esc => {
-            let AppMode::ViewerGotoLine(v, _) =
-                std::mem::replace(&mut app.mode, AppMode::Browse)
+            let AppMode::ViewerGotoLine(v, _) = std::mem::replace(&mut app.mode, AppMode::Browse)
             else {
                 return Ok(false);
             };

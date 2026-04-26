@@ -405,11 +405,15 @@ fn colorize_idf_line(line: &str) -> Line<'static> {
     if line.starts_with("Ketchup Killers") {
         return Line::from(Span::styled(
             line.to_string(),
-            Style::default().fg(CLR_HEADER_FG).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(CLR_HEADER_FG)
+                .add_modifier(Modifier::BOLD),
         ));
     }
     // "Key: value" lines
-    let known_labels = ["Title", "Type", "Mime", "Composer", "Date", "Size", "Attr", "Viewers"];
+    let known_labels = [
+        "Title", "Type", "Mime", "Composer", "Date", "Size", "Attr", "Viewers",
+    ];
     for label in &known_labels {
         let prefix = format!("{}:", label);
         if line.starts_with(prefix.as_str()) {
@@ -446,7 +450,9 @@ fn colorize_idf_line(line: &str) -> Line<'static> {
     // Filename (unlabeled line after header)
     Line::from(Span::styled(
         line.to_string(),
-        Style::default().fg(CLR_PANEL_TITLE).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(CLR_PANEL_TITLE)
+            .add_modifier(Modifier::BOLD),
     ))
 }
 
@@ -470,7 +476,13 @@ fn hex_dump_line(chunk: &[u8], bytes_per_row: usize) -> Line<'static> {
     // ASCII representation
     let ascii: String = chunk
         .iter()
-        .map(|&b| if (0x20..0x7F).contains(&b) { b as char } else { '.' })
+        .map(|&b| {
+            if (0x20..0x7F).contains(&b) {
+                b as char
+            } else {
+                '.'
+            }
+        })
         .collect();
     spans.push(Span::styled(ascii, Style::default().fg(CLR_UNKNOWN)));
     Line::from(spans)
@@ -481,7 +493,10 @@ fn render_file_id_panel(f: &mut Frame, app: &App, area: Rect) {
     let (border_style, title_style, title_text) = if focused {
         (
             Style::default().fg(CLR_HEADER_FG).bg(CLR_APP_BG),
-            Style::default().fg(CLR_HEADER_FG).bg(CLR_APP_BG).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(CLR_HEADER_FG)
+                .bg(CLR_APP_BG)
+                .add_modifier(Modifier::BOLD),
             " FileID ↑↓  Tab=exit ",
         )
     } else {
