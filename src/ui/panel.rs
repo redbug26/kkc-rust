@@ -400,6 +400,81 @@ fn render_panel_footer(f: &mut Frame, panel: &crate::panel::Panel, footer_area: 
     );
 }
 
+fn colorize_idf_line(line: &str) -> Line<'static> {
+    // Header "Ketchup Killers IDF"
+    if line.starts_with("Ketchup Killers") {
+        return Line::from(Span::styled(
+            line.to_string(),
+            Style::default().fg(CLR_HEADER_FG).add_modifier(Modifier::BOLD),
+        ));
+    }
+    // "Key: value" lines
+    let known_labels = ["Title", "Type", "Mime", "Composer", "Date", "Size", "Attr"];
+    for label in &known_labels {
+        let prefix = format!("{}:", label);
+        if line.starts_with(prefix.as_str()) {
+            let value = &line[prefix.len()..];
+            let label_color = match *label {
+                "Type" => CLR_HEADER_FG,
+                "Title" | "Composer" => CLR_PANEL_TITLE,
+                _ => CLR_PANEL_BORDER_DIM,
+            };
+            let value_color = match *label {
+                "Type" => CLR_PANEL_TITLE,
+                "Mime" => CLR_DATA,
+                "Attr" => CLR_EXEC,
+                _ => CLR_TEXT,
+            };
+            return Line::from(vec![
+                Span::styled(prefix, Style::default().fg(label_color)),
+                Span::styled(value.to_string(), Style::default().fg(value_color)),
+            ]);
+        }
+    }
+    // Extra detail lines (start with space)
+    if line.starts_with(' ') {
+        return Line::from(Span::styled(
+            line.to_string(),
+            Style::default().fg(CLR_DATA),
+        ));
+    }
+    // Empty line
+    if line.is_empty() {
+        return Line::from("");
+    }
+    // Filename (unlabeled line after header)
+    Line::from(Span::styled(
+        line.to_string(),
+        Style::default().fg(CLR_PANEL_TITLE).add_modifier(Modifier::BOLD),
+    ))
+}
+
+fn hex_dump_line(chunk: &[u8], bytes_per_row: usize) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    for (i, &b) in chunk.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::raw(" "));
+        }
+        spans.push(Span::styled(
+            format!("{:02X}", b),
+            Style::default().fg(CLR_DATA),
+        ));
+    }
+    // Pad if this is a short last row
+    for _ in chunk.len()..bytes_per_row {
+        spans.push(Span::raw("   "));
+    }
+    // Separator between hex and ASCII
+    spans.push(Span::raw("  "));
+    // ASCII representation
+    let ascii: String = chunk
+        .iter()
+        .map(|&b| if (0x20..0x7F).contains(&b) { b as char } else { '.' })
+        .collect();
+    spans.push(Span::styled(ascii, Style::default().fg(CLR_UNKNOWN)));
+    Line::from(spans)
+}
+
 fn render_file_id_panel(f: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
@@ -413,27 +488,79 @@ fn render_file_id_panel(f: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    if inner.height == 0 {
+    if inner.height == 0 || inner.width < 5 {
         return;
     }
 
+    // Split inner into: │<sp> left gutter | content area | right gutter <sp>│
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(vec![
+            Constraint::Length(2),
+            Constraint::Min(1),
+            Constraint::Length(2),
+        ])
+        .split(inner);
+    let left_col = cols[0];
+    let content_area = cols[1];
+    let right_col = cols[2];
+
+    // Render decorative inner gutter bars (pipe + padding space)
+    let gutter_style = Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_PANEL_BG);
+    let left_gutter_lines: Vec<Line<'static>> = (0..inner.height as usize)
+        .map(|_| Line::from(Span::styled("│ ", gutter_style)))
+        .collect();
+    let right_gutter_lines: Vec<Line<'static>> = (0..inner.height as usize)
+        .map(|_| Line::from(Span::styled(" │", gutter_style)))
+        .collect();
+    f.render_widget(
+        Paragraph::new(left_gutter_lines).style(Style::default().bg(CLR_PANEL_BG)),
+        left_col,
+    );
+    f.render_widget(
+        Paragraph::new(right_gutter_lines).style(Style::default().bg(CLR_PANEL_BG)),
+        right_col,
+    );
+
+    // IDF text lines
     let text = app.build_file_id_preview();
-    let lines = text
-        .lines()
-        .map(|line| {
-            Line::from(Span::styled(
-                line.to_string(),
-                Style::default().fg(CLR_TEXT),
-            ))
-        })
-        .collect::<Vec<_>>();
+    let mut lines: Vec<Line<'static>> = text.lines().map(|l| colorize_idf_line(l)).collect();
+
+    // Hex dump section — only for regular local files
+    // Layout: N*2 hex + (N-1) spaces + 2 separator + N ascii = 4N+1 chars per row
+    let cw = content_area.width as usize;
+    let bytes_per_row: usize = ((cw.saturating_sub(1)) / 4).clamp(4, 32);
+    let max_bytes = bytes_per_row * 8;
+    let hex_data: Option<Vec<u8>> = app
+        .active_panel()
+        .current_entry()
+        .filter(|e| !e.is_dir && e.name != "..")
+        .and_then(|e| {
+            use std::io::Read;
+            let mut file = std::fs::File::open(&e.path).ok()?;
+            let mut buf = vec![0u8; max_bytes];
+            let n = file.read(&mut buf).ok()?;
+            buf.truncate(n);
+            Some(buf)
+        });
+
+    if let Some(data) = hex_data {
+        if !data.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "─".repeat(cw),
+                Style::default().fg(CLR_PANEL_BORDER_DIM),
+            )));
+            for chunk in data.chunks(bytes_per_row) {
+                lines.push(hex_dump_line(chunk, bytes_per_row));
+            }
+        }
+    }
 
     f.render_widget(
         Paragraph::new(lines)
-            .wrap(Wrap { trim: false })
             .scroll((0, 0))
             .style(Style::default().bg(CLR_PANEL_BG)),
-        inner,
+        content_area,
     );
 }
 

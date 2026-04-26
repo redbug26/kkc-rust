@@ -507,6 +507,23 @@
 ^History
 
   V0.1.18
+      - Error/status messages now displayed in a proper dialog box
+      - Tab support: multiple tabs per panel, tabs saved and restored
+        across sessions
+      - Viewer optimisation: faster rendering, viewer split into
+        sub-modules (events/viewer.rs, ui/panel.rs)
+      - CSV viewer: word-wrap support for long cells
+      - XML viewer plugin added
+      - MIME type detection used throughout (plugins, archive, idf)
+      - IDF/file-ID probing extended: many more formats recognised
+        in the status bar (modules, samples, pictures, animations)
+      - Amstrad CPC & C64 Disk plugin: improved directory listing
+      - Viewer highlight submenu: new sub-menu to control syntax/keyword
+        highlighting; viewer events and UI refactored into separate files
+      - Panels refactored into ui/panel.rs
+      - FileID panel improvment
+
+  V0.1.17
       - Complete rewrite in Rust using ratatui + crossterm
       - Dual-panel TUI with tab support in each panel
       - Internal viewer: Text / Hex / Ansi / Image modes (lazy decoding)

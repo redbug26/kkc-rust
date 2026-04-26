@@ -91,12 +91,14 @@ pub fn render_idf_card(path: &Path) -> Option<String> {
     let mut out = String::new();
     out.push_str("Ketchup Killers IDF\n");
     out.push('\n');
+    // Filename first, no label
+    out.push_str(&format!("{}\n", clean_field(&info.detail)));
+    out.push('\n');
     if let Some(title) = info.title.as_ref().filter(|s| !s.is_empty()) {
         out.push_str(&format!("Title: {}\n", clean_field(title)));
     }
-    out.push_str(&format!("Type: {}\n", clean_field(&info.format),));
+    out.push_str(&format!("Type: {}\n", clean_field(&info.format)));
     out.push_str(&format!("Mime: {}\n", clean_field(&info.mime_type)));
-    out.push_str(&format!("Name: {}\n", clean_field(&info.detail)));
     if let Some(composer) = info.composer.as_ref().filter(|s| !s.is_empty()) {
         out.push_str(&format!("Composer: {}\n", clean_field(composer)));
     }
@@ -107,8 +109,40 @@ pub fn render_idf_card(path: &Path) -> Option<String> {
         }
     }
     out.push('\n');
-    out.push_str(&format!("True Size: {} bytes\n", meta.len()));
+    if let Ok(modified) = meta.modified() {
+        let dt = DateTime::<Local>::from(modified);
+        out.push_str(&format!("Date: {}\n", dt.format("%Y-%m-%d  %H:%M")));
+    }
+    out.push_str(&format!("Size: {} bytes\n", meta.len()));
+    out.push_str(&format!("Attr: {}\n", file_attrs(&meta)));
     Some(out)
+}
+
+#[cfg(unix)]
+fn file_attrs(meta: &fs::Metadata) -> String {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = meta.permissions().mode();
+    let ftype = if meta.is_dir() { 'd' } else if meta.file_type().is_symlink() { 'l' } else { '-' };
+    let bits = [
+        (0o400, 'r'), (0o200, 'w'), (0o100, 'x'),
+        (0o040, 'r'), (0o020, 'w'), (0o010, 'x'),
+        (0o004, 'r'), (0o002, 'w'), (0o001, 'x'),
+    ];
+    let mut s = String::with_capacity(10);
+    s.push(ftype);
+    for (bit, ch) in &bits {
+        s.push(if mode & bit != 0 { *ch } else { '-' });
+    }
+    s
+}
+
+#[cfg(not(unix))]
+fn file_attrs(meta: &fs::Metadata) -> String {
+    if meta.permissions().readonly() {
+        "-r--r--r--".into()
+    } else {
+        "-rw-rw-rw-".into()
+    }
 }
 
 fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
@@ -140,14 +174,25 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             vec![],
         ))
     } else if data.starts_with(&[0x1F, 0x8B]) {
-        Some(info(
-            "application/gzip",
-            path,
-            IdfKind::Archive,
-            None,
-            None,
-            vec![],
-        ))
+        if ext == "vgz" {
+            Some(info(
+                "audio/x-vgm",
+                path,
+                IdfKind::Sample,
+                None,
+                None,
+                vec![" VGZ (gzip-compressed VGM)".into()],
+            ))
+        } else {
+            Some(info(
+                "application/gzip",
+                path,
+                IdfKind::Archive,
+                None,
+                None,
+                vec![],
+            ))
+        }
     } else if data.starts_with(b"BZh") {
         Some(info(
             "application/x-bzip2",
@@ -193,14 +238,33 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             vec![],
         ))
-    } else if data.starts_with(b"-lh") && data.get(6) == Some(&b'-') {
+    } else if data.get(2..5) == Some(b"-lh") && data.get(6) == Some(&b'-') {
         Some(info(
             "application/x-lzh-compressed",
             path,
             IdfKind::Archive,
             None,
+            // lha_first_name(&data),
             None,
-            vec![],
+            lha_lines(&data),
+        ))
+    } else if data.starts_with(b"Vgm ") {
+        Some(info(
+            "audio/x-vgm",
+            path,
+            IdfKind::Sample,
+            None,
+            None,
+            vgm_lines(&data),
+        ))
+    } else if data.starts_with(b"UF2\n") && data.get(4..8) == Some(&[0x57, 0x51, 0x5D, 0x9E]) {
+        Some(info(
+            "application/x-uf2",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            uf2_lines(&data),
         ))
     } else if is_tar(&data) {
         Some(info(
@@ -461,7 +525,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             IdfKind::Module,
             fixed_text(&data[17..37]),
             tracker_name(&data, 38, 58),
-            vec![],
+            xm_lines(&data),
         ))
     } else if is_it(&data) {
         Some(info(
@@ -533,7 +597,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             IdfKind::Bitmap,
             svg_title(&data),
             None,
-            vec![],
+            svg_lines(&data),
         ))
     } else if is_xml_document(&data, &ext) {
         Some(info(
@@ -702,6 +766,8 @@ fn format_from_mime_type(mime_type: &str) -> Option<&'static str> {
         "audio/x-xm" => Some("FastTracker module"),
         "audio/x-it" => Some("Impulse Tracker module"),
         "audio/x-mod" => Some("ProTracker module"),
+        "audio/x-vgm" => Some("VGM audio"),
+        "application/x-uf2" => Some("UF2 firmware image"),
         "application/x-amstrad-cpc-dsk" => Some("Amstrad CPC DSK image"),
         "application/x-c64-d64" => Some("Commodore 64 D64 disk image"),
         "application/x-bittorrent" => Some("BitTorrent metadata"),
@@ -1303,6 +1369,145 @@ fn is_s3m(data: &[u8]) -> bool {
 fn is_xm(data: &[u8]) -> bool {
     data.starts_with(b"Extended Module: ")
 }
+
+fn xm_lines(data: &[u8]) -> Vec<String> {
+    let mut out = Vec::new();
+    if data.len() < 80 {
+        return out;
+    }
+    let channels = u16::from_le_bytes([data[68], data[69]]);
+    let patterns = u16::from_le_bytes([data[70], data[71]]);
+    let instruments = u16::from_le_bytes([data[72], data[73]]);
+    let bpm = u16::from_le_bytes([data[78], data[79]]);
+    out.push(format!(" {} channel(s)", channels));
+    out.push(format!(" {} pattern(s)", patterns));
+    out.push(format!(" {} instrument(s)", instruments));
+    if bpm > 0 {
+        out.push(format!(" {} BPM", bpm));
+    }
+    out
+}
+
+fn lha_first_name(data: &[u8]) -> Option<String> {
+    // Level-0/1 LZH headers: offset 0 = header size, 2..7 = method,
+    // 7..11 = compressed size (LE32), 11..15 = original size (LE32),
+    // 19 = filename length, 20.. = filename
+    if data.len() < 22 {
+        return None;
+    }
+    let name_len = data[19] as usize;
+    if name_len == 0 || 20 + name_len > data.len() {
+        return None;
+    }
+    let name = &data[20..20 + name_len];
+    let s = String::from_utf8_lossy(name).trim().to_string();
+    if s.is_empty() { None } else { Some(s) }
+}
+
+fn lha_lines(data: &[u8]) -> Vec<String> {
+    let mut out = Vec::new();
+    if data.len() >= 7 {
+        // method ID is at offset 2..7, e.g. "-lh5-"
+        if let Ok(method) = std::str::from_utf8(&data[2..7]) {
+            out.push(format!(" Method {}", method));
+        }
+    }
+    out
+}
+
+fn vgm_lines(data: &[u8]) -> Vec<String> {
+    let mut out = Vec::new();
+    if data.len() >= 12 {
+        let version = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+        let major = (version >> 8) & 0xF;
+        let minor = version & 0xFF;
+        out.push(format!(" VGM v{}.{:02x}", major, minor));
+    }
+    if data.len() >= 40 {
+        let gd3_offset = u32::from_le_bytes([data[20], data[21], data[22], data[23]]);
+        if gd3_offset > 0 {
+            let gd3_abs = 0x14usize.wrapping_add(gd3_offset as usize);
+            if gd3_abs + 12 <= data.len() && &data[gd3_abs..gd3_abs + 4] == b"Gd3 " {
+                // GD3 tag present — extract track name (first UTF-16LE string)
+                let str_start = gd3_abs + 12;
+                if str_start < data.len() {
+                    let title = read_gd3_string(&data[str_start..]);
+                    if let Some(t) = title.filter(|s| !s.is_empty()) {
+                        out.push(format!(" Track: {}", t));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+fn read_gd3_string(data: &[u8]) -> Option<String> {
+    let words: Vec<u16> = data
+        .chunks_exact(2)
+        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .take_while(|&w| w != 0)
+        .collect();
+    let s = String::from_utf16(&words).ok()?;
+    let trimmed = s.trim().to_string();
+    if trimmed.is_empty() { None } else { Some(trimmed) }
+}
+
+fn uf2_lines(data: &[u8]) -> Vec<String> {
+    let mut out = Vec::new();
+    if data.len() < 32 {
+        return out;
+    }
+    let flags = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+    let num_blocks = u32::from_le_bytes([data[28], data[29], data[30], data[31]]);
+    out.push(format!(" {} block(s)", num_blocks));
+    // Family ID present when bit 0x00002000 is set
+    if flags & 0x0000_2000 != 0 && data.len() >= 484 {
+        let family = u32::from_le_bytes([data[480], data[481], data[482], data[483]]);
+        out.push(format!(" Family ID 0x{:08X}", family));
+    }
+    let target_addr = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
+    out.push(format!(" Target 0x{:08X}", target_addr));
+    out
+}
+
+fn svg_lines(data: &[u8]) -> Vec<String> {
+    let sample = String::from_utf8_lossy(&data[..data.len().min(4096)]);
+    let lower = sample.to_ascii_lowercase();
+    let svg_start = match lower.find("<svg") {
+        Some(p) => p,
+        None => return Vec::new(),
+    };
+    let tag_end = lower[svg_start..].find('>').map(|p| p + svg_start).unwrap_or(sample.len());
+    let tag = &sample[svg_start..tag_end];
+    let mut out = Vec::new();
+
+    // Try to extract width and height
+    if let (Some(w), Some(h)) = (attr_value(tag, "width"), attr_value(tag, "height")) {
+        out.push(format!(" {}  x  {}", w.trim(), h.trim()));
+    } else if let Some(vb) = attr_value(tag, "viewBox") {
+        out.push(format!(" viewBox {}", vb.trim()));
+    }
+    out
+}
+
+fn attr_value<'a>(tag: &'a str, attr: &str) -> Option<&'a str> {
+    let lower = tag.to_ascii_lowercase();
+    let key = format!("{}=", attr);
+    let pos = lower.find(key.as_str())?;
+    let rest = &tag[pos + key.len()..];
+    if rest.starts_with('"') {
+        let end = rest[1..].find('"')?;
+        Some(&rest[1..1 + end])
+    } else if rest.starts_with('\'') {
+        let end = rest[1..].find('\'')?;
+        Some(&rest[1..1 + end])
+    } else {
+        None
+    }
+}
+
+
 
 fn is_it(data: &[u8]) -> bool {
     data.starts_with(b"IMPM")
