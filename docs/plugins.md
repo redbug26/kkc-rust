@@ -71,6 +71,7 @@ Declaration:
 ```lua
 kkc.register_archive_plugin({
     name = "simple_archive",
+    version = "1.0.0",
     description = "Example archive plugin",
     extensions = { "foo" },
     extract = function(path, destination)
@@ -83,6 +84,7 @@ kkc.register_archive_plugin({
 Fields:
 
 - `name`: stable unique plugin identifier.
+- `version`: optional semantic version string shown in `Options > Plugins`. Defaults to `0.0.0` for older plugins.
 - `description`: text shown in `Options > Plugins`.
 - `extensions`: supported extensions, without leading dots.
 - `extract(path, destination)`: extracts content into `destination`, then returns `true`.
@@ -94,6 +96,7 @@ Example with archive writing:
 ```lua
 kkc.register_archive_plugin({
     name = "writable_archive",
+    version = "1.0.0",
     description = "Example writable archive",
     extensions = { "foo" },
     extract = function(path, destination)
@@ -121,6 +124,7 @@ There are two forms:
 Viewer plugin fields:
 
 - `name`: stable unique plugin identifier.
+- `version`: optional semantic version string shown in `Options > Plugins`. Defaults to `0.0.0` for older plugins.
 - `description`: text shown in `Options > Plugins` and `F4: Change Viewer`.
 - `modes`: supported viewer modes, usually `{ "text" }`.
 - `extensions`: optional. File extensions, without leading dots, for automatic viewer plugin selection.
@@ -140,6 +144,7 @@ local kkc = require("kkc")
 
 kkc.register_viewer_plugin({
     name = "keywords",
+    version = "1.0.0",
     description = "Simple highlighting",
     modes = { "text" },
     render_line = function(path, mode, line)
@@ -169,6 +174,7 @@ end
 
 kkc.register_viewer_plugin({
     name = "index_viewer",
+    version = "1.0.0",
     description = "Displays a custom index",
     modes = { "text" },
     extensions = { "idx" },
@@ -254,6 +260,7 @@ end
 
 kkc.register_viewer_plugin({
     name = "foo_viewer",
+    version = "1.0.0",
     description = "Example stateful viewer",
     modes = { "text" },
     render = render,
@@ -320,5 +327,6 @@ The plugins bundled in `assets/plugins` can be used as examples:
 - `json_viewer`: pretty/tree JSON viewer.
 - `markdown_viewer`: rendered Markdown viewer.
 - `text_syntax`: line-by-line syntax highlighting viewer.
+- `xml_viewer`: structured XML viewer with syntax highlighting.
 - `pdf_file`: read-only PDF exploration as an archive.
 - `lha_lzh`: LHA/LZH exploration in Lua.

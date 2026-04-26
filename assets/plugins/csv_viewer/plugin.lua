@@ -530,6 +530,7 @@ end
 
 kkc.register_viewer_plugin({
     name        = "csv_viewer",
+    version     = "1.0.0",
     description = "CSV file viewer with column alignment",
     modes       = { "text" },
     extensions  = { "csv" },

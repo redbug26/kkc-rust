@@ -529,6 +529,7 @@ end
 
 kkc.register_viewer_plugin({
     name = "json_viewer",
+    version = "1.0.0",
     description = "Pretty and tree JSON viewer",
     modes = { "text" },
     extensions = { "json", "geojson" },

@@ -266,6 +266,7 @@ end
 
 kkc.register_viewer_plugin({
     name = "markdown_viewer",
+    version = "1.0.0",
     description = "Rendered Markdown viewer",
     modes = { "text" },
     extensions = { "md", "markdown", "mdown", "mkd" },

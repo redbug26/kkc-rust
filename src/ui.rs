@@ -3512,6 +3512,13 @@ fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
         .max()
         .unwrap_or(0)
         .max("Type".len());
+    let col_version = s
+        .plugins
+        .iter()
+        .map(|p| p.version.len())
+        .max()
+        .unwrap_or(0)
+        .max("Version".len());
     let col_ext = s
         .plugins
         .iter()
@@ -3528,13 +3535,15 @@ fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
         .max("Ext".len());
 
     let header = format!(
-        "  {:<col_name$} {:<col_kind$} {:<col_ext$} {}",
+        "  {:<col_name$} {:<col_kind$} {:<col_version$} {:<col_ext$} {}",
         "Name",
         "Type",
+        "Version",
         "Ext",
         "Description",
         col_name = col_name,
         col_kind = col_kind,
+        col_version = col_version,
         col_ext = col_ext,
     );
     safe_render_widget(
@@ -3611,14 +3620,16 @@ fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
             };
             let icon = if selected { "▶" } else { " " };
             let text = format!(
-                " {} {:<col_name$} {:<col_kind$} {:<col_ext$} {}",
+                " {} {:<col_name$} {:<col_kind$} {:<col_version$} {:<col_ext$} {}",
                 icon,
                 plugin.name,
                 plugin.kind,
+                plugin.version,
                 exts,
                 plugin.description,
                 col_name = col_name,
                 col_kind = col_kind,
+                col_version = col_version,
                 col_ext = col_ext,
             );
             let padded = format!(

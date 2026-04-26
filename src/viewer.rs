@@ -22,6 +22,8 @@ use self::viewer_decode::{
 use self::viewer_render::{mask_keywords, pad_visible, slice_visible};
 use self::viewer_search::parse_hex_query;
 
+const PLUGIN_DOCUMENT_SEARCH_WIDTH: usize = 120;
+
 fn viewer_positions() -> &'static Mutex<HashMap<PathBuf, ViewerPosition>> {
     static POSITIONS: OnceLock<Mutex<HashMap<PathBuf, ViewerPosition>>> = OnceLock::new();
     POSITIONS.get_or_init(|| Mutex::new(HashMap::new()))
@@ -559,6 +561,13 @@ impl Viewer {
         }
         self.matches = if matches!(self.mode, ViewMode::Hex) {
             self.rebuild_hex_matches()
+        } else if let Some(lines) = self.plugin_document_plain_lines(PLUGIN_DOCUMENT_SEARCH_WIDTH) {
+            let needle = self.search.to_lowercase();
+            lines
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, line)| line.to_lowercase().contains(&needle).then_some(idx))
+                .collect()
         } else {
             let needle = self.search.to_lowercase();
             (0..self.line_count())
@@ -682,9 +691,31 @@ impl Viewer {
             mode,
             plugin_name,
             &self.plugin_state,
-            120,
+            PLUGIN_DOCUMENT_SEARCH_WIDTH,
         )
         .map(|lines| lines.len())
+    }
+
+    fn plugin_document_plain_lines(&self, width: usize) -> Option<Vec<String>> {
+        let mode = self.viewer_mode_key()?;
+        let plugin_name = self.viewer_plugin.as_deref()?;
+        crate::plugins::render_viewer_document(
+            &self.path,
+            mode,
+            plugin_name,
+            &self.plugin_state,
+            width,
+        )
+        .map(|lines| {
+            lines
+                .into_iter()
+                .map(|line| {
+                    line.into_iter()
+                        .map(|span| sanitize_plugin_text(&span.text))
+                        .collect::<String>()
+                })
+                .collect()
+        })
     }
 
     fn render_plugin_document_lines(
@@ -740,6 +771,7 @@ impl Viewer {
         ) {
             Some((consumed, new_state)) => {
                 self.plugin_state = new_state;
+                self.rebuild_matches();
                 consumed
             }
             None => false,

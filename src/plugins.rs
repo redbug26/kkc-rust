@@ -19,6 +19,7 @@ const BUNDLED_PDF_FILE_PLUGIN: &str = include_str!("../assets/plugins/pdf_file/p
 const BUNDLED_HTML_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/html_viewer/plugin.lua");
 const BUNDLED_EML_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/eml_viewer/plugin.lua");
 const BUNDLED_JSON_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/json_viewer/plugin.lua");
+const BUNDLED_XML_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/xml_viewer/plugin.lua");
 const BUNDLED_CSV_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/csv_viewer/plugin.lua");
 const BUNDLED_MARKDOWN_VIEWER_PLUGIN: &str =
     include_str!("../assets/plugins/markdown_viewer/plugin.lua");
@@ -35,6 +36,7 @@ pub struct PluginRegistry {
 #[derive(Debug, Clone)]
 pub struct PluginInfo {
     pub name: String,
+    pub version: String,
     pub kind: String,
     pub description: String,
     pub extensions: Vec<String>,
@@ -43,6 +45,7 @@ pub struct PluginInfo {
 #[derive(Debug, Clone)]
 struct ArchivePlugin {
     name: String,
+    version: String,
     description: String,
     script_path: PathBuf,
     plugin_dir: PathBuf,
@@ -53,6 +56,7 @@ struct ArchivePlugin {
 #[derive(Debug, Clone)]
 struct ViewerPlugin {
     name: String,
+    version: String,
     description: String,
     script_path: PathBuf,
     plugin_dir: PathBuf,
@@ -63,6 +67,7 @@ struct ViewerPlugin {
 #[derive(Debug, Clone)]
 struct RegisteredPlugin {
     name: String,
+    version: String,
     description: String,
     extensions: Vec<String>,
     can_add_files: bool,
@@ -71,6 +76,7 @@ struct RegisteredPlugin {
 #[derive(Debug, Clone)]
 struct RegisteredViewerPlugin {
     name: String,
+    version: String,
     description: String,
     modes: Vec<String>,
     extensions: Vec<String>,
@@ -267,6 +273,7 @@ fn load_plugins() -> Result<PluginRegistry> {
         for plugin in registered {
             archive_plugins.push(ArchivePlugin {
                 name: plugin.name,
+                version: plugin.version,
                 description: plugin.description,
                 script_path: script_path.clone(),
                 plugin_dir: plugin_dir.clone(),
@@ -277,6 +284,7 @@ fn load_plugins() -> Result<PluginRegistry> {
         for plugin in registered_viewers {
             viewer_plugins.push(ViewerPlugin {
                 name: plugin.name,
+                version: plugin.version,
                 description: plugin.description,
                 script_path: script_path.clone(),
                 plugin_dir: plugin_dir.clone(),
@@ -335,6 +343,10 @@ fn install_bundled_plugins(plugins_dir: &Path) -> Result<()> {
     let json_dir = plugins_dir.join("json_viewer");
     fs::create_dir_all(&json_dir)?;
     write_bundled_file(&json_dir.join("plugin.lua"), BUNDLED_JSON_VIEWER_PLUGIN)?;
+
+    let xml_dir = plugins_dir.join("xml_viewer");
+    fs::create_dir_all(&xml_dir)?;
+    write_bundled_file(&xml_dir.join("plugin.lua"), BUNDLED_XML_VIEWER_PLUGIN)?;
 
     let csv_dir = plugins_dir.join("csv_viewer");
     fs::create_dir_all(&csv_dir)?;
@@ -604,6 +616,7 @@ where
         "register_archive_plugin",
         lua.create_function(move |_, table: Table| {
             let name: String = table.get("name")?;
+            let version: String = table.get("version").unwrap_or_else(|_| "0.0.0".into());
             let description: String = table.get("description").unwrap_or_else(|_| String::new());
             let extract: Option<Function> = table.get("extract")?;
             let add_files: Option<Function> = table.get("add_files").ok();
@@ -623,6 +636,7 @@ where
 
             on_register(RegisteredPlugin {
                 name,
+                version,
                 description,
                 extensions,
                 can_add_files: add_files.is_some(),
@@ -668,6 +682,7 @@ impl PluginRegistry {
             .iter()
             .map(|plugin| PluginInfo {
                 name: plugin.name.clone(),
+                version: plugin.version.clone(),
                 kind: "Archive".into(),
                 description: plugin.description.clone(),
                 extensions: plugin.extensions.clone(),
@@ -675,6 +690,7 @@ impl PluginRegistry {
             .collect::<Vec<_>>();
         plugins.extend(self.viewer_plugins.iter().map(|plugin| PluginInfo {
             name: plugin.name.clone(),
+            version: plugin.version.clone(),
             kind: "Viewer".into(),
             description: plugin.description.clone(),
             extensions: if plugin.extensions.is_empty() {
@@ -691,6 +707,7 @@ impl PluginRegistry {
             .iter()
             .map(|plugin| PluginInfo {
                 name: plugin.name.clone(),
+                version: plugin.version.clone(),
                 kind: "Viewer".into(),
                 description: plugin.description.clone(),
                 extensions: if plugin.extensions.is_empty() {
@@ -1132,6 +1149,7 @@ where
         "register_viewer_plugin",
         lua.create_function(move |_, table: Table| {
             let name: String = table.get("name")?;
+            let version: String = table.get("version").unwrap_or_else(|_| "0.0.0".into());
             let description: String = table.get("description").unwrap_or_else(|_| String::new());
             let render_line: Option<Function> = table.get("render_line").ok();
             let render: Option<Function> = table.get("render").ok();
@@ -1155,6 +1173,7 @@ where
             };
             on_register(RegisteredViewerPlugin {
                 name,
+                version,
                 description,
                 modes,
                 extensions,
@@ -1217,6 +1236,7 @@ mod tests {
 
         assert_eq!(plugins.len(), 1);
         assert_eq!(plugins[0].name, "pdf_file");
+        assert_eq!(plugins[0].version, "1.0.0");
         assert_eq!(plugins[0].extensions, vec!["pdf"]);
     }
 
@@ -1232,6 +1252,7 @@ mod tests {
 
         assert_eq!(plugins.len(), 1);
         assert_eq!(plugins[0].name, "text_syntax");
+        assert_eq!(plugins[0].version, "1.0.0");
         assert_eq!(plugins[0].modes, vec!["text"]);
     }
 
@@ -1247,8 +1268,29 @@ mod tests {
 
         assert_eq!(plugins.len(), 1);
         assert_eq!(plugins[0].name, "json_viewer");
+        assert_eq!(plugins[0].version, "1.0.0");
         assert_eq!(plugins[0].modes, vec!["text"]);
         assert_eq!(plugins[0].extensions, vec!["json", "geojson"]);
+    }
+
+    #[test]
+    fn bundled_xml_viewer_plugin_registers() {
+        let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("plugins")
+            .join("xml_viewer")
+            .join("plugin.lua");
+
+        let plugins = inspect_viewer_plugin(&script).expect("viewer plugin should load");
+
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(plugins[0].name, "xml_viewer");
+        assert_eq!(plugins[0].version, "1.0.0");
+        assert_eq!(plugins[0].modes, vec!["text"]);
+        assert_eq!(
+            plugins[0].extensions,
+            vec!["xml", "xsd", "xsl", "xslt", "svg", "rss", "atom", "plist"]
+        );
     }
 
     #[test]
@@ -1263,6 +1305,7 @@ mod tests {
 
         assert_eq!(plugins.len(), 1);
         assert_eq!(plugins[0].name, "html_viewer");
+        assert_eq!(plugins[0].version, "1.0.0");
         assert_eq!(plugins[0].modes, vec!["text"]);
         assert_eq!(plugins[0].extensions, vec!["html", "htm", "xhtml"]);
     }
@@ -1279,6 +1322,7 @@ mod tests {
 
         assert_eq!(plugins.len(), 1);
         assert_eq!(plugins[0].name, "eml_viewer");
+        assert_eq!(plugins[0].version, "1.0.0");
         assert_eq!(plugins[0].modes, vec!["text"]);
         assert_eq!(plugins[0].extensions, vec!["eml", "mbox"]);
     }
@@ -1295,6 +1339,7 @@ mod tests {
 
         assert_eq!(plugins.len(), 1);
         assert_eq!(plugins[0].name, "markdown_viewer");
+        assert_eq!(plugins[0].version, "1.0.0");
         assert_eq!(plugins[0].modes, vec!["text"]);
         assert_eq!(
             plugins[0].extensions,
@@ -1319,6 +1364,7 @@ mod tests {
             .join("plugin.lua");
         let plugin = ViewerPlugin {
             name: "csv_viewer".into(),
+            version: "1.0.0".into(),
             description: String::new(),
             plugin_dir: script_path.parent().expect("plugin dir").to_path_buf(),
             script_path,
@@ -1375,6 +1421,7 @@ mod tests {
             .join("plugin.lua");
         let plugin = ViewerPlugin {
             name: "html_viewer".into(),
+            version: "1.0.0".into(),
             description: String::new(),
             plugin_dir: script_path.parent().expect("plugin dir").to_path_buf(),
             script_path,
@@ -1416,6 +1463,7 @@ mod tests {
             .join("plugin.lua");
         let plugin = ViewerPlugin {
             name: "eml_viewer".into(),
+            version: "1.0.0".into(),
             description: String::new(),
             plugin_dir: script_path.parent().expect("plugin dir").to_path_buf(),
             script_path,
@@ -1452,6 +1500,7 @@ mod tests {
             .join("plugin.lua");
         let plugin = ViewerPlugin {
             name: "markdown_viewer".into(),
+            version: "1.0.0".into(),
             description: String::new(),
             plugin_dir: script_path.parent().expect("plugin dir").to_path_buf(),
             script_path,
@@ -1494,6 +1543,7 @@ mod tests {
             .join("plugin.lua");
         let plugin = ViewerPlugin {
             name: "json_viewer".into(),
+            version: "1.0.0".into(),
             description: String::new(),
             plugin_dir: script_path.parent().expect("plugin dir").to_path_buf(),
             script_path,
@@ -1524,6 +1574,63 @@ mod tests {
     }
 
     #[test]
+    fn bundled_xml_viewer_renders_document() {
+        let xml_path =
+            std::env::temp_dir().join(format!("kkc-xml-viewer-{}.xml", std::process::id()));
+        fs::write(
+            &xml_path,
+            r#"<?xml version="1.0"?><catalog><book id="bk101"><title>XML Guide</title><!-- note --><data><![CDATA[a < b]]></data></book></catalog>"#,
+        )
+        .expect("write xml");
+
+        let script_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("plugins")
+            .join("xml_viewer")
+            .join("plugin.lua");
+        let plugin = ViewerPlugin {
+            name: "xml_viewer".into(),
+            version: "1.0.0".into(),
+            description: String::new(),
+            plugin_dir: script_path.parent().expect("plugin dir").to_path_buf(),
+            script_path,
+            modes: vec!["text".into()],
+            extensions: vec![
+                "xml".into(),
+                "xsd".into(),
+                "xsl".into(),
+                "xslt".into(),
+                "svg".into(),
+                "rss".into(),
+                "atom".into(),
+                "plist".into(),
+            ],
+        };
+
+        let rendered = plugin
+            .render_document(&xml_path, "text", &HashMap::new(), 120)
+            .expect("xml viewer should render")
+            .expect("xml viewer should return lines");
+        let text = lines_to_text(&rendered);
+        assert!(text.contains("XML"));
+        assert!(text.contains("catalog"));
+        assert!(text.contains("book"));
+        assert!(text.contains("id"));
+        assert!(text.contains("bk101"));
+        assert!(text.contains("XML Guide"));
+        assert!(text.contains("note"));
+        assert!(text.contains("CDATA"));
+
+        let (_, state) = plugin
+            .handle_key(&xml_path, "text", "f2", &HashMap::new())
+            .expect("xml viewer should handle key")
+            .expect("xml viewer should return state");
+        assert_eq!(state.get("wrap").map(String::as_str), Some("0"));
+
+        let _ = fs::remove_file(&xml_path);
+    }
+
+    #[test]
     fn bundled_amstrad_dsk_viewer_plugin_registers() {
         let script = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("assets")
@@ -1535,6 +1642,7 @@ mod tests {
 
         assert_eq!(plugins.len(), 1);
         assert_eq!(plugins[0].name, "amstrad_dsk_directory");
+        assert_eq!(plugins[0].version, "1.0.0");
         assert_eq!(plugins[0].modes, vec!["text"]);
     }
 
@@ -1550,6 +1658,7 @@ mod tests {
 
         assert_eq!(plugins.len(), 1);
         assert_eq!(plugins[0].name, "commodore_d64_directory");
+        assert_eq!(plugins[0].version, "1.0.0");
         assert_eq!(plugins[0].modes, vec!["text"]);
     }
 
@@ -1604,6 +1713,7 @@ mod tests {
             .join("plugin.lua");
         let plugin = ViewerPlugin {
             name: "commodore_d64_directory".into(),
+            version: "1.0.0".into(),
             description: String::new(),
             plugin_dir: script_path.parent().expect("plugin dir").to_path_buf(),
             script_path,
@@ -1639,6 +1749,7 @@ mod tests {
         let plugin_dir = script_path.parent().expect("plugin dir").to_path_buf();
         let plugin = ViewerPlugin {
             name: "text_syntax".into(),
+            version: "1.0.0".into(),
             description: String::new(),
             script_path,
             plugin_dir,

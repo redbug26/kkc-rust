@@ -310,6 +310,7 @@ end
 
 kkc.register_archive_plugin({
     name = "amstrad_dsk",
+    version = "1.0.0",
     description = "Amstrad CPC DSK archive plugin",
     extensions = { "dsk" },
     can_handle = function(path)
@@ -321,6 +322,7 @@ kkc.register_archive_plugin({
 
 kkc.register_viewer_plugin({
     name = "amstrad_dsk_directory",
+    version = "1.0.0",
     description = "Amstrad CPC DSK directory viewer",
     modes = { "text" },
     extensions = { "dsk" },

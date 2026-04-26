@@ -246,6 +246,7 @@ end
 
 kkc.register_archive_plugin({
     name = "pdf_file",
+    version = "1.0.0",
     description = "Pure Lua PDF file access plugin: extracts readable text and embedded images",
     extensions = { "pdf" },
     can_handle = function(path)

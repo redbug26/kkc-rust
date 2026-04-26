@@ -397,6 +397,7 @@ end
 
 kkc.register_viewer_plugin({
     name = "html_viewer",
+    version = "1.0.0",
     description = "Rendered HTML text viewer",
     modes = { "text" },
     extensions = { "html", "htm", "xhtml" },

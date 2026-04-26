@@ -290,6 +290,7 @@ end
 
 kkc.register_archive_plugin({
     name = "lha_lzh",
+    version = "1.0.0",
     description = "Pure Lua LHA/LZH archive plugin",
     extensions = { "lha", "lzh" },
     can_handle = function(path)
