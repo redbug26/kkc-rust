@@ -42,6 +42,7 @@ pub struct PluginInfo {
     pub kind: String,
     pub description: String,
     pub extensions: Vec<String>,
+    pub dir: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -859,6 +860,7 @@ impl PluginRegistry {
                 kind: "Archive".into(),
                 description: plugin.description.clone(),
                 extensions: plugin.support_labels(),
+                dir: plugin.plugin_dir.clone(),
             })
             .collect::<Vec<_>>();
         plugins.extend(self.viewer_plugins.iter().map(|plugin| PluginInfo {
@@ -873,6 +875,7 @@ impl PluginRegistry {
             } else {
                 plugin.extensions.clone()
             },
+            dir: plugin.plugin_dir.clone(),
         }));
         plugins.extend(self.action_plugins.iter().map(|plugin| PluginInfo {
             name: plugin.name.clone(),
@@ -880,6 +883,7 @@ impl PluginRegistry {
             kind: "Action".into(),
             description: plugin.description.clone(),
             extensions: Vec::new(),
+            dir: plugin.plugin_dir.clone(),
         }));
         plugins
     }
@@ -899,6 +903,7 @@ impl PluginRegistry {
                 } else {
                     plugin.extensions.clone()
                 },
+                dir: plugin.plugin_dir.clone(),
             })
             .collect()
     }

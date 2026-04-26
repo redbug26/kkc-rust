@@ -682,6 +682,12 @@ pub struct SearchState {
     pub start_dir: PathBuf,
     pub backend: SearchBackend,
     pub follow_links: bool,
+    /// Background search thread sends results here.
+    pub search_rx: Option<std::sync::mpsc::Receiver<SearchResult>>,
+    /// Set to `true` to ask the background thread to stop early.
+    pub cancel_flag: Option<Arc<AtomicBool>>,
+    /// Number of directories visited so far (for progress display).
+    pub dirs_visited: usize,
 }
 
 // ---------------------------------------------------------------------------
@@ -1332,6 +1338,7 @@ impl App {
 
     pub fn poll_background_tasks(&mut self) {
         self.poll_running_cmd();
+        self.poll_search();
         let mut remote_connect_result: Option<RemoteConnectMessage> = None;
         if let Some(task) = &self.remote_connect_task {
             match task.rx.try_recv() {
@@ -1489,6 +1496,59 @@ impl App {
                     break;
                 }
             }
+        }
+    }
+
+    /// Drain results arriving from the background search thread.
+    pub fn poll_search(&mut self) {
+        if !matches!(self.mode, AppMode::SearchPanel(_)) {
+            return;
+        }
+        let mut done = false;
+        if let AppMode::SearchPanel(ref mut s) = self.mode {
+            if s.running {
+                if let Some(ref rx) = s.search_rx {
+                    // Drain up to 200 results per tick to stay responsive
+                    for _ in 0..200 {
+                        match rx.try_recv() {
+                            Ok(result) => {
+                                s.dirs_visited += 1;
+                                if s.results.len() < 1000 {
+                                    s.results.push(result);
+                                }
+                            }
+                            Err(TryRecvError::Empty) => break,
+                            Err(TryRecvError::Disconnected) => {
+                                done = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if done {
+            if let AppMode::SearchPanel(ref mut s) = self.mode {
+                s.running = false;
+                s.search_rx = None;
+                s.cancel_flag = None;
+                // Auto-focus results list when search completes
+                if !s.results.is_empty() && s.input_field < 3 {
+                    s.input_field = 3;
+                }
+            }
+        }
+    }
+
+    /// Cancel any running background search and close the search panel.
+    pub fn cancel_search(&mut self) {
+        if let AppMode::SearchPanel(ref mut s) = self.mode {
+            if let Some(ref flag) = s.cancel_flag {
+                flag.store(true, Ordering::Relaxed);
+            }
+            s.running = false;
+            s.search_rx = None;
+            s.cancel_flag = None;
         }
     }
 
@@ -1894,6 +1954,9 @@ impl App {
             start_dir: start,
             backend: SearchBackend::best_default(),
             follow_links: false,
+            search_rx: None,
+            cancel_flag: None,
+            dirs_visited: 0,
         });
     }
 
@@ -1905,6 +1968,14 @@ impl App {
         let AppMode::SearchPanel(ref mut state) = self.mode else {
             return;
         };
+
+        // Cancel any previous search thread
+        if let Some(ref flag) = state.cancel_flag {
+            flag.store(true, Ordering::Relaxed);
+        }
+        state.search_rx = None;
+        state.cancel_flag = None;
+
         // Resolve start directory from dir_query
         let start = {
             let p = std::path::Path::new(&state.dir_query);
@@ -1918,6 +1989,7 @@ impl App {
         state.results.clear();
         state.cursor = 0;
         state.scroll = 0;
+        state.dirs_visited = 0;
         state.running = true;
 
         let query = SearchQuery {
@@ -1931,28 +2003,57 @@ impl App {
             } else {
                 Some(state.content_query.clone())
             },
-            start: start,
+            start,
             follow_links: state.follow_links,
         };
 
-        let results = match state.backend {
-            SearchBackend::Spotlight => search_spotlight(&query, 1000),
-            SearchBackend::Locate => search_locate(&query, 1000),
-            SearchBackend::Walk => {
-                let mut results = Vec::new();
-                let _ = search(&query, |r| {
-                    results.push(r.clone());
-                    results.len() < 1000
-                });
-                results
-            }
-        };
+        let backend = state.backend;
+        let (tx, rx) = std::sync::mpsc::channel::<SearchResult>();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel_clone = Arc::clone(&cancel);
 
-        let AppMode::SearchPanel(ref mut state) = self.mode else {
-            return;
-        };
-        state.results = results;
-        state.running = false;
+        match backend {
+            SearchBackend::Walk => {
+                std::thread::spawn(move || {
+                    let _ = search(&query, |r| {
+                        if cancel_clone.load(Ordering::Relaxed) {
+                            return false;
+                        }
+                        tx.send(r.clone()).is_ok()
+                    });
+                    // tx drops here → Disconnected signals completion to poller
+                });
+            }
+            SearchBackend::Spotlight => {
+                std::thread::spawn(move || {
+                    let results = search_spotlight(&query, 1000);
+                    for r in results {
+                        if cancel_clone.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        if tx.send(r).is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+            SearchBackend::Locate => {
+                std::thread::spawn(move || {
+                    let results = search_locate(&query, 1000);
+                    for r in results {
+                        if cancel_clone.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        if tx.send(r).is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+        }
+
+        state.search_rx = Some(rx);
+        state.cancel_flag = Some(cancel);
     }
 
     // -----------------------------------------------------------------------

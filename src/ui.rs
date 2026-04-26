@@ -1,6 +1,8 @@
 mod panel;
+mod plugins;
 
 use self::panel::{render_center_buttons, render_panel_or_file_id};
+use self::plugins::render_plugins;
 use crate::app::{
     ActionPaletteState, ActivePanel, App, AppMode, AssocEditorState, BookmarkListItem, ConfigState,
     ConfirmAction, ConfirmDialog, InputDialog, MENU_DATA, MENU_HEADERS, MenuAction, MenuState,
@@ -2473,16 +2475,24 @@ fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
         ""
     };
     let sep_title = if state.running {
-        " Searching\u{2026} ".to_string()
+        if result_count > 0 {
+            format!(" Searching...  {result_count} found so far  [Esc to cancel] ")
+        } else {
+            " Searching...  [Esc to cancel] ".to_string()
+        }
     } else if result_count > 0 {
         format!(" {result_count} result(s){suffix} ")
     } else {
-        " No results \u{2013} press Enter to search ".to_string()
+        " No results - press Enter to search ".to_string()
     };
     let sep_block = Block::default()
         .title(Span::styled(
             sep_title,
-            Style::default().fg(Color::Rgb(160, 170, 200)),
+            Style::default().fg(if state.running {
+                Color::Rgb(220, 180, 80)
+            } else {
+                Color::Rgb(160, 170, 200)
+            }),
         ))
         .borders(Borders::TOP)
         .border_style(Style::default().fg(Color::Rgb(60, 70, 100)));
@@ -3926,239 +3936,7 @@ fn render_opener(f: &mut Frame, s: &OpenerState, area: Rect) {
 // Association editor
 // ---------------------------------------------------------------------------
 
-fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
-    let w: u16 = area.width.saturating_sub(4).min(120).max(76);
-    let h: u16 = area.height.saturating_sub(4).min(26).max(22);
-    let x = area.x + (area.width.saturating_sub(w)) / 2;
-    let y = area.y + (area.height.saturating_sub(h)) / 2;
-    let popup = clamp_rect(
-        area,
-        Rect {
-            x,
-            y,
-            width: w,
-            height: h,
-        },
-    );
-
-    let sh = Rect {
-        x: popup.x + 2,
-        y: popup.y + 1,
-        width: popup.width,
-        height: popup.height,
-    };
-    if sh.right() <= area.right() && sh.bottom() <= area.bottom() {
-        safe_render_widget(
-            f,
-            Block::default().style(Style::default().bg(Color::Rgb(20, 15, 10))),
-            sh,
-        );
-    }
-    safe_render_widget(f, Clear, popup);
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG))
-        .title(Span::styled(
-            " Plugins ",
-            Style::default()
-                .fg(CLR_BUTTON_FG)
-                .bg(CLR_APP_BG)
-                .add_modifier(Modifier::BOLD),
-        ))
-        .style(Style::default().bg(CLR_APP_BG));
-    let inner = block.inner(popup);
-    safe_render_widget(f, block, popup);
-
-    let dir_line = format!("  Directory: {}", s.plugins_dir.display());
-    safe_render_widget(
-        f,
-        Paragraph::new(truncate_str(&dir_line, inner.width as usize))
-            .style(Style::default().fg(Color::Rgb(110, 88, 65)).bg(CLR_APP_BG)),
-        Rect {
-            x: inner.x,
-            y: inner.y,
-            width: inner.width,
-            height: 1,
-        },
-    );
-
-    // Dynamic column widths based on actual data
-    let col_name = s
-        .plugins
-        .iter()
-        .map(|p| p.name.len())
-        .max()
-        .unwrap_or(0)
-        .max("Name".len());
-    let col_kind = s
-        .plugins
-        .iter()
-        .map(|p| p.kind.len())
-        .max()
-        .unwrap_or(0)
-        .max("Type".len());
-    let col_version = s
-        .plugins
-        .iter()
-        .map(|p| p.version.len())
-        .max()
-        .unwrap_or(0)
-        .max("Version".len());
-    let col_ext = s
-        .plugins
-        .iter()
-        .map(|p| {
-            if p.extensions.is_empty() {
-                1
-            } else {
-                p.extensions.iter().map(|e| e.len()).sum::<usize>()
-                    + p.extensions.len().saturating_sub(1)
-            }
-        })
-        .max()
-        .unwrap_or(0)
-        .max("Mime".len());
-
-    let header = format!(
-        "  {:<col_name$} {:<col_kind$} {:<col_version$} {:<col_ext$} {}",
-        "Name",
-        "Type",
-        "Version",
-        "Mime",
-        "Description",
-        col_name = col_name,
-        col_kind = col_kind,
-        col_version = col_version,
-        col_ext = col_ext,
-    );
-    safe_render_widget(
-        f,
-        Paragraph::new(truncate_str(&header, inner.width as usize)).style(
-            Style::default()
-                .fg(CLR_HEADER_FG)
-                .bg(CLR_HEADER_BG)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Rect {
-            x: inner.x,
-            y: inner.y + 2,
-            width: inner.width,
-            height: 1,
-        },
-    );
-    let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
-    safe_render_widget(
-        f,
-        Paragraph::new(sep.clone()).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
-        Rect {
-            x: inner.x,
-            y: inner.y + 3,
-            width: inner.width,
-            height: 1,
-        },
-    );
-
-    let list_h = inner.height.saturating_sub(7) as usize;
-    let start = if s.plugins.is_empty() || s.cursor < list_h {
-        0
-    } else {
-        s.cursor.saturating_sub(list_h - 1)
-    };
-
-    if s.plugins.is_empty() {
-        safe_render_widget(
-            f,
-            Paragraph::new("  (no plugins loaded)")
-                .style(Style::default().fg(Color::Rgb(110, 88, 65)).bg(CLR_APP_BG)),
-            Rect {
-                x: inner.x,
-                y: inner.y + 4,
-                width: inner.width,
-                height: 1,
-            },
-        );
-    } else {
-        for (list_row, idx) in (start..).zip(0..list_h) {
-            if list_row >= s.plugins.len() {
-                break;
-            }
-            let plugin = &s.plugins[list_row];
-            let row_y = inner.y + 4 + idx as u16;
-            let selected = s.cursor == list_row;
-            let style = if selected {
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(CLR_CURSOR_BG)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::Rgb(50, 36, 22)).bg(CLR_APP_BG)
-            };
-            let exts = if plugin.extensions.is_empty() {
-                "-".into()
-            } else {
-                plugin.extensions.join(",")
-            };
-            let icon = if selected { "▶" } else { " " };
-            let text = format!(
-                " {} {:<col_name$} {:<col_kind$} {:<col_version$} {:<col_ext$} {}",
-                icon,
-                plugin.name,
-                plugin.kind,
-                plugin.version,
-                exts,
-                plugin.description,
-                col_name = col_name,
-                col_kind = col_kind,
-                col_version = col_version,
-                col_ext = col_ext,
-            );
-            let padded = format!(
-                "{:<width$}",
-                truncate_str(&text, inner.width as usize),
-                width = inner.width as usize
-            );
-            safe_render_widget(
-                f,
-                Paragraph::new(padded).style(style),
-                Rect {
-                    x: inner.x,
-                    y: row_y,
-                    width: inner.width,
-                    height: 1,
-                },
-            );
-        }
-    }
-
-    let button_y = inner.y + inner.height.saturating_sub(2);
-    safe_render_widget(
-        f,
-        Paragraph::new(sep).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
-        Rect {
-            x: inner.x,
-            y: button_y - 1,
-            width: inner.width,
-            height: 1,
-        },
-    );
-    let buttons = "  [ Enter/O Open Dir ]   [ Esc Close ]";
-    safe_render_widget(
-        f,
-        Paragraph::new(buttons).style(
-            Style::default()
-                .fg(CLR_BUTTON_FG)
-                .bg(CLR_BUTTON_BG)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Rect {
-            x: inner.x,
-            y: button_y,
-            width: inner.width,
-            height: 1,
-        },
-    );
-}
+// render_plugins lives in src/ui/plugins.rs
 
 fn render_action_palette(f: &mut Frame, s: &ActionPaletteState, area: Rect) {
     let w: u16 = area.width.saturating_sub(4).min(100).max(60);

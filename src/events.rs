@@ -1013,6 +1013,8 @@ fn handle_search(app: &mut App, key: KeyEvent) -> Result<bool> {
     let page_size = 10usize;
     match key.code {
         KeyCode::Esc | KeyCode::F(10) => {
+            // If a search is running, cancel it then close the panel
+            app.cancel_search();
             app.mode = AppMode::Browse;
         }
         KeyCode::Tab => {
@@ -1291,7 +1293,12 @@ fn handle_plugins(app: &mut App, key: KeyEvent) -> Result<bool> {
         }
         KeyCode::Enter | KeyCode::Char('o') | KeyCode::Char('O') => {
             let dir = if let AppMode::Plugins(ref s) = app.mode {
-                s.plugins_dir.clone()
+                // Use the selected plugin's own directory; fall back to the global plugins_dir
+                s.plugins
+                    .get(s.cursor)
+                    .map(|p| p.dir.clone())
+                    .filter(|d| !d.as_os_str().is_empty())
+                    .unwrap_or_else(|| s.plugins_dir.clone())
             } else {
                 return Ok(false);
             };
