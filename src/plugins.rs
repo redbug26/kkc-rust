@@ -1303,6 +1303,62 @@ mod tests {
     }
 
     #[test]
+    fn bundled_csv_viewer_supports_nowrap_state() {
+        let csv_path =
+            std::env::temp_dir().join(format!("kkc-csv-viewer-{}.csv", std::process::id()));
+        fs::write(
+            &csv_path,
+            "Name;Description\nAlpha;this is a very long column value that should stay complete in nowrap\n",
+        )
+        .expect("write csv");
+
+        let script_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("plugins")
+            .join("csv_viewer")
+            .join("plugin.lua");
+        let plugin = ViewerPlugin {
+            name: "csv_viewer".into(),
+            description: String::new(),
+            plugin_dir: script_path.parent().expect("plugin dir").to_path_buf(),
+            script_path,
+            modes: vec!["text".into()],
+            extensions: vec!["csv".into()],
+        };
+
+        let default_rendered = plugin
+            .render_document(&csv_path, "text", &HashMap::new(), 80)
+            .expect("csv viewer should render")
+            .expect("csv viewer should return lines");
+        let default_text = lines_to_text(&default_rendered);
+        assert!(default_text.contains("wrap: "));
+        assert!(default_text.contains("on"));
+
+        let (_, state) = plugin
+            .handle_key(&csv_path, "text", "f2", &HashMap::new())
+            .expect("csv viewer should handle key")
+            .expect("csv viewer should return state");
+        assert_eq!(state.get("wrap").map(String::as_str), Some("0"));
+
+        let nowrap_rendered = plugin
+            .render_document(&csv_path, "text", &state, 80)
+            .expect("csv viewer should render nowrap")
+            .expect("csv viewer should return nowrap lines");
+        let nowrap_text = lines_to_text(&nowrap_rendered);
+        assert!(nowrap_text.contains("wrap: "));
+        assert!(nowrap_text.contains("off +0"));
+        assert!(nowrap_text.contains("this is a very long column value that should stay complete"));
+
+        let (_, scrolled_state) = plugin
+            .handle_key(&csv_path, "text", "right", &state)
+            .expect("csv viewer should handle scroll")
+            .expect("csv viewer should return scrolled state");
+        assert_eq!(scrolled_state.get("hscroll").map(String::as_str), Some("8"));
+
+        let _ = fs::remove_file(&csv_path);
+    }
+
+    #[test]
     fn bundled_html_viewer_renders_document() {
         let html_path =
             std::env::temp_dir().join(format!("kkc-html-viewer-{}.html", std::process::id()));

@@ -2,7 +2,7 @@ local kkc             = require("kkc")
 
 local MAX_COL_WIDTH   = 30
 local MAX_TOTAL_WIDTH = 120 -- max rendered line width; reduce to taste
-local MAX_ROWS        = 500
+local MAX_ROWS        = 5000000
 
 -- Count unquoted occurrences of a separator character in a string
 local function count_unquoted(str, sep)
@@ -113,6 +113,58 @@ local function pad_left(s, width)
     return string.rep(" ", gap) .. s
 end
 
+local function sub_chars(s, start_char, count)
+    if count <= 0 then return "" end
+    local first = utf8.offset(s, start_char)
+    if not first then return "" end
+    local after = utf8.offset(s, start_char + count)
+    if after then
+        return s:sub(first, after - 1)
+    end
+    return s:sub(first)
+end
+
+local function copy_span_with_text(source, text)
+    return {
+        text = text,
+        fg = source.fg or "white",
+        bg = source.bg or "black",
+        bold = source.bold or false,
+    }
+end
+
+local function clip_spans(spans, hscroll, width)
+    if hscroll <= 0 then
+        return spans
+    end
+
+    local out = {}
+    local skip = hscroll
+    local room = width
+
+    for _, sp in ipairs(spans) do
+        if room <= 0 then break end
+        local text = sp.text or ""
+        local len = text_len(text)
+        if skip >= len then
+            skip = skip - len
+        else
+            local take = math.min(len - skip, room)
+            local clipped = sub_chars(text, skip + 1, take)
+            if clipped ~= "" then
+                table.insert(out, copy_span_with_text(sp, clipped))
+                room = room - text_len(clipped)
+            end
+            skip = 0
+        end
+    end
+
+    if #out == 0 then
+        return { span("") }
+    end
+    return out
+end
+
 local function is_numeric(s)
     return s ~= "" and (
         s:match("^%-?%d+%.?%d*$") ~= nil or
@@ -183,9 +235,12 @@ local function render_csv(path, mode, state, width)
     if max_width < 20 then max_width = MAX_TOTAL_WIDTH end
 
     -- Read sort state (passed from previous handle_key calls)
-    state           = state or {}
-    local sort_col  = tonumber(state.sort_col) or 0 -- 0 = no sort
-    local sort_dir  = state.sort_dir or "asc"
+    state          = state or {}
+    local sort_col = tonumber(state.sort_col) or 0  -- 0 = no sort
+    local sort_dir = state.sort_dir or "asc"
+    local wrap     = state.wrap ~= "0"
+    local hscroll  = tonumber(state.hscroll) or 0
+    if wrap then hscroll = 0 end
 
     -- Read file line by line, capping at MAX_ROWS + header
     local file, err = io.open(path, "r")
@@ -236,7 +291,10 @@ local function render_csv(path, mode, state, width)
     for row_idx, row in ipairs(rows) do
         for col = 1, #row do
             local val = row[col] or ""
-            local w   = math.min(text_len(val), MAX_COL_WIDTH)
+            local w   = text_len(val)
+            if wrap then
+                w = math.min(w, MAX_COL_WIDTH)
+            end
             if w > col_widths[col] then
                 col_widths[col] = w
             end
@@ -249,11 +307,16 @@ local function render_csv(path, mode, state, width)
 
     -- Reserve room for sort indicator "▲"/"▼" in the active column header
     if sort_col > 0 and col_widths[sort_col] then
-        col_widths[sort_col] = math.min(col_widths[sort_col] + 2, MAX_COL_WIDTH)
+        col_widths[sort_col] = col_widths[sort_col] + 2
+        if wrap then
+            col_widths[sort_col] = math.min(col_widths[sort_col], MAX_COL_WIDTH)
+        end
     end
 
     -- Shrink column widths so the total line width fits the panel width
-    col_widths = fit_widths(col_widths, max_width)
+    if wrap then
+        col_widths = fit_widths(col_widths, max_width)
+    end
 
     -- Sort data rows (keep header at position 1)
     if sort_col > 0 and #rows > 1 then
@@ -315,7 +378,10 @@ local function render_csv(path, mode, state, width)
         or span("", "gray"),
         span("  sort: ", "gray"),
         span(sort_hint, "lightyellow"),
-        span("  [< >] col  [s] dir", "darkgray"),
+        span("  wrap: ", "gray"),
+        span(wrap and "on" or ("off +" .. tostring(hscroll)), wrap and "lightgreen" or "lightyellow"),
+        span("  [< >] col  [s] dir  [F2/w] wrap", "darkgray"),
+        not wrap and span("  [← →] scroll", "darkgray") or span("", "darkgray"),
     })
     table.insert(out, { span("") })
 
@@ -334,7 +400,7 @@ local function render_csv(path, mode, state, width)
                 local arrow = sort_dir == "asc" and " ▲" or " ▼"
                 display_val = val .. arrow
             end
-            local display = truncate(display_val, width)
+            local display = wrap and truncate(display_val, width) or display_val
 
             -- Pad: numeric columns right-aligned, text left-aligned
             local padded
@@ -362,7 +428,11 @@ local function render_csv(path, mode, state, width)
             table.insert(spans, span(padded, fg, is_header))
         end
 
-        table.insert(out, spans)
+        if wrap then
+            table.insert(out, spans)
+        else
+            table.insert(out, clip_spans(spans, hscroll, max_width))
+        end
 
         -- Separator line under the header
         if is_header then
@@ -373,7 +443,11 @@ local function render_csv(path, mode, state, width)
                 end
                 table.insert(sep_spans, span(string.rep("─", col_widths[col]), "gray"))
             end
-            table.insert(out, sep_spans)
+            if wrap then
+                table.insert(out, sep_spans)
+            else
+                table.insert(out, clip_spans(sep_spans, hscroll, max_width))
+            end
         end
     end
 
@@ -392,6 +466,8 @@ local function handle_csv_key(path, mode, key, state)
     state           = state or {}
     local sort_col  = tonumber(state.sort_col) or 0
     local sort_dir  = state.sort_dir or "asc"
+    local wrap      = state.wrap ~= "0"
+    local hscroll   = tonumber(state.hscroll) or 0
 
     -- Determine column count from the first line of the file
     local col_count = 0
@@ -424,6 +500,21 @@ local function handle_csv_key(path, mode, key, state)
             sort_dir = sort_dir == "asc" and "desc" or "asc"
             consumed = true
         end
+    elseif key == "f2" or key == "char:w" or key == "char:W" then
+        wrap = not wrap
+        if wrap then
+            hscroll = 0
+        end
+        consumed = true
+    elseif not wrap and key == "left" then
+        hscroll = math.max(0, hscroll - 8)
+        consumed = true
+    elseif not wrap and key == "right" then
+        hscroll = hscroll + 8
+        consumed = true
+    elseif not wrap and key == "home" then
+        hscroll = 0
+        consumed = true
     end
 
     return {
@@ -431,6 +522,8 @@ local function handle_csv_key(path, mode, key, state)
         state    = {
             sort_col = tostring(sort_col),
             sort_dir = sort_dir,
+            wrap = wrap and "1" or "0",
+            hscroll = tostring(hscroll),
         },
     }
 end
