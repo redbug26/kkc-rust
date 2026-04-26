@@ -20,7 +20,7 @@ use crate::remote::{
     download_into_dir, download_to_temp, join_remote, load_profiles, normalize_remote_cwd,
     prepare_connection, rename_path as remote_rename_path, save_profile, upload_into_dir,
 };
-use crate::search::{SearchQuery, SearchResult, search};
+use crate::search::{SearchBackend, SearchQuery, SearchResult, search, search_locate, search_spotlight};
 use crate::terminal::{CmdLine, RunningCmd, TerminalState};
 use crate::viewer::Viewer;
 use anyhow::Result;
@@ -647,11 +647,15 @@ impl InputDialog {
 pub struct SearchState {
     pub query: String,
     pub content_query: String,
-    pub input_field: usize, // 0 = pattern, 1 = content
+    pub dir_query: String,
+    pub input_field: usize, // 0=name 1=content 2=dir 3=results
     pub results: Vec<SearchResult>,
     pub cursor: usize,
+    pub scroll: usize,
     pub running: bool,
     pub start_dir: PathBuf,
+    pub backend: SearchBackend,
+    pub follow_links: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -1851,14 +1855,19 @@ impl App {
 
     pub fn open_search(&mut self) {
         let start = self.active_panel().persisted_path();
+        let dir_str = start.to_string_lossy().into_owned();
         self.mode = AppMode::SearchPanel(SearchState {
-            query: String::new(),
+            query: "*".into(),
             content_query: String::new(),
+            dir_query: dir_str,
             input_field: 0,
             results: Vec::new(),
             cursor: 0,
+            scroll: 0,
             running: false,
             start_dir: start,
+            backend: SearchBackend::best_default(),
+            follow_links: false,
         });
     }
 
@@ -1870,12 +1879,23 @@ impl App {
         let AppMode::SearchPanel(ref mut state) = self.mode else {
             return;
         };
+        // Resolve start directory from dir_query
+        let start = {
+            let p = std::path::Path::new(&state.dir_query);
+            if p.is_dir() {
+                p.to_path_buf()
+            } else {
+                state.start_dir.clone()
+            }
+        };
+        state.start_dir = start.clone();
         state.results.clear();
         state.cursor = 0;
+        state.scroll = 0;
         state.running = true;
 
         let query = SearchQuery {
-            pattern: if state.query.is_empty() {
+            pattern: if state.query.is_empty() || state.query == "*" {
                 "*".into()
             } else {
                 state.query.clone()
@@ -1885,15 +1905,22 @@ impl App {
             } else {
                 Some(state.content_query.clone())
             },
-            start: state.start_dir.clone(),
-            follow_links: false,
+            start: start,
+            follow_links: state.follow_links,
         };
 
-        let mut results = Vec::new();
-        let _ = search(&query, |r| {
-            results.push(r.clone());
-            results.len() < 500
-        });
+        let results = match state.backend {
+            SearchBackend::Spotlight => search_spotlight(&query, 1000),
+            SearchBackend::Locate => search_locate(&query, 1000),
+            SearchBackend::Walk => {
+                let mut results = Vec::new();
+                let _ = search(&query, |r| {
+                    results.push(r.clone());
+                    results.len() < 1000
+                });
+                results
+            }
+        };
 
         let AppMode::SearchPanel(ref mut state) = self.mode else {
             return;

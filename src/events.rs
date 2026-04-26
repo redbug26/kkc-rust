@@ -986,54 +986,177 @@ fn handle_copy_dialog(app: &mut App, key: KeyEvent) -> Result<bool> {
 // ---------------------------------------------------------------------------
 
 fn handle_search(app: &mut App, key: KeyEvent) -> Result<bool> {
+    let page_size = 10usize;
     match key.code {
-        KeyCode::Esc => {
+        KeyCode::Esc | KeyCode::F(10) => {
             app.mode = AppMode::Browse;
         }
         KeyCode::Tab => {
             let AppMode::SearchPanel(ref mut s) = app.mode else {
                 return Ok(false);
             };
-            s.input_field = 1 - s.input_field;
+            // Cycle input fields: 0→1→2→0; ↓ from any input field enters results
+            s.input_field = (s.input_field + 1) % 3;
+        }
+        KeyCode::BackTab => {
+            let AppMode::SearchPanel(ref mut s) = app.mode else {
+                return Ok(false);
+            };
+            if s.input_field == 3 {
+                s.input_field = 2;
+            } else {
+                s.input_field = (s.input_field + 2) % 3;
+            }
+        }
+        KeyCode::F(5) => {
+            let AppMode::SearchPanel(ref mut s) = app.mode else {
+                return Ok(false);
+            };
+            s.backend = s.backend.next_available();
         }
         KeyCode::Enter => {
-            app.run_search();
-            // After search completes, stay in search mode to show results
+            let input_field = if let AppMode::SearchPanel(ref s) = app.mode {
+                s.input_field
+            } else {
+                return Ok(false);
+            };
+            if input_field == 3 {
+                // Navigate to selected file
+                let selected = if let AppMode::SearchPanel(ref s) = app.mode {
+                    s.results.get(s.cursor).map(|r| r.path.clone())
+                } else {
+                    None
+                };
+                if let Some(path) = selected {
+                    app.mode = AppMode::Browse;
+                    if let Some(dir) = path.parent() {
+                        app.enter_dir(dir.to_path_buf())?;
+                        let file_name = path
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .into_owned();
+                        app.active_panel_mut().cursor = app
+                            .active_panel()
+                            .entries
+                            .iter()
+                            .position(|e| e.name == file_name)
+                            .unwrap_or(0);
+                    }
+                }
+            } else {
+                app.run_search();
+                // Auto-focus results if any
+                if let AppMode::SearchPanel(ref mut s) = app.mode {
+                    if !s.results.is_empty() {
+                        s.input_field = 3;
+                    }
+                }
+            }
         }
         KeyCode::Up => {
             let AppMode::SearchPanel(ref mut s) = app.mode else {
                 return Ok(false);
             };
-            if s.cursor > 0 {
-                s.cursor -= 1;
+            if s.input_field == 3 {
+                if s.cursor > 0 {
+                    s.cursor -= 1;
+                    if s.cursor < s.scroll {
+                        s.scroll = s.cursor;
+                    }
+                } else {
+                    // Leave results focus back to inputs
+                    s.input_field = 2;
+                }
+            } else {
+                s.input_field = (s.input_field + 2) % 3;
             }
         }
         KeyCode::Down => {
             let AppMode::SearchPanel(ref mut s) = app.mode else {
                 return Ok(false);
             };
-            if s.cursor + 1 < s.results.len() {
-                s.cursor += 1;
+            if s.input_field == 3 {
+                if s.cursor + 1 < s.results.len() {
+                    s.cursor += 1;
+                }
+            } else if !s.results.is_empty() {
+                s.input_field = 3;
+                s.cursor = 0;
+                s.scroll = 0;
+            } else {
+                s.input_field = (s.input_field + 1) % 3;
+            }
+        }
+        KeyCode::PageUp => {
+            let AppMode::SearchPanel(ref mut s) = app.mode else {
+                return Ok(false);
+            };
+            if s.input_field == 3 {
+                s.cursor = s.cursor.saturating_sub(page_size);
+                if s.cursor < s.scroll {
+                    s.scroll = s.cursor;
+                }
+            }
+        }
+        KeyCode::PageDown => {
+            let AppMode::SearchPanel(ref mut s) = app.mode else {
+                return Ok(false);
+            };
+            if s.input_field == 3 {
+                let max = s.results.len().saturating_sub(1);
+                s.cursor = (s.cursor + page_size).min(max);
+            }
+        }
+        KeyCode::Home => {
+            let AppMode::SearchPanel(ref mut s) = app.mode else {
+                return Ok(false);
+            };
+            if s.input_field == 3 {
+                s.cursor = 0;
+                s.scroll = 0;
+            }
+        }
+        KeyCode::End => {
+            let AppMode::SearchPanel(ref mut s) = app.mode else {
+                return Ok(false);
+            };
+            if s.input_field == 3 {
+                s.cursor = s.results.len().saturating_sub(1);
             }
         }
         KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
             let AppMode::SearchPanel(ref mut s) = app.mode else {
                 return Ok(false);
             };
-            if s.input_field == 0 {
-                s.query.push(ch);
-            } else {
-                s.content_query.push(ch);
+            match s.input_field {
+                0 => s.query.push(ch),
+                1 => s.content_query.push(ch),
+                2 => s.dir_query.push(ch),
+                _ => {}
             }
         }
         KeyCode::Backspace => {
             let AppMode::SearchPanel(ref mut s) = app.mode else {
                 return Ok(false);
             };
-            if s.input_field == 0 {
-                s.query.pop();
-            } else {
-                s.content_query.pop();
+            match s.input_field {
+                0 => { s.query.pop(); }
+                1 => { s.content_query.pop(); }
+                2 => { s.dir_query.pop(); }
+                _ => {}
+            }
+        }
+        KeyCode::Delete => {
+            let AppMode::SearchPanel(ref mut s) = app.mode else {
+                return Ok(false);
+            };
+            // Clear the active input field
+            match s.input_field {
+                0 => { s.query.clear(); s.query.push('*'); }
+                1 => s.content_query.clear(),
+                2 => s.dir_query = s.start_dir.to_string_lossy().into_owned(),
+                _ => {}
             }
         }
         _ => {}
