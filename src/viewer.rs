@@ -1,5 +1,9 @@
 use anyhow::{Context, Result};
-use crossterm::{cursor::MoveTo, queue, terminal::window_size};
+use crossterm::{
+    cursor::MoveTo,
+    queue,
+    terminal::{size as terminal_size, window_size},
+};
 use image::{ImageFormat, ImageReader};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -21,8 +25,6 @@ use self::viewer_decode::{
 };
 use self::viewer_render::{mask_keywords, pad_visible, slice_visible};
 use self::viewer_search::parse_hex_query;
-
-const PLUGIN_DOCUMENT_SEARCH_WIDTH: usize = 120;
 
 fn viewer_positions() -> &'static Mutex<HashMap<PathBuf, ViewerPosition>> {
     static POSITIONS: OnceLock<Mutex<HashMap<PathBuf, ViewerPosition>>> = OnceLock::new();
@@ -561,7 +563,7 @@ impl Viewer {
         }
         self.matches = if matches!(self.mode, ViewMode::Hex) {
             self.rebuild_hex_matches()
-        } else if let Some(lines) = self.plugin_document_plain_lines(PLUGIN_DOCUMENT_SEARCH_WIDTH) {
+        } else if let Some(lines) = self.plugin_document_plain_lines(self.plugin_document_width()) {
             let needle = self.search.to_lowercase();
             lines
                 .iter()
@@ -684,16 +686,20 @@ impl Viewer {
     fn plugin_document_line_count(&self) -> Option<usize> {
         let mode = self.viewer_mode_key()?;
         let plugin_name = self.viewer_plugin.as_deref()?;
-        // Use a normal width for count-only calls so document renderers still
-        // apply their own width caps while building the temporary line list.
         crate::plugins::render_viewer_document(
             &self.path,
             mode,
             plugin_name,
             &self.plugin_state,
-            PLUGIN_DOCUMENT_SEARCH_WIDTH,
+            self.plugin_document_width(),
         )
         .map(|lines| lines.len())
+    }
+
+    fn plugin_document_width(&self) -> usize {
+        terminal_size()
+            .map(|(cols, _)| cols.saturating_sub(2).max(1) as usize)
+            .unwrap_or(120)
     }
 
     fn plugin_document_plain_lines(&self, width: usize) -> Option<Vec<String>> {

@@ -1289,7 +1289,7 @@ mod tests {
         assert_eq!(plugins[0].modes, vec!["text"]);
         assert_eq!(
             plugins[0].extensions,
-            vec!["xml", "xsd", "xsl", "xslt", "svg", "rss", "atom", "plist"]
+            vec!["xml", "plist"]
         );
     }
 
@@ -1343,7 +1343,7 @@ mod tests {
         assert_eq!(plugins[0].modes, vec!["text"]);
         assert_eq!(
             plugins[0].extensions,
-            vec!["md", "markdown", "mdown", "mkd"]
+            vec!["md"]
         );
     }
 
@@ -1505,7 +1505,7 @@ mod tests {
             plugin_dir: script_path.parent().expect("plugin dir").to_path_buf(),
             script_path,
             modes: vec!["text".into()],
-            extensions: vec!["md".into(), "markdown".into(), "mdown".into(), "mkd".into()],
+            extensions: vec!["md".into()],
         };
 
         let rendered = plugin

@@ -247,7 +247,7 @@ end
 kkc.register_archive_plugin({
     name = "pdf_file",
     version = "1.0.0",
-    description = "Pure Lua PDF file access plugin: extracts readable text and embedded images",
+    description = "Pure Lua PDF file access plugin",
     extensions = { "pdf" },
     can_handle = function(path)
         return path:lower():match("%.pdf$") ~= nil

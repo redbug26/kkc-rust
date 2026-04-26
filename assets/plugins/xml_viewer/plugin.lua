@@ -316,7 +316,8 @@ local function line_for_token(token, depth)
     elseif token.kind == "comment" then
         return { span(indent, "gray"), span("<!-- " .. normalize_space(token.text) .. " -->", "darkgray") }
     elseif token.kind == "cdata" then
-        return { span(indent, "gray"), span("<![CDATA[", "yellow", true), span(normalize_space(token.text), "white"), span("]]>", "yellow", true) }
+        return { span(indent, "gray"), span("<![CDATA[", "yellow", true), span(normalize_space(token.text), "white"),
+            span("]]>", "yellow", true) }
     elseif token.kind == "pi" then
         return { span(indent, "gray"), span("<?", "magenta"), span(token.text, "lightmagenta"), span("?>", "magenta") }
     elseif token.kind == "declaration" then
@@ -439,7 +440,7 @@ kkc.register_viewer_plugin({
     version = "1.0.0",
     description = "Structured XML document viewer",
     modes = { "text" },
-    extensions = { "xml", "xsd", "xsl", "xslt", "svg", "rss", "atom", "plist" },
+    extensions = { "xml", "plist" },
     render = render_xml,
     handle_key = handle_xml_key,
 })
