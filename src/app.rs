@@ -950,6 +950,8 @@ pub struct App {
     pub config: Config,
     pub left: Panel,
     pub right: Panel,
+    left_tabs: PanelTabs,
+    right_tabs: PanelTabs,
     pub active: ActivePanel,
     pub file_id_preview: bool,
     pub mode: AppMode,
@@ -971,6 +973,65 @@ pub struct App {
     pub terminal: TerminalState,
     /// Streaming output from a running external command.
     pub running_cmd: Option<RunningCmd>,
+}
+
+#[derive(Debug, Default)]
+struct PanelTabs {
+    before: Vec<Panel>,
+    after: Vec<Panel>,
+}
+
+impl PanelTabs {
+    fn count(&self) -> usize {
+        self.before.len() + 1 + self.after.len()
+    }
+
+    fn current_index(&self) -> usize {
+        self.before.len()
+    }
+
+    fn new_panel_from(current: &Panel) -> Panel {
+        Panel::new(current.persisted_path(), current.sort, current.show_hidden)
+    }
+
+    fn new_tab(current: &mut Panel, tabs: &mut Self) {
+        let new_panel = Self::new_panel_from(current);
+        let old_current = std::mem::replace(current, new_panel);
+        tabs.before.push(old_current);
+    }
+
+    fn close_tab(current: &mut Panel, tabs: &mut Self) -> bool {
+        if tabs.count() <= 1 {
+            return false;
+        }
+
+        if !tabs.after.is_empty() {
+            let next = tabs.after.remove(0);
+            let _closed = std::mem::replace(current, next);
+        } else if let Some(previous) = tabs.before.pop() {
+            let _closed = std::mem::replace(current, previous);
+        }
+        true
+    }
+
+    fn next_tab(current: &mut Panel, tabs: &mut Self) -> bool {
+        if tabs.count() <= 1 {
+            return false;
+        }
+
+        if !tabs.after.is_empty() {
+            let next = tabs.after.remove(0);
+            let old_current = std::mem::replace(current, next);
+            tabs.before.push(old_current);
+        } else {
+            let next = tabs.before.remove(0);
+            let old_current = std::mem::replace(current, next);
+            let mut new_after = std::mem::take(&mut tabs.before);
+            new_after.push(old_current);
+            tabs.after = new_after;
+        }
+        true
+    }
 }
 
 impl App {
@@ -1017,6 +1078,8 @@ impl App {
             config,
             left,
             right,
+            left_tabs: PanelTabs::default(),
+            right_tabs: PanelTabs::default(),
             active: ActivePanel::Left,
             file_id_preview: false,
             mode: AppMode::Browse,
@@ -1086,6 +1149,79 @@ impl App {
 
     pub fn swap_panels(&mut self) {
         std::mem::swap(&mut self.left, &mut self.right);
+        std::mem::swap(&mut self.left_tabs, &mut self.right_tabs);
+    }
+
+    pub fn active_panel_tab_index(&self) -> usize {
+        match self.active {
+            ActivePanel::Left => self.left_tabs.current_index(),
+            ActivePanel::Right => self.right_tabs.current_index(),
+        }
+    }
+
+    pub fn active_panel_tab_count(&self) -> usize {
+        match self.active {
+            ActivePanel::Left => self.left_tabs.count(),
+            ActivePanel::Right => self.right_tabs.count(),
+        }
+    }
+
+    pub fn left_panel_tab_index(&self) -> usize {
+        self.left_tabs.current_index()
+    }
+
+    pub fn left_panel_tab_count(&self) -> usize {
+        self.left_tabs.count()
+    }
+
+    pub fn right_panel_tab_index(&self) -> usize {
+        self.right_tabs.current_index()
+    }
+
+    pub fn right_panel_tab_count(&self) -> usize {
+        self.right_tabs.count()
+    }
+
+    pub fn new_active_tab(&mut self) {
+        match self.active {
+            ActivePanel::Left => PanelTabs::new_tab(&mut self.left, &mut self.left_tabs),
+            ActivePanel::Right => PanelTabs::new_tab(&mut self.right, &mut self.right_tabs),
+        }
+        self.status.text = format!(
+            "Tab {}/{}",
+            self.active_panel_tab_index() + 1,
+            self.active_panel_tab_count()
+        );
+    }
+
+    pub fn close_active_tab(&mut self) {
+        let closed = match self.active {
+            ActivePanel::Left => PanelTabs::close_tab(&mut self.left, &mut self.left_tabs),
+            ActivePanel::Right => PanelTabs::close_tab(&mut self.right, &mut self.right_tabs),
+        };
+        self.status.text = if closed {
+            format!(
+                "Tab {}/{}",
+                self.active_panel_tab_index() + 1,
+                self.active_panel_tab_count()
+            )
+        } else {
+            "Cannot close last tab".into()
+        };
+    }
+
+    pub fn next_active_tab(&mut self) {
+        let switched = match self.active {
+            ActivePanel::Left => PanelTabs::next_tab(&mut self.left, &mut self.left_tabs),
+            ActivePanel::Right => PanelTabs::next_tab(&mut self.right, &mut self.right_tabs),
+        };
+        if switched {
+            self.status.text = format!(
+                "Tab {}/{}",
+                self.active_panel_tab_index() + 1,
+                self.active_panel_tab_count()
+            );
+        }
     }
 
     pub fn open_dir_bookmarks(&mut self) {
@@ -2206,4 +2342,38 @@ fn spawn_remote_connect_task(profile: RemoteProfile, show_hidden: bool) -> Remot
         }
     });
     RemoteConnectTask { rx, cancel }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn panel_tabs_create_cycle_and_close() {
+        let root = std::env::temp_dir().join(format!("kkc-tabs-{}", std::process::id()));
+        let one = root.join("one");
+        let two = root.join("two");
+        fs::create_dir_all(&one).expect("create first tab dir");
+        fs::create_dir_all(&two).expect("create second tab dir");
+
+        let mut current = Panel::new(one.clone(), SortMode::Name, false);
+        let mut tabs = PanelTabs::default();
+
+        PanelTabs::new_tab(&mut current, &mut tabs);
+        assert_eq!(tabs.count(), 2);
+        assert_eq!(tabs.current_index(), 1);
+        assert_eq!(current.path, one);
+
+        current.enter_dir(two.clone()).expect("enter second dir");
+        assert!(PanelTabs::next_tab(&mut current, &mut tabs));
+        assert_eq!(tabs.current_index(), 0);
+        assert_eq!(current.path, one);
+
+        assert!(PanelTabs::close_tab(&mut current, &mut tabs));
+        assert_eq!(tabs.count(), 1);
+        assert_eq!(current.path, two);
+        assert!(!PanelTabs::close_tab(&mut current, &mut tabs));
+
+        let _ = fs::remove_dir_all(root);
+    }
 }

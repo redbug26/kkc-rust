@@ -135,6 +135,18 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
                 app.mode = AppMode::Terminal;
                 return Ok(false);
             }
+            KeyCode::Char('t') => {
+                app.new_active_tab();
+                return Ok(false);
+            }
+            KeyCode::Char('w') => {
+                app.close_active_tab();
+                return Ok(false);
+            }
+            KeyCode::Tab | KeyCode::Char('n') => {
+                app.next_active_tab();
+                return Ok(false);
+            }
             _ => {}
         }
     }

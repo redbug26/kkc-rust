@@ -182,6 +182,8 @@ pub fn render(f: &mut Frame, app: &App) {
         left_active,
         app.config.color_by_type,
         app.file_id_preview && !left_active,
+        app.left_panel_tab_index(),
+        app.left_panel_tab_count(),
     );
     render_center_buttons(f, panel_chunks[1]);
     render_panel_or_file_id(
@@ -192,6 +194,8 @@ pub fn render(f: &mut Frame, app: &App) {
         !left_active,
         app.config.color_by_type,
         app.file_id_preview && left_active,
+        app.right_panel_tab_index(),
+        app.right_panel_tab_count(),
     );
     render_status(f, app, status_area);
 
@@ -277,6 +281,8 @@ fn render_panel(
     area: Rect,
     active: bool,
     color_by_type: bool,
+    tab_index: usize,
+    tab_count: usize,
 ) {
     let border_style = if active {
         Style::default()
@@ -293,7 +299,14 @@ fn render_panel(
     };
 
     let display_path = panel.display_path();
-    let title_text = truncate_path(&display_path, area.width.saturating_sub(4) as usize);
+    let tab_prefix = if tab_count > 1 {
+        format!("[{}/{}] ", tab_index + 1, tab_count)
+    } else {
+        String::new()
+    };
+    let title_room = area.width.saturating_sub(4) as usize;
+    let path_room = title_room.saturating_sub(tab_prefix.len());
+    let title_text = format!("{}{}", tab_prefix, truncate_path(&display_path, path_room));
     let title = format!(" {} ", title_text);
 
     let block = Block::default()
@@ -414,7 +427,12 @@ fn render_panel(
                 Style::default().fg(fg)
             };
 
-            let name_str = format!(" {:<width$}", &entry.name, width = name_w);
+            let display_name = if entry.is_dir && entry.name != ".." {
+                format!("/{}", entry.name)
+            } else {
+                format!(" {}", entry.name)
+            };
+            let name_str = format!("{:<width$}", display_name, width = name_w);
             let name_str = truncate_str(&name_str, name_w);
 
             let size_str = if entry.name == ".." {
@@ -545,11 +563,13 @@ fn render_panel_or_file_id(
     active: bool,
     color_by_type: bool,
     show_file_id: bool,
+    tab_index: usize,
+    tab_count: usize,
 ) {
     if show_file_id {
         render_file_id_panel(f, app, area);
     } else {
-        render_panel(f, panel, area, active, color_by_type);
+        render_panel(f, panel, area, active, color_by_type, tab_index, tab_count);
     }
 }
 
