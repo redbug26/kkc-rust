@@ -45,6 +45,8 @@ pub enum MenuAction {
     DeselectPattern,
     InvertSelection,
     SearchFiles,
+    RemoteConnect,
+    FileIdPreview,
     DirBookmarks,
     ToggleFBar,
     SaveConfig,
@@ -268,6 +270,8 @@ pub static MENU_DATA: &[&[MenuEntry]] = &[
     ],
     &[
         ("Search..", Some("A-F7"), MenuAction::SearchFiles),
+        ("Remote Connect..", Some("^F"), MenuAction::RemoteConnect),
+        ("File ID Preview", Some("A-F4"), MenuAction::FileIdPreview),
         ("Bookmarks", Some("^D"), MenuAction::DirBookmarks),
     ],
     &[

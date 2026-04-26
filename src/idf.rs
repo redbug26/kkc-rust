@@ -2,8 +2,10 @@ use anyhow::Result;
 use chrono::{DateTime, Local};
 use std::collections::HashMap;
 use std::fs;
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
+use zip::ZipArchive;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IdfKind {
@@ -18,6 +20,7 @@ pub enum IdfKind {
 #[derive(Debug, Clone)]
 pub struct IdInfo {
     pub format: String,
+    pub mime_type: String,
     pub detail: String,
     pub kind: IdfKind,
     pub title: Option<String>,
@@ -42,6 +45,7 @@ pub fn probe_path(path: &Path) -> Option<IdInfo> {
     if meta.is_dir() {
         return Some(IdInfo {
             format: "Directory".into(),
+            mime_type: "inode/directory".into(),
             detail: path
                 .file_name()
                 .unwrap_or_default()
@@ -71,7 +75,10 @@ pub fn probe_path(path: &Path) -> Option<IdInfo> {
         return hit.clone();
     }
 
-    let probed = probe_file(path).ok().flatten();
+    let probed = probe_file(path)
+        .ok()
+        .flatten()
+        .or_else(|| Some(fallback_info(path)));
     if let Ok(mut guard) = cache().lock() {
         guard.insert(key, probed.clone());
     }
@@ -87,7 +94,14 @@ pub fn render_idf_card(path: &Path) -> Option<String> {
     if let Some(title) = info.title.as_ref().filter(|s| !s.is_empty()) {
         out.push_str(&format!("Title: {}\n", clean_field(title)));
     }
-    out.push_str(&format!("Type: {}\n", clean_field(&info.format)));
+    out.push_str(&format!(
+        "Type: {}\n",
+        clean_field(&info.format),
+    ));
+     out.push_str(&format!(
+        "Mime: {}\n",
+        clean_field(&info.mime_type)
+    ));
     out.push_str(&format!("Name: {}\n", clean_field(&info.detail)));
     if let Some(composer) = info.composer.as_ref().filter(|s| !s.is_empty()) {
         out.push_str(&format!("Composer: {}\n", clean_field(composer)));
@@ -115,17 +129,16 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         || data.starts_with(b"PK\x05\x06")
         || data.starts_with(b"PK\x07\x08")
     {
-        Some(info(
-            "ZIP archive",
-            path,
-            IdfKind::Archive,
-            None,
-            None,
-            vec![],
-        ))
+        let mime_type = zip_mime_type(&data, &ext).unwrap_or("application/zip");
+        let kind = if is_office_mime_type(mime_type) {
+            IdfKind::Other
+        } else {
+            IdfKind::Archive
+        };
+        Some(info(mime_type, path, kind, None, None, vec![]))
     } else if data.starts_with(b"7z\xBC\xAF\x27\x1C") {
         Some(info(
-            "7-Zip archive",
+            "application/x-7z-compressed",
             path,
             IdfKind::Archive,
             None,
@@ -134,7 +147,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         ))
     } else if data.starts_with(&[0x1F, 0x8B]) {
         Some(info(
-            "GZip archive",
+            "application/gzip",
             path,
             IdfKind::Archive,
             None,
@@ -143,7 +156,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         ))
     } else if data.starts_with(b"BZh") {
         Some(info(
-            "BZip2 archive",
+            "application/x-bzip2",
             path,
             IdfKind::Archive,
             None,
@@ -152,7 +165,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         ))
     } else if data.starts_with(&[0xFD, b'7', b'z', b'X', b'Z', 0x00]) {
         Some(info(
-            "XZ archive",
+            "application/x-xz",
             path,
             IdfKind::Archive,
             None,
@@ -161,7 +174,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         ))
     } else if data.starts_with(b"\x60\xEA") {
         Some(info(
-            "ARJ archive",
+            "application/x-arj",
             path,
             IdfKind::Archive,
             None,
@@ -170,7 +183,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         ))
     } else if data.starts_with(b"MSCF") {
         Some(info(
-            "CAB archive",
+            "application/vnd.ms-cab-compressed",
             path,
             IdfKind::Archive,
             None,
@@ -179,7 +192,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         ))
     } else if data.starts_with(&[0x28, 0xB5, 0x2F, 0xFD]) {
         Some(info(
-            "Zstandard archive",
+            "application/zstd",
             path,
             IdfKind::Archive,
             None,
@@ -188,7 +201,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         ))
     } else if data.starts_with(b"-lh") && data.get(6) == Some(&b'-') {
         Some(info(
-            "LHA/LZH archive",
+            "application/x-lzh-compressed",
             path,
             IdfKind::Archive,
             None,
@@ -197,7 +210,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         ))
     } else if is_tar(&data) {
         Some(info(
-            "TAR archive",
+            "application/x-tar",
             path,
             IdfKind::Archive,
             None,
@@ -206,7 +219,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         ))
     } else if is_iso9660(&data) {
         Some(info(
-            "ISO-9660 image",
+            "application/x-iso9660-image",
             path,
             IdfKind::Archive,
             None,
@@ -215,7 +228,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         ))
     } else if data.starts_with(b"Rar!\x1A\x07\x00") {
         Some(info(
-            "RAR archive v4",
+            "application/vnd.rar",
             path,
             IdfKind::Archive,
             None,
@@ -224,7 +237,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         ))
     } else if data.starts_with(b"Rar!\x1A\x07\x01\x00") {
         Some(info(
-            "RAR archive v5",
+            "application/vnd.rar",
             path,
             IdfKind::Archive,
             None,
@@ -234,7 +247,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
     } else if data.starts_with(b"\x89PNG\r\n\x1A\n") {
         let (w, h) = png_size(&data).unwrap_or((0, 0));
         Some(info(
-            "PNG bitmap",
+            "image/png",
             path,
             IdfKind::Bitmap,
             None,
@@ -244,7 +257,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
     } else if data.starts_with(b"RIFF") && data.get(8..12) == Some(b"WEBP") {
         let (w, h) = webp_size(&data).unwrap_or((0, 0));
         Some(info(
-            "WebP bitmap",
+            "image/webp",
             path,
             IdfKind::Bitmap,
             None,
@@ -253,7 +266,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         ))
     } else if data.starts_with(&[0x00, 0x00, 0x01, 0x00]) {
         Some(info(
-            "ICO bitmap",
+            "image/vnd.microsoft.icon",
             path,
             IdfKind::Bitmap,
             None,
@@ -262,7 +275,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         ))
     } else if is_pcx(&data) {
         Some(info(
-            "PCX bitmap",
+            "image/x-pcx",
             path,
             IdfKind::Bitmap,
             None,
@@ -272,7 +285,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
     } else if data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a") {
         let (w, h) = gif_size(&data).unwrap_or((0, 0));
         Some(info(
-            "GIF bitmap",
+            "image/gif",
             path,
             IdfKind::Bitmap,
             None,
@@ -282,7 +295,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
     } else if data.starts_with(b"\xFF\xD8\xFF") {
         let (w, h) = jpeg_size(&data).unwrap_or((0, 0));
         Some(info(
-            "JPEG bitmap",
+            "image/jpeg",
             path,
             IdfKind::Bitmap,
             None,
@@ -292,7 +305,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
     } else if data.starts_with(b"BM") {
         let (w, h) = bmp_size(&data).unwrap_or((0, 0));
         Some(info(
-            "BMP bitmap",
+            "image/bmp",
             path,
             IdfKind::Bitmap,
             None,
@@ -301,7 +314,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         ))
     } else if is_tiff(&data) {
         Some(info(
-            "TIFF bitmap",
+            "image/tiff",
             path,
             IdfKind::Bitmap,
             None,
@@ -310,7 +323,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         ))
     } else if data.starts_with(b"8BPS") {
         Some(info(
-            "Photoshop bitmap",
+            "image/vnd.adobe.photoshop",
             path,
             IdfKind::Bitmap,
             None,
@@ -319,7 +332,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         ))
     } else if is_tga(&data, &ext) {
         Some(info(
-            "TGA bitmap",
+            "image/x-tga",
             path,
             IdfKind::Bitmap,
             None,
@@ -330,7 +343,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         Some(wav_info(path, &data))
     } else if data.starts_with(b"FORM") && data.get(8..12) == Some(b"AIFF") {
         Some(info(
-            "AIFF audio",
+            "audio/aiff",
             path,
             IdfKind::Sample,
             None,
@@ -338,10 +351,17 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             vec![],
         ))
     } else if data.starts_with(b".snd") {
-        Some(info("AU audio", path, IdfKind::Sample, None, None, vec![]))
+        Some(info(
+            "audio/basic",
+            path,
+            IdfKind::Sample,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(b"RIFF") && data.get(8..12) == Some(b"AVI ") {
         Some(info(
-            "AVI animation",
+            "video/x-msvideo",
             path,
             IdfKind::Animation,
             None,
@@ -350,7 +370,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         ))
     } else if data.len() > 12 && &data[4..8] == b"ftyp" {
         Some(info(
-            "MP4/MOV container",
+            "video/mp4",
             path,
             IdfKind::Animation,
             None,
@@ -359,7 +379,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         ))
     } else if data.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]) {
         Some(info(
-            "Matroska container",
+            "video/x-matroska",
             path,
             IdfKind::Animation,
             None,
@@ -368,7 +388,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         ))
     } else if data.starts_with(b"fLaC") {
         Some(info(
-            "FLAC audio",
+            "audio/flac",
             path,
             IdfKind::Sample,
             None,
@@ -377,7 +397,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         ))
     } else if data.starts_with(b"OggS") {
         Some(info(
-            "Ogg stream",
+            "application/ogg",
             path,
             IdfKind::Sample,
             None,
@@ -386,7 +406,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         ))
     } else if data.starts_with(b"ID3") {
         Some(info(
-            "MP3 audio",
+            "audio/mpeg",
             path,
             IdfKind::Sample,
             id3v1_title(&data),
@@ -397,7 +417,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         Some(midi_info(path, &data))
     } else if data.starts_with(b"%PDF-") {
         Some(info(
-            "PDF document",
+            "application/pdf",
             path,
             IdfKind::Other,
             None,
@@ -406,7 +426,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         ))
     } else if data.starts_with(b"{\\rtf") {
         Some(info(
-            "RTF document",
+            "application/rtf",
             path,
             IdfKind::Other,
             None,
@@ -415,7 +435,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         ))
     } else if data.starts_with(b"MZ") {
         Some(info(
-            "DOS/Windows executable",
+            "application/vnd.microsoft.portable-executable",
             path,
             IdfKind::Other,
             None,
@@ -424,7 +444,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         ))
     } else if data.starts_with(b"\x7FELF") {
         Some(info(
-            "ELF executable",
+            "application/x-elf",
             path,
             IdfKind::Other,
             None,
@@ -433,7 +453,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         ))
     } else if is_s3m(&data) {
         Some(info(
-            "Scream Tracker module",
+            "audio/x-s3m",
             path,
             IdfKind::Module,
             fixed_text(&data[..28]),
@@ -442,7 +462,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         ))
     } else if is_xm(&data) {
         Some(info(
-            "FastTracker module",
+            "audio/x-xm",
             path,
             IdfKind::Module,
             fixed_text(&data[17..37]),
@@ -451,7 +471,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         ))
     } else if is_it(&data) {
         Some(info(
-            "Impulse Tracker module",
+            "audio/x-it",
             path,
             IdfKind::Module,
             fixed_text(&data[4..30]),
@@ -460,7 +480,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         ))
     } else if is_mod(&data) {
         Some(info(
-            "ProTracker module",
+            "audio/x-mod",
             path,
             IdfKind::Module,
             fixed_text(&data[..20]),
@@ -469,7 +489,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         ))
     } else if matches!(ext.as_str(), "htm" | "html") || looks_like_html(&data) {
         Some(info(
-            "HTML document",
+            "text/html",
             path,
             IdfKind::Other,
             html_title(&data),
@@ -477,16 +497,9 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             vec![],
         ))
     } else if matches!(ext.as_str(), "ans" | "nfo" | "diz") {
-        Some(info(
-            "ANSI/DOS text",
-            path,
-            IdfKind::Other,
-            None,
-            None,
-            vec![],
-        ))
+        Some(info("text/plain", path, IdfKind::Other, None, None, vec![]))
     } else if seems_text(&data) {
-        Some(info("Text file", path, IdfKind::Other, None, None, vec![]))
+        Some(info("text/plain", path, IdfKind::Other, None, None, vec![]))
     } else {
         None
     };
@@ -495,7 +508,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
 }
 
 fn info(
-    format: &str,
+    mime_type: &str,
     path: &Path,
     kind: IdfKind,
     title: Option<String>,
@@ -503,7 +516,10 @@ fn info(
     extra: Vec<String>,
 ) -> IdInfo {
     IdInfo {
-        format: format.into(),
+        format: format_from_mime_type(mime_type)
+            .unwrap_or("Unknown file")
+            .into(),
+        mime_type: mime_type.into(),
         detail: path
             .file_name()
             .unwrap_or_default()
@@ -514,6 +530,202 @@ fn info(
         composer,
         extra,
     }
+}
+
+fn fallback_info(path: &Path) -> IdInfo {
+    IdInfo {
+        format: "Unknown file".into(),
+        mime_type: fallback_mime_type(path),
+        detail: path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned(),
+        kind: IdfKind::Other,
+        title: None,
+        composer: None,
+        extra: Vec::new(),
+    }
+}
+
+fn fallback_mime_type(path: &Path) -> String {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.trim_start_matches('.').to_ascii_lowercase())
+        .filter(|ext| !ext.is_empty())
+        .map(|ext| format!("application/{ext}"))
+        .unwrap_or_else(|| "application/octet-stream".into())
+}
+
+fn format_from_mime_type(mime_type: &str) -> Option<&'static str> {
+    match mime_type {
+        "application/zip" => Some("ZIP archive"),
+        "application/x-7z-compressed" => Some("7-Zip archive"),
+        "application/gzip" => Some("GZip archive"),
+        "application/x-bzip2" => Some("BZip2 archive"),
+        "application/x-xz" => Some("XZ archive"),
+        "application/x-arj" => Some("ARJ archive"),
+        "application/vnd.ms-cab-compressed" => Some("CAB archive"),
+        "application/zstd" => Some("Zstandard archive"),
+        "application/x-lzh-compressed" => Some("LHA/LZH archive"),
+        "application/x-tar" => Some("TAR archive"),
+        "application/x-iso9660-image" => Some("ISO-9660 image"),
+        "application/vnd.rar" => Some("RAR archive"),
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => {
+            Some("Microsoft Word document")
+        }
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => {
+            Some("Microsoft Excel spreadsheet")
+        }
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation" => {
+            Some("Microsoft PowerPoint presentation")
+        }
+        "application/vnd.ms-word.document.macroEnabled.12" => Some("Microsoft Word document"),
+        "application/vnd.ms-excel.sheet.macroEnabled.12" => Some("Microsoft Excel spreadsheet"),
+        "application/vnd.ms-powerpoint.presentation.macroEnabled.12" => {
+            Some("Microsoft PowerPoint presentation")
+        }
+        "application/vnd.oasis.opendocument.text" => Some("OpenDocument text"),
+        "application/vnd.oasis.opendocument.spreadsheet" => Some("OpenDocument spreadsheet"),
+        "application/vnd.oasis.opendocument.presentation" => Some("OpenDocument presentation"),
+        "image/png" => Some("PNG bitmap"),
+        "image/webp" => Some("WebP bitmap"),
+        "image/vnd.microsoft.icon" => Some("ICO bitmap"),
+        "image/x-pcx" => Some("PCX bitmap"),
+        "image/gif" => Some("GIF bitmap"),
+        "image/jpeg" => Some("JPEG bitmap"),
+        "image/bmp" => Some("BMP bitmap"),
+        "image/tiff" => Some("TIFF bitmap"),
+        "image/vnd.adobe.photoshop" => Some("Photoshop bitmap"),
+        "image/x-tga" => Some("TGA bitmap"),
+        "audio/wav" => Some("WAV sample"),
+        "audio/aiff" => Some("AIFF audio"),
+        "audio/basic" => Some("AU audio"),
+        "video/x-msvideo" => Some("AVI animation"),
+        "video/mp4" => Some("MP4/MOV container"),
+        "video/x-matroska" => Some("Matroska container"),
+        "audio/flac" => Some("FLAC audio"),
+        "application/ogg" => Some("Ogg stream"),
+        "audio/mpeg" => Some("MP3 audio"),
+        "audio/midi" => Some("MIDI song"),
+        "application/pdf" => Some("PDF document"),
+        "application/rtf" => Some("RTF document"),
+        "application/vnd.microsoft.portable-executable" => Some("DOS/Windows executable"),
+        "application/x-elf" => Some("ELF executable"),
+        "audio/x-s3m" => Some("Scream Tracker module"),
+        "audio/x-xm" => Some("FastTracker module"),
+        "audio/x-it" => Some("Impulse Tracker module"),
+        "audio/x-mod" => Some("ProTracker module"),
+        "text/html" => Some("HTML document"),
+        "text/plain" => Some("Text file"),
+        _ => None,
+    }
+}
+
+fn zip_mime_type(data: &[u8], ext: &str) -> Option<&'static str> {
+    let mut archive = ZipArchive::new(Cursor::new(data)).ok()?;
+    let mut has_content_types = false;
+    let mut has_word = false;
+    let mut has_excel = false;
+    let mut has_powerpoint = false;
+    let mut has_macro_word = false;
+    let mut has_macro_excel = false;
+    let mut has_macro_powerpoint = false;
+    let mut odf_mime = None;
+
+    for idx in 0..archive.len().min(256) {
+        let Ok(mut file) = archive.by_index(idx) else {
+            continue;
+        };
+        let name = file.name().to_ascii_lowercase();
+        match name.as_str() {
+            "[content_types].xml" => has_content_types = true,
+            "word/document.xml" => has_word = true,
+            "xl/workbook.xml" => has_excel = true,
+            "ppt/presentation.xml" => has_powerpoint = true,
+            "word/vbaproject.bin" => has_macro_word = true,
+            "xl/vbaproject.bin" => has_macro_excel = true,
+            "ppt/vbaproject.bin" => has_macro_powerpoint = true,
+            "mimetype" => {
+                use std::io::Read;
+                let mut value = String::new();
+                if file.read_to_string(&mut value).is_ok() {
+                    odf_mime = Some(value.trim().to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if let Some(mime) = odf_mime.as_deref().and_then(open_document_mime_type) {
+        return Some(mime);
+    }
+    if has_content_types {
+        if has_word {
+            return Some(if has_macro_word || ext == "docm" {
+                "application/vnd.ms-word.document.macroEnabled.12"
+            } else {
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            });
+        }
+        if has_excel {
+            return Some(if has_macro_excel || ext == "xlsm" {
+                "application/vnd.ms-excel.sheet.macroEnabled.12"
+            } else {
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            });
+        }
+        if has_powerpoint {
+            return Some(if has_macro_powerpoint || ext == "pptm" {
+                "application/vnd.ms-powerpoint.presentation.macroEnabled.12"
+            } else {
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            });
+        }
+    }
+
+    match ext {
+        "docx" => Some("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+        "xlsx" => Some("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        "pptx" => Some("application/vnd.openxmlformats-officedocument.presentationml.presentation"),
+        "docm" => Some("application/vnd.ms-word.document.macroEnabled.12"),
+        "xlsm" => Some("application/vnd.ms-excel.sheet.macroEnabled.12"),
+        "pptm" => Some("application/vnd.ms-powerpoint.presentation.macroEnabled.12"),
+        "odt" => Some("application/vnd.oasis.opendocument.text"),
+        "ods" => Some("application/vnd.oasis.opendocument.spreadsheet"),
+        "odp" => Some("application/vnd.oasis.opendocument.presentation"),
+        _ => None,
+    }
+}
+
+fn open_document_mime_type(value: &str) -> Option<&'static str> {
+    match value {
+        "application/vnd.oasis.opendocument.text" => {
+            Some("application/vnd.oasis.opendocument.text")
+        }
+        "application/vnd.oasis.opendocument.spreadsheet" => {
+            Some("application/vnd.oasis.opendocument.spreadsheet")
+        }
+        "application/vnd.oasis.opendocument.presentation" => {
+            Some("application/vnd.oasis.opendocument.presentation")
+        }
+        _ => None,
+    }
+}
+
+fn is_office_mime_type(mime_type: &str) -> bool {
+    matches!(
+        mime_type,
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            | "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            | "application/vnd.ms-word.document.macroEnabled.12"
+            | "application/vnd.ms-excel.sheet.macroEnabled.12"
+            | "application/vnd.ms-powerpoint.presentation.macroEnabled.12"
+            | "application/vnd.oasis.opendocument.text"
+            | "application/vnd.oasis.opendocument.spreadsheet"
+            | "application/vnd.oasis.opendocument.presentation"
+    )
 }
 
 fn wh_lines(w: u32, h: u32) -> Vec<String> {
@@ -540,7 +752,7 @@ fn midi_info(path: &Path, data: &[u8]) -> IdInfo {
         extra.push(format!(" MIDI format {}", format));
         extra.push(format!(" {} track(s)", tracks));
     }
-    info("MIDI song", path, IdfKind::Module, None, None, extra)
+    info("audio/midi", path, IdfKind::Module, None, None, extra)
 }
 
 fn wav_info(path: &Path, data: &[u8]) -> IdInfo {
@@ -550,7 +762,7 @@ fn wav_info(path: &Path, data: &[u8]) -> IdInfo {
         extra.push(format!(" {} channel(s)", channels));
         extra.push(format!(" {} bit", bits));
     }
-    info("WAV sample", path, IdfKind::Sample, None, None, extra)
+    info("audio/wav", path, IdfKind::Sample, None, None, extra)
 }
 
 fn wav_fmt(data: &[u8]) -> Option<(u16, u32, u16)> {
@@ -849,4 +1061,64 @@ fn is_xm(data: &[u8]) -> bool {
 
 fn is_it(data: &[u8]) -> bool {
     data.starts_with(b"IMPM")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn docx_zip_is_detected_as_office_document() {
+        let path = std::env::temp_dir().join(format!("kkc-idf-{}.docx", std::process::id()));
+        {
+            let file = fs::File::create(&path).expect("create docx");
+            let mut zip = zip::ZipWriter::new(file);
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+            zip.start_file("[Content_Types].xml", options)
+                .expect("content types");
+            zip.write_all(b"<Types></Types>")
+                .expect("write content types");
+            zip.start_file("word/document.xml", options)
+                .expect("document xml");
+            zip.write_all(b"<w:document/>").expect("write document");
+            zip.finish().expect("finish docx");
+        }
+
+        let info = probe_file(&path)
+            .expect("probe should not fail")
+            .expect("docx should be detected");
+        assert_eq!(
+            info.mime_type,
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        );
+        assert_eq!(info.format, "Microsoft Word document");
+        assert_eq!(info.kind, IdfKind::Other);
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn plain_zip_stays_zip_archive() {
+        let path = std::env::temp_dir().join(format!("kkc-idf-{}.zip", std::process::id()));
+        {
+            let file = fs::File::create(&path).expect("create zip");
+            let mut zip = zip::ZipWriter::new(file);
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+            zip.start_file("readme.txt", options).expect("readme");
+            zip.write_all(b"hello").expect("write readme");
+            zip.finish().expect("finish zip");
+        }
+
+        let info = probe_file(&path)
+            .expect("probe should not fail")
+            .expect("zip should be detected");
+        assert_eq!(info.mime_type, "application/zip");
+        assert_eq!(info.format, "ZIP archive");
+        assert_eq!(info.kind, IdfKind::Archive);
+
+        let _ = fs::remove_file(path);
+    }
 }

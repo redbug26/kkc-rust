@@ -257,6 +257,12 @@ fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<bool> {
         MenuAction::SearchFiles => {
             app.open_search();
         }
+        MenuAction::RemoteConnect => {
+            app.open_remote_connect();
+        }
+        MenuAction::FileIdPreview => {
+            app.open_file_id_view();
+        }
         MenuAction::DirBookmarks => {
             app.open_dir_bookmarks();
         }
