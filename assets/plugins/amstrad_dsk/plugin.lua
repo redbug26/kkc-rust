@@ -77,6 +77,78 @@ local function basename(path)
     return path:match("([^/\\]+)$") or path
 end
 
+local function file_size(path)
+    local file = io.open(path, "rb")
+    if not file then
+        return 0
+    end
+    local size = file:seek("end") or 0
+    file:close()
+    return size
+end
+
+local function validate_dsk_header(path)
+    local file = io.open(path, "rb")
+    if not file then
+        return nil, "unable to open DSK"
+    end
+
+    local header = file:read(34) or ""
+    if header ~= "MV - CPCEMU Disk-File\r\nDisk-Info\r\n"
+        and header ~= "EXTENDED CPC DSK File\r\nDisk-Info\r\n" then
+        file:close()
+        return nil, "not an Amstrad CPC DSK image"
+    end
+
+    file:seek("set", 48)
+    local tracks = (file:read(1) or "\0"):byte(1) or 0
+    local sides = (file:read(1) or "\0"):byte(1) or 0
+    local lo = (file:read(1) or "\0"):byte(1) or 0
+    local hi = (file:read(1) or "\0"):byte(1) or 0
+    local track_size = lo + hi * 256
+    local sizes = file:read(204) or ""
+    file:close()
+
+    if tracks < 1 or tracks > 84 then
+        return nil, "invalid DSK track count"
+    end
+    if sides < 1 or sides > 2 then
+        return nil, "invalid DSK side count"
+    end
+
+    local total_track_size = 0
+    if header == "EXTENDED CPC DSK File\r\nDisk-Info\r\n" then
+        for idx = 1, math.min(#sizes, tracks * sides) do
+            total_track_size = total_track_size + (sizes:byte(idx) or 0) * 256
+        end
+        if total_track_size == 0 then
+            return nil, "invalid extended DSK track table"
+        end
+    else
+        if track_size < 256 or track_size > 65535 then
+            return nil, "invalid DSK track size"
+        end
+        total_track_size = tracks * sides * track_size
+    end
+
+    local expected_max = 256 + total_track_size
+    local size = file_size(path)
+    if size > 0 and expected_max > size + 65536 then
+        return nil, "DSK header announces more data than the file contains"
+    end
+    return true
+end
+
+local function read_valid_dsk(path)
+    local ok, err = validate_dsk_header(path)
+    if not ok then
+        error(err, 0)
+    end
+    dsk.init()
+    dsk.verbose = false
+    assert(dsk.read(path), "unable to read DSK")
+end
+
 local function span(text, fg, bold)
     return { text = text, fg = fg or "white", bg = "black", bold = bold or false }
 end
@@ -167,12 +239,13 @@ local function render_dsk_directory(path, mode)
         return nil
     end
 
-    dsk.init()
-    dsk.verbose = false
-    assert(dsk.read(path), "unable to read DSK")
-    dsk.cat()
+    read_valid_dsk(path)
+    local catalog_ok, catalog_err = pcall(dsk.cat)
 
-    local rows = catalog_rows()
+    local rows = {}
+    if catalog_ok then
+        rows = catalog_rows()
+    end
     local free, total = free_block_count()
     local lines = {}
     table.insert(lines, line(span("Amstrad CPC DSK directory", "yellow", true)))
@@ -193,6 +266,12 @@ local function render_dsk_directory(path, mode)
         span("  Free blocks: ", "gray"),
         span(tostring(free) .. "/" .. tostring(total), "cyan")
     ))
+    if not catalog_ok then
+        table.insert(lines, line(
+            span("Catalog: ", "gray"),
+            span(tostring(catalog_err or "not readable"), "red", true)
+        ))
+    end
     table.insert(lines, line(span("")))
     table.insert(lines, line(
         span("Usr ", "yellow", true),
@@ -206,6 +285,10 @@ local function render_dsk_directory(path, mode)
     table.insert(lines, line(span(string.rep("-", 72), "gray")))
 
     if #rows == 0 then
+        if not catalog_ok then
+            table.insert(lines, line(span("This image can be viewed as a disk image, but not entered as an AMSDOS archive.", "gray")))
+            return lines
+        end
         table.insert(lines, line(span("Empty directory", "gray")))
         return lines
     end
@@ -247,9 +330,7 @@ local function amsdos_import_name(path)
 end
 
 local function extract_dsk(path, destination)
-    dsk.init()
-    dsk.verbose = false
-    assert(dsk.read(path), "unable to read DSK")
+    read_valid_dsk(path)
     dsk.cat()
 
     local grouped = {}
@@ -289,9 +370,7 @@ local function normalize_tracks_for_write()
 end
 
 local function add_files_to_dsk(path, files)
-    dsk.init()
-    dsk.verbose = false
-    assert(dsk.read(path), "unable to read DSK")
+    read_valid_dsk(path)
     dsk.cat()
 
     for _, source in ipairs(files) do
@@ -312,7 +391,7 @@ kkc.register_archive_plugin({
     name = "amstrad_dsk",
     version = "1.0.0",
     description = "Amstrad CPC DSK archive plugin",
-    extensions = { "dsk" },
+    mime_types = { "application/x-amstrad-cpc-dsk" },
     can_handle = function(path)
         return path:lower():match("%.dsk$") ~= nil
     end,
@@ -325,6 +404,6 @@ kkc.register_viewer_plugin({
     version = "1.0.0",
     description = "Amstrad CPC DSK directory viewer",
     modes = { "text" },
-    extensions = { "dsk" },
+    mime_types = { "application/x-amstrad-cpc-dsk" },
     render = render_dsk_directory,
 })

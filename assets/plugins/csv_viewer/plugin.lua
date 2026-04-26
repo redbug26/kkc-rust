@@ -533,7 +533,7 @@ kkc.register_viewer_plugin({
     version     = "1.0.0",
     description = "CSV file viewer with column alignment",
     modes       = { "text" },
-    extensions  = { "csv" },
+    mime_types  = { "text/csv" },
     render      = render_csv,
     handle_key  = handle_csv_key,
 })

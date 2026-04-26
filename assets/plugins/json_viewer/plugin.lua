@@ -532,7 +532,7 @@ kkc.register_viewer_plugin({
     version = "1.0.0",
     description = "Pretty and tree JSON viewer",
     modes = { "text" },
-    extensions = { "json", "geojson" },
+    mime_types = { "application/json" },
     render = render_json,
     handle_key = handle_json_key,
 })

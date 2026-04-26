@@ -3,7 +3,7 @@
 KKC loads Lua plugins at startup. Plugins can add:
 
 - archive access, so a file can be entered like a directory;
-- viewer extensions, to improve the internal viewer display.
+- viewer extensions, selected from FileID mime types, to improve the internal viewer display.
 
 User plugins are installed in the `data_dir()/plugins` directory from the `ProjectDirs` crate.
 From KKC, this directory is available through `Options > Plugins > Open Dir`.
@@ -73,7 +73,7 @@ kkc.register_archive_plugin({
     name = "simple_archive",
     version = "1.0.0",
     description = "Example archive plugin",
-    extensions = { "foo" },
+    mime_types = { "application/foo" },
     extract = function(path, destination)
         kkc.write_file(kkc.path_join(destination, "content.txt"), "Extracted from " .. path)
         return true
@@ -86,10 +86,11 @@ Fields:
 - `name`: stable unique plugin identifier.
 - `version`: optional semantic version string shown in `Options > Plugins`. Defaults to `0.0.0` for older plugins.
 - `description`: text shown in `Options > Plugins`.
-- `extensions`: supported extensions, without leading dots.
+- `mime_types`: supported mime types as reported by FileID (`idf.rs`).
+- `extensions`: legacy fallback for older plugins. Prefer `mime_types`.
 - `extract(path, destination)`: extracts content into `destination`, then returns `true`.
 - `add_files(path, files)`: optional. Allows copying local files into the archive. `files` is a Lua table of paths.
-- `can_handle(path)`: optional. Some bundled plugins use this for their own checks, but KKC currently discovers archive support from `extensions`.
+- `can_handle(path)`: optional. Some bundled plugins use this for their own checks, but KKC discovers archive support from `mime_types`.
 
 Example with archive writing:
 
@@ -98,7 +99,7 @@ kkc.register_archive_plugin({
     name = "writable_archive",
     version = "1.0.0",
     description = "Example writable archive",
-    extensions = { "foo" },
+    mime_types = { "application/foo" },
     extract = function(path, destination)
         return true
     end,
@@ -127,7 +128,8 @@ Viewer plugin fields:
 - `version`: optional semantic version string shown in `Options > Plugins`. Defaults to `0.0.0` for older plugins.
 - `description`: text shown in `Options > Plugins` and `F4: Change Viewer`.
 - `modes`: supported viewer modes, usually `{ "text" }`.
-- `extensions`: optional. File extensions, without leading dots, for automatic viewer plugin selection.
+- `mime_types`: optional. FileID mime types for automatic viewer plugin selection.
+- `extensions`: legacy fallback for older plugins. Prefer `mime_types`.
 
 Currently useful modes:
 
@@ -177,7 +179,7 @@ kkc.register_viewer_plugin({
     version = "1.0.0",
     description = "Displays a custom index",
     modes = { "text" },
-    extensions = { "idx" },
+    mime_types = { "application/x-index" },
     render = function(path, mode, state, width)
         if mode ~= "text" then
             return nil

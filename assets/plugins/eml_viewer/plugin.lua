@@ -335,6 +335,6 @@ kkc.register_viewer_plugin({
     version = "1.0.0",
     description = "Rendered EML/MIME message viewer",
     modes = { "text" },
-    extensions = { "eml", "mbox" },
+    mime_types = { "message/rfc822", "application/mbox" },
     render = render_eml,
 })

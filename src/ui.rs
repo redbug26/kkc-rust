@@ -3669,20 +3669,20 @@ fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
             if p.extensions.is_empty() {
                 1
             } else {
-                p.extensions.iter().map(|e| e.len() + 1).sum::<usize>()
+                p.extensions.iter().map(|e| e.len()).sum::<usize>()
                     + p.extensions.len().saturating_sub(1)
             }
         })
         .max()
         .unwrap_or(0)
-        .max("Ext".len());
+        .max("Mime".len());
 
     let header = format!(
         "  {:<col_name$} {:<col_kind$} {:<col_version$} {:<col_ext$} {}",
         "Name",
         "Type",
         "Version",
-        "Ext",
+        "Mime",
         "Description",
         col_name = col_name,
         col_kind = col_kind,
@@ -3754,12 +3754,7 @@ fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
             let exts = if plugin.extensions.is_empty() {
                 "-".into()
             } else {
-                plugin
-                    .extensions
-                    .iter()
-                    .map(|ext| format!(".{ext}"))
-                    .collect::<Vec<_>>()
-                    .join(",")
+                plugin.extensions.join(",")
             };
             let icon = if selected { "▶" } else { " " };
             let text = format!(

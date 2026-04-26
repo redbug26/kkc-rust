@@ -440,7 +440,7 @@ kkc.register_viewer_plugin({
     version = "1.0.0",
     description = "Structured XML document viewer",
     modes = { "text" },
-    extensions = { "xml", "plist" },
+    mime_types = { "application/xml", "text/xml", "application/rss+xml", "application/atom+xml", "application/x-plist", "image/svg+xml" },
     render = render_xml,
     handle_key = handle_xml_key,
 })

@@ -435,7 +435,7 @@ kkc.register_archive_plugin({
     name = "commodore_d64",
     version = "1.0.0",
     description = "Commodore 64 D64 disk image plugin",
-    extensions = { "d64" },
+    mime_types = { "application/x-c64-d64" },
     can_handle = function(path)
         return path:lower():match("%.d64$") ~= nil
     end,
@@ -447,6 +447,6 @@ kkc.register_viewer_plugin({
     version = "1.0.0",
     description = "Commodore 64 D64 directory viewer",
     modes = { "text" },
-    extensions = { "d64" },
+    mime_types = { "application/x-c64-d64" },
     render = render_d64_directory,
 })

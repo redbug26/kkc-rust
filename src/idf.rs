@@ -535,6 +535,44 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             vec![],
         ))
+    } else if is_xml_document(&data, &ext) {
+        Some(info(
+            xml_mime_type(&ext),
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if is_csv(&data, &ext) {
+        Some(info("text/csv", path, IdfKind::Other, None, None, vec![]))
+    } else if is_markdown(&data, &ext) {
+        Some(info(
+            "text/markdown",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if is_email_message(&data, &ext) {
+        Some(info(
+            "message/rfc822",
+            path,
+            IdfKind::Other,
+            email_subject(&data),
+            None,
+            vec![],
+        ))
+    } else if ext == "mbox" {
+        Some(info(
+            "application/mbox",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
     } else if matches!(ext.as_str(), "htm" | "html") || looks_like_html(&data) {
         Some(info(
             "text/html",
@@ -670,6 +708,15 @@ fn format_from_mime_type(mime_type: &str) -> Option<&'static str> {
         "text/vcard" => Some("vCard contact"),
         "application/json" => Some("JSON document"),
         "image/svg+xml" => Some("SVG vector image"),
+        "application/xml" | "text/xml" => Some("XML document"),
+        "application/xhtml+xml" => Some("XHTML document"),
+        "application/rss+xml" => Some("RSS feed"),
+        "application/atom+xml" => Some("Atom feed"),
+        "application/x-plist" => Some("Property list"),
+        "text/csv" => Some("CSV table"),
+        "text/markdown" => Some("Markdown document"),
+        "message/rfc822" => Some("EML message"),
+        "application/mbox" => Some("Mbox mailbox"),
         "text/html" => Some("HTML document"),
         "text/plain" => Some("Text file"),
         _ => None,
@@ -1161,6 +1208,59 @@ fn svg_title(data: &[u8]) -> Option<String> {
     } else {
         Some(title.to_string())
     }
+}
+
+fn is_xml_document(data: &[u8], ext: &str) -> bool {
+    if !matches!(
+        ext,
+        "xml" | "xsd" | "xsl" | "xslt" | "xhtml" | "rss" | "atom" | "plist"
+    ) {
+        return false;
+    }
+    let sample = String::from_utf8_lossy(&data[..data.len().min(1024)]).to_ascii_lowercase();
+    let trimmed = sample.trim_start_matches('\u{feff}').trim_start();
+    trimmed.starts_with("<?xml") || trimmed.starts_with('<')
+}
+
+fn xml_mime_type(ext: &str) -> &'static str {
+    match ext {
+        "xhtml" => "application/xhtml+xml",
+        "rss" => "application/rss+xml",
+        "atom" => "application/atom+xml",
+        "plist" => "application/x-plist",
+        _ => "application/xml",
+    }
+}
+
+fn is_csv(data: &[u8], ext: &str) -> bool {
+    if ext != "csv" {
+        return false;
+    }
+    let sample = String::from_utf8_lossy(&data[..data.len().min(2048)]);
+    let first_line = sample.lines().next().unwrap_or_default();
+    first_line.contains(',') || first_line.contains(';') || first_line.contains('\t')
+}
+
+fn is_markdown(_data: &[u8], ext: &str) -> bool {
+    matches!(ext, "md" | "markdown" | "mdown" | "mkd")
+}
+
+fn is_email_message(data: &[u8], ext: &str) -> bool {
+    if ext == "eml" {
+        return true;
+    }
+    let sample = String::from_utf8_lossy(&data[..data.len().min(2048)]).to_ascii_lowercase();
+    sample.contains("\nsubject:") && (sample.contains("\nfrom:") || sample.starts_with("from:"))
+}
+
+fn email_subject(data: &[u8]) -> Option<String> {
+    let sample = String::from_utf8_lossy(&data[..data.len().min(8192)]);
+    sample.lines().find_map(|line| {
+        line.strip_prefix("Subject:")
+            .or_else(|| line.strip_prefix("subject:"))
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    })
 }
 
 fn is_amstrad_dsk(data: &[u8], ext: &str) -> bool {

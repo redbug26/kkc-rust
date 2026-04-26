@@ -49,6 +49,7 @@ struct ArchivePlugin {
     description: String,
     script_path: PathBuf,
     plugin_dir: PathBuf,
+    mime_types: Vec<String>,
     extensions: Vec<String>,
     can_add_files: bool,
 }
@@ -61,6 +62,7 @@ struct ViewerPlugin {
     script_path: PathBuf,
     plugin_dir: PathBuf,
     modes: Vec<String>,
+    mime_types: Vec<String>,
     extensions: Vec<String>,
 }
 
@@ -69,6 +71,7 @@ struct RegisteredPlugin {
     name: String,
     version: String,
     description: String,
+    mime_types: Vec<String>,
     extensions: Vec<String>,
     can_add_files: bool,
 }
@@ -79,6 +82,7 @@ struct RegisteredViewerPlugin {
     version: String,
     description: String,
     modes: Vec<String>,
+    mime_types: Vec<String>,
     extensions: Vec<String>,
 }
 
@@ -277,6 +281,7 @@ fn load_plugins() -> Result<PluginRegistry> {
                 description: plugin.description,
                 script_path: script_path.clone(),
                 plugin_dir: plugin_dir.clone(),
+                mime_types: plugin.mime_types,
                 extensions: plugin.extensions,
                 can_add_files: plugin.can_add_files,
             });
@@ -289,6 +294,7 @@ fn load_plugins() -> Result<PluginRegistry> {
                 script_path: script_path.clone(),
                 plugin_dir: plugin_dir.clone(),
                 modes: plugin.modes,
+                mime_types: plugin.mime_types,
                 extensions: plugin.extensions,
             });
         }
@@ -626,18 +632,20 @@ where
                 )));
             }
 
-            let extensions = match table.get::<Option<Table>>("extensions")? {
-                Some(values) => values
-                    .sequence_values::<String>()
-                    .map(|value| value.map(|ext| ext.trim_start_matches('.').to_ascii_lowercase()))
-                    .collect::<mlua::Result<Vec<_>>>()?,
-                None => Vec::new(),
-            };
+            let mime_types = table_string_list(&table, "mime_types")?
+                .into_iter()
+                .map(|value| value.to_ascii_lowercase())
+                .collect::<Vec<_>>();
+            let extensions = table_string_list(&table, "extensions")?
+                .into_iter()
+                .map(|ext| ext.trim_start_matches('.').to_ascii_lowercase())
+                .collect::<Vec<_>>();
 
             on_register(RegisteredPlugin {
                 name,
                 version,
                 description,
+                mime_types,
                 extensions,
                 can_add_files: add_files.is_some(),
             });
@@ -675,6 +683,13 @@ where
     Ok(())
 }
 
+fn table_string_list(table: &Table, key: &str) -> mlua::Result<Vec<String>> {
+    match table.get::<Option<Table>>(key)? {
+        Some(values) => values.sequence_values::<String>().collect(),
+        None => Ok(Vec::new()),
+    }
+}
+
 impl PluginRegistry {
     fn plugin_infos(&self) -> Vec<PluginInfo> {
         let mut plugins = self
@@ -685,7 +700,7 @@ impl PluginRegistry {
                 version: plugin.version.clone(),
                 kind: "Archive".into(),
                 description: plugin.description.clone(),
-                extensions: plugin.extensions.clone(),
+                extensions: plugin.support_labels(),
             })
             .collect::<Vec<_>>();
         plugins.extend(self.viewer_plugins.iter().map(|plugin| PluginInfo {
@@ -693,7 +708,9 @@ impl PluginRegistry {
             version: plugin.version.clone(),
             kind: "Viewer".into(),
             description: plugin.description.clone(),
-            extensions: if plugin.extensions.is_empty() {
+            extensions: if !plugin.mime_types.is_empty() {
+                plugin.mime_types.clone()
+            } else if plugin.extensions.is_empty() {
                 plugin.modes.clone()
             } else {
                 plugin.extensions.clone()
@@ -710,7 +727,9 @@ impl PluginRegistry {
                 version: plugin.version.clone(),
                 kind: "Viewer".into(),
                 description: plugin.description.clone(),
-                extensions: if plugin.extensions.is_empty() {
+                extensions: if !plugin.mime_types.is_empty() {
+                    plugin.mime_types.clone()
+                } else if plugin.extensions.is_empty() {
                     plugin.modes.clone()
                 } else {
                     plugin.extensions.clone()
@@ -720,30 +739,33 @@ impl PluginRegistry {
     }
 
     fn default_viewer_plugin_for_path(&self, path: &Path) -> Option<&str> {
-        let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+        let mime_type = path_mime_type(path);
         self.viewer_plugins
             .iter()
-            .find(|plugin| plugin.extensions.iter().any(|value| value == &ext))
+            .find(|plugin| plugin.supports_path(path, mime_type.as_deref()))
             .map(|plugin| plugin.name.as_str())
     }
 
     fn supports_archive(&self, path: &Path) -> bool {
+        let mime_type = path_mime_type(path);
         self.archive_plugins
             .iter()
-            .any(|plugin| plugin.supports_path(path))
+            .any(|plugin| plugin.supports_path(path, mime_type.as_deref()))
     }
 
     fn supports_add_files(&self, path: &Path) -> bool {
+        let mime_type = path_mime_type(path);
         self.archive_plugins
             .iter()
-            .any(|plugin| plugin.supports_path(path) && plugin.can_add_files)
+            .any(|plugin| plugin.supports_path(path, mime_type.as_deref()) && plugin.can_add_files)
     }
 
     fn extract_archive(&self, path: &Path, destination: &Path) -> Result<bool> {
+        let mime_type = path_mime_type(path);
         let Some(plugin) = self
             .archive_plugins
             .iter()
-            .find(|plugin| plugin.supports_path(path))
+            .find(|plugin| plugin.supports_path(path, mime_type.as_deref()))
         else {
             return Ok(false);
         };
@@ -753,11 +775,10 @@ impl PluginRegistry {
     }
 
     fn add_files(&self, path: &Path, sources: &[PathBuf]) -> Result<bool> {
-        let Some(plugin) = self
-            .archive_plugins
-            .iter()
-            .find(|plugin| plugin.supports_path(path) && plugin.can_add_files)
-        else {
+        let mime_type = path_mime_type(path);
+        let Some(plugin) = self.archive_plugins.iter().find(|plugin| {
+            plugin.supports_path(path, mime_type.as_deref()) && plugin.can_add_files
+        }) else {
             return Ok(false);
         };
 
@@ -820,12 +841,16 @@ impl PluginRegistry {
 }
 
 impl ArchivePlugin {
-    fn supports_path(&self, path: &Path) -> bool {
-        let Some(ext) = path.extension().and_then(|ext| ext.to_str()) else {
-            return false;
-        };
-        let ext = ext.to_ascii_lowercase();
-        self.extensions.iter().any(|candidate| candidate == &ext)
+    fn supports_path(&self, path: &Path, mime_type: Option<&str>) -> bool {
+        supports_path_mime_or_legacy_ext(path, mime_type, &self.mime_types, &self.extensions)
+    }
+
+    fn support_labels(&self) -> Vec<String> {
+        if self.mime_types.is_empty() {
+            self.extensions.clone()
+        } else {
+            self.mime_types.clone()
+        }
     }
 
     fn extract(&self, path: &Path, destination: &Path) -> Result<()> {
@@ -903,6 +928,10 @@ impl ArchivePlugin {
 impl ViewerPlugin {
     fn supports_mode(&self, mode: &str) -> bool {
         self.modes.iter().any(|candidate| candidate == mode)
+    }
+
+    fn supports_path(&self, path: &Path, mime_type: Option<&str>) -> bool {
+        supports_path_mime_or_legacy_ext(path, mime_type, &self.mime_types, &self.extensions)
     }
 
     fn highlight_lines(
@@ -1101,6 +1130,33 @@ fn lua_span_to_viewer_span(span: Table) -> mlua::Result<ViewerSpan> {
     })
 }
 
+fn path_mime_type(path: &Path) -> Option<String> {
+    crate::idf::probe_path(path).map(|info| info.mime_type.to_ascii_lowercase())
+}
+
+fn supports_path_mime_or_legacy_ext(
+    path: &Path,
+    mime_type: Option<&str>,
+    mime_types: &[String],
+    extensions: &[String],
+) -> bool {
+    if let Some(mime_type) = mime_type
+        && mime_types.iter().any(|candidate| candidate == mime_type)
+    {
+        return true;
+    }
+
+    if !mime_types.is_empty() {
+        return false;
+    }
+
+    let Some(ext) = path.extension().and_then(|ext| ext.to_str()) else {
+        return false;
+    };
+    let ext = ext.to_ascii_lowercase();
+    extensions.iter().any(|candidate| candidate == &ext)
+}
+
 fn plugin_lua() -> Lua {
     // Archive plugins need Lua's standard IO library; dsk-lua uses io.open().
     unsafe { Lua::unsafe_new() }
@@ -1164,18 +1220,20 @@ where
                     .collect::<mlua::Result<Vec<_>>>()?,
                 None => Vec::new(),
             };
-            let extensions = match table.get::<Option<Table>>("extensions")? {
-                Some(values) => values
-                    .sequence_values::<String>()
-                    .map(|value| value.map(|ext| ext.trim_start_matches('.').to_ascii_lowercase()))
-                    .collect::<mlua::Result<Vec<_>>>()?,
-                None => Vec::new(),
-            };
+            let mime_types = table_string_list(&table, "mime_types")?
+                .into_iter()
+                .map(|value| value.to_ascii_lowercase())
+                .collect::<Vec<_>>();
+            let extensions = table_string_list(&table, "extensions")?
+                .into_iter()
+                .map(|ext| ext.trim_start_matches('.').to_ascii_lowercase())
+                .collect::<Vec<_>>();
             on_register(RegisteredViewerPlugin {
                 name,
                 version,
                 description,
                 modes,
+                mime_types,
                 extensions,
             });
             Ok(())
@@ -1237,7 +1295,7 @@ mod tests {
         assert_eq!(plugins.len(), 1);
         assert_eq!(plugins[0].name, "pdf_file");
         assert_eq!(plugins[0].version, "1.0.0");
-        assert_eq!(plugins[0].extensions, vec!["pdf"]);
+        assert_eq!(plugins[0].mime_types, vec!["application/pdf"]);
     }
 
     #[test]
@@ -1270,7 +1328,7 @@ mod tests {
         assert_eq!(plugins[0].name, "json_viewer");
         assert_eq!(plugins[0].version, "1.0.0");
         assert_eq!(plugins[0].modes, vec!["text"]);
-        assert_eq!(plugins[0].extensions, vec!["json", "geojson"]);
+        assert_eq!(plugins[0].mime_types, vec!["application/json"]);
     }
 
     #[test]
@@ -1287,7 +1345,17 @@ mod tests {
         assert_eq!(plugins[0].name, "xml_viewer");
         assert_eq!(plugins[0].version, "1.0.0");
         assert_eq!(plugins[0].modes, vec!["text"]);
-        assert_eq!(plugins[0].extensions, vec!["xml", "plist"]);
+        assert_eq!(
+            plugins[0].mime_types,
+            vec![
+                "application/xml",
+                "text/xml",
+                "application/rss+xml",
+                "application/atom+xml",
+                "application/x-plist",
+                "image/svg+xml"
+            ]
+        );
     }
 
     #[test]
@@ -1304,7 +1372,10 @@ mod tests {
         assert_eq!(plugins[0].name, "html_viewer");
         assert_eq!(plugins[0].version, "1.0.0");
         assert_eq!(plugins[0].modes, vec!["text"]);
-        assert_eq!(plugins[0].extensions, vec!["html", "htm", "xhtml"]);
+        assert_eq!(
+            plugins[0].mime_types,
+            vec!["text/html", "application/xhtml+xml"]
+        );
     }
 
     #[test]
@@ -1321,7 +1392,10 @@ mod tests {
         assert_eq!(plugins[0].name, "eml_viewer");
         assert_eq!(plugins[0].version, "1.0.0");
         assert_eq!(plugins[0].modes, vec!["text"]);
-        assert_eq!(plugins[0].extensions, vec!["eml", "mbox"]);
+        assert_eq!(
+            plugins[0].mime_types,
+            vec!["message/rfc822", "application/mbox"]
+        );
     }
 
     #[test]
@@ -1338,7 +1412,7 @@ mod tests {
         assert_eq!(plugins[0].name, "markdown_viewer");
         assert_eq!(plugins[0].version, "1.0.0");
         assert_eq!(plugins[0].modes, vec!["text"]);
-        assert_eq!(plugins[0].extensions, vec!["md"]);
+        assert_eq!(plugins[0].mime_types, vec!["text/markdown"]);
     }
 
     #[test]
@@ -1363,6 +1437,7 @@ mod tests {
             plugin_dir: script_path.parent().expect("plugin dir").to_path_buf(),
             script_path,
             modes: vec!["text".into()],
+            mime_types: vec!["text/csv".into()],
             extensions: vec!["csv".into()],
         };
 
@@ -1420,6 +1495,7 @@ mod tests {
             plugin_dir: script_path.parent().expect("plugin dir").to_path_buf(),
             script_path,
             modes: vec!["text".into()],
+            mime_types: vec!["text/html".into(), "application/xhtml+xml".into()],
             extensions: vec!["html".into(), "htm".into(), "xhtml".into()],
         };
 
@@ -1462,6 +1538,7 @@ mod tests {
             plugin_dir: script_path.parent().expect("plugin dir").to_path_buf(),
             script_path,
             modes: vec!["text".into()],
+            mime_types: vec!["message/rfc822".into(), "application/mbox".into()],
             extensions: vec!["eml".into(), "mbox".into()],
         };
 
@@ -1499,6 +1576,7 @@ mod tests {
             plugin_dir: script_path.parent().expect("plugin dir").to_path_buf(),
             script_path,
             modes: vec!["text".into()],
+            mime_types: vec!["text/markdown".into()],
             extensions: vec!["md".into()],
         };
 
@@ -1542,6 +1620,7 @@ mod tests {
             plugin_dir: script_path.parent().expect("plugin dir").to_path_buf(),
             script_path,
             modes: vec!["text".into()],
+            mime_types: vec!["application/json".into()],
             extensions: vec!["json".into(), "geojson".into()],
         };
 
@@ -1589,6 +1668,14 @@ mod tests {
             plugin_dir: script_path.parent().expect("plugin dir").to_path_buf(),
             script_path,
             modes: vec!["text".into()],
+            mime_types: vec![
+                "application/xml".into(),
+                "text/xml".into(),
+                "application/rss+xml".into(),
+                "application/atom+xml".into(),
+                "application/x-plist".into(),
+                "image/svg+xml".into(),
+            ],
             extensions: vec![
                 "xml".into(),
                 "xsd".into(),
@@ -1712,6 +1799,7 @@ mod tests {
             plugin_dir: script_path.parent().expect("plugin dir").to_path_buf(),
             script_path,
             modes: vec!["text".into()],
+            mime_types: vec!["application/x-c64-d64".into()],
             extensions: Vec::new(),
         };
 
@@ -1748,6 +1836,7 @@ mod tests {
             script_path,
             plugin_dir,
             modes: vec!["text".into()],
+            mime_types: Vec::new(),
             extensions: Vec::new(),
         };
         let lines = vec!["fn main() { let answer = 42; }".to_string()];

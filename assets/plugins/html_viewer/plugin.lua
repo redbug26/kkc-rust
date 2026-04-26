@@ -400,6 +400,6 @@ kkc.register_viewer_plugin({
     version = "1.0.0",
     description = "Rendered HTML text viewer",
     modes = { "text" },
-    extensions = { "html", "htm", "xhtml" },
+    mime_types = { "text/html", "application/xhtml+xml" },
     render = render_html,
 })

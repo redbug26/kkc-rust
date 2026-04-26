@@ -124,10 +124,12 @@ function dsk.read(filename)
             dsk.tracks[tracknum][sidenum].sector[cpt_sectors].size = string.byte(dsk.datafile:read(1))
             dsk.tracks[tracknum][sidenum].sector[cpt_sectors].fdc1 = string.byte(dsk.datafile:read(1))
             dsk.tracks[tracknum][sidenum].sector[cpt_sectors].fdc2 = string.byte(dsk.datafile:read(1))
-            dsk.datafile:seek("cur",2)
+            local sizelo = string.byte(dsk.datafile:read(1)) or 0
+            local sizehi = string.byte(dsk.datafile:read(1)) or 0
+            dsk.tracks[tracknum][sidenum].sector[cpt_sectors].actualsize = sizelo + sizehi * 256
 
             if(dsk.verbose==true) then
-                print("Sector num : "..cpt_sectors.." / id : "..string.format("#%02x",dsk.tracks[tracknum][sidenum].sector[cpt_sectors].id).." / size : "..dsk.tracks[tracknum][sidenum].sector[cpt_sectors].size)
+                print("Sector num : "..cpt_sectors.." / id : "..string.format("#%02x",dsk.tracks[tracknum][sidenum].sector[cpt_sectors].id).." / size : "..dsk.tracks[tracknum][sidenum].sector[cpt_sectors].size.." / actual size : "..dsk.tracks[tracknum][sidenum].sector[cpt_sectors].actualsize)
             end
     
         end
@@ -137,7 +139,21 @@ function dsk.read(filename)
          
         for cpt_sectors = 0,dsk.tracks[tracknum][sidenum].sectorsnumber-1,1
         do
-            dsk.tracks[tracknum][sidenum].sector[cpt_sectors].data = dsk.datafile:read(256<<(dsk.tracks[tracknum][sidenum].sector[cpt_sectors].size-1))
+            local sector = dsk.tracks[tracknum][sidenum].sector[cpt_sectors]
+            local bytes_to_read = sector.actualsize or 0
+            if bytes_to_read <= 0 then
+                local sector_size = sector.size or 0
+                if sector_size < 1 or sector_size > 6 then
+                    sj.error("Invalid sector size in DSK track "..tracknum..", side "..sidenum)
+                    return false
+                end
+                bytes_to_read = 256 << (sector_size - 1)
+            end
+            if bytes_to_read > 8192 then
+                sj.error("Invalid sector byte count in DSK track "..tracknum..", side "..sidenum)
+                return false
+            end
+            sector.data = dsk.datafile:read(bytes_to_read) or ""
         end
 
     end
@@ -445,7 +461,16 @@ function dsk.cat()
 
     dsk.catalog={}
 
-    local directory = dsk.getsector(0,0,0x0c1)..dsk.getsector(0,0,0x0c2)..dsk.getsector(0,0,0x0c3)..dsk.getsector(0,0,0x0c4)
+    local dir1 = dsk.getsector(0,0,0x0c1)
+    local dir2 = dsk.getsector(0,0,0x0c2)
+    local dir3 = dsk.getsector(0,0,0x0c3)
+    local dir4 = dsk.getsector(0,0,0x0c4)
+    if dir1 == nil or dir2 == nil or dir3 == nil or dir4 == nil then
+        sj.error("DSK has no readable AMSDOS catalog")
+        return false
+    end
+
+    local directory = dir1..dir2..dir3..dir4
 
     local cptentry=1
 
