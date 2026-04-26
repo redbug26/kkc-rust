@@ -1,17 +1,17 @@
 class Kkc < Formula
   desc "Dual-panel file manager inspired by Norton Commander, written in Rust"
   homepage "https://github.com/redbug26/kkc-rust"
-  version "0.1.17"
+  version "0.1.18"
   license "MIT"
 
   on_macos do
-    url "https://github.com/redbug26/kkc-rust/releases/download/v0.1.17/kkc-macos-arm64.tar.gz"
-    sha256 "1620e7587deca534f4846d27fd27c134991d4a644d1d4a6eae51123bcc7bcfef"
+    url "https://github.com/redbug26/kkc-rust/releases/download/v0.1.18/kkc-macos-arm64.tar.gz"
+    sha256 "85ba71204726b7be7883ce166c2c40e0444c64ac0b3d6fec47533306480b5610"
   end
 
   on_linux do
-    url "https://github.com/redbug26/kkc-rust/releases/download/v0.1.17/kkc-linux-x86_64.tar.gz"
-    sha256 "53efb4c33863697e911b145cee6ccbda770e8db712d0090788707857d9c95f76"
+    url "https://github.com/redbug26/kkc-rust/releases/download/v0.1.18/kkc-linux-x86_64.tar.gz"
+    sha256 "be5348acd6bf749ddf101b8b8e85f85ca651ea8024c0afeb73f3bf1ece0b55b6"
   end
 
   # Build from source with: brew install --HEAD redbug26/kkc-rust/kkc
