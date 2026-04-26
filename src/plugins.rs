@@ -336,7 +336,7 @@ fn install_bundled_plugins(plugins_dir: &Path) -> Result<()> {
     fs::create_dir_all(&json_dir)?;
     write_bundled_file(&json_dir.join("plugin.lua"), BUNDLED_JSON_VIEWER_PLUGIN)?;
 
-     let csv_dir = plugins_dir.join("csv_viewer");
+    let csv_dir = plugins_dir.join("csv_viewer");
     fs::create_dir_all(&csv_dir)?;
     write_bundled_file(&csv_dir.join("plugin.lua"), BUNDLED_CSV_VIEWER_PLUGIN)?;
 

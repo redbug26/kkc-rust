@@ -4,10 +4,10 @@ use std::path::Path;
 pub(super) fn detect_mode(path: &Path, data: &[u8]) -> ViewMode {
     if looks_like_image(path, data) {
         ViewMode::Image
-    } else if contains_ansi_escape(data) {
-        ViewMode::Ansi
     } else if is_likely_binary(data) {
         ViewMode::Hex
+    } else if contains_ansi_escape(data) {
+        ViewMode::Ansi
     } else {
         ViewMode::Text
     }
@@ -31,7 +31,8 @@ fn looks_like_image(path: &Path, data: &[u8]) -> bool {
 }
 
 fn contains_ansi_escape(data: &[u8]) -> bool {
-    data.windows(2).any(|w| w == [0x1b, b'['])
+    let check = &data[..data.len().min(65536)];
+    check.windows(2).any(|w| w == [0x1b, b'['])
 }
 
 fn is_likely_binary(data: &[u8]) -> bool {
@@ -85,33 +86,23 @@ pub(super) fn ansi_lines(
     }
 }
 
-pub(super) fn hex_lines(data: &[u8], encoding: EncodingMode) -> Vec<String> {
-    let mut lines = Vec::new();
-    let width = 16;
-    for (i, chunk) in data.chunks(width).enumerate() {
-        let offset = i * width;
-        let hex = chunk
-            .iter()
-            .map(|b| format!("{:02X}", b))
-            .collect::<Vec<_>>()
-            .join(" ");
-        let ascii: String = chunk
-            .iter()
-            .map(|&b| {
-                if b < 0x20 || b == 0x7f {
-                    '.'
-                } else {
-                    byte_to_display_char(b, encoding)
-                }
-            })
-            .collect();
-        lines.push(format!("{:08X}  {:<47}  {}", offset, hex, ascii));
-    }
-    if lines.is_empty() {
-        vec![String::new()]
-    } else {
-        lines
-    }
+pub(super) fn hex_line(offset: usize, chunk: &[u8], encoding: EncodingMode) -> String {
+    let hex = chunk
+        .iter()
+        .map(|b| format!("{:02X}", b))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let ascii: String = chunk
+        .iter()
+        .map(|&b| {
+            if b < 0x20 || b == 0x7f {
+                '.'
+            } else {
+                byte_to_display_char(b, encoding)
+            }
+        })
+        .collect();
+    format!("{:08X}  {:<47}  {}", offset, hex, ascii)
 }
 
 fn split_line_bytes(input: &[u8], mode: LineFeedMode) -> Vec<Vec<u8>> {

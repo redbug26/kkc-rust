@@ -22,7 +22,6 @@ use ratatui::{
     widgets::{
         Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Scrollbar,
         ScrollbarOrientation, ScrollbarState, Wrap,
-        block::{Position, Title},
     },
 };
 use unicode_width::UnicodeWidthStr;
@@ -3319,13 +3318,12 @@ fn render_help(f: &mut Frame, state: &crate::help::HelpState, area: Rect) {
 fn render_help_with_title(f: &mut Frame, popup: Rect, title: &str, state: &crate::help::HelpState) {
     let block = Block::default()
         .title(format!(" {} ", title))
-        .title(
-            Title::from(Span::styled(
+        .title_bottom(
+            Line::from(Span::styled(
                 format!(" {} ", state.hlp_path),
                 Style::default().fg(Color::DarkGray).bg(CLR_APP_BG),
             ))
-            .position(Position::Bottom)
-            .alignment(Alignment::Right),
+            .right_aligned(),
         )
         .borders(Borders::ALL)
         .border_style(Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG))
@@ -3887,17 +3885,17 @@ fn render_opener(f: &mut Frame, s: &OpenerState, area: Rect) {
 // ---------------------------------------------------------------------------
 
 fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
-    let W: u16 = area.width.saturating_sub(4).min(120).max(76);
-    let H: u16 = area.height.saturating_sub(4).min(26).max(22);
-    let x = area.x + (area.width.saturating_sub(W)) / 2;
-    let y = area.y + (area.height.saturating_sub(H)) / 2;
+    let w: u16 = area.width.saturating_sub(4).min(120).max(76);
+    let h: u16 = area.height.saturating_sub(4).min(26).max(22);
+    let x = area.x + (area.width.saturating_sub(w)) / 2;
+    let y = area.y + (area.height.saturating_sub(h)) / 2;
     let popup = clamp_rect(
         area,
         Rect {
             x,
             y,
-            width: W,
-            height: H,
+            width: w,
+            height: h,
         },
     );
 
@@ -3944,8 +3942,20 @@ fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
     );
 
     // Dynamic column widths based on actual data
-    let col_name = s.plugins.iter().map(|p| p.name.len()).max().unwrap_or(0).max("Name".len());
-    let col_kind = s.plugins.iter().map(|p| p.kind.len()).max().unwrap_or(0).max("Type".len());
+    let col_name = s
+        .plugins
+        .iter()
+        .map(|p| p.name.len())
+        .max()
+        .unwrap_or(0)
+        .max("Name".len());
+    let col_kind = s
+        .plugins
+        .iter()
+        .map(|p| p.kind.len())
+        .max()
+        .unwrap_or(0)
+        .max("Type".len());
     let col_ext = s
         .plugins
         .iter()
@@ -3963,7 +3973,10 @@ fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
 
     let header = format!(
         "  {:<col_name$} {:<col_kind$} {:<col_ext$} {}",
-        "Name", "Type", "Ext", "Description",
+        "Name",
+        "Type",
+        "Ext",
+        "Description",
         col_name = col_name,
         col_kind = col_kind,
         col_ext = col_ext,
@@ -4043,7 +4056,11 @@ fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
             let icon = if selected { "▶" } else { " " };
             let text = format!(
                 " {} {:<col_name$} {:<col_kind$} {:<col_ext$} {}",
-                icon, plugin.name, plugin.kind, exts, plugin.description,
+                icon,
+                plugin.name,
+                plugin.kind,
+                exts,
+                plugin.description,
                 col_name = col_name,
                 col_kind = col_kind,
                 col_ext = col_ext,

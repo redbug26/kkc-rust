@@ -17,7 +17,7 @@ mod viewer_render;
 mod viewer_search;
 
 use self::viewer_decode::{
-    ansi_lines, detect_mode, hex_lines, preproc_op_label, preprocess_bytes, text_lines,
+    ansi_lines, detect_mode, hex_line, preproc_op_label, preprocess_bytes, text_lines,
 };
 use self::viewer_render::{mask_keywords, pad_visible, slice_visible};
 use self::viewer_search::parse_hex_query;
@@ -48,7 +48,6 @@ pub struct Viewer {
     pub mask_enabled: bool,
     pub preproc_ops: Vec<PreprocOp>,
     text_lines: Vec<String>,
-    hex_lines: Vec<String>,
     ansi_lines: Vec<String>,
     image: Option<ImageInfo>,
 }
@@ -148,7 +147,6 @@ impl Viewer {
             mask_enabled: true,
             preproc_ops: Vec::new(),
             text_lines: Vec::new(),
-            hex_lines: Vec::new(),
             ansi_lines: Vec::new(),
             image,
         };
@@ -230,6 +228,7 @@ impl Viewer {
         }
         match self.mode {
             ViewMode::Image => 1,
+            ViewMode::Hex => self.hex_line_count(),
             _ => self.current_plain_lines().len().max(1),
         }
     }
@@ -471,21 +470,7 @@ impl Viewer {
                 self.render_text_like_lines(selected_width, start, height)
             }
             ViewMode::Image => vec![Line::from(Span::raw(String::new()))],
-            ViewMode::Hex => self
-                .current_plain_lines()
-                .iter()
-                .skip(start)
-                .take(height)
-                .map(|line| {
-                    let display = if self.wrap {
-                        line.clone()
-                    } else {
-                        let shifted = slice_visible(line, self.hscroll, selected_width);
-                        pad_visible(&shifted, selected_width)
-                    };
-                    Line::from(Span::raw(display))
-                })
-                .collect(),
+            ViewMode::Hex => self.render_hex_lines(selected_width, start, height),
         }
     }
 
@@ -516,7 +501,7 @@ impl Viewer {
     pub fn current_plain_lines(&self) -> &[String] {
         match self.mode {
             ViewMode::Text => &self.text_lines,
-            ViewMode::Hex => &self.hex_lines,
+            ViewMode::Hex => &[],
             ViewMode::Ansi => &self.ansi_lines,
             ViewMode::Image => &[],
         }
@@ -525,10 +510,45 @@ impl Viewer {
     fn plain_line_at(&self, idx: usize) -> String {
         match self.mode {
             ViewMode::Text => self.text_lines.get(idx).cloned().unwrap_or_default(),
-            ViewMode::Hex => self.hex_lines.get(idx).cloned().unwrap_or_default(),
+            ViewMode::Hex => self.hex_plain_line_at(idx),
             ViewMode::Ansi => self.ansi_lines.get(idx).cloned().unwrap_or_default(),
             ViewMode::Image => String::new(),
         }
+    }
+
+    fn hex_line_count(&self) -> usize {
+        self.raw.len().div_ceil(16).max(1)
+    }
+
+    fn hex_plain_line_at(&self, idx: usize) -> String {
+        let offset = idx.saturating_mul(16);
+        if offset >= self.raw.len() {
+            return String::new();
+        }
+        let end = offset.saturating_add(16).min(self.raw.len());
+        let chunk = preprocess_bytes(&self.raw[offset..end], &self.preproc_ops);
+        hex_line(offset, &chunk, self.encoding)
+    }
+
+    fn render_hex_lines(
+        &self,
+        selected_width: usize,
+        start: usize,
+        height: usize,
+    ) -> Vec<Line<'static>> {
+        let end = start.saturating_add(height).min(self.hex_line_count());
+        (start..end)
+            .map(|idx| {
+                let line = self.hex_plain_line_at(idx);
+                let display = if self.wrap {
+                    line
+                } else {
+                    let shifted = slice_visible(&line, self.hscroll, selected_width);
+                    pad_visible(&shifted, selected_width)
+                };
+                Line::from(Span::raw(display))
+            })
+            .collect()
     }
 
     fn rebuild_matches(&mut self) {
@@ -569,14 +589,13 @@ impl Viewer {
             if needle.is_empty() || needle.len() > self.raw.len() {
                 return Vec::new();
             }
-            let hay = self
-                .raw
-                .iter()
-                .map(|b| b.to_ascii_lowercase())
-                .collect::<Vec<_>>();
             let mut matches = Vec::new();
-            for start in 0..=hay.len() - needle.len() {
-                if hay[start..start + needle.len()] == needle {
+            for start in 0..=self.raw.len() - needle.len() {
+                if self.raw[start..start + needle.len()]
+                    .iter()
+                    .zip(&needle)
+                    .all(|(hay, needle)| hay.to_ascii_lowercase() == *needle)
+                {
                     matches.push(start / 16);
                 }
             }
@@ -730,7 +749,6 @@ impl Viewer {
     fn rebuild_decoded_lines(&mut self) {
         // Clear cached lines — other modes will be rebuilt lazily when accessed.
         self.text_lines = Vec::new();
-        self.hex_lines = Vec::new();
         self.ansi_lines = Vec::new();
         self.image = detect_image_info(&self.path, &self.raw);
         // Immediately rebuild only the currently active mode.
@@ -746,14 +764,7 @@ impl Viewer {
                         text_lines(&self.raw, self.line_feed, &self.preproc_ops, self.encoding);
                 }
             }
-            ViewMode::Hex => {
-                if self.hex_lines.is_empty() {
-                    self.hex_lines = hex_lines(
-                        &preprocess_bytes(&self.raw, &self.preproc_ops),
-                        self.encoding,
-                    );
-                }
-            }
+            ViewMode::Hex => {}
             ViewMode::Ansi => {
                 if self.ansi_lines.is_empty() {
                     self.ansi_lines =
