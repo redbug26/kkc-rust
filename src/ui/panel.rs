@@ -409,7 +409,7 @@ fn colorize_idf_line(line: &str) -> Line<'static> {
         ));
     }
     // "Key: value" lines
-    let known_labels = ["Title", "Type", "Mime", "Composer", "Date", "Size", "Attr"];
+    let known_labels = ["Title", "Type", "Mime", "Composer", "Date", "Size", "Attr", "Viewers"];
     for label in &known_labels {
         let prefix = format!("{}:", label);
         if line.starts_with(prefix.as_str()) {
@@ -423,6 +423,7 @@ fn colorize_idf_line(line: &str) -> Line<'static> {
                 "Type" => CLR_PANEL_TITLE,
                 "Mime" => CLR_DATA,
                 "Attr" => CLR_EXEC,
+                "Viewers" => CLR_AUDIO,
                 _ => CLR_TEXT,
             };
             return Line::from(vec![
@@ -476,15 +477,26 @@ fn hex_dump_line(chunk: &[u8], bytes_per_row: usize) -> Line<'static> {
 }
 
 fn render_file_id_panel(f: &mut Frame, app: &App, area: Rect) {
+    let focused = app.file_id_active;
+    let (border_style, title_style, title_text) = if focused {
+        (
+            Style::default().fg(CLR_HEADER_FG).bg(CLR_APP_BG),
+            Style::default().fg(CLR_HEADER_FG).bg(CLR_APP_BG).add_modifier(Modifier::BOLD),
+            " FileID ↑↓  Tab=exit ",
+        )
+    } else {
+        (
+            Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG),
+            Style::default().fg(CLR_PANEL_TITLE).bg(CLR_APP_BG),
+            " FileID ",
+        )
+    };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Thick)
-        .border_style(Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG))
+        .border_style(border_style)
         .style(Style::default().bg(CLR_PANEL_BG))
-        .title(Span::styled(
-            " FileID ",
-            Style::default().fg(CLR_PANEL_TITLE).bg(CLR_APP_BG),
-        ));
+        .title(Span::styled(title_text, title_style));
     let inner = block.inner(area);
     f.render_widget(block, area);
 
@@ -530,7 +542,7 @@ fn render_file_id_panel(f: &mut Frame, app: &App, area: Rect) {
     // Layout: N*2 hex + (N-1) spaces + 2 separator + N ascii = 4N+1 chars per row
     let cw = content_area.width as usize;
     let bytes_per_row: usize = ((cw.saturating_sub(1)) / 4).clamp(4, 32);
-    let max_bytes = bytes_per_row * 8;
+    let max_bytes = bytes_per_row * 64;
     let hex_data: Option<Vec<u8>> = app
         .active_panel()
         .current_entry()
@@ -558,7 +570,7 @@ fn render_file_id_panel(f: &mut Frame, app: &App, area: Rect) {
 
     f.render_widget(
         Paragraph::new(lines)
-            .scroll((0, 0))
+            .scroll((app.file_id_scroll, 0))
             .style(Style::default().bg(CLR_PANEL_BG)),
         content_area,
     );

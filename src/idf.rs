@@ -243,8 +243,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             "application/x-lzh-compressed",
             path,
             IdfKind::Archive,
-            None,
-            // lha_first_name(&data),
+            lha_first_name(&data),
             None,
             lha_lines(&data),
         ))

@@ -76,6 +76,32 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
     let shift = key.modifiers.contains(KeyModifiers::SHIFT);
     let alt = key.modifiers.contains(KeyModifiers::ALT);
 
+    // FileID panel focus mode: all navigation keys scroll the IDF card
+    if app.file_id_active {
+        match key.code {
+            KeyCode::Tab | KeyCode::Esc => {
+                app.file_id_active = false;
+            }
+            KeyCode::Up => {
+                app.file_id_scroll_up();
+            }
+            KeyCode::Down => {
+                app.file_id_scroll_down();
+            }
+            KeyCode::PageUp => {
+                app.file_id_scroll_page_up(10);
+            }
+            KeyCode::PageDown => {
+                app.file_id_scroll_page_down(10);
+            }
+            KeyCode::Home => {
+                app.file_id_home();
+            }
+            _ => {}
+        }
+        return Ok(false);
+    }
+
     // Printable char (no modifiers) → start quick-search
     if !ctrl && !alt && !shift {
         if let KeyCode::Char(ch) = key.code {
@@ -201,7 +227,12 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
             app.active_panel_mut().move_end();
         }
         KeyCode::Tab => {
-            app.switch_panel();
+            if app.file_id_preview {
+                app.file_id_active = true;
+                app.file_id_scroll = 0;
+            } else {
+                app.switch_panel();
+            }
         }
         KeyCode::Enter => {
             handle_enter(app)?;

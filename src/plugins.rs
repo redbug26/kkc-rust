@@ -233,6 +233,23 @@ pub fn default_viewer_plugin_for_path(path: &Path) -> Option<String> {
     })
 }
 
+pub fn viewer_plugins_for_path(path: &Path) -> Vec<String> {
+    PLUGINS
+        .get()
+        .and_then(|registry| {
+            let reg = registry.read().ok()?;
+            let mime_type = path_mime_type(path);
+            let names = reg
+                .viewer_plugins
+                .iter()
+                .filter(|p| p.supports_path(path, mime_type.as_deref()))
+                .map(|p| p.name.clone())
+                .collect::<Vec<_>>();
+            Some(names)
+        })
+        .unwrap_or_default()
+}
+
 pub fn is_plugin_bundle(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())

@@ -673,6 +673,8 @@ pub struct App {
     right_tabs: PanelTabs,
     pub active: ActivePanel,
     pub file_id_preview: bool,
+    pub file_id_active: bool,
+    pub file_id_scroll: u16,
     pub mode: AppMode,
     pub status: StatusMessage,
     pub dir_history: VecDeque<PathBuf>,
@@ -731,6 +733,8 @@ impl App {
             right_tabs,
             active: ActivePanel::Left,
             file_id_preview: false,
+            file_id_active: false,
+            file_id_scroll: 0,
             mode: if let Some(msg) = plugin_status {
                 AppMode::Confirm(ConfirmDialog {
                     title: String::new(),
@@ -1719,6 +1723,28 @@ impl App {
 
     pub fn open_file_id_view(&mut self) {
         self.file_id_preview = !self.file_id_preview;
+        self.file_id_active = false;
+        self.file_id_scroll = 0;
+    }
+
+    pub fn file_id_scroll_up(&mut self) {
+        self.file_id_scroll = self.file_id_scroll.saturating_sub(1);
+    }
+
+    pub fn file_id_scroll_down(&mut self) {
+        self.file_id_scroll = self.file_id_scroll.saturating_add(1);
+    }
+
+    pub fn file_id_scroll_page_up(&mut self, page: u16) {
+        self.file_id_scroll = self.file_id_scroll.saturating_sub(page);
+    }
+
+    pub fn file_id_scroll_page_down(&mut self, page: u16) {
+        self.file_id_scroll = self.file_id_scroll.saturating_add(page);
+    }
+
+    pub fn file_id_home(&mut self) {
+        self.file_id_scroll = 0;
     }
 
     pub fn build_file_id_preview(&self) -> String {
@@ -1738,7 +1764,13 @@ impl App {
             return "No FILE_ID.DIZ.".into();
         }
 
-        render_idf_card(&entry.path).unwrap_or_else(|| "No FILE_ID.DIZ.".into())
+        let mut card = render_idf_card(&entry.path).unwrap_or_else(|| "No FILE_ID.DIZ.".into());
+        // Append available viewer plugins
+        let viewers = crate::plugins::viewer_plugins_for_path(&entry.path);
+        if !viewers.is_empty() {
+            card.push_str(&format!("Viewers: {}\n", viewers.join(", ")));
+        }
+        card
     }
 
     pub fn run_with_busy<T, F>(&mut self, message: &str, op: F) -> Result<T>
