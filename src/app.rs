@@ -105,6 +105,8 @@ pub enum AppMode {
     RemoteConnect(RemoteConnectState),
     /// Add a new remote connection.
     RemoteEdit(RemoteEditState),
+    /// Protocol picker dropdown for adding a new remote connection.
+    RemoteAddMenu(usize),
     /// Connecting to a remote backend in the background.
     RemoteConnecting(RemoteConnectingState),
     /// Copy dialog and options.
@@ -289,6 +291,7 @@ impl RemoteConnectState {
             let protocol = match item.kind {
                 RemoteKind::Sftp(_) => "sftp",
                 RemoteKind::Imap(_) => "imap",
+                RemoteKind::Smb(_) => "smb",
             };
             let source = match item.source {
                 RemoteSource::SshConfig => "ssh",
@@ -391,6 +394,7 @@ enum RemoteConnectMessage {
 pub enum RemoteEditKind {
     Sftp,
     Imap,
+    Smb,
 }
 
 #[derive(Debug, Clone)]
@@ -424,6 +428,7 @@ impl RemoteEditState {
                 String::new(),
             ],
             RemoteEditKind::Imap => Default::default(),
+            RemoteEditKind::Smb => Default::default(),
         };
         let input_cursor = fields[Self::NAME].len();
         Self {
@@ -457,6 +462,17 @@ impl RemoteEditState {
                     imap.port.map(|p| p.to_string()).unwrap_or_default(),
                     imap.path.clone().unwrap_or_default(),
                     imap.password.clone().unwrap_or_default(),
+                ],
+            ),
+            RemoteKind::Smb(smb) => (
+                RemoteEditKind::Smb,
+                [
+                    profile.name.clone(),
+                    smb.host.clone(),
+                    smb.user.clone().unwrap_or_default(),
+                    smb.workgroup.clone().unwrap_or_default(),
+                    smb.share.clone().unwrap_or_default(),
+                    smb.password.clone().unwrap_or_default(),
                 ],
             ),
         };
@@ -518,6 +534,24 @@ impl RemoteEditState {
                         port,
                         path: trim_opt(&self.fields[Self::PATH]),
                         password: trim_opt(&self.fields[Self::SECRET]),
+                    }),
+                }
+            }
+            RemoteEditKind::Smb => {
+                let host = self.fields[Self::HOST].trim();
+                if host.is_empty() {
+                    return None;
+                }
+                RemoteProfile {
+                    name: name.to_string(),
+                    source: RemoteSource::UserToml,
+                    kind: RemoteKind::Smb(crate::remote::SmbProfile {
+                        host: host.to_string(),
+                        user: trim_opt(&self.fields[Self::USER]),
+                        workgroup: trim_opt(&self.fields[Self::PORT]),
+                        share: trim_opt(&self.fields[Self::PATH]),
+                        password: trim_opt(&self.fields[Self::SECRET]),
+                        path: None,
                     }),
                 }
             }
@@ -1076,12 +1110,20 @@ impl App {
         self.mode = AppMode::RemoteConnect(RemoteConnectState::load());
     }
 
+    pub fn open_remote_add_menu(&mut self) {
+        self.mode = AppMode::RemoteAddMenu(0);
+    }
+
     pub fn open_remote_add(&mut self) {
         self.mode = AppMode::RemoteEdit(RemoteEditState::new(RemoteEditKind::Sftp));
     }
 
     pub fn open_remote_add_imap(&mut self) {
         self.mode = AppMode::RemoteEdit(RemoteEditState::new(RemoteEditKind::Imap));
+    }
+
+    pub fn open_remote_add_smb(&mut self) {
+        self.mode = AppMode::RemoteEdit(RemoteEditState::new(RemoteEditKind::Smb));
     }
 
     pub fn open_remote_edit(&mut self) {
@@ -1198,6 +1240,7 @@ impl App {
         let protocol_label = match profile.kind {
             RemoteKind::Sftp(_) => "SFTP",
             RemoteKind::Imap(_) => "IMAP",
+            RemoteKind::Smb(_) => "SMB",
         };
         self.remote_connect_task = Some(spawn_remote_connect_task(
             profile.clone(),
@@ -1217,6 +1260,7 @@ impl App {
         let protocol_label = match profile.kind {
             RemoteKind::Sftp(_) => "SFTP",
             RemoteKind::Imap(_) => "IMAP",
+            RemoteKind::Smb(_) => "SMB",
         };
         self.remote_connect_task = Some(spawn_remote_connect_task(
             profile.clone(),

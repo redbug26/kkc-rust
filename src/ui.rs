@@ -227,6 +227,7 @@ pub fn render(f: &mut Frame, app: &App) {
         AppMode::AssocEditor(s) => render_assoc_editor(f, s, f.area()),
         AppMode::RemoteConnect(s) => render_remote_connect(f, s, f.area()),
         AppMode::RemoteEdit(s) => render_remote_edit(f, s, f.area()),
+        AppMode::RemoteAddMenu(cursor) => render_remote_add_menu(f, *cursor, f.area()),
         AppMode::RemoteConnecting(s) => render_remote_connecting(f, s, f.area()),
         AppMode::Menu(ms) => render_menu(f, ms, f.area()),
         AppMode::QuickSearch => {
@@ -2059,6 +2060,12 @@ fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, area: Rect) 
                             .fg(Color::Rgb(181, 238, 170))
                             .bg(CLR_MENU_DD_BG),
                     ),
+                    RemoteProtocol::Smb => (
+                        "smb",
+                        Style::default()
+                            .fg(Color::Rgb(255, 165, 80))
+                            .bg(CLR_MENU_DD_BG),
+                    ),
                 };
                 let (source, badge_style) = match item.source {
                     RemoteSource::SshConfig => (
@@ -2148,9 +2155,74 @@ fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, area: Rect) 
     safe_render_widget(f, List::new(items), list_area);
     safe_render_widget(
         f,
-        Paragraph::new(" Type:Filter  Enter:Connect  Tab:SSH  F6:Edit  F7:SFTP  F8:IMAP  Esc:Cancel ")
+        Paragraph::new(" Type:Filter  Enter:Connect  Tab:SSH  F6:Edit  F7:Add  Esc:Cancel ")
             .style(Style::default().fg(CLR_BUTTON_FG).bg(CLR_STATUS_BG)),
         hint_area,
+    );
+}
+
+fn render_remote_add_menu(f: &mut Frame, cursor: usize, area: Rect) {
+    const LABELS: [&str; 3] = ["SFTP", "IMAP", "SMB"];
+    const STYLES: [(u8, u8, u8); 3] = [(121, 214, 255), (181, 238, 170), (255, 165, 80)];
+    let width: u16 = 22;
+    let height: u16 = 7; // border + title + 3 items + separator + hint
+    let popup = clamp_rect(
+        area,
+        Rect {
+            x: area.x + area.width.saturating_sub(width) / 2,
+            y: area.y + area.height.saturating_sub(height) / 2,
+            width,
+            height,
+        },
+    );
+    safe_render_widget(f, Clear, popup);
+    let block = Block::default()
+        .title(Span::styled(
+            " Add Connection ",
+            Style::default()
+                .fg(CLR_MENU_BAR_FG)
+                .bg(CLR_MENU_DD_BG)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(CLR_MENU_BORDER).bg(CLR_MENU_DD_BG))
+        .style(Style::default().bg(CLR_MENU_DD_BG));
+    let inner = block.inner(popup);
+    safe_render_widget(f, block, popup);
+
+    for (i, (label, (r, g, b))) in LABELS.iter().zip(STYLES.iter()).enumerate() {
+        let row = Rect { x: inner.x, y: inner.y + i as u16, width: inner.width, height: 1 };
+        let selected = i == cursor;
+        let text = if selected {
+            format!(" ► {:<16}", label)
+        } else {
+            format!("   {:<16}", label)
+        };
+        let style = if selected {
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Rgb(*r, *g, *b))
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+                .fg(Color::Rgb(*r, *g, *b))
+                .bg(CLR_MENU_DD_BG)
+        };
+        safe_render_widget(f, Paragraph::new(text).style(style), row);
+    }
+
+    // hint row
+    let hint_row = Rect {
+        x: inner.x,
+        y: inner.y + LABELS.len() as u16,
+        width: inner.width,
+        height: 1,
+    };
+    safe_render_widget(
+        f,
+        Paragraph::new(" ↑↓:Select  Enter:OK  Esc ")
+            .style(Style::default().fg(CLR_BUTTON_FG).bg(CLR_STATUS_BG)),
+        hint_row,
     );
 }
 
@@ -2172,6 +2244,7 @@ fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: Rect) {
             match state.kind {
                 RemoteEditKind::Sftp => " Add SFTP Server ",
                 RemoteEditKind::Imap => " Add IMAP Server ",
+                RemoteEditKind::Smb => " Add SMB Server ",
             },
             Style::default()
                 .fg(CLR_MENU_BAR_FG)
@@ -2186,6 +2259,7 @@ fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: Rect) {
     let labels = match state.kind {
         RemoteEditKind::Sftp => ["Name", "Host", "User", "Port", "Path", "Identity"],
         RemoteEditKind::Imap => ["Name", "Host", "User", "Port", "Mailbox", "Password"],
+        RemoteEditKind::Smb => ["Name", "Host", "User", "Workgroup", "Share", "Password"],
     };
     let value_w = (inner.width as usize).saturating_sub(9);
     let mut lines = Vec::new();

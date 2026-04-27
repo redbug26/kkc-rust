@@ -52,6 +52,7 @@ pub fn handle_event(app: &mut App, event: Event) -> Result<bool> {
         AppMode::AssocEditor(_) => return handle_assoc_editor(app, key),
         AppMode::RemoteConnect(_) => return handle_remote_connect(app, key),
         AppMode::RemoteEdit(_) => return handle_remote_edit(app, key),
+        AppMode::RemoteAddMenu(_) => return handle_remote_add_menu(app, key),
         AppMode::RemoteConnecting(_) => return handle_remote_connecting(app, key),
         AppMode::Terminal => return crate::terminal::handle_terminal(app, key),
         AppMode::Browse => {}
@@ -1645,10 +1646,7 @@ fn handle_remote_connect(app: &mut App, key: KeyEvent) -> Result<bool> {
             app.open_remote_edit();
         }
         KeyCode::F(7) => {
-            app.open_remote_add();
-        }
-        KeyCode::F(8) => {
-            app.open_remote_add_imap();
+            app.open_remote_add_menu();
         }
         KeyCode::Enter => {
             let profile = if let AppMode::RemoteConnect(ref s) = app.mode {
@@ -1697,6 +1695,7 @@ fn launch_ssh_for_profile(app: &mut App) -> Result<()> {
     let sftp = match &profile.kind {
         RemoteKind::Sftp(sftp) => sftp.clone(),
         RemoteKind::Imap(_) => return Ok(()),
+        RemoteKind::Smb(_) => return Ok(()),
     };
     let mut args: Vec<String> = vec!["ssh".to_string()];
     match profile.source {
@@ -1728,6 +1727,40 @@ fn launch_ssh_for_profile(app: &mut App) -> Result<()> {
     execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
     app.needs_clear = true;
     Ok(())
+}
+
+fn handle_remote_add_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
+    const CHOICES: usize = 3; // SFTP, IMAP, SMB
+    match key.code {
+        KeyCode::Esc => {
+            app.mode = AppMode::RemoteConnect(crate::app::RemoteConnectState::load());
+        }
+        KeyCode::Up => {
+            if let AppMode::RemoteAddMenu(ref mut c) = app.mode {
+                if *c > 0 {
+                    *c -= 1;
+                }
+            }
+        }
+        KeyCode::Down => {
+            if let AppMode::RemoteAddMenu(ref mut c) = app.mode {
+                if *c + 1 < CHOICES {
+                    *c += 1;
+                }
+            }
+        }
+        KeyCode::Enter => {
+            if let AppMode::RemoteAddMenu(cursor) = app.mode {
+                match cursor {
+                    0 => app.open_remote_add(),
+                    1 => app.open_remote_add_imap(),
+                    _ => app.open_remote_add_smb(),
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(false)
 }
 
 fn handle_remote_connecting(app: &mut App, key: KeyEvent) -> Result<bool> {
@@ -1811,6 +1844,7 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
                     app.status.text = match s.kind {
                         RemoteEditKind::Sftp => "SFTP name is required".into(),
                         RemoteEditKind::Imap => "IMAP name, host and user are required".into(),
+                        RemoteEditKind::Smb => "SMB name and host are required".into(),
                     };
                 }
             } else {

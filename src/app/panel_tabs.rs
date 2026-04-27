@@ -150,6 +150,7 @@ fn restore_remote_panel(
         match &mut profile.kind {
             RemoteKind::Sftp(sftp) => sftp.path = Some(remote_path),
             RemoteKind::Imap(imap) => imap.path = Some(remote_path),
+            RemoteKind::Smb(smb) => smb.path = Some(remote_path),
         }
     }
     let _ = panel.enter_remote(profile);
