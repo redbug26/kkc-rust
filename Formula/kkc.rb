@@ -18,11 +18,14 @@ class Kkc < Formula
   head do
     url "https://github.com/redbug26/kkc-rust.git", branch: "main"
     depends_on "rust" => :build
+    depends_on "samba" => :build
   end
 
   def install
     if build.head?
-      system "cargo", "install", *std_cargo_args
+      system "cargo", "install", *std_cargo_args,
+             "--features", "smb",
+             "--env", "PKG_CONFIG_PATH=#{Formula["samba"].opt_lib}/pkgconfig"
     else
       bin.install "kkc"
     end

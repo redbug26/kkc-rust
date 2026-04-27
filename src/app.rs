@@ -288,11 +288,7 @@ impl RemoteConnectState {
         let mut contains = Vec::new();
 
         for (idx, item) in self.items.iter().enumerate() {
-            let protocol = match item.kind {
-                RemoteKind::Sftp(_) => "sftp",
-                RemoteKind::Imap(_) => "imap",
-                RemoteKind::Smb(_) => "smb",
-            };
+            let protocol = item.protocol().name();
             let source = match item.source {
                 RemoteSource::SshConfig => "ssh",
                 RemoteSource::UserToml => "toml",
@@ -397,6 +393,54 @@ pub enum RemoteEditKind {
     Smb,
 }
 
+impl RemoteEditKind {
+    /// All protocol choices in menu order.
+    pub fn all() -> &'static [Self] {
+        &[Self::Sftp, Self::Imap, Self::Smb]
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Sftp => "SFTP",
+            Self::Imap => "IMAP",
+            Self::Smb => "SMB",
+        }
+    }
+
+    /// UI accent colour (R, G, B).
+    pub fn color_rgb(self) -> (u8, u8, u8) {
+        match self {
+            Self::Sftp => (121, 214, 255),
+            Self::Imap => (181, 238, 170),
+            Self::Smb => (255, 165, 80),
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Sftp => " Add SFTP Server ",
+            Self::Imap => " Add IMAP Server ",
+            Self::Smb => " Add SMB Server ",
+        }
+    }
+
+    pub fn field_labels(self) -> [&'static str; 6] {
+        match self {
+            Self::Sftp => ["Name", "Host", "User", "Port", "Path", "Identity"],
+            Self::Imap => ["Name", "Host", "User", "Port", "Mailbox", "Password"],
+            Self::Smb => ["Name", "Host", "User", "Workgroup", "Share", "Password"],
+        }
+    }
+
+    pub fn validation_message(self) -> &'static str {
+        match self {
+            Self::Sftp => "SFTP name is required",
+            Self::Imap => "IMAP name, host and user are required",
+            Self::Smb => "SMB name and host are required",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RemoteEditState {
     pub kind: RemoteEditKind,
@@ -427,8 +471,7 @@ impl RemoteEditState {
                 "~".into(),
                 String::new(),
             ],
-            RemoteEditKind::Imap => Default::default(),
-            RemoteEditKind::Smb => Default::default(),
+            _ => Default::default(),
         };
         let input_cursor = fields[Self::NAME].len();
         Self {
@@ -1114,18 +1157,6 @@ impl App {
         self.mode = AppMode::RemoteAddMenu(0);
     }
 
-    pub fn open_remote_add(&mut self) {
-        self.mode = AppMode::RemoteEdit(RemoteEditState::new(RemoteEditKind::Sftp));
-    }
-
-    pub fn open_remote_add_imap(&mut self) {
-        self.mode = AppMode::RemoteEdit(RemoteEditState::new(RemoteEditKind::Imap));
-    }
-
-    pub fn open_remote_add_smb(&mut self) {
-        self.mode = AppMode::RemoteEdit(RemoteEditState::new(RemoteEditKind::Smb));
-    }
-
     pub fn open_remote_edit(&mut self) {
         self.open_remote_edit_profile();
     }
@@ -1237,11 +1268,7 @@ impl App {
         self.pending_remote_cwd = None;
         self.file_id_preview = false;
         self.remote_connect_return = Some(return_state);
-        let protocol_label = match profile.kind {
-            RemoteKind::Sftp(_) => "SFTP",
-            RemoteKind::Imap(_) => "IMAP",
-            RemoteKind::Smb(_) => "SMB",
-        };
+        let protocol_label = profile.protocol().label();
         self.remote_connect_task = Some(spawn_remote_connect_task(
             profile.clone(),
             self.active_panel().show_hidden,
@@ -1257,11 +1284,7 @@ impl App {
         self.pending_remote_cwd = Some(target_cwd);
         self.file_id_preview = false;
         self.remote_connect_return = None;
-        let protocol_label = match profile.kind {
-            RemoteKind::Sftp(_) => "SFTP",
-            RemoteKind::Imap(_) => "IMAP",
-            RemoteKind::Smb(_) => "SMB",
-        };
+        let protocol_label = profile.protocol().label();
         self.remote_connect_task = Some(spawn_remote_connect_task(
             profile.clone(),
             self.active_panel().show_hidden,

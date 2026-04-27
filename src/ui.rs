@@ -16,7 +16,7 @@ use crate::file_types::FileCategory;
 use crate::help::HelpView;
 use crate::idf::{IdfKind, probe_path};
 use crate::panel::Entry;
-use crate::remote::{RemoteProtocol, RemoteSource};
+use crate::remote::RemoteSource;
 use crate::viewer::{ViewMode, Viewer};
 use chrono::{DateTime, Local};
 use ratatui::{
@@ -2047,26 +2047,12 @@ fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, area: Rect) 
             .take(rows)
             .map(|(match_idx, item_idx)| {
                 let item = &state.items[*item_idx];
-                let (proto, proto_style) = match item.protocol() {
-                    RemoteProtocol::Sftp => (
-                        "sftp",
-                        Style::default()
-                            .fg(Color::Rgb(121, 214, 255))
-                            .bg(CLR_MENU_DD_BG),
-                    ),
-                    RemoteProtocol::Imap => (
-                        "imap",
-                        Style::default()
-                            .fg(Color::Rgb(181, 238, 170))
-                            .bg(CLR_MENU_DD_BG),
-                    ),
-                    RemoteProtocol::Smb => (
-                        "smb",
-                        Style::default()
-                            .fg(Color::Rgb(255, 165, 80))
-                            .bg(CLR_MENU_DD_BG),
-                    ),
-                };
+                let protocol = item.protocol();
+                let (r, g, b) = protocol.color_rgb();
+                let proto = protocol.name();
+                let proto_style = Style::default()
+                    .fg(Color::Rgb(r, g, b))
+                    .bg(CLR_MENU_DD_BG);
                 let (source, badge_style) = match item.source {
                     RemoteSource::SshConfig => (
                         "ssh",
@@ -2162,10 +2148,9 @@ fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, area: Rect) 
 }
 
 fn render_remote_add_menu(f: &mut Frame, cursor: usize, area: Rect) {
-    const LABELS: [&str; 3] = ["SFTP", "IMAP", "SMB"];
-    const STYLES: [(u8, u8, u8); 3] = [(121, 214, 255), (181, 238, 170), (255, 165, 80)];
+    let choices = RemoteEditKind::all();
     let width: u16 = 22;
-    let height: u16 = 7; // border + title + 3 items + separator + hint
+    let height: u16 = (choices.len() as u16) + 4; // border(2) + title row + items + hint
     let popup = clamp_rect(
         area,
         Rect {
@@ -2190,7 +2175,9 @@ fn render_remote_add_menu(f: &mut Frame, cursor: usize, area: Rect) {
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
 
-    for (i, (label, (r, g, b))) in LABELS.iter().zip(STYLES.iter()).enumerate() {
+    for (i, kind) in choices.iter().enumerate() {
+        let (r, g, b) = kind.color_rgb();
+        let label = kind.name();
         let row = Rect { x: inner.x, y: inner.y + i as u16, width: inner.width, height: 1 };
         let selected = i == cursor;
         let text = if selected {
@@ -2201,11 +2188,11 @@ fn render_remote_add_menu(f: &mut Frame, cursor: usize, area: Rect) {
         let style = if selected {
             Style::default()
                 .fg(Color::Black)
-                .bg(Color::Rgb(*r, *g, *b))
+                .bg(Color::Rgb(r, g, b))
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default()
-                .fg(Color::Rgb(*r, *g, *b))
+                .fg(Color::Rgb(r, g, b))
                 .bg(CLR_MENU_DD_BG)
         };
         safe_render_widget(f, Paragraph::new(text).style(style), row);
@@ -2214,7 +2201,7 @@ fn render_remote_add_menu(f: &mut Frame, cursor: usize, area: Rect) {
     // hint row
     let hint_row = Rect {
         x: inner.x,
-        y: inner.y + LABELS.len() as u16,
+        y: inner.y + choices.len() as u16,
         width: inner.width,
         height: 1,
     };
@@ -2241,11 +2228,7 @@ fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: Rect) {
     safe_render_widget(f, Clear, popup);
     let block = Block::default()
         .title(Span::styled(
-            match state.kind {
-                RemoteEditKind::Sftp => " Add SFTP Server ",
-                RemoteEditKind::Imap => " Add IMAP Server ",
-                RemoteEditKind::Smb => " Add SMB Server ",
-            },
+            state.kind.title(),
             Style::default()
                 .fg(CLR_MENU_BAR_FG)
                 .bg(CLR_MENU_DD_BG)
@@ -2256,11 +2239,7 @@ fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: Rect) {
         .style(Style::default().bg(CLR_MENU_DD_BG));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
-    let labels = match state.kind {
-        RemoteEditKind::Sftp => ["Name", "Host", "User", "Port", "Path", "Identity"],
-        RemoteEditKind::Imap => ["Name", "Host", "User", "Port", "Mailbox", "Password"],
-        RemoteEditKind::Smb => ["Name", "Host", "User", "Workgroup", "Share", "Password"],
-    };
+    let labels = state.kind.field_labels();
     let value_w = (inner.width as usize).saturating_sub(9);
     let mut lines = Vec::new();
     for (idx, label) in labels.iter().enumerate() {

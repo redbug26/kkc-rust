@@ -26,7 +26,10 @@ base64 = "0.13"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp"] }
 mlua = { version = "0.10", features = ["lua54", "vendored", "error-send"] }
 zip = { version = "8.5.1", default-features = false, features = ["deflate"] }
-pavao = "0.2"
+pavao = { version = "0.2", optional = true }
+
+[features]
+smb = ["dep:pavao"]
 
 [profile.release]
 opt-level = 3

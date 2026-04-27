@@ -5,8 +5,10 @@ use imap::{Client, Session};
 use native_tls::{TlsConnector, TlsStream};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::io::{Read, Write};
-use pavao::{SmbClient, SmbCredentials, SmbDirentType, SmbMode, SmbOpenOptions, SmbOptions};
+use std::io::Write;
+#[cfg_attr(feature = "smb", path = "remote_smb.rs")]
+#[cfg_attr(not(feature = "smb"), path = "remote_smb_stub.rs")]
+mod smb_impl;
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -69,6 +71,35 @@ pub struct ImapProfile {
     pub password: Option<String>,
 }
 
+impl RemoteProtocol {
+    /// Lowercase short name ("sftp", "imap", "smb").
+    pub fn name(self) -> &'static str {
+        match self {
+            RemoteProtocol::Sftp => "sftp",
+            RemoteProtocol::Imap => "imap",
+            RemoteProtocol::Smb => "smb",
+        }
+    }
+
+    /// Display label ("SFTP", "IMAP", "SMB").
+    pub fn label(self) -> &'static str {
+        match self {
+            RemoteProtocol::Sftp => "SFTP",
+            RemoteProtocol::Imap => "IMAP",
+            RemoteProtocol::Smb => "SMB",
+        }
+    }
+
+    /// UI accent colour (R, G, B).
+    pub fn color_rgb(self) -> (u8, u8, u8) {
+        match self {
+            RemoteProtocol::Sftp => (121, 214, 255),
+            RemoteProtocol::Imap => (181, 238, 170),
+            RemoteProtocol::Smb => (255, 165, 80),
+        }
+    }
+}
+
 impl RemoteProfile {
     pub fn protocol(&self) -> RemoteProtocol {
         match self.kind {
@@ -111,7 +142,7 @@ struct ConnectionStore {
     #[serde(default)]
     imap: Vec<ImapProfileToml>,
     #[serde(default)]
-    smb: Vec<SmbProfileToml>,
+    smb: Vec<smb_impl::SmbProfileToml>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,22 +171,6 @@ struct ImapProfileToml {
     path: Option<String>,
     #[serde(default)]
     password: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct SmbProfileToml {
-    name: String,
-    host: String,
-    #[serde(default)]
-    user: Option<String>,
-    #[serde(default)]
-    password: Option<String>,
-    #[serde(default)]
-    workgroup: Option<String>,
-    #[serde(default)]
-    share: Option<String>,
-    #[serde(default)]
-    path: Option<String>,
 }
 
 type ImapSession = Session<TlsStream<TcpStream>>;
@@ -226,7 +241,7 @@ pub fn save_profile(profile: &RemoteProfile, old_name: Option<&str>) -> Result<(
             store
                 .smb
                 .retain(|p| !p.name.eq_ignore_ascii_case(&profile.name));
-            store.smb.push(SmbProfileToml {
+            store.smb.push(smb_impl::SmbProfileToml {
                 name: profile.name.clone(),
                 host: smb.host.clone(),
                 user: smb.user.clone(),
@@ -307,7 +322,7 @@ where
     let entries = match &profile.kind {
         RemoteKind::Sftp(_) => list_sftp_dir(profile, &cwd, show_hidden)?,
         RemoteKind::Imap(imap) => list_imap_dir_with_progress(imap, &cwd, progress)?,
-        RemoteKind::Smb(_) => list_smb_dir(profile, &cwd, show_hidden)?,
+        RemoteKind::Smb(_) => smb_impl::list_smb_dir(profile, &cwd, show_hidden)?,
     };
     if cancel.load(Ordering::Relaxed) {
         bail!("Aborted");
@@ -347,7 +362,7 @@ pub fn list_dir(profile: &RemoteProfile, cwd: &str, show_hidden: bool) -> Result
     match &profile.kind {
         RemoteKind::Sftp(_) => list_sftp_dir(profile, cwd, show_hidden),
         RemoteKind::Imap(imap) => list_imap_dir(imap, cwd),
-        RemoteKind::Smb(_) => list_smb_dir(profile, cwd, show_hidden),
+        RemoteKind::Smb(_) => smb_impl::list_smb_dir(profile, cwd, show_hidden),
     }
 }
 
@@ -368,7 +383,7 @@ pub fn download_into_dir(
     match &profile.kind {
         RemoteKind::Sftp(_) => download_sftp_into_dir(profile, remote_path, local_dir, recursive),
         RemoteKind::Imap(imap) => download_imap_into_dir(imap, remote_path, local_dir),
-        RemoteKind::Smb(_) => download_smb_into_dir(profile, remote_path, local_dir, recursive),
+        RemoteKind::Smb(_) => smb_impl::download_smb_into_dir(profile, remote_path, local_dir, recursive),
     }
 }
 
@@ -380,7 +395,7 @@ pub fn download_bulk_into_dir(
     match &profile.kind {
         RemoteKind::Sftp(_) => download_sftp_bulk_into_dir(profile, remote_path, local_dir),
         RemoteKind::Imap(imap) => download_imap_into_dir(imap, remote_path, local_dir),
-        RemoteKind::Smb(_) => download_smb_into_dir(profile, remote_path, local_dir, true),
+        RemoteKind::Smb(_) => smb_impl::download_smb_into_dir(profile, remote_path, local_dir, true),
     }
 }
 
@@ -393,7 +408,7 @@ pub fn upload_into_dir(
     match &profile.kind {
         RemoteKind::Sftp(_) => upload_sftp_into_dir(profile, local_path, remote_dir, recursive),
         RemoteKind::Imap(_) => bail!("Upload to IMAP is not supported"),
-        RemoteKind::Smb(_) => upload_smb_into_dir(profile, local_path, remote_dir, recursive),
+        RemoteKind::Smb(_) => smb_impl::upload_smb_into_dir(profile, local_path, remote_dir, recursive),
     }
 }
 
@@ -405,7 +420,7 @@ pub fn upload_bulk_into_dir(
     match &profile.kind {
         RemoteKind::Sftp(_) => upload_sftp_bulk_into_dir(profile, local_path, remote_dir),
         RemoteKind::Imap(_) => bail!("Upload to IMAP is not supported"),
-        RemoteKind::Smb(_) => upload_smb_into_dir(profile, local_path, remote_dir, true),
+        RemoteKind::Smb(_) => smb_impl::upload_smb_into_dir(profile, local_path, remote_dir, true),
     }
 }
 
@@ -423,14 +438,7 @@ pub fn rename_path(profile: &RemoteProfile, old_path: &str, new_path: &str) -> R
             Ok(())
         }
         RemoteKind::Imap(_) => bail!("Rename on IMAP is not supported"),
-        RemoteKind::Smb(smb) => {
-            let old_url = smb_full_url(smb, old_path);
-            let new_url = smb_full_url(smb, new_path);
-            let client = smb_client(smb)?;
-            client
-                .rename(&old_url, &new_url)
-                .map_err(|e| anyhow::anyhow!("SMB rename error: {e}"))
-        }
+        RemoteKind::Smb(smb) => smb_impl::smb_rename(smb, old_path, new_path),
     }
 }
 
@@ -441,13 +449,7 @@ pub fn make_dir(profile: &RemoteProfile, remote_path: &str) -> Result<()> {
             Ok(())
         }
         RemoteKind::Imap(_) => bail!("Create mailbox from KKC is not supported yet"),
-        RemoteKind::Smb(smb) => {
-            let url = smb_full_url(smb, remote_path);
-            let client = smb_client(smb)?;
-            client
-                .mkdir(&url, SmbMode::from(0o755u16))
-                .map_err(|e| anyhow::anyhow!("SMB mkdir error: {e}"))
-        }
+        RemoteKind::Smb(smb) => smb_impl::smb_mkdir(smb, remote_path),
     }
 }
 
@@ -464,16 +466,12 @@ pub fn delete_path(profile: &RemoteProfile, remote_path: &str, is_dir: bool) -> 
         RemoteKind::Imap(_) => bail!("Delete on IMAP is not supported yet"),
         RemoteKind::Smb(_) => {
             if is_dir {
-                delete_smb_dir_recursive(profile, remote_path)
+                smb_impl::delete_smb_dir_recursive(profile, remote_path)
             } else {
                 let RemoteKind::Smb(smb) = &profile.kind else {
                     unreachable!()
                 };
-                let url = smb_full_url(smb, remote_path);
-                let client = smb_client(smb)?;
-                client
-                    .unlink(&url)
-                    .map_err(|e| anyhow::anyhow!("SMB unlink error: {e}"))
+                smb_impl::smb_delete_file(smb, remote_path)
             }
         }
     }
@@ -504,7 +502,7 @@ pub fn remote_stats(
     match &profile.kind {
         RemoteKind::Sftp(_) => remote_sftp_stats(profile, remote_path, is_dir),
         RemoteKind::Imap(imap) => remote_imap_stats(imap, remote_path, is_dir),
-        RemoteKind::Smb(_) => remote_smb_stats(profile, remote_path, is_dir),
+        RemoteKind::Smb(_) => smb_impl::remote_smb_stats(profile, remote_path, is_dir),
     }
 }
 
@@ -524,7 +522,7 @@ where
     match &profile.kind {
         RemoteKind::Sftp(_) => scan_sftp_stats(profile, remote_path, is_dir, progress, cancel),
         RemoteKind::Imap(imap) => scan_imap_stats(imap, remote_path, is_dir, progress, cancel),
-        RemoteKind::Smb(_) => scan_smb_stats(profile, remote_path, is_dir, progress, cancel),
+        RemoteKind::Smb(_) => smb_impl::scan_smb_stats(profile, remote_path, is_dir, progress, cancel),
     }
 }
 
@@ -546,7 +544,7 @@ where
             download_imap_with_progress(imap, remote_path, local_dir, progress)
         }
         RemoteKind::Smb(_) => {
-            download_smb_with_progress(profile, remote_path, local_dir, recursive, progress)
+            smb_impl::download_smb_with_progress(profile, remote_path, local_dir, recursive, progress)
         }
     }
 }
@@ -567,7 +565,7 @@ where
         }
         RemoteKind::Imap(_) => bail!("Upload to IMAP is not supported"),
         RemoteKind::Smb(_) => {
-            upload_smb_with_progress(profile, local_path, remote_dir, recursive, progress)
+            smb_impl::upload_smb_with_progress(profile, local_path, remote_dir, recursive, progress)
         }
     }
 }
@@ -1844,392 +1842,4 @@ impl IfEmpty for &str {
             self.to_string()
         }
     }
-}
-
-// ---------------------------------------------------------------------------
-// SMB helpers
-// ---------------------------------------------------------------------------
-
-fn smb_client(smb: &SmbProfile) -> Result<SmbClient> {
-    let mut creds = SmbCredentials::default().server(format!("smb://{}", smb.host));
-    if let Some(share) = smb.share.as_deref().filter(|s| !s.trim().is_empty()) {
-        creds = creds.share(format!("/{}", share.trim_matches('/')));
-    }
-    if let Some(user) = smb.user.as_deref().filter(|s| !s.trim().is_empty()) {
-        creds = creds.username(user);
-    }
-    if let Some(password) = smb.password.as_deref().filter(|s| !s.trim().is_empty()) {
-        creds = creds.password(password);
-    }
-    if let Some(workgroup) = smb.workgroup.as_deref().filter(|s| !s.trim().is_empty()) {
-        creds = creds.workgroup(workgroup);
-    }
-    SmbClient::new(creds, SmbOptions::default())
-        .map_err(|e| anyhow::anyhow!("SMB connection error: {e}"))
-}
-
-fn smb_full_url(smb: &SmbProfile, path: &str) -> String {
-    let share = smb.share.as_deref().unwrap_or("").trim_matches('/');
-    let base = if share.is_empty() {
-        format!("smb://{}", smb.host)
-    } else {
-        format!("smb://{}/{}", smb.host, share)
-    };
-    if path == "/" || path.trim_matches('/').is_empty() {
-        base
-    } else {
-        format!("{}/{}", base, path.trim_start_matches('/'))
-    }
-}
-
-fn systemtime_to_local(st: SystemTime) -> Option<DateTime<Local>> {
-    let secs = st.duration_since(UNIX_EPOCH).ok()?.as_secs();
-    Local.timestamp_opt(secs as i64, 0).single()
-}
-
-fn list_smb_dir(
-    profile: &RemoteProfile,
-    cwd: &str,
-    show_hidden: bool,
-) -> Result<Vec<RemoteEntry>> {
-    let RemoteKind::Smb(smb) = &profile.kind else {
-        bail!("Profile is not SMB");
-    };
-    let client = smb_client(smb)?;
-    let url = smb_full_url(smb, cwd);
-    let entries = client
-        .list_dirplus(&url)
-        .map_err(|e| anyhow::anyhow!("SMB list error: {e}"))?;
-    let mut out = Vec::new();
-    for dirent in entries {
-        let name = dirent.name.clone();
-        if name == "." || name == ".." {
-            continue;
-        }
-        if !show_hidden && name.starts_with('.') {
-            continue;
-        }
-        let dtype = dirent.get_type();
-        let is_dir = matches!(dtype, SmbDirentType::Dir | SmbDirentType::FileShare);
-        let is_symlink = matches!(dtype, SmbDirentType::Link);
-        let modified = systemtime_to_local(dirent.mtime);
-        out.push(RemoteEntry {
-            path: join_remote(cwd, &name),
-            name,
-            is_dir,
-            is_symlink,
-            size: dirent.size,
-            modified,
-            mode: if is_dir { 0o755 } else { 0o644 },
-        });
-    }
-    Ok(out)
-}
-
-fn download_smb_into_dir(
-    profile: &RemoteProfile,
-    remote_path: &str,
-    local_dir: &Path,
-    recursive: bool,
-) -> Result<PathBuf> {
-    let name = Path::new(remote_path)
-        .file_name()
-        .context("remote path has no file name")?;
-    let local_target = local_dir.join(name);
-    download_smb_path::<fn(&str, u64) -> bool>(
-        profile,
-        remote_path,
-        &local_target,
-        recursive,
-        None,
-    )?;
-    Ok(local_target)
-}
-
-fn upload_smb_into_dir(
-    profile: &RemoteProfile,
-    local_path: &Path,
-    remote_dir: &str,
-    recursive: bool,
-) -> Result<String> {
-    let name = local_path
-        .file_name()
-        .context("local path has no file name")?;
-    let remote_target = join_remote(remote_dir, &name.to_string_lossy());
-    upload_smb_path::<fn(&str, u64) -> bool>(
-        profile,
-        local_path,
-        &remote_target,
-        recursive,
-        None,
-    )?;
-    Ok(remote_target)
-}
-
-fn download_smb_with_progress<F>(
-    profile: &RemoteProfile,
-    remote_path: &str,
-    local_dir: &Path,
-    recursive: bool,
-    progress: &mut F,
-) -> Result<PathBuf>
-where
-    F: FnMut(&str, u64) -> bool,
-{
-    let name = Path::new(remote_path)
-        .file_name()
-        .context("remote path has no file name")?;
-    let local_target = local_dir.join(name);
-    download_smb_path(profile, remote_path, &local_target, recursive, Some(progress))?;
-    Ok(local_target)
-}
-
-fn upload_smb_with_progress<F>(
-    profile: &RemoteProfile,
-    local_path: &Path,
-    remote_dir: &str,
-    recursive: bool,
-    progress: &mut F,
-) -> Result<String>
-where
-    F: FnMut(&str, u64) -> bool,
-{
-    let name = local_path
-        .file_name()
-        .context("local path has no file name")?;
-    let remote_target = join_remote(remote_dir, &name.to_string_lossy());
-    upload_smb_path(profile, local_path, &remote_target, recursive, Some(progress))?;
-    Ok(remote_target)
-}
-
-fn download_smb_path<F>(
-    profile: &RemoteProfile,
-    remote_path: &str,
-    local_target: &Path,
-    recursive: bool,
-    mut progress: Option<&mut F>,
-) -> Result<()>
-where
-    F: FnMut(&str, u64) -> bool,
-{
-    let RemoteKind::Smb(smb) = &profile.kind else {
-        bail!("Profile is not SMB");
-    };
-    if recursive {
-        // Try directory download; if it fails (not a directory), fall through to file download
-        let children = list_smb_dir(profile, remote_path, true);
-        if let Ok(children) = children {
-            fs::create_dir_all(local_target)?;
-            for child in children {
-                let child_local = local_target.join(&child.name);
-                download_smb_path(
-                    profile,
-                    &child.path,
-                    &child_local,
-                    child.is_dir,
-                    progress.as_deref_mut(),
-                )?;
-            }
-            return Ok(());
-        }
-    }
-    // File download
-    if let Some(parent) = local_target.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let url = smb_full_url(smb, remote_path);
-    let client = smb_client(smb)?;
-    let mut smb_file = client
-        .open_with(&url, SmbOpenOptions::default().read(true))
-        .map_err(|e| anyhow::anyhow!("SMB open error: {e}"))?;
-    let mut data = Vec::new();
-    smb_file
-        .read_to_end(&mut data)
-        .map_err(|e| anyhow::anyhow!("SMB read error: {e}"))?;
-    drop(smb_file);
-    drop(client);
-    fs::write(local_target, &data)?;
-    let size = data.len() as u64;
-    if let Some(cb) = progress.as_mut()
-        && !cb(remote_path, size)
-    {
-        bail!("Aborted");
-    }
-    Ok(())
-}
-
-fn upload_smb_path<F>(
-    profile: &RemoteProfile,
-    local_path: &Path,
-    remote_target: &str,
-    recursive: bool,
-    mut progress: Option<&mut F>,
-) -> Result<()>
-where
-    F: FnMut(&str, u64) -> bool,
-{
-    let RemoteKind::Smb(smb) = &profile.kind else {
-        bail!("Profile is not SMB");
-    };
-    if recursive && local_path.is_dir() {
-        let url = smb_full_url(smb, remote_target);
-        let client = smb_client(smb)?;
-        let _ = client.mkdir(&url, SmbMode::from(0o755u16));
-        drop(client);
-        for entry in fs::read_dir(local_path)? {
-            let entry = entry?;
-            let child_local = entry.path();
-            let child_remote =
-                join_remote(remote_target, &entry.file_name().to_string_lossy());
-            let is_dir = child_local.is_dir();
-            upload_smb_path(
-                profile,
-                &child_local,
-                &child_remote,
-                is_dir,
-                progress.as_deref_mut(),
-            )?;
-        }
-        return Ok(());
-    }
-    // File upload
-    let data = fs::read(local_path)?;
-    let size = data.len() as u64;
-    let url = smb_full_url(smb, remote_target);
-    let client = smb_client(smb)?;
-    let mut smb_file = client
-        .open_with(
-            &url,
-            SmbOpenOptions::default()
-                .write(true)
-                .create(true)
-                .truncate(true),
-        )
-        .map_err(|e| anyhow::anyhow!("SMB open error: {e}"))?;
-    smb_file
-        .write_all(&data)
-        .map_err(|e| anyhow::anyhow!("SMB write error: {e}"))?;
-    drop(smb_file);
-    drop(client);
-    if let Some(cb) = progress.as_mut()
-        && !cb(&local_path.to_string_lossy(), size)
-    {
-        bail!("Aborted");
-    }
-    Ok(())
-}
-
-fn delete_smb_dir_recursive(profile: &RemoteProfile, remote_path: &str) -> Result<()> {
-    let RemoteKind::Smb(smb) = &profile.kind else {
-        bail!("Profile is not SMB");
-    };
-    let children = list_smb_dir(profile, remote_path, true)?;
-    for child in children {
-        if child.is_dir {
-            delete_smb_dir_recursive(profile, &child.path)?;
-        } else {
-            let url = smb_full_url(smb, &child.path);
-            let client = smb_client(smb)?;
-            client
-                .unlink(&url)
-                .map_err(|e| anyhow::anyhow!("SMB unlink error: {e}"))?;
-        }
-    }
-    let url = smb_full_url(smb, remote_path);
-    let client = smb_client(smb)?;
-    client
-        .rmdir(&url)
-        .map_err(|e| anyhow::anyhow!("SMB rmdir error: {e}"))
-}
-
-fn remote_smb_stats(
-    profile: &RemoteProfile,
-    remote_path: &str,
-    is_dir: bool,
-) -> Result<RemoteStats> {
-    if !is_dir {
-        let RemoteKind::Smb(smb) = &profile.kind else {
-            bail!("Profile is not SMB");
-        };
-        let url = smb_full_url(smb, remote_path);
-        let client = smb_client(smb)?;
-        let stat = client
-            .stat(&url)
-            .map_err(|e| anyhow::anyhow!("SMB stat error: {e}"))?;
-        return Ok(RemoteStats {
-            files: 1,
-            bytes: stat.size,
-        });
-    }
-    remote_smb_dir_stats_recursive(profile, remote_path)
-}
-
-fn remote_smb_dir_stats_recursive(
-    profile: &RemoteProfile,
-    remote_path: &str,
-) -> Result<RemoteStats> {
-    let mut stats = RemoteStats::default();
-    for child in list_smb_dir(profile, remote_path, true)? {
-        if child.is_dir {
-            let sub = remote_smb_dir_stats_recursive(profile, &child.path)?;
-            stats.files += sub.files;
-            stats.bytes += sub.bytes;
-        } else {
-            stats.files += 1;
-            stats.bytes += child.size;
-        }
-    }
-    Ok(stats)
-}
-
-fn scan_smb_stats<F>(
-    profile: &RemoteProfile,
-    remote_path: &str,
-    is_dir: bool,
-    progress: &mut F,
-    cancel: &Arc<AtomicBool>,
-) -> Result<RemoteStats>
-where
-    F: FnMut(RemoteStats),
-{
-    if cancel.load(Ordering::Relaxed) {
-        bail!("Aborted");
-    }
-    if !is_dir {
-        let stats = remote_smb_stats(profile, remote_path, false)?;
-        progress(stats);
-        return Ok(stats);
-    }
-    scan_smb_dir_recursive(profile, remote_path, progress, cancel)
-}
-
-fn scan_smb_dir_recursive<F>(
-    profile: &RemoteProfile,
-    remote_path: &str,
-    progress: &mut F,
-    cancel: &Arc<AtomicBool>,
-) -> Result<RemoteStats>
-where
-    F: FnMut(RemoteStats),
-{
-    let mut stats = RemoteStats::default();
-    for child in list_smb_dir(profile, remote_path, true)? {
-        if cancel.load(Ordering::Relaxed) {
-            bail!("Aborted");
-        }
-        if child.is_dir {
-            let sub = scan_smb_dir_recursive(profile, &child.path, progress, cancel)?;
-            stats.files += sub.files;
-            stats.bytes += sub.bytes;
-        } else {
-            let delta = RemoteStats {
-                files: 1,
-                bytes: child.size,
-            };
-            stats.files += delta.files;
-            stats.bytes += delta.bytes;
-            progress(delta);
-        }
-    }
-    Ok(stats)
 }

@@ -1694,8 +1694,7 @@ fn launch_ssh_for_profile(app: &mut App) -> Result<()> {
     };
     let sftp = match &profile.kind {
         RemoteKind::Sftp(sftp) => sftp.clone(),
-        RemoteKind::Imap(_) => return Ok(()),
-        RemoteKind::Smb(_) => return Ok(()),
+        _ => return Ok(()),
     };
     let mut args: Vec<String> = vec!["ssh".to_string()];
     match profile.source {
@@ -1730,7 +1729,7 @@ fn launch_ssh_for_profile(app: &mut App) -> Result<()> {
 }
 
 fn handle_remote_add_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
-    const CHOICES: usize = 3; // SFTP, IMAP, SMB
+    let choices = RemoteEditKind::all();
     match key.code {
         KeyCode::Esc => {
             app.mode = AppMode::RemoteConnect(crate::app::RemoteConnectState::load());
@@ -1744,17 +1743,15 @@ fn handle_remote_add_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
         }
         KeyCode::Down => {
             if let AppMode::RemoteAddMenu(ref mut c) = app.mode {
-                if *c + 1 < CHOICES {
+                if *c + 1 < choices.len() {
                     *c += 1;
                 }
             }
         }
         KeyCode::Enter => {
             if let AppMode::RemoteAddMenu(cursor) = app.mode {
-                match cursor {
-                    0 => app.open_remote_add(),
-                    1 => app.open_remote_add_imap(),
-                    _ => app.open_remote_add_smb(),
+                if let Some(&kind) = choices.get(cursor) {
+                    app.mode = AppMode::RemoteEdit(crate::app::RemoteEditState::new(kind));
                 }
             }
         }
@@ -1841,11 +1838,7 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
                         Err(e) => app.status.text = format!("Cannot save connection: {}", e),
                     }
                 } else {
-                    app.status.text = match s.kind {
-                        RemoteEditKind::Sftp => "SFTP name is required".into(),
-                        RemoteEditKind::Imap => "IMAP name, host and user are required".into(),
-                        RemoteEditKind::Smb => "SMB name and host are required".into(),
-                    };
+                    app.status.text = s.kind.validation_message().into();
                 }
             } else {
                 s.cursor = (s.cursor + 1).min(crate::app::RemoteEditState::CANCEL);
