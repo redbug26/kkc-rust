@@ -150,6 +150,7 @@ pub(super) fn handle_viewer_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
     };
     let visible_rows = match menu.kind {
         ViewerMenuKind::Preproc => 8usize,
+        ViewerMenuKind::Mask => 10usize,
         _ => 6usize,
     };
 
@@ -244,11 +245,20 @@ fn viewer_menu_items(kind: ViewerMenuKind) -> &'static [&'static str] {
         ViewerMenuKind::LineFeed => &["DOS (CR/LF)", "Unix (LF)", "Mac (CR)", "Mixed"],
         ViewerMenuKind::Encoding => &["Plain ASCII", "DOS CP437"],
         ViewerMenuKind::Mask => &[
-            "C Style",
-            "Pascal Style",
-            "Assembler Style",
-            "Ketchup Style",
-            "Mask OFF",
+            "Auto detect",
+            "C / C++",
+            "Rust",
+            "JavaScript / TS",
+            "Python",
+            "PHP",
+            "HTML / XML",
+            "CSS / SCSS",
+            "SQL",
+            "Shell / Bash",
+            "Pascal",
+            "Assembler",
+            "Ketchup",
+            "Syntax OFF",
         ],
         ViewerMenuKind::Preproc => &[],
     }
@@ -334,11 +344,20 @@ fn apply_viewer_menu_selection(
             viewer.set_encoding(mode);
         }
         ViewerMenuKind::Mask => match menu.cursor {
-            0 => viewer.set_mask(Some(MaskKind::C)),
-            1 => viewer.set_mask(Some(MaskKind::Pascal)),
-            2 => viewer.set_mask(Some(MaskKind::Assembler)),
-            3 => viewer.set_mask(Some(MaskKind::Ketchup)),
-            _ => viewer.set_mask(None),
+            0  => viewer.set_mask(Some(MaskKind::Auto)),
+            1  => viewer.set_mask(Some(MaskKind::C)),
+            2  => viewer.set_mask(Some(MaskKind::Rust)),
+            3  => viewer.set_mask(Some(MaskKind::JavaScript)),
+            4  => viewer.set_mask(Some(MaskKind::Python)),
+            5  => viewer.set_mask(Some(MaskKind::Php)),
+            6  => viewer.set_mask(Some(MaskKind::Html)),
+            7  => viewer.set_mask(Some(MaskKind::Css)),
+            8  => viewer.set_mask(Some(MaskKind::Sql)),
+            9  => viewer.set_mask(Some(MaskKind::Shell)),
+            10 => viewer.set_mask(Some(MaskKind::Pascal)),
+            11 => viewer.set_mask(Some(MaskKind::Assembler)),
+            12 => viewer.set_mask(Some(MaskKind::Ketchup)),
+            _  => viewer.set_mask(None),
         },
     }
     app.mode = AppMode::Viewer(viewer);

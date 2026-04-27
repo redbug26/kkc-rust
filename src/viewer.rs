@@ -19,11 +19,12 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 mod viewer_decode;
 mod viewer_render;
 mod viewer_search;
+mod syntax;
 
 use self::viewer_decode::{
     ansi_lines, detect_mode, hex_line, preproc_op_label, preprocess_bytes, text_lines,
 };
-use self::viewer_render::{mask_keywords, pad_visible, slice_visible};
+use self::viewer_render::{pad_visible, slice_visible};
 use self::viewer_search::parse_hex_query;
 
 fn viewer_positions() -> &'static Mutex<HashMap<PathBuf, ViewerPosition>> {
@@ -82,7 +83,17 @@ pub enum LineFeedMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MaskKind {
+    /// Auto-detect language from the file extension.
+    Auto,
     C,
+    Rust,
+    JavaScript,
+    Python,
+    Php,
+    Html,
+    Css,
+    Sql,
+    Shell,
     Pascal,
     Assembler,
     Ketchup,
@@ -147,7 +158,7 @@ impl Viewer {
             save_position: true,
             encoding,
             line_feed,
-            mask: MaskKind::Ketchup,
+            mask: MaskKind::Auto,
             mask_enabled: true,
             preproc_ops: Vec::new(),
             text_lines: Vec::new(),
@@ -193,7 +204,16 @@ impl Viewer {
             "OFF"
         } else {
             match self.mask {
-                MaskKind::C => "C",
+                MaskKind::Auto => "Auto",
+                MaskKind::C => "C/C++",
+                MaskKind::Rust => "Rust",
+                MaskKind::JavaScript => "JS",
+                MaskKind::Python => "Python",
+                MaskKind::Php => "PHP",
+                MaskKind::Html => "HTML",
+                MaskKind::Css => "CSS",
+                MaskKind::Sql => "SQL",
+                MaskKind::Shell => "Shell",
                 MaskKind::Pascal => "Pascal",
                 MaskKind::Assembler => "Asm",
                 MaskKind::Ketchup => "Ketchup",
@@ -513,9 +533,40 @@ impl Viewer {
             return highlighted;
         }
 
+        // Syntax highlight ─────────────────────────────────────────────────
+        if self.mask_enabled {
+            if let Some(lang) = syntax::effective_lang(self.mask, &self.path) {
+                // Pre-scan lines before the visible area to determine the
+                // block-comment state at `start`.
+                let mut bc = false;
+                for orig in lines.iter().take(start) {
+                    syntax::scan_line_state(orig, lang, &mut bc);
+                }
+                // Render each visible line; highlight_line also advances `bc`.
+                // We use the original line to update state for accuracy, but
+                // render the (possibly hscroll-clipped) display line.
+                return lines
+                    .iter()
+                    .skip(start)
+                    .take(height)
+                    .zip(display_lines.into_iter())
+                    .map(|(orig, display)| {
+                        // Save state, render display line, restore and re-advance
+                        // using the original line so multi-line comment tracking
+                        // is not confused by horizontal scrolling.
+                        let bc_before = bc;
+                        let rendered = syntax::highlight_line(&display, lang, &mut bc);
+                        bc = bc_before;
+                        syntax::scan_line_state(orig, lang, &mut bc);
+                        rendered
+                    })
+                    .collect();
+            }
+        }
+
         display_lines
             .into_iter()
-            .map(|line| self.render_masked_display_line(line))
+            .map(|line| Line::from(Span::raw(line)))
             .collect()
     }
 
@@ -640,43 +691,6 @@ impl Viewer {
             let shifted = slice_visible(line, self.hscroll, width);
             pad_visible(&shifted, width)
         }
-    }
-
-    fn render_masked_display_line(&self, display: String) -> Line<'static> {
-        if !self.mask_enabled {
-            return Line::from(Span::raw(display));
-        }
-
-        let keywords = mask_keywords(self.mask);
-        let mut spans = Vec::new();
-        let chars: Vec<char> = display.chars().collect();
-        let mut i = 0usize;
-        while i < chars.len() {
-            let ch = chars[i];
-            if ch.is_ascii_alphanumeric() || ch == '_' {
-                let start = i;
-                i += 1;
-                while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
-                    i += 1;
-                }
-                let token: String = chars[start..i].iter().collect();
-                let style = if keywords.iter().any(|kw| kw.eq_ignore_ascii_case(&token)) {
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(Color::White)
-                };
-                spans.push(Span::styled(token, style));
-            } else {
-                spans.push(Span::styled(
-                    ch.to_string(),
-                    Style::default().fg(Color::White),
-                ));
-                i += 1;
-            }
-        }
-        Line::from(spans)
     }
 
     fn render_plugin_lines(

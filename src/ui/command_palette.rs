@@ -170,38 +170,6 @@ pub(super) fn render_command_palette(f: &mut Frame, s: &CommandPaletteState, are
         );
     }
 
-    // ── Scroll indicators ─────────────────────────────────────────────────
-    // let ind_style = Style::default().fg(CLR_MARKER).bg(CLR_QS_BG);
-    // if start > 0 {
-    //     let label = format!("▲{} ", start);
-    //     let lw = label.len() as u16;
-    //     safe_render_widget(
-    //         f,
-    //         Paragraph::new(label).style(ind_style),
-    //         Rect {
-    //             x: popup.x + popup.width.saturating_sub(lw + 1),
-    //             y: list_area.y,
-    //             width: lw,
-    //             height: 1,
-    //         },
-    //     );
-    // }
-    // let items_below = total.saturating_sub(start + list_h);
-    // if items_below > 0 {
-    //     let label = format!("▼{} ", items_below);
-    //     let lw = label.len() as u16;
-    //     safe_render_widget(
-    //         f,
-    //         Paragraph::new(label).style(ind_style),
-    //         Rect {
-    //             x: popup.x + popup.width.saturating_sub(lw + 1),
-    //             y: list_area.y + (list_h as u16).saturating_sub(1),
-    //             width: lw,
-    //             height: 1,
-    //         },
-    //     );
-    // }
-
     // ── Hint bar ──────────────────────────────────────────────────────────
     let hint_y = inner.y + inner.height.saturating_sub(1);
     safe_render_widget(

@@ -645,7 +645,7 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, goto_input: Option<
         String::new()
     };
     let mask_info = if matches!(v.mode, ViewMode::Text | ViewMode::Ansi) {
-        format!(" Mask:{} ", v.mask_label())
+        format!(" Syn:{} ", v.mask_label())
     } else {
         String::new()
     };
@@ -838,7 +838,7 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, goto_input: Option<
             (footer_area.x + 12 + input.len() as u16).min(footer_area.x + footer_area.width - 1);
         safe_set_cursor_position(f, cx, footer_area.y);
     } else {
-        let help = Paragraph::new(" F10:Close  F2:Wrap  F3:LnFeed  F4:Mode  F5:Zoom  F6:Prepro  F7:Search  F8:Enc  F9:Mask  ^G:Goto ")
+        let help = Paragraph::new(" F10:Close  F2:Wrap  F3:LnFeed  F4:Mode  F5:Zoom  F6:Prepro  F7:Search  F8:Enc  F9:Syntax  ^G:Goto ")
             .style(Style::default().fg(Color::Black).bg(Color::Cyan));
         f.render_widget(help, footer_area);
     }
@@ -885,11 +885,20 @@ fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, ar
         }
         ViewerMenuKind::Encoding => vec!["Plain ASCII".into(), "DOS CP437".into()],
         ViewerMenuKind::Mask => vec![
-            "C Style",
-            "Pascal Style",
-            "Assembler Style",
-            "Ketchup Style",
-            "Mask OFF",
+            "Auto detect",
+            "C / C++",
+            "Rust",
+            "JavaScript / TS",
+            "Python",
+            "PHP",
+            "HTML / XML",
+            "CSS / SCSS",
+            "SQL",
+            "Shell / Bash",
+            "Pascal",
+            "Assembler",
+            "Ketchup",
+            "Syntax OFF",
         ]
         .into_iter()
         .map(str::to_string)
@@ -901,7 +910,7 @@ fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, ar
         ViewerMenuKind::LineFeed => " Change Line Feed ",
         ViewerMenuKind::Preproc => " Preprocess ",
         ViewerMenuKind::Encoding => " Character Set ",
-        ViewerMenuKind::Mask => " Change Mask ",
+        ViewerMenuKind::Mask => " Syntax Highlight ",
     };
 
     let width = items
