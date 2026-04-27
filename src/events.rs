@@ -2,7 +2,7 @@ mod menu;
 mod palette;
 mod viewer;
 
-use self::menu::{execute_menu_action, handle_menu};
+use self::menu::handle_menu;
 use self::palette::handle_command_palette;
 use self::viewer::{
     handle_viewer, handle_viewer_goto_line, handle_viewer_menu, handle_viewer_plugin_palette,

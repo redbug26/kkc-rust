@@ -1,34 +1,40 @@
 //! Pure in-process syntax highlighting for the file viewer.
 //!
-//! No external crates — hand-rolled tokenisers for each supported language
-//! inspired by the highlight.js grammar definitions.
+//! Architecture inspired by highlight.js:
+//!   · Keyword categories: keyword · built_in · literal · type · variable.language
+//!   · title.function  — identifier immediately after fn / def / function / procedure
+//!   · title.class     — identifier immediately after class / struct / enum / trait / type / impl
+//!   · meta            — preprocessor directives, decorators, Rust attributes
+//!   · string · number · comment · operator
 
 use super::MaskKind;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use std::path::Path;
 
-// ── Token colour palette  (VS Code Dark+ inspired) ───────────────────────
-const CLR_KEYWORD:  Color = Color::Rgb(86,  156, 214); // blue
-const CLR_TYPE:     Color = Color::Rgb(78,  201, 176); // teal
-const CLR_STRING:   Color = Color::Rgb(206, 145, 120); // salmon / orange
-const CLR_COMMENT:  Color = Color::Rgb(106, 153, 85);  // green
-const CLR_NUMBER:   Color = Color::Rgb(181, 206, 168); // pale green
-const CLR_PREPROC:  Color = Color::Rgb(197, 134, 192); // violet / pink
-const CLR_FUNC:     Color = Color::Rgb(220, 220, 170); // pale yellow
-const CLR_OPERATOR: Color = Color::Rgb(180, 200, 240); // light blue-gray
-const CLR_PLAIN:    Color = Color::Rgb(212, 212, 212); // light gray
+// ── Token colour palette  (VS Code Dark+ inspired) ────────────────────────────
+const CLR_KEYWORD:  Color = Color::Rgb(86,  156, 214); // blue       — keyword / literal
+const CLR_TYPE:     Color = Color::Rgb(78,  201, 176); // teal       — type / title.class
+const CLR_STRING:   Color = Color::Rgb(206, 145, 120); // salmon     — string
+const CLR_COMMENT:  Color = Color::Rgb(106, 153, 85);  // green      — comment
+const CLR_NUMBER:   Color = Color::Rgb(181, 206, 168); // pale green — number
+const CLR_PREPROC:  Color = Color::Rgb(197, 134, 192); // violet     — meta / preprocessor
+const CLR_FUNC:     Color = Color::Rgb(220, 220, 170); // pale yel.  — title.function / built_in
+const CLR_OPERATOR: Color = Color::Rgb(180, 200, 240); // lt blue-gr — operator
+const CLR_PLAIN:    Color = Color::Rgb(212, 212, 212); // light gray — plain text
+const CLR_VAR_LANG: Color = Color::Rgb(156, 220, 254); // light cyan — variable.language
 const CLR_KETCHUP:  Color = Color::Yellow;
 
-#[inline] fn kw()    -> Style { Style::default().fg(CLR_KEYWORD).add_modifier(Modifier::BOLD) }
-#[inline] fn ty()    -> Style { Style::default().fg(CLR_TYPE) }
-#[inline] fn str_s() -> Style { Style::default().fg(CLR_STRING) }
-#[inline] fn cmt()   -> Style { Style::default().fg(CLR_COMMENT).add_modifier(Modifier::DIM) }
-#[inline] fn num()   -> Style { Style::default().fg(CLR_NUMBER) }
-#[inline] fn pre()   -> Style { Style::default().fg(CLR_PREPROC) }
-#[inline] fn func()  -> Style { Style::default().fg(CLR_FUNC) }
-#[inline] fn op()    -> Style { Style::default().fg(CLR_OPERATOR) }
-#[inline] fn pl()    -> Style { Style::default().fg(CLR_PLAIN) }
+#[inline] fn kw()       -> Style { Style::default().fg(CLR_KEYWORD).add_modifier(Modifier::BOLD) }
+#[inline] fn ty()       -> Style { Style::default().fg(CLR_TYPE) }
+#[inline] fn str_s()    -> Style { Style::default().fg(CLR_STRING) }
+#[inline] fn cmt()      -> Style { Style::default().fg(CLR_COMMENT).add_modifier(Modifier::DIM) }
+#[inline] fn num()      -> Style { Style::default().fg(CLR_NUMBER) }
+#[inline] fn pre()      -> Style { Style::default().fg(CLR_PREPROC) }
+#[inline] fn func()     -> Style { Style::default().fg(CLR_FUNC) }
+#[inline] fn op()       -> Style { Style::default().fg(CLR_OPERATOR) }
+#[inline] fn pl()       -> Style { Style::default().fg(CLR_PLAIN) }
+#[inline] fn var_lang() -> Style { Style::default().fg(CLR_VAR_LANG) }
 
 // ── Language detection ────────────────────────────────────────────────────
 
@@ -108,65 +114,88 @@ pub(super) fn scan_line_state(line: &str, lang: MaskKind, bc: &mut bool) {
     }
 }
 
-// ── Generic C-family tokenizer ────────────────────────────────────────────
+// ── Generic C-family tokenizer ─────────────────────────────────────────────────
+//
+// Implements highlight.js-style keyword categories:
+//   keyword · built_in · literal · type · variable.language
+//   title.function (ident after fn_decl_kws) · title.class (ident after class_decl_kws)
 
-/// Generic tokeniser for C-family languages.
 struct Tok<'a> {
-    src:        &'a str,
-    pos:        usize,
-    spans:      Vec<Span<'static>>,
-    // Config
-    kws:        &'static [&'static str],
-    types:      &'static [&'static str],
-    line_cmt:   &'static str,
-    line_cmt2:  &'static str,
-    blk_open:   &'static str,
-    blk_close:  &'static str,
-    preproc:    bool,  // '#' at line start = preprocessor (C)
-    dollar_var: bool,  // $ident as variable (PHP, Shell)
-    dquote:     bool,  // "string"
-    squote:     bool,  // 'string' / 'char'
-    backtick:   bool,  // `template` (JS)
+    src:               &'a str,
+    pos:               usize,
+    spans:             Vec<Span<'static>>,
+    // Keyword category tables (hl.js-inspired)
+    kws:               &'static [&'static str], // keyword — control flow, declarations
+    builtins:          &'static [&'static str], // built_in — stdlib / standard functions
+    literals:          &'static [&'static str], // literal — true, false, null, None …
+    types:             &'static [&'static str], // type names
+    var_langs:         &'static [&'static str], // variable.language — this, super, self …
+    fn_decl_kws:       &'static [&'static str], // after these: next ident = title.function
+    class_decl_kws:    &'static [&'static str], // after these: next ident = title.class
+    // Input config
+    line_cmt:          &'static str,
+    line_cmt2:         &'static str,
+    blk_open:          &'static str,
+    blk_close:         &'static str,
+    preproc:           bool,  // '#' at line start = meta (preprocessor)
+    dollar_var:        bool,  // $ident as variable.language (PHP)
+    dquote:            bool,  // "string"
+    squote:            bool,  // 'string' / 'char'
+    backtick:          bool,  // `template literal` (JS)
+    // Runtime state
+    next_ident_style:  Option<Style>, // pending title.function / title.class for next ident
 }
 
 impl<'a> Tok<'a> {
-    // ── Language presets ──────────────────────────────────────────────────
-    fn c(src: &'a str) -> Self {
-        Self::new(src, C_KW, C_TY, "//", "", "/*", "*/", true, false, true, true, false)
-    }
-    fn js(src: &'a str) -> Self {
-        Self::new(src, JS_KW, JS_TY, "//", "", "/*", "*/", false, false, true, true, true)
-    }
-    fn php(src: &'a str) -> Self {
-        Self::new(src, PHP_KW, PHP_TY, "//", "#", "/*", "*/", false, true, true, true, false)
-    }
-    fn css(src: &'a str) -> Self {
-        Self::new(src, CSS_KW, CSS_TY, "", "", "/*", "*/", false, false, true, true, false)
-    }
-    fn sql(src: &'a str) -> Self {
-        Self::new(src, SQL_KW, &[], "--", "", "/*", "*/", false, false, true, true, false)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn new(
-        src: &'a str,
-        kws: &'static [&'static str],
-        types: &'static [&'static str],
-        line_cmt: &'static str,
-        line_cmt2: &'static str,
-        blk_open: &'static str,
-        blk_close: &'static str,
-        preproc: bool,
-        dollar_var: bool,
-        dquote: bool,
-        squote: bool,
-        backtick: bool,
-    ) -> Self {
+    // ── Base defaults ─────────────────────────────────────────────────────
+    fn base(src: &'a str) -> Self {
         Self {
             src, pos: 0, spans: Vec::new(),
-            kws, types, line_cmt, line_cmt2,
-            blk_open, blk_close,
-            preproc, dollar_var, dquote, squote, backtick,
+            kws: &[], builtins: &[], literals: &[], types: &[], var_langs: &[],
+            fn_decl_kws: &[], class_decl_kws: &[],
+            line_cmt: "", line_cmt2: "",
+            blk_open: "/*", blk_close: "*/",
+            preproc: false, dollar_var: false,
+            dquote: true, squote: true, backtick: false,
+            next_ident_style: None,
+        }
+    }
+
+    // ── Language presets ──────────────────────────────────────────────────
+    fn c(src: &'a str) -> Self {
+        Self {
+            kws: C_KW, types: C_TY, literals: C_LIT, builtins: C_BUILTIN,
+            line_cmt: "//", preproc: true,
+            ..Self::base(src)
+        }
+    }
+    fn js(src: &'a str) -> Self {
+        Self {
+            kws: JS_KW, types: JS_TY, literals: JS_LIT, builtins: JS_BUILTIN,
+            var_langs: JS_VAR_LANG,
+            fn_decl_kws: JS_FN_DECL, class_decl_kws: JS_CLASS_DECL,
+            line_cmt: "//", backtick: true,
+            ..Self::base(src)
+        }
+    }
+    fn php(src: &'a str) -> Self {
+        Self {
+            kws: PHP_KW, types: PHP_TY, literals: PHP_LIT,
+            fn_decl_kws: PHP_FN_DECL, class_decl_kws: PHP_CLASS_DECL,
+            line_cmt: "//", line_cmt2: "#", dollar_var: true,
+            ..Self::base(src)
+        }
+    }
+    fn css(src: &'a str) -> Self {
+        Self {
+            kws: CSS_KW, types: CSS_TY,
+            ..Self::base(src)
+        }
+    }
+    fn sql(src: &'a str) -> Self {
+        Self {
+            kws: SQL_KW, line_cmt: "--",
+            ..Self::base(src)
         }
     }
 
@@ -230,23 +259,65 @@ impl<'a> Tok<'a> {
     }
 
     fn eat_decimal_tail(&mut self) {
-        while matches!(self.peek(), Some('0'..='9'|'.'|'e'|'E'|'_'|'f'|'F'|'u'|'U'|'l'|'L'|'i'|'s')) {
+        while matches!(self.peek(), Some('0'..='9'|'_')) { self.advance(); }
+        if self.peek() == Some('.') {
+            let next2 = {
+                let mut it = self.src[self.pos + 1..].chars();
+                it.next()
+            };
+            if matches!(next2, Some('0'..='9') | None) {
+                self.advance();
+                while matches!(self.peek(), Some('0'..='9'|'_')) { self.advance(); }
+            }
+        }
+        if matches!(self.peek(), Some('e'|'E')) {
             self.advance();
+            if matches!(self.peek(), Some('+'|'-')) { self.advance(); }
+            while matches!(self.peek(), Some('0'..='9'|'_')) { self.advance(); }
+        }
+        // type suffix
+        if matches!(self.peek(), Some('u'|'i'|'f'|'U'|'I'|'F'|'l'|'L')) {
+            while matches!(self.peek(), Some(c) if c.is_ascii_alphanumeric()) { self.advance(); }
         }
     }
 
+    /// Eat an identifier — applies highlight.js-inspired category lookup.
+    ///
+    /// Priority (mirrors hl.js):
+    ///   1. pending title.function / title.class (set by previous declaration keyword)
+    ///   2. variable.language  (this, super, self …)
+    ///   3. literal            (true, false, null …)  → keyword colour
+    ///   4. keyword            → also sets next_ident_style for fn/class decl kws
+    ///   5. type
+    ///   6. built_in           → pale-yellow (same as title.function)
+    ///   7. call / macro site  → pale-yellow
+    ///   8. plain
     fn eat_ident(&mut self) {
         let start = self.pos;
         while matches!(self.peek(), Some(c) if c.is_ascii_alphanumeric() || c == '_') {
             self.advance();
         }
         let token = &self.src[start..self.pos];
-        let is_call = self.peek() == Some('(');
+        let is_call  = self.peek() == Some('(');
         let is_macro = self.peek() == Some('!');
-        let style = if self.kws.iter().any(|k| k.eq_ignore_ascii_case(token)) {
+
+        let style = if let Some(s) = self.next_ident_style.take() {
+            s
+        } else if self.var_langs.iter().any(|v| *v == token) {
+            var_lang()
+        } else if self.literals.iter().any(|l| l.eq_ignore_ascii_case(token)) {
+            kw()
+        } else if self.kws.iter().any(|k| k.eq_ignore_ascii_case(token)) {
+            if self.fn_decl_kws.iter().any(|k| *k == token) {
+                self.next_ident_style = Some(func());
+            } else if self.class_decl_kws.iter().any(|k| *k == token) {
+                self.next_ident_style = Some(ty());
+            }
             kw()
         } else if self.types.iter().any(|t| t.eq_ignore_ascii_case(token)) {
             ty()
+        } else if self.builtins.iter().any(|b| b.eq_ignore_ascii_case(token)) {
+            func()
         } else if is_call || is_macro {
             func()
         } else {
@@ -293,36 +364,42 @@ impl<'a> Tok<'a> {
             if self.pos >= self.src.len() { return self.spans; }
         }
 
-        // C-style preprocessor: line beginning with optional whitespace then '#'
+        // C-style preprocessor (#include, #define …) — entire line is meta colour
         if self.preproc {
-            let rem = self.rem();
-            let trimmed = rem.trim_start();
-            if trimmed.starts_with('#') {
-                let ws_len = rem.len() - trimmed.len();
-                let ws = rem[..ws_len].to_owned();
-                let rest = trimmed.to_owned();
-                self.push(ws, pl());
-                self.push(rest, pre());
+            let rem = self.rem().to_owned();
+            let trimmed_start = rem.len() - rem.trim_start().len();
+            if rem.trim_start().starts_with('#') {
+                let ws_len = trimmed_start;
+                if ws_len > 0 { self.push(rem[..ws_len].to_owned(), pl()); }
+                self.push(rem[ws_len..].to_owned(), pre());
                 return self.spans;
             }
         }
 
         while self.pos < self.src.len() {
             // Line comments
-            if self.sw(self.line_cmt) {
-                self.push(self.rem().to_owned(), cmt()); return self.spans;
+            if !self.line_cmt.is_empty() && self.sw(self.line_cmt) {
+                self.push(self.rem().to_owned(), cmt());
+                return self.spans;
             }
             if !self.line_cmt2.is_empty() && self.sw(self.line_cmt2) {
-                self.push(self.rem().to_owned(), cmt()); return self.spans;
+                self.push(self.rem().to_owned(), cmt());
+                return self.spans;
             }
             // Block comment open
-            if self.sw(self.blk_open) {
-                self.eat_block_comment(in_block); continue;
+            if !self.blk_open.is_empty() && self.sw(self.blk_open) {
+                self.eat_block_comment(in_block);
+                continue;
             }
 
             let ch = self.peek().unwrap();
 
-            // Dollar variable ($ident — PHP, Shell)
+            // Cancel pending fn/class name on '(' or ';' or '{'
+            if matches!(ch, '(' | ';' | '{') {
+                self.next_ident_style = None;
+            }
+
+            // Dollar variable ($ident — PHP): variable.language colour
             if self.dollar_var && ch == '$' {
                 let start = self.pos;
                 self.advance();
@@ -330,7 +407,7 @@ impl<'a> Tok<'a> {
                     while matches!(self.peek(), Some(c) if c.is_ascii_alphanumeric() || c == '_') {
                         self.advance();
                     }
-                    self.push(self.src[start..self.pos].to_owned(), ty());
+                    self.push(self.src[start..self.pos].to_owned(), var_lang());
                 } else {
                     self.push("$".to_owned(), op());
                 }
@@ -338,14 +415,14 @@ impl<'a> Tok<'a> {
             }
 
             // String literals
-            if self.dquote && ch == '"'  { self.eat_string('"');  continue; }
-            if self.squote && ch == '\'' { self.eat_string('\''); continue; }
-            if self.backtick && ch == '`'{ self.eat_string('`');  continue; }
+            if self.dquote   && ch == '"'  { self.eat_string('"');  continue; }
+            if self.squote   && ch == '\'' { self.eat_string('\''); continue; }
+            if self.backtick && ch == '`'  { self.eat_string('`');  continue; }
 
             // Numbers
             if ch.is_ascii_digit() { self.eat_number(); continue; }
 
-            // Identifiers / keywords
+            // Identifiers / keywords (all categories)
             if ch.is_ascii_alphabetic() || ch == '_' { self.eat_ident(); continue; }
 
             // Operators / punctuation
@@ -392,26 +469,34 @@ fn scan_pascal_block(line: &str, bc: &mut bool) {
     scan_c_block(line, "{", "}", bc);
 }
 
-// ── Rust tokeniser ────────────────────────────────────────────────────────
+// ── Rust tokeniser ─────────────────────────────────────────────────────────────
+//
+// Hand-rolled to handle Rust-specific constructs:
+//   · r#"raw strings"# · 'lifetime vs 'char' · #[attributes] · // and /* */ comments
+//   · title.function after `fn` · title.class after struct/enum/trait/type/impl/union
+//   · variable.language: self / Self / super
 
 fn tokenize_rust(line: &str, in_block: &mut bool) -> Vec<Span<'static>> {
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut pos = 0usize;
+    let mut next_ident: Option<Style> = None; // pending title.function / title.class
 
     // Continue block comment from previous line
     if *in_block {
-        let (end, closed) = consume_block_comment_end(line, 0, "/*", "*/");
+        let (end, closed) = find_block_comment_close(line, "*/");
         spans.push(Span::styled(line[..end].to_owned(), cmt()));
         pos = end;
         if closed { *in_block = false; } else { return spans; }
     }
 
-    // Attribute or outer-doc-comment line: starts with `#[` or `#![`
+    // Rust outer / inner attribute: lines starting with #[ or #![
     {
         let tr = line[pos..].trim_start();
         if tr.starts_with("#[") || tr.starts_with("#![") {
             let ws_len = line[pos..].len() - tr.len();
-            if ws_len > 0 { spans.push(Span::styled(line[pos..pos+ws_len].to_owned(), pl())); }
+            if ws_len > 0 {
+                spans.push(Span::styled(line[pos..pos + ws_len].to_owned(), pl()));
+            }
             spans.push(Span::styled(tr.to_owned(), pre()));
             return spans;
         }
@@ -425,9 +510,9 @@ fn tokenize_rust(line: &str, in_block: &mut bool) -> Vec<Span<'static>> {
         if rem.starts_with("//") {
             spans.push(Span::styled(rem.to_owned(), cmt())); break;
         }
-        // Block comment open
+        // Block comment /* … */
         if rem.starts_with("/*") {
-            let (end, closed) = find_block_comment_close(&src[pos+2..], "*/");
+            let (end, closed) = find_block_comment_close(&src[pos + 2..], "*/");
             let abs_end = pos + 2 + end;
             spans.push(Span::styled(src[pos..abs_end].to_owned(), cmt()));
             pos = abs_end;
@@ -466,7 +551,12 @@ fn tokenize_rust(line: &str, in_block: &mut bool) -> Vec<Span<'static>> {
 
         let ch = rem.chars().next().unwrap();
 
-        // Double-quoted string
+        // Cancel pending title.* on '(' or ';' or '{'
+        if matches!(ch, '(' | ';' | '{') {
+            next_ident = None;
+        }
+
+        // Double-quoted string  "…"
         if ch == '"' {
             let (text, new_pos) = eat_string_from(src, pos, '"');
             spans.push(Span::styled(text, str_s())); pos = new_pos; continue;
@@ -520,14 +610,28 @@ fn tokenize_rust(line: &str, in_block: &mut bool) -> Vec<Span<'static>> {
                 pos += src[pos..].chars().next().map_or(1, |c| c.len_utf8());
             }
             let token = &src[start..pos];
-            let next = src[pos..].chars().next();
-            let style = if RUST_KW.iter().any(|k| *k == token) {
+            let next_ch = src[pos..].chars().next();
+
+            let style = if let Some(s) = next_ident.take() {
+                s
+            } else if token == "self" || token == "Self" || token == "super" {
+                var_lang()
+            } else if RUST_LIT.iter().any(|l| *l == token) {
+                kw()
+            } else if RUST_KW.iter().any(|k| *k == token) {
+                if RUST_FN_DECL.iter().any(|k| *k == token) {
+                    next_ident = Some(func());
+                } else if RUST_CLASS_DECL.iter().any(|k| *k == token) {
+                    next_ident = Some(ty());
+                }
                 kw()
             } else if RUST_TY.iter().any(|t| *t == token) {
                 ty()
-            } else if next == Some('!') {
-                func() // macro call: println! vec! etc.
-            } else if next == Some('(') || next == Some('<') {
+            } else if RUST_BUILTIN.iter().any(|b| *b == token) {
+                func()
+            } else if next_ch == Some('!') {
+                func() // macro invocation: println! vec! format! etc.
+            } else if next_ch == Some('(') || next_ch == Some('<') {
                 func()
             } else {
                 pl()
@@ -545,11 +649,17 @@ fn tokenize_rust(line: &str, in_block: &mut bool) -> Vec<Span<'static>> {
     spans
 }
 
-// ── Python tokeniser ──────────────────────────────────────────────────────
+// ── Python tokeniser ───────────────────────────────────────────────────────────
+//
+// Highlight.js python.js inspired:
+//   · keyword / built_in / literal / type / variable.language (self, cls)
+//   · title.function after `def` · title.class after `class`
+//   · @decorator as meta · # comment · strings (with triple-quotes on same line)
 
 fn tokenize_python(line: &str) -> Vec<Span<'static>> {
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut pos = 0usize;
+    let mut next_ident: Option<Style> = None;
     let src = line;
 
     while pos < src.len() {
@@ -557,64 +667,105 @@ fn tokenize_python(line: &str) -> Vec<Span<'static>> {
 
         // Comment
         if rem.starts_with('#') {
-            spans.push(Span::styled(rem.to_owned(), cmt())); break;
+            spans.push(Span::styled(rem.to_owned(), cmt()));
+            break;
         }
 
         let ch = rem.chars().next().unwrap();
 
-        // Triple-quoted string (simplified: consume whole line as string start)
+        // Cancel pending title.* on '(' or ':'
+        if matches!(ch, '(' | ';' | ':') { next_ident = None; }
+
+        // Decorator @name
+        if ch == '@' {
+            let start = pos; pos += 1;
+            while matches!(src[pos..].chars().next(), Some(c) if c.is_ascii_alphanumeric() || c == '_' || c == '.') {
+                pos += src[pos..].chars().next().map_or(1, |c| c.len_utf8());
+            }
+            spans.push(Span::styled(src[start..pos].to_owned(), pre()));
+            continue;
+        }
+
+        // Triple-quoted string (simplified: no cross-line state)
         if rem.starts_with("\"\"\"") || rem.starts_with("'''") {
             let delim = &rem[..3];
             let start = pos; pos += 3;
             if let Some(end_off) = src[pos..].find(delim) {
                 pos += end_off + 3;
             } else {
-                // Spans to end of line (multiline — no state tracking in this simplified version)
                 pos = src.len();
             }
-            spans.push(Span::styled(src[start..pos].to_owned(), str_s())); continue;
+            spans.push(Span::styled(src[start..pos].to_owned(), str_s()));
+            continue;
         }
-        // String literals
-        if ch == '"' {
-            let (text, new_pos) = eat_string_from(src, pos, '"');
-            spans.push(Span::styled(text, str_s())); pos = new_pos; continue;
+
+        // String literals with optional prefix (f/b/r/u and two-char combos)
+        if matches!(ch, 'f'|'b'|'r'|'u'|'F'|'B'|'R'|'U') {
+            let prefix_end = pos + 1;
+            let next1 = src[prefix_end..].chars().next();
+            let (skip, quote_pos) = if matches!(next1, Some('b'|'r'|'B'|'R'|'f'|'F'))
+                && matches!(src[prefix_end + 1..].chars().next(), Some('"'|'\''))
+            {
+                (2usize, prefix_end + 1)
+            } else if matches!(next1, Some('"'|'\'')) {
+                (1usize, prefix_end)
+            } else {
+                (0usize, pos)
+            };
+            if skip > 0 {
+                let start = pos; pos = quote_pos;
+                if src[pos..].starts_with("\"\"\"") || src[pos..].starts_with("'''") {
+                    let delim = src[pos..pos + 3].to_owned(); pos += 3;
+                    if let Some(off) = src[pos..].find(delim.as_str()) { pos += off + 3; }
+                    else { pos = src.len(); }
+                } else {
+                    let q = src[pos..].chars().next().unwrap();
+                    let (_, np) = eat_string_from(src, pos, q); pos = np;
+                }
+                spans.push(Span::styled(src[start..pos].to_owned(), str_s()));
+                continue;
+            }
         }
-        if ch == '\'' {
-            let (text, new_pos) = eat_string_from(src, pos, '\'');
-            spans.push(Span::styled(text, str_s())); pos = new_pos; continue;
-        }
+        if ch == '"' { let (t, p) = eat_string_from(src, pos, '"');  spans.push(Span::styled(t, str_s())); pos = p; continue; }
+        if ch == '\'' { let (t, p) = eat_string_from(src, pos, '\''); spans.push(Span::styled(t, str_s())); pos = p; continue; }
+
         // Numbers
         if ch.is_ascii_digit() {
             let (text, new_pos) = eat_number_from(src, pos);
             spans.push(Span::styled(text, num())); pos = new_pos; continue;
         }
-        // Decorator
-        if ch == '@' {
-            let start = pos; pos += 1;
-            while matches!(src[pos..].chars().next(), Some(c) if c.is_ascii_alphanumeric() || c == '_' || c == '.') {
-                pos += src[pos..].chars().next().map_or(1, |c| c.len_utf8());
-            }
-            spans.push(Span::styled(src[start..pos].to_owned(), pre())); continue;
-        }
-        // Identifiers
+
+        // Identifiers / keywords
         if ch.is_ascii_alphabetic() || ch == '_' {
             let start = pos;
             while matches!(src[pos..].chars().next(), Some(c) if c.is_ascii_alphanumeric() || c == '_') {
                 pos += src[pos..].chars().next().map_or(1, |c| c.len_utf8());
             }
             let token = &src[start..pos];
-            let next = src[pos..].chars().next();
-            let style = if PY_KW.iter().any(|k| *k == token) {
+            let next_ch = src[pos..].chars().next();
+
+            let style = if let Some(s) = next_ident.take() {
+                s
+            } else if token == "self" || token == "cls" {
+                var_lang()
+            } else if PY_LIT.iter().any(|l| *l == token) {
+                kw()
+            } else if PY_KW.iter().any(|k| *k == token) {
+                if token == "def"   { next_ident = Some(func()); }
+                else if token == "class" { next_ident = Some(ty()); }
                 kw()
             } else if PY_TY.iter().any(|t| *t == token) {
                 ty()
-            } else if next == Some('(') {
+            } else if PY_BUILTIN.iter().any(|b| *b == token) {
+                func()
+            } else if next_ch == Some('(') {
                 func()
             } else {
                 pl()
             };
             spans.push(Span::styled(token.to_owned(), style)); continue;
         }
+
         // Operators
         let s = ch.to_string();
         let style = if "+-*/%=<>!&|^~?:;.,".contains(ch) { op() } else { pl() };
@@ -636,7 +787,8 @@ fn tokenize_shell(line: &str) -> Vec<Span<'static>> {
 
         // Comment
         if rem.starts_with('#') {
-            spans.push(Span::styled(rem.to_owned(), cmt())); break;
+            spans.push(Span::styled(rem.to_owned(), cmt()));
+            break;
         }
 
         let ch = rem.chars().next().unwrap();
@@ -646,19 +798,41 @@ fn tokenize_shell(line: &str) -> Vec<Span<'static>> {
         if ch == '\'' { let (t, p) = eat_string_from(src, pos, '\''); spans.push(Span::styled(t, str_s())); pos = p; continue; }
         if ch == '`'  { let (t, p) = eat_string_from(src, pos, '`');  spans.push(Span::styled(t, str_s())); pos = p; continue; }
 
-        // Variable $VAR or ${VAR}
+        // Variable: $VAR  ${VAR}  $((expr))  $(cmd)
         if ch == '$' {
             let start = pos; pos += 1;
-            if src[pos..].starts_with('{') {
+            if src[pos..].starts_with("((") {
+                pos += 2;
+                let mut depth = 1usize;
+                while pos < src.len() && depth > 0 {
+                    if src[pos..].starts_with("((") { depth += 1; pos += 2; }
+                    else if src[pos..].starts_with("))") { depth -= 1; pos += 2; }
+                    else { pos += src[pos..].chars().next().map_or(1, |c| c.len_utf8()); }
+                }
+            } else if src[pos..].starts_with('(') {
                 pos += 1;
-                while pos < src.len() && src.as_bytes()[pos] != b'}' { pos += 1; }
+                let mut depth = 1usize;
+                while pos < src.len() && depth > 0 {
+                    match src[pos..].chars().next() {
+                        Some('(') => { depth += 1; pos += 1; }
+                        Some(')') => { depth -= 1; pos += 1; }
+                        Some(c)   => { pos += c.len_utf8(); }
+                        None      => break,
+                    }
+                }
+            } else if src[pos..].starts_with('{') {
+                pos += 1;
+                while pos < src.len() && src.as_bytes()[pos] != b'}' {
+                    pos += src[pos..].chars().next().map_or(1, |c| c.len_utf8());
+                }
                 if pos < src.len() { pos += 1; }
-                spans.push(Span::styled(src[start..pos].to_owned(), ty())); continue;
+            } else {
+                while matches!(src[pos..].chars().next(), Some(c) if c.is_ascii_alphanumeric() || c == '_') {
+                    pos += src[pos..].chars().next().map_or(1, |c| c.len_utf8());
+                }
             }
-            while matches!(src[pos..].chars().next(), Some(c) if c.is_ascii_alphanumeric() || c == '_') {
-                pos += src[pos..].chars().next().map_or(1, |c| c.len_utf8());
-            }
-            spans.push(Span::styled(src[start..pos].to_owned(), ty())); continue;
+            spans.push(Span::styled(src[start..pos].to_owned(), var_lang()));
+            continue;
         }
 
         // Numbers
@@ -667,14 +841,23 @@ fn tokenize_shell(line: &str) -> Vec<Span<'static>> {
             spans.push(Span::styled(t, num())); pos = p; continue;
         }
 
-        // Identifiers / keywords
+        // Identifiers / keywords / built-ins
         if ch.is_ascii_alphabetic() || ch == '_' {
             let start = pos;
             while matches!(src[pos..].chars().next(), Some(c) if c.is_ascii_alphanumeric() || c == '_' || c == '-') {
                 pos += src[pos..].chars().next().map_or(1, |c| c.len_utf8());
             }
             let token = &src[start..pos];
-            let style = if SH_KW.iter().any(|k| k.eq_ignore_ascii_case(token)) { kw() } else { pl() };
+            let next_ch = src[pos..].chars().next();
+            let style = if SH_KW.iter().any(|k| k.eq_ignore_ascii_case(token)) {
+                kw()
+            } else if SH_BUILTIN.iter().any(|b| b.eq_ignore_ascii_case(token)) {
+                func()
+            } else if next_ch == Some('(') {
+                func()
+            } else {
+                pl()
+            };
             spans.push(Span::styled(token.to_owned(), style)); continue;
         }
 
@@ -754,7 +937,7 @@ fn tokenize_pascal(line: &str, in_block: &mut bool) -> Vec<Span<'static>> {
         if ch.is_ascii_digit() || (ch == '$' && matches!(src[pos+1..].chars().next(), Some('0'..='9'|'A'..='F'|'a'..='f'))) {
             let start = pos;
             if ch == '$' { pos += 1; } // hex prefix $FF
-            while matches!(src[pos..].chars().next(), Some('0'..='9'|'a'..='f'|'A'..='F'|'.'|'e'|'E')) {
+            while matches!(src[pos..].chars().next(), Some('0'..='9'|'a'..='f'|'A'..='F'|'.')) {
                 pos += src[pos..].chars().next().map_or(1, |c| c.len_utf8());
             }
             spans.push(Span::styled(src[start..pos].to_owned(), num())); continue;
@@ -847,9 +1030,9 @@ fn tokenize_html(line: &str, in_block: &mut bool) -> Vec<Span<'static>> {
     let mut pos = 0usize;
     let src = line;
 
-    // Continue HTML comment <!-- ... -->
+    // Continue HTML comment <!-- … -->
     if *in_block {
-        let (end, closed) = consume_block_comment_end(src, 0, "<!--", "-->");
+        let (end, closed) = find_block_comment_close(src, "-->");
         spans.push(Span::styled(src[..end].to_owned(), cmt()));
         pos = end;
         if closed { *in_block = false; } else { return spans; }
@@ -907,7 +1090,7 @@ fn tokenize_html(line: &str, in_block: &mut bool) -> Vec<Span<'static>> {
                     continue;
                 }
                 // Attribute value
-                if (ch == '"' || ch == '\'') {
+                if ch == '"' || ch == '\'' {
                     let (t, p) = eat_string_from(src, pos, ch);
                     spans.push(Span::styled(t, str_s())); pos = p; continue;
                 }
@@ -1017,95 +1200,163 @@ fn find_block_comment_close(src: &str, close: &str) -> (usize, bool) {
     }
 }
 
-/// Consume from `pos` through a block-comment close delimiter.
-/// If `in_block` was true at entry, we're already inside; `open` is unused.
-/// Returns (new_pos, found_close).
-fn consume_block_comment_end(src: &str, pos: usize, _open: &str, close: &str) -> (usize, bool) {
-    let (consumed, found) = find_block_comment_close(&src[pos..], close);
-    (pos + consumed, found)
-}
-
 // ── Keyword / type tables ─────────────────────────────────────────────────
 
+// ─── C / C++ ──────────────────────────────────────────────────────────────
 static C_KW: &[&str] = &[
-    "asm", "auto", "break", "case", "char", "const", "continue", "default", "do",
-    "double", "else", "enum", "extern", "float", "for", "goto", "if", "inline",
-    "int", "long", "register", "restrict", "return", "short", "signed", "sizeof",
-    "static", "struct", "switch", "typedef", "union", "unsigned", "void", "volatile",
-    "while", "_Bool", "_Complex", "_Imaginary", "nullptr", "constexpr", "thread_local",
-    "static_assert", "noreturn", "alignas", "alignof",
+    "break", "case", "continue", "default", "do", "else", "for", "goto", "if",
+    "return", "switch", "while",
+    "asm", "auto", "const", "enum", "extern", "inline", "register", "restrict",
+    "sizeof", "static", "struct", "typedef", "union", "volatile",
+    "_Alignas", "_Alignof", "_Atomic", "_Generic", "_Noreturn", "_Static_assert",
+    "_Thread_local", "_Pragma", "alignas", "alignof", "noreturn",
+    "static_assert", "thread_local", "typeof", "typeof_unqual",
+    "constexpr", "nullptr",
 ];
 static C_TY: &[&str] = &[
-    "bool", "size_t", "ssize_t", "ptrdiff_t", "intptr_t", "uintptr_t",
-    "int8_t", "int16_t", "int32_t", "int64_t", "uint8_t", "uint16_t", "uint32_t", "uint64_t",
+    "bool", "char", "double", "float", "int", "long", "short", "signed", "unsigned", "void",
+    "_Bool", "_BitInt", "_Complex", "_Imaginary",
+    "int8_t", "int16_t", "int32_t", "int64_t",
+    "uint8_t", "uint16_t", "uint32_t", "uint64_t",
     "int_fast8_t", "int_fast16_t", "int_fast32_t", "int_fast64_t",
     "uint_fast8_t", "uint_fast16_t", "uint_fast32_t", "uint_fast64_t",
     "int_least8_t", "int_least16_t", "int_least32_t", "int_least64_t",
     "uint_least8_t", "uint_least16_t", "uint_least32_t", "uint_least64_t",
-    "intmax_t", "uintmax_t", "wchar_t", "FILE", "NULL", "true", "false",
-    "string", "vector", "map", "set", "pair", "optional", "variant",  // C++ stdlib
-    "shared_ptr", "unique_ptr", "weak_ptr",
+    "intmax_t", "uintmax_t", "intptr_t", "uintptr_t",
+    "ptrdiff_t", "size_t", "ssize_t", "wchar_t", "FILE",
+    "string", "wstring", "vector", "map", "set", "pair",
+    "optional", "variant", "shared_ptr", "unique_ptr", "weak_ptr",
+    "deque", "list", "queue", "stack", "array",
+];
+static C_LIT: &[&str] = &["true", "false", "NULL", "nullptr"];
+static C_BUILTIN: &[&str] = &[
+    "printf", "fprintf", "sprintf", "snprintf", "scanf", "fscanf", "sscanf",
+    "puts", "putchar", "putc", "gets", "getchar", "getc",
+    "fopen", "fclose", "fread", "fwrite", "fgets", "fputs", "feof", "ferror", "perror",
+    "fflush", "rewind", "fseek", "ftell",
+    "malloc", "calloc", "realloc", "free", "abort", "exit", "atexit", "qsort", "bsearch",
+    "atoi", "atol", "atof", "strtol", "strtod", "strtoul",
+    "strlen", "strcpy", "strncpy", "strcat", "strncat", "strcmp", "strncmp",
+    "strchr", "strrchr", "strstr", "strtok", "memset", "memcpy", "memmove", "memcmp",
+    "abs", "fabs", "sqrt", "pow", "log", "log2", "log10", "exp",
+    "sin", "cos", "tan", "asin", "acos", "atan", "atan2",
+    "ceil", "floor", "round", "fmod",
+    "isalpha", "isdigit", "isalnum", "isspace", "isupper", "islower",
+    "toupper", "tolower",
 ];
 
+// ─── Rust ─────────────────────────────────────────────────────────────────
 static RUST_KW: &[&str] = &[
-    "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else",
-    "enum", "extern", "false", "fn", "for", "if", "impl", "in", "let", "loop",
-    "match", "mod", "move", "mut", "pub", "ref", "return", "self", "Self",
-    "static", "struct", "super", "trait", "true", "type", "union", "unsafe",
-    "use", "where", "while", "yield", "abstract", "become", "box", "do", "final",
-    "macro", "override", "priv", "typeof", "unsized", "virtual",
+    "abstract", "as", "async", "await", "become", "box", "break", "const",
+    "continue", "crate", "do", "dyn", "else", "enum", "extern", "final",
+    "fn", "for", "if", "impl", "in", "let", "loop", "macro", "match",
+    "mod", "move", "mut", "override", "priv", "pub", "ref", "return",
+    "static", "struct", "super", "trait", "try", "type", "typeof",
+    "union", "unsafe", "unsized", "use", "virtual", "where", "while", "yield",
 ];
+static RUST_FN_DECL:    &[&str] = &["fn"];
+static RUST_CLASS_DECL: &[&str] = &["struct", "enum", "trait", "type", "union", "impl"];
+static RUST_LIT: &[&str] = &["true", "false", "Some", "None", "Ok", "Err"];
 static RUST_TY: &[&str] = &[
     "i8", "i16", "i32", "i64", "i128", "isize",
     "u8", "u16", "u32", "u64", "u128", "usize",
     "f32", "f64", "bool", "char", "str",
     "String", "Vec", "Box", "Arc", "Rc", "Mutex", "RwLock",
-    "Option", "Result", "Some", "None", "Ok", "Err",
+    "Option", "Result",
     "HashMap", "HashSet", "BTreeMap", "BTreeSet", "VecDeque", "BinaryHeap",
     "Cow", "Cell", "RefCell", "Pin", "PhantomData",
     "PathBuf", "Path", "OsStr", "OsString",
 ];
-
-static JS_KW: &[&str] = &[
-    "break", "case", "catch", "class", "const", "continue", "debugger", "default",
-    "delete", "do", "else", "export", "extends", "finally", "for", "function",
-    "if", "import", "in", "instanceof", "let", "new", "of", "return", "switch",
-    "this", "throw", "try", "typeof", "undefined", "var", "void", "while", "with",
-    "yield", "async", "await", "from", "as", "static", "super",
+static RUST_BUILTIN: &[&str] = &[
+    "Copy", "Send", "Sized", "Sync", "Drop", "Fn", "FnMut", "FnOnce",
+    "ToOwned", "Clone", "Debug", "PartialEq", "PartialOrd", "Eq", "Ord",
+    "AsRef", "AsMut", "Into", "From", "Default",
+    "Iterator", "Extend", "IntoIterator", "DoubleEndedIterator", "ExactSizeIterator",
+    "ToString", "Display", "Write",
+    "assert", "assert_eq", "assert_ne",
+    "debug_assert", "debug_assert_eq", "debug_assert_ne",
+    "panic", "unimplemented", "unreachable", "todo",
+    "print", "println", "eprint", "eprintln",
+    "format", "write", "writeln",
+    "vec", "concat", "env", "file", "line", "module_path",
+    "include_bytes", "include_str", "stringify", "cfg",
+    "macro_rules", "drop",
 ];
+
+// ─── JavaScript ───────────────────────────────────────────────────────────
+static JS_KW: &[&str] = &[
+    "async", "await", "break", "case", "catch", "class", "const", "continue",
+    "debugger", "default", "delete", "do", "else", "export", "extends",
+    "finally", "for", "from", "function", "if", "import", "in", "instanceof",
+    "let", "new", "of", "return", "static", "switch", "throw", "try",
+    "typeof", "var", "void", "while", "with", "yield", "as",
+];
+static JS_FN_DECL:    &[&str] = &["function", "get", "set"];
+static JS_CLASS_DECL: &[&str] = &["class", "extends"];
+static JS_LIT: &[&str] = &["true", "false", "null", "undefined", "NaN", "Infinity"];
 static JS_TY: &[&str] = &[
-    "true", "false", "null", "NaN", "Infinity", "globalThis",
-    "Array", "Object", "String", "Number", "Boolean", "Function", "Symbol",
-    "Promise", "Error", "TypeError", "RangeError", "SyntaxError",
+    "Array", "Object", "String", "Number", "Boolean", "Function", "Symbol", "BigInt",
+    "Promise", "Error", "TypeError", "RangeError", "SyntaxError", "ReferenceError",
+    "EvalError", "URIError", "InternalError",
     "Map", "Set", "WeakMap", "WeakSet",
     "Date", "RegExp", "JSON", "Math",
-    "console", "document", "window", "navigator", "location",
-    "parseInt", "parseFloat", "isNaN", "isFinite",
+    "ArrayBuffer", "SharedArrayBuffer", "DataView", "Atomics",
+    "Uint8Array", "Int8Array", "Uint16Array", "Int16Array",
+    "Uint32Array", "Int32Array", "Float32Array", "Float64Array",
+    "Proxy", "Reflect", "Intl", "WebAssembly",
+    "Generator", "GeneratorFunction", "AsyncFunction", "globalThis",
+];
+static JS_VAR_LANG: &[&str] = &["this", "super", "arguments", "self"];
+static JS_BUILTIN: &[&str] = &[
+    "eval", "isFinite", "isNaN", "parseFloat", "parseInt",
+    "decodeURI", "decodeURIComponent", "encodeURI", "encodeURIComponent",
+    "console", "window", "document", "navigator", "location", "history",
+    "module", "exports", "require", "global",
     "setTimeout", "setInterval", "clearTimeout", "clearInterval",
-    "fetch", "URL", "URLSearchParams", "FormData", "Headers",
+    "queueMicrotask", "requestAnimationFrame", "cancelAnimationFrame",
+    "fetch", "URL", "URLSearchParams", "FormData", "Headers", "Request", "Response",
+    "alert", "confirm", "prompt",
 ];
 
+// ─── Python ───────────────────────────────────────────────────────────────
 static PY_KW: &[&str] = &[
-    "and", "as", "assert", "async", "await", "break", "class", "continue",
-    "def", "del", "elif", "else", "except", "False", "finally", "for",
-    "from", "global", "if", "import", "in", "is", "lambda", "None",
-    "nonlocal", "not", "or", "pass", "raise", "return", "True", "try",
-    "while", "with", "yield",
+    "and", "as", "assert", "async", "await", "break", "case", "class",
+    "continue", "def", "del", "elif", "else", "except", "finally",
+    "for", "from", "global", "if", "import", "in", "is",
+    "lambda", "match", "nonlocal", "not", "or", "pass", "raise",
+    "return", "try", "while", "with", "yield",
 ];
+static PY_LIT: &[&str] = &["True", "False", "None", "NotImplemented", "Ellipsis", "__debug__"];
 static PY_TY: &[&str] = &[
-    "int", "float", "str", "bool", "bytes", "list", "dict", "tuple", "set",
-    "frozenset", "bytearray", "memoryview", "complex",
-    "object", "type", "super",
-    "print", "len", "range", "enumerate", "zip", "map", "filter",
-    "sorted", "reversed", "any", "all", "sum", "min", "max", "abs",
-    "isinstance", "issubclass", "hasattr", "getattr", "setattr", "delattr",
-    "open", "input", "repr", "id", "hash", "vars", "dir",
-    "property", "staticmethod", "classmethod",
-    "Exception", "ValueError", "TypeError", "KeyError", "IndexError",
-    "AttributeError", "RuntimeError", "StopIteration", "OSError",
-    "Optional", "List", "Dict", "Tuple", "Set", "Union", "Any",
+    "Any", "Callable", "Coroutine", "Dict", "FrozenSet", "List", "Literal",
+    "Generic", "Optional", "Sequence", "Set", "Tuple", "Type", "Union",
+    "Exception", "BaseException", "ValueError", "TypeError", "KeyError",
+    "IndexError", "AttributeError", "RuntimeError", "StopIteration",
+    "OSError", "IOError", "FileNotFoundError", "PermissionError",
+    "ImportError", "ModuleNotFoundError", "NotImplementedError",
+    "ArithmeticError", "ZeroDivisionError", "OverflowError",
+    "NameError", "UnboundLocalError", "RecursionError",
+    "AssertionError", "SystemExit", "KeyboardInterrupt", "GeneratorExit",
+    "MemoryError", "SyntaxError", "IndentationError",
+    "UnicodeError", "UnicodeDecodeError", "UnicodeEncodeError",
+    "Warning", "DeprecationWarning", "RuntimeWarning", "UserWarning",
+];
+static PY_BUILTIN: &[&str] = &[
+    "__import__",
+    "abs", "all", "any", "ascii", "bin", "bool", "breakpoint",
+    "bytearray", "bytes", "callable", "chr", "classmethod",
+    "compile", "complex", "delattr", "dict", "dir", "divmod",
+    "enumerate", "eval", "exec", "filter", "float", "format",
+    "frozenset", "getattr", "globals", "hasattr", "hash", "help",
+    "hex", "id", "input", "int", "isinstance", "issubclass",
+    "iter", "len", "list", "locals", "map", "max", "memoryview",
+    "min", "next", "object", "oct", "open", "ord", "pow",
+    "print", "property", "range", "repr", "reversed", "round",
+    "set", "setattr", "slice", "sorted", "staticmethod", "str",
+    "sum", "super", "tuple", "type", "vars", "zip",
 ];
 
+// ─── PHP ──────────────────────────────────────────────────────────────────
 static PHP_KW: &[&str] = &[
     "abstract", "and", "array", "as", "break", "callable", "case", "catch",
     "class", "clone", "const", "continue", "declare", "default", "do", "echo",
@@ -1117,108 +1368,159 @@ static PHP_KW: &[&str] = &[
     "return", "static", "switch", "throw", "trait", "try", "unset", "use",
     "var", "while", "xor", "yield",
 ];
-static PHP_TY: &[&str] = &[
-    "null", "true", "false", "NULL", "TRUE", "FALSE",
-    "int", "float", "string", "bool", "array", "object", "void", "mixed",
+static PHP_FN_DECL:    &[&str] = &["function", "fn"];
+static PHP_CLASS_DECL: &[&str] = &["class", "interface", "trait", "enum"];
+static PHP_LIT:  &[&str] = &["null", "true", "false", "NULL", "TRUE", "FALSE"];
+static PHP_TY:   &[&str] = &[
+    "int", "float", "string", "bool", "array", "object", "void",
+    "mixed", "never", "iterable", "callable",
     "self", "parent", "static",
     "Exception", "Error", "Throwable", "Iterator", "Countable", "Closure",
 ];
 
+// ─── CSS ──────────────────────────────────────────────────────────────────
 static CSS_KW: &[&str] = &[
-    "important", "inherit", "initial", "unset", "revert",
-    "none", "auto", "normal", "bold", "italic", "underline", "block",
-    "inline", "flex", "grid", "relative", "absolute", "fixed", "sticky",
-    "center", "left", "right", "top", "bottom", "solid", "dashed", "dotted",
-    "hidden", "visible", "scroll", "clip", "ellipsis",
-    "color", "background", "border", "margin", "padding", "font", "text",
-    "width", "height", "display", "position", "float", "clear",
-    "overflow", "opacity", "transform", "transition", "animation",
-    "cursor", "pointer", "default",
+    "important", "inherit", "initial", "unset", "revert", "none", "auto",
+    "normal", "bold", "italic", "underline", "line-through", "overline",
+    "block", "inline", "inline-block", "flex", "inline-flex",
+    "grid", "inline-grid", "contents", "table", "list-item",
+    "relative", "absolute", "fixed", "sticky",
+    "center", "left", "right", "top", "bottom", "start", "end",
+    "solid", "dashed", "dotted", "double", "groove", "ridge", "inset", "outset",
+    "hidden", "visible", "scroll", "clip", "ellipsis", "nowrap", "wrap",
+    "pointer", "default", "text", "crosshair", "move", "not-allowed",
+    "uppercase", "lowercase", "capitalize", "contain", "cover",
+    "to", "from", "at",
 ];
 static CSS_TY: &[&str] = &[
-    "px", "em", "rem", "vh", "vw", "vmin", "vmax", "pt", "pc", "cm", "mm",
-    "rgb", "rgba", "hsl", "hsla", "var", "calc", "url", "linear-gradient",
-    "radial-gradient",
+    "rgb", "rgba", "hsl", "hsla", "hwb", "lab", "lch", "oklch", "oklab",
+    "color", "color-mix",
+    "var", "calc", "min", "max", "clamp", "env", "url",
+    "linear-gradient", "radial-gradient", "conic-gradient",
+    "repeating-linear-gradient", "repeating-radial-gradient",
+    "translate", "translateX", "translateY", "translateZ", "translate3d",
+    "rotate", "rotateX", "rotateY", "rotateZ", "rotate3d",
+    "scale", "scaleX", "scaleY", "scaleZ", "scale3d",
+    "skew", "skewX", "skewY",
+    "matrix", "matrix3d", "perspective",
+    "blur", "brightness", "contrast", "drop-shadow", "grayscale",
+    "hue-rotate", "invert", "opacity", "saturate", "sepia",
+    "cubic-bezier", "steps",
+    "px", "em", "rem", "vh", "vw", "vmin", "vmax", "pt", "pc", "cm", "mm", "in",
+    "ch", "ex", "fr", "deg", "rad", "turn", "s", "ms",
 ];
 
+// ─── SQL ──────────────────────────────────────────────────────────────────
 static SQL_KW: &[&str] = &[
     "SELECT", "FROM", "WHERE", "INSERT", "INTO", "VALUES", "UPDATE", "SET",
     "DELETE", "CREATE", "DROP", "ALTER", "TABLE", "VIEW", "INDEX", "DATABASE",
     "SCHEMA", "COLUMN", "CONSTRAINT", "JOIN", "INNER", "LEFT", "RIGHT",
     "FULL", "OUTER", "CROSS", "ON", "AND", "OR", "NOT", "IN", "LIKE",
-    "BETWEEN", "IS", "NULL", "AS", "WITH", "CASE", "WHEN", "THEN", "ELSE",
-    "END", "ORDER", "BY", "GROUP", "HAVING", "DISTINCT", "UNION", "ALL",
-    "EXISTS", "LIMIT", "OFFSET", "RETURNING", "TRIGGER", "FUNCTION",
-    "PROCEDURE", "BEGIN", "COMMIT", "ROLLBACK", "TRANSACTION", "PRIMARY",
-    "KEY", "FOREIGN", "REFERENCES", "UNIQUE", "CHECK", "DEFAULT",
-    "AUTO_INCREMENT", "SERIAL", "TRUNCATE", "REPLACE", "EXPLAIN",
-    "select", "from", "where", "insert", "into", "values", "update", "set",
-    "delete", "create", "drop", "alter", "table", "view", "index",
-    "join", "inner", "left", "right", "full", "outer", "cross", "on",
-    "and", "or", "not", "in", "like", "between", "is", "null", "as",
-    "with", "case", "when", "then", "else", "end", "order", "by", "group",
-    "having", "distinct", "union", "all", "exists", "limit", "offset",
-    "primary", "key", "foreign", "references", "unique", "check", "default",
+    "ILIKE", "BETWEEN", "IS", "NULL", "AS", "WITH", "CASE", "WHEN", "THEN",
+    "ELSE", "END", "ORDER", "BY", "GROUP", "HAVING", "DISTINCT", "UNION",
+    "ALL", "EXCEPT", "INTERSECT", "EXISTS", "LIMIT", "OFFSET",
+    "RETURNING", "TRIGGER", "FUNCTION", "PROCEDURE",
+    "BEGIN", "COMMIT", "ROLLBACK", "TRANSACTION", "SAVEPOINT",
+    "PRIMARY", "KEY", "FOREIGN", "REFERENCES", "UNIQUE", "CHECK", "DEFAULT",
+    "AUTO_INCREMENT", "SERIAL", "IDENTITY",
+    "TRUNCATE", "REPLACE", "EXPLAIN", "ANALYZE",
+    "CAST", "CONVERT", "COALESCE", "NULLIF", "GREATEST", "LEAST",
+    "IF", "WHILE", "DECLARE", "CURSOR", "FETCH", "CLOSE",
+    "MERGE", "OVER", "PARTITION", "ROW_NUMBER", "RANK", "DENSE_RANK",
+    "LAG", "LEAD", "FIRST_VALUE", "LAST_VALUE", "NTILE",
+    "COUNT", "SUM", "AVG", "MIN", "MAX", "ROUND", "FLOOR", "CEIL",
+    "NOW", "CURRENT_TIMESTAMP", "CURRENT_DATE", "CURRENT_TIME",
+    "CONCAT", "SUBSTRING", "LENGTH", "UPPER", "LOWER", "TRIM",
+    "EXTRACT", "DATE_TRUNC",
 ];
 
+// ─── Shell / Bash ─────────────────────────────────────────────────────────
 static SH_KW: &[&str] = &[
     "if", "then", "else", "elif", "fi", "for", "do", "done", "while",
     "until", "case", "esac", "in", "function", "return", "exit",
     "break", "continue", "local", "readonly", "export", "unset",
-    "eval", "exec", "source", "alias", "declare", "typeset",
-    "echo", "printf", "read", "true", "false", "test", "shift",
-    "set", "unset", "trap", "wait", "kill", "jobs", "fg", "bg",
+    "declare", "typeset", "eval", "exec", "source",
+];
+static SH_BUILTIN: &[&str] = &[
+    "echo", "printf", "read", "test", "true", "false",
+    "cd", "pwd", "ls", "mkdir", "rmdir", "rm", "cp", "mv", "ln",
+    "cat", "tac", "head", "tail", "wc", "sort", "uniq", "cut",
+    "grep", "awk", "sed", "tr", "tee", "xargs", "find",
+    "chmod", "chown", "chgrp", "touch", "stat",
+    "date", "time", "sleep", "kill", "jobs", "fg", "bg", "wait",
+    "set", "unset", "shift", "trap", "alias", "type", "which",
+    "push", "pop", "enable", "builtin", "command",
 ];
 
+// ─── Pascal / Delphi / Free Pascal ────────────────────────────────────────
 static PAS_KW: &[&str] = &[
-    "absolute", "and", "array", "asm", "begin", "break", "case", "class",
-    "const", "constructor", "continue", "destructor", "div", "do",
+    "absolute", "abstract", "and", "array", "asm", "begin", "break", "case",
+    "class", "const", "constructor", "continue", "destructor", "div", "do",
     "downto", "else", "end", "except", "exit", "exports", "file",
     "finalization", "finally", "for", "forward", "function", "goto", "if",
     "implementation", "in", "inherited", "initialization", "inline",
     "interface", "label", "library", "mod", "nil", "not", "object",
     "of", "on", "operator", "or", "packed", "procedure", "program",
-    "property", "raise", "record", "repeat", "resourcestring", "self",
-    "set", "shl", "shr", "string", "then", "threadvar", "to", "try",
+    "property", "raise", "record", "repeat", "resourcestring",
+    "self", "set", "shl", "shr", "string", "then", "threadvar", "to", "try",
     "type", "unit", "until", "uses", "var", "virtual", "while", "with", "xor",
 ];
 static PAS_TY: &[&str] = &[
     "integer", "cardinal", "word", "byte", "shortint", "smallint", "longint",
-    "int64", "qword", "dword", "real", "single", "double", "extended",
+    "int64", "qword", "dword",
+    "real", "single", "double", "extended", "currency",
     "boolean", "char", "widechar", "pchar", "pwidechar",
-    "ansistring", "widestring", "unicodestring", "shortstring", "pointer",
-    "variant", "olevariant",
+    "ansistring", "widestring", "unicodestring", "shortstring",
+    "pointer", "variant", "olevariant",
+    "tcomponent", "tobject",
 ];
 
+// ─── x86 / x86-64 Assembler ───────────────────────────────────────────────
 static ASM_KW: &[&str] = &[
-    "mov", "movs", "movz", "push", "pop", "pusha", "popa", "pushad", "popad",
-    "call", "ret", "retn", "retf", "leave", "enter",
-    "cmp", "test", "jmp", "je", "jne", "jz", "jnz", "ja", "jb", "jg", "jl",
-    "jae", "jbe", "jge", "jle", "jo", "jno", "js", "jns", "jc", "jnc",
-    "add", "sub", "mul", "imul", "div", "idiv", "inc", "dec", "neg",
+    "mov", "movs", "movz", "movsx", "movzx", "lea", "xchg", "push", "pop",
+    "pusha", "popa", "pushad", "popad", "pushf", "popf", "pushfd", "popfd",
+    "add", "adc", "sub", "sbb", "mul", "imul", "div", "idiv", "inc", "dec",
+    "neg", "cmp", "test",
     "xor", "or", "and", "not", "shl", "shr", "sar", "sal", "rol", "ror",
-    "lea", "int", "nop", "hlt", "cli", "sti", "clc", "stc", "cld", "std",
-    "db", "dw", "dd", "dq", "dt", "resb", "resw", "resd", "resq",
-    "equ", "org", "align", "section", "segment", "proc", "endp", "macro",
-    "endm", "local", "global", "extern", "public", "extrn",
-    "assume", "end", "ends", "xlatb", "xlat",
+    "rcl", "rcr", "bt", "bts", "btr", "btc", "bsf", "bsr",
+    "call", "ret", "retn", "retf", "leave", "enter", "jmp",
+    "je", "jne", "jz", "jnz", "ja", "jb", "jg", "jl",
+    "jae", "jbe", "jge", "jle", "jo", "jno", "js", "jns", "jc", "jnc",
+    "jcxz", "jecxz", "jrcxz",
     "loop", "loope", "loopne", "rep", "repe", "repne", "repnz", "repz",
+    "int", "nop", "hlt", "cli", "sti", "clc", "stc", "cld", "std",
+    "cpuid", "rdtsc", "syscall", "sysret",
+    "cmpsb", "cmpsw", "cmpsd", "lodsb", "lodsw", "lodsd",
+    "movsb", "movsw", "movsd", "stosb", "stosw", "stosd",
+    "scasb", "scasw", "scasd",
+    "db", "dw", "dd", "dq", "dt", "resb", "resw", "resd", "resq",
+    "equ", "org", "align", "section", "segment",
+    "proc", "endp", "macro", "endm", "local",
+    "global", "extern", "public", "extrn",
+    "assume", "end", "ends", "xlat", "xlatb",
 ];
 static ASM_REG: &[&str] = &[
     "al", "bl", "cl", "dl", "ah", "bh", "ch", "dh",
+    "sil", "dil", "spl", "bpl",
+    "r8b", "r9b", "r10b", "r11b", "r12b", "r13b", "r14b", "r15b",
     "ax", "bx", "cx", "dx", "si", "di", "sp", "bp",
+    "r8w", "r9w", "r10w", "r11w", "r12w", "r13w", "r14w", "r15w",
     "eax", "ebx", "ecx", "edx", "esi", "edi", "esp", "ebp",
+    "r8d", "r9d", "r10d", "r11d", "r12d", "r13d", "r14d", "r15d",
     "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rsp", "rbp",
     "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
-    "r8d", "r9d", "r10d", "r11d", "r12d", "r13d", "r14d", "r15d",
-    "r8w", "r9w", "r10w", "r11w", "r12w", "r13w", "r14w", "r15w",
-    "r8b", "r9b", "r10b", "r11b", "r12b", "r13b", "r14b", "r15b",
     "cs", "ds", "es", "fs", "gs", "ss",
     "cr0", "cr2", "cr3", "cr4", "dr0", "dr1", "dr2", "dr3", "dr6", "dr7",
     "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7",
+    "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15",
     "ymm0", "ymm1", "ymm2", "ymm3", "ymm4", "ymm5", "ymm6", "ymm7",
+    "ymm8", "ymm9", "ymm10", "ymm11", "ymm12", "ymm13", "ymm14", "ymm15",
+    "rip", "eip", "ip", "rflags", "eflags", "flags",
+    "mm0", "mm1", "mm2", "mm3", "mm4", "mm5", "mm6", "mm7",
+    "st0", "st1", "st2", "st3", "st4", "st5", "st6", "st7",
 ];
 
+// ─── Ketchup ──────────────────────────────────────────────────────────────
 static KETCHUP_KW: &[&str] = &[
     "blackward", "ketchup", "killers", "redbug", "access", "darkangel",
     "off", "topy", "kennet", "typeone", "pulpe", "tyby", "djamm", "vatin",

@@ -7,7 +7,7 @@ use self::panel::{render_center_buttons, render_panel_or_file_id};
 use self::plugins::render_plugins;
 use crate::app::{
     ActionPaletteState, ActivePanel, App, AppMode, AssocEditorState, BookmarkListItem,
-    CommandPaletteState, ConfigState, ConfirmAction, ConfirmDialog, InputDialog, MENU_DATA,
+    ConfigState, ConfirmAction, ConfirmDialog, InputDialog, MENU_DATA,
     MENU_HEADERS, MenuAction, MenuState, OpenerState, PluginsState,
     RemoteConnectState, RemoteConnectingState, RemoteEditKind, RemoteEditState, SearchState,
     ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,

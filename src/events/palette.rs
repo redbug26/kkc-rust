@@ -1,7 +1,7 @@
 //! Command palette event handler (Ctrl-P).
 
 use super::menu::execute_menu_action;
-use crate::app::{App, AppMode, CommandPaletteState, PALETTE_DATA};
+use crate::app::{App, AppMode, PALETTE_DATA};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 

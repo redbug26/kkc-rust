@@ -2,7 +2,7 @@ mod command_palette;
 mod menu;
 mod panel_tabs;
 
-pub use self::command_palette::{CommandPaletteState, PALETTE_DATA, PaletteEntry};
+pub use self::command_palette::{CommandPaletteState, PALETTE_DATA};
 pub use self::menu::{
     MENU_DATA, MENU_HEADERS, MenuAction, MenuEntry, MenuState,
     ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,
