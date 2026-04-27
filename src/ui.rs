@@ -1,13 +1,16 @@
+mod command_palette;
 mod panel;
 mod plugins;
 
+use self::command_palette::render_command_palette;
 use self::panel::{render_center_buttons, render_panel_or_file_id};
 use self::plugins::render_plugins;
 use crate::app::{
-    ActionPaletteState, ActivePanel, App, AppMode, AssocEditorState, BookmarkListItem, ConfigState,
-    ConfirmAction, ConfirmDialog, InputDialog, MENU_DATA, MENU_HEADERS, MenuAction, MenuState,
-    OpenerState, PluginsState, RemoteConnectState, RemoteConnectingState, RemoteEditKind,
-    RemoteEditState, SearchState, ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,
+    ActionPaletteState, ActivePanel, App, AppMode, AssocEditorState, BookmarkListItem,
+    CommandPaletteState, ConfigState, ConfirmAction, ConfirmDialog, InputDialog, MENU_DATA,
+    MENU_HEADERS, MenuAction, MenuState, OpenerState, PluginsState,
+    RemoteConnectState, RemoteConnectingState, RemoteEditKind, RemoteEditState, SearchState,
+    ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,
 };
 use crate::config::SortMode;
 use crate::copy::{CopyDialogState, CopyProgressState};
@@ -223,6 +226,7 @@ pub fn render(f: &mut Frame, app: &App) {
         AppMode::Config(cs) => render_config(f, cs, f.area()),
         AppMode::Plugins(s) => render_plugins(f, s, f.area()),
         AppMode::ActionPalette(s) => render_action_palette(f, s, f.area()),
+        AppMode::CommandPalette(s) => render_command_palette(f, s, f.area()),
         AppMode::Opener(s) => render_opener(f, s, f.area()),
         AppMode::AssocEditor(s) => render_assoc_editor(f, s, f.area()),
         AppMode::RemoteConnect(s) => render_remote_connect(f, s, f.area()),
@@ -2291,8 +2295,16 @@ fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: Rect) {
         Span::styled(" [ Cancel ] ", cancel_style),
     ]));
     lines.push(Line::default());
+    let hint_text = if matches!(state.kind, crate::app::RemoteEditKind::Smb)
+        && state.cursor == RemoteEditState::PATH
+        && state.share_picker.is_none()
+    {
+        " Tab:Next  F5:Browse shares  Esc:Cancel "
+    } else {
+        " Tab/Shift-Tab:Next  Enter:Select  Esc:Cancel "
+    };
     lines.push(Line::from(Span::styled(
-        " Tab/Shift-Tab:Next  Enter:Select  Esc:Cancel ",
+        hint_text,
         Style::default().fg(CLR_UNKNOWN).bg(CLR_MENU_DD_BG),
     )));
     safe_render_widget(
@@ -2305,6 +2317,53 @@ fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: Rect) {
             (inner.x + 9 + state.input_cursor as u16).min(inner.x + inner.width.saturating_sub(2));
         let cursor_y = inner.y + state.cursor as u16;
         safe_set_cursor_position(f, cursor_x, cursor_y);
+    }
+
+    // ── SMB share picker dropdown ─────────────────────────────────────────
+    if let Some((ref shares, picker_cur)) = state.share_picker {
+        // Anchor: Share field is at cursor row PATH (4); dropdown sits below it.
+        const PATH_ROW: u16 = crate::app::RemoteEditState::PATH as u16;
+        let dd_x = inner.x + 9;
+        let dd_y = inner.y + PATH_ROW + 1;
+        let dd_w = inner.width.saturating_sub(9).min(40).max(16);
+        let max_visible: usize = 8;
+        let visible = shares.len().min(max_visible);
+        let dd_h = (visible as u16 + 2).min(area.height.saturating_sub(dd_y));
+
+        let dd_area = clamp_rect(
+            area,
+            Rect { x: dd_x, y: dd_y, width: dd_w, height: dd_h },
+        );
+        safe_render_widget(f, Clear, dd_area);
+        let dd_block = Block::default()
+            .title(Span::styled(" Shares ", Style::default().fg(CLR_MENU_BAR_FG).bg(CLR_MENU_DD_BG)))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(CLR_QS_BORDER).bg(CLR_MENU_DD_BG))
+            .style(Style::default().bg(CLR_MENU_DD_BG));
+        let dd_inner = dd_block.inner(dd_area);
+        safe_render_widget(f, dd_block, dd_area);
+
+        let scroll = if picker_cur >= max_visible {
+            picker_cur - max_visible + 1
+        } else {
+            0
+        };
+        for (row, idx) in (scroll..shares.len()).take(dd_inner.height as usize).enumerate() {
+            let selected = idx == picker_cur;
+            let (fg, bg) = if selected {
+                (CLR_MENU_SEL_FG, CLR_MENU_SEL_BG)
+            } else {
+                (CLR_MENU_DD_FG, CLR_MENU_DD_BG)
+            };
+            let marker = if selected { "▶ " } else { "  " };
+            let name = truncate_str(&shares[idx], dd_inner.width.saturating_sub(2) as usize);
+            let padded = format!("{}{:<width$}", marker, name, width = dd_inner.width.saturating_sub(2) as usize);
+            safe_render_widget(
+                f,
+                Paragraph::new(padded).style(Style::default().fg(fg).bg(bg)),
+                Rect { x: dd_inner.x, y: dd_inner.y + row as u16, width: dd_inner.width, height: 1 },
+            );
+        }
     }
 }
 

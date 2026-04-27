@@ -41,33 +41,75 @@ pub(super) struct SmbProfileToml {
 // ---------------------------------------------------------------------------
 
 pub(super) fn smb_rename(smb: &SmbProfile, old_path: &str, new_path: &str) -> Result<()> {
-    let old_url = smb_full_url(smb, old_path);
-    let new_url = smb_full_url(smb, new_path);
     let client = smb_client(smb)?;
     client
-        .rename(&old_url, &new_url)
+        .rename(old_path, new_path)
         .map_err(|e| anyhow::anyhow!("SMB rename error: {e}"))
 }
 
 pub(super) fn smb_mkdir(smb: &SmbProfile, path: &str) -> Result<()> {
-    let url = smb_full_url(smb, path);
     let client = smb_client(smb)?;
     client
-        .mkdir(&url, SmbMode::from(0o755u16))
+        .mkdir(path, SmbMode::from(0o755u16))
         .map_err(|e| anyhow::anyhow!("SMB mkdir error: {e}"))
 }
 
 pub(super) fn smb_delete_file(smb: &SmbProfile, path: &str) -> Result<()> {
-    let url = smb_full_url(smb, path);
     let client = smb_client(smb)?;
     client
-        .unlink(&url)
+        .unlink(path)
         .map_err(|e| anyhow::anyhow!("SMB unlink error: {e}"))
 }
 
 // ---------------------------------------------------------------------------
 // Functions called from the dispatch functions in remote.rs (pub(super))
 // ---------------------------------------------------------------------------
+
+/// Enumerate the available shares on an SMB server (no share required).
+pub(super) fn list_smb_shares(profile: &RemoteProfile) -> Result<Vec<String>> {
+    let RemoteKind::Smb(smb) = &profile.kind else {
+        bail!("Profile is not SMB");
+    };
+    // Build a server-root connection WITHOUT one_share_per_server — that flag
+    // is only appropriate when a specific share is selected; using it at the
+    // server root suppresses the share listing on most Samba/NAS servers.
+    let server_url = format!("smb://{}", smb.host);
+    let mut creds = SmbCredentials::default().server(&server_url);
+    if let Some(user) = smb.user.as_deref().filter(|s| !s.trim().is_empty()) {
+        creds = creds.username(user);
+    }
+    if let Some(password) = smb.password.as_deref().filter(|s| !s.trim().is_empty()) {
+        creds = creds.password(password);
+    }
+    if let Some(workgroup) = smb.workgroup.as_deref().filter(|s| !s.trim().is_empty()) {
+        creds = creds.workgroup(workgroup);
+    }
+    let client = SmbClient::new(creds, SmbOptions::default())
+        .map_err(|e| anyhow::anyhow!("SMB connect to {}: {}", server_url, e))?;
+    // Use list_dir (not list_dirplus) — list_dir uses smbc_readdir which returns
+    // proper SMB entity types (FileShare, IpcShare, etc.) at the server root.
+    // list_dirplus uses smbc_readdirplus which retrieves file stats and does not
+    // work reliably for share enumeration.
+    let dirents = client
+        .list_dir("")
+        .or_else(|_| client.list_dir("/"))
+        .map_err(|e| anyhow::anyhow!("SMB share enumeration on '{}': {}", smb.host, e))?;
+    let mut shares: Vec<String> = dirents
+        .into_iter()
+        .filter(|d| {
+            matches!(
+                d.get_type(),
+                SmbDirentType::FileShare | SmbDirentType::Dir
+            )
+        })
+        .map(|d| d.name().to_owned())
+        .collect();
+    shares.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    if shares.is_empty() {
+        bail!("Server responded but listed no shares (check credentials/permissions)");
+    }
+    Ok(shares)
+}
 
 pub(super) fn list_smb_dir(
     profile: &RemoteProfile,
@@ -78,10 +120,10 @@ pub(super) fn list_smb_dir(
         bail!("Profile is not SMB");
     };
     let client = smb_client(smb)?;
-    let url = smb_full_url(smb, cwd);
+    let smb_path = if cwd == "/" { "" } else { cwd };
     let entries = client
-        .list_dirplus(&url)
-        .map_err(|e| anyhow::anyhow!("SMB list error: {e}"))?;
+        .list_dirplus(smb_path)
+        .map_err(|e| anyhow::anyhow!("SMB list error listing '{}': {} (check credentials and share name)", smb_path, e))?;
     let mut out = Vec::new();
     for dirent in entries {
         let name = dirent.name.clone();
@@ -196,17 +238,15 @@ pub(super) fn delete_smb_dir_recursive(
         if child.is_dir {
             delete_smb_dir_recursive(profile, &child.path)?;
         } else {
-            let url = smb_full_url(smb, &child.path);
             let client = smb_client(smb)?;
             client
-                .unlink(&url)
+                .unlink(&child.path)
                 .map_err(|e| anyhow::anyhow!("SMB unlink error: {e}"))?;
         }
     }
-    let url = smb_full_url(smb, remote_path);
     let client = smb_client(smb)?;
     client
-        .rmdir(&url)
+        .rmdir(remote_path)
         .map_err(|e| anyhow::anyhow!("SMB rmdir error: {e}"))
 }
 
@@ -219,10 +259,9 @@ pub(super) fn remote_smb_stats(
         let RemoteKind::Smb(smb) = &profile.kind else {
             bail!("Profile is not SMB");
         };
-        let url = smb_full_url(smb, remote_path);
         let client = smb_client(smb)?;
         let stat = client
-            .stat(&url)
+            .stat(remote_path)
             .map_err(|e| anyhow::anyhow!("SMB stat error: {e}"))?;
         return Ok(RemoteStats {
             files: 1,
@@ -258,9 +297,11 @@ where
 // ---------------------------------------------------------------------------
 
 fn smb_client(smb: &SmbProfile) -> Result<SmbClient> {
-    let mut creds = SmbCredentials::default().server(format!("smb://{}", smb.host));
-    if let Some(share) = smb.share.as_deref().filter(|s| !s.trim().is_empty()) {
-        creds = creds.share(format!("/{}", share.trim_matches('/')));
+    let server_url = format!("smb://{}", smb.host);
+    let share_info = smb.share.as_deref().unwrap_or("").trim_matches('/');
+    let mut creds = SmbCredentials::default().server(&server_url);
+    if !share_info.is_empty() {
+        creds = creds.share(share_info.to_string());
     }
     if let Some(user) = smb.user.as_deref().filter(|s| !s.trim().is_empty()) {
         creds = creds.username(user);
@@ -271,23 +312,23 @@ fn smb_client(smb: &SmbProfile) -> Result<SmbClient> {
     if let Some(workgroup) = smb.workgroup.as_deref().filter(|s| !s.trim().is_empty()) {
         creds = creds.workgroup(workgroup);
     }
-    SmbClient::new(creds, SmbOptions::default())
-        .map_err(|e| anyhow::anyhow!("SMB connection error: {e}"))
+    let target = if share_info.is_empty() {
+        server_url.clone()
+    } else {
+        format!("{}/{}", server_url, share_info)
+    };
+    SmbClient::new(creds, SmbOptions::default().one_share_per_server(true)).map_err(|e| {
+        anyhow::anyhow!(
+            "SMB connection error connecting to {} (user={}, share={}): {}",
+            target,
+            smb.user.as_deref().unwrap_or("(none)"),
+            if share_info.is_empty() { "(none)" } else { share_info },
+            e
+        )
+    })
 }
 
-fn smb_full_url(smb: &SmbProfile, path: &str) -> String {
-    let share = smb.share.as_deref().unwrap_or("").trim_matches('/');
-    let base = if share.is_empty() {
-        format!("smb://{}", smb.host)
-    } else {
-        format!("smb://{}/{}", smb.host, share)
-    };
-    if path == "/" || path.trim_matches('/').is_empty() {
-        base
-    } else {
-        format!("{}/{}", base, path.trim_start_matches('/'))
-    }
-}
+
 
 fn systemtime_to_local(st: SystemTime) -> Option<DateTime<Local>> {
     let secs = st.duration_since(UNIX_EPOCH).ok()?.as_secs();
@@ -329,10 +370,9 @@ where
     if let Some(parent) = local_target.parent() {
         fs::create_dir_all(parent)?;
     }
-    let url = smb_full_url(smb, remote_path);
     let client = smb_client(smb)?;
     let mut smb_file = client
-        .open_with(&url, SmbOpenOptions::default().read(true))
+        .open_with(remote_path, SmbOpenOptions::default().read(true))
         .map_err(|e| anyhow::anyhow!("SMB open error: {e}"))?;
     let mut data = Vec::new();
     smb_file
@@ -364,9 +404,8 @@ where
         bail!("Profile is not SMB");
     };
     if recursive && local_path.is_dir() {
-        let url = smb_full_url(smb, remote_target);
         let client = smb_client(smb)?;
-        let _ = client.mkdir(&url, SmbMode::from(0o755u16));
+        let _ = client.mkdir(remote_target, SmbMode::from(0o755u16));
         drop(client);
         for entry in fs::read_dir(local_path)? {
             let entry = entry?;
@@ -386,11 +425,10 @@ where
     // File upload
     let data = fs::read(local_path)?;
     let size = data.len() as u64;
-    let url = smb_full_url(smb, remote_target);
     let client = smb_client(smb)?;
     let mut smb_file = client
         .open_with(
-            &url,
+            remote_target,
             SmbOpenOptions::default()
                 .write(true)
                 .create(true)

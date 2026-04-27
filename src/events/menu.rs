@@ -180,7 +180,7 @@ fn mnemonics_for_labels(labels: &[String]) -> Vec<Option<char>> {
         .collect()
 }
 
-fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<bool> {
+pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<bool> {
     match action {
         MenuAction::ViewFile => {
             app.open_viewer();
@@ -291,6 +291,18 @@ fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<bool> {
                 "KKC {} \u{2014} Rust reimplementation of KKC-DOS",
                 env!("CARGO_PKG_VERSION")
             );
+        }
+        MenuAction::NewTab => {
+            app.new_active_tab();
+        }
+        MenuAction::CloseTab => {
+            app.close_active_tab();
+        }
+        MenuAction::NextTab => {
+            app.next_active_tab();
+        }
+        MenuAction::OpenTerminal => {
+            app.mode = AppMode::Terminal;
         }
         MenuAction::Separator => {}
     }

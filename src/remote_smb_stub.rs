@@ -40,6 +40,10 @@ pub(super) struct SmbProfileToml {
 // Stub wrappers — all return an error
 // ---------------------------------------------------------------------------
 
+pub(super) fn list_smb_shares(_profile: &RemoteProfile) -> Result<Vec<String>> {
+    bail!("SMB support not compiled in (rebuild with --features smb)")
+}
+
 pub(super) fn smb_rename(_smb: &SmbProfile, _old: &str, _new: &str) -> Result<()> {
     bail!("SMB support not compiled in (rebuild with --features smb)")
 }

@@ -1,14 +1,16 @@
 mod menu;
+mod palette;
 mod viewer;
 
-use self::menu::handle_menu;
+use self::menu::{execute_menu_action, handle_menu};
+use self::palette::handle_command_palette;
 use self::viewer::{
     handle_viewer, handle_viewer_goto_line, handle_viewer_menu, handle_viewer_plugin_palette,
     handle_viewer_searching,
 };
 use crate::app::{
-    ActionPaletteState, App, AppMode, AssocEditorState, BookmarkListItem, ConfigState,
-    ConfirmAction, InputAction, InputDialog, MenuState, OpenerState, RemoteEditKind,
+    ActionPaletteState, App, AppMode, AssocEditorState, BookmarkListItem, CommandPaletteState,
+    ConfigState, ConfirmAction, InputAction, InputDialog, MenuState, OpenerState, RemoteEditKind,
 };
 use crate::archive::supports_archive_navigation;
 use crate::config::SortMode;
@@ -48,6 +50,7 @@ pub fn handle_event(app: &mut App, event: Event) -> Result<bool> {
         AppMode::Config(_) => return handle_config(app, key),
         AppMode::Plugins(_) => return handle_plugins(app, key),
         AppMode::ActionPalette(_) => return handle_action_palette(app, key),
+        AppMode::CommandPalette(_) => return handle_command_palette(app, key),
         AppMode::Opener(_) => return handle_opener(app, key),
         AppMode::AssocEditor(_) => return handle_assoc_editor(app, key),
         AppMode::RemoteConnect(_) => return handle_remote_connect(app, key),
@@ -178,6 +181,10 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
                 } else {
                     app.mode = AppMode::ActionPalette(state);
                 }
+                return Ok(false);
+            }
+            KeyCode::Char('p') => {
+                app.mode = AppMode::CommandPalette(CommandPaletteState::default());
                 return Ok(false);
             }
             KeyCode::Char('t') => {
@@ -1772,6 +1779,80 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
     let AppMode::RemoteEdit(ref mut s) = app.mode else {
         return Ok(false);
     };
+
+    // ── Share picker navigation (intercepts all keys when open) ──────────
+    if s.share_picker.is_some() {
+        match key.code {
+            KeyCode::Esc | KeyCode::F(5) => {
+                s.share_picker = None;
+            }
+            KeyCode::Up => {
+                if let Some((_, ref mut cur)) = s.share_picker {
+                    *cur = cur.saturating_sub(1);
+                }
+            }
+            KeyCode::Down => {
+                if let Some((ref shares, ref mut cur)) = s.share_picker {
+                    *cur = (*cur + 1).min(shares.len().saturating_sub(1));
+                }
+            }
+            KeyCode::Enter => {
+                if let Some((ref shares, cur)) = s.share_picker {
+                    s.fields[crate::app::RemoteEditState::PATH] = shares[cur].clone();
+                    s.input_cursor = s.fields[crate::app::RemoteEditState::PATH].len();
+                }
+                s.share_picker = None;
+                // Move cursor to Password field after selecting share
+                s.cursor = crate::app::RemoteEditState::SECRET;
+                s.sync_cursor();
+            }
+            _ => {}
+        }
+        return Ok(false);
+    }
+
+    // ── F5: fetch SMB share list ──────────────────────────────────────────
+    if key.code == KeyCode::F(5)
+        && matches!(s.kind, crate::app::RemoteEditKind::Smb)
+        && s.cursor == crate::app::RemoteEditState::PATH
+    {
+        let host = s.fields[crate::app::RemoteEditState::HOST].trim().to_string();
+        if host.is_empty() {
+            app.status.text = "Enter host first".into();
+            return Ok(false);
+        }
+        let user = s.fields[crate::app::RemoteEditState::USER].trim();
+        let workgroup = s.fields[crate::app::RemoteEditState::PORT].trim();
+        let password = s.fields[crate::app::RemoteEditState::SECRET].trim();
+        let smb = crate::remote::SmbProfile {
+            host: host.clone(),
+            user: if user.is_empty() { None } else { Some(user.to_string()) },
+            workgroup: if workgroup.is_empty() { None } else { Some(workgroup.to_string()) },
+            password: if password.is_empty() { None } else { Some(password.to_string()) },
+            share: None,
+            path: None,
+        };
+        let profile = crate::remote::RemoteProfile {
+            name: "tmp".into(),
+            source: crate::remote::RemoteSource::UserToml,
+            kind: crate::remote::RemoteKind::Smb(smb),
+        };
+        match crate::remote::list_smb_shares(&profile) {
+            Ok(shares) => {
+                let current = s.fields[crate::app::RemoteEditState::PATH].trim().to_lowercase();
+                let cur = shares
+                    .iter()
+                    .position(|sh| sh.to_lowercase() == current)
+                    .unwrap_or(0);
+                s.share_picker = Some((shares, cur));
+            }
+            Err(e) => {
+                app.status.text = format!("Share list: {}", e);
+            }
+        }
+        return Ok(false);
+    }
+
     match key.code {
         KeyCode::Esc => app.mode = AppMode::RemoteConnect(crate::app::RemoteConnectState::load()),
         KeyCode::Tab | KeyCode::Down => {

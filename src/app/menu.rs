@@ -55,6 +55,10 @@ pub enum MenuAction {
     Associations,
     Help,
     About,
+    NewTab,
+    CloseTab,
+    NextTab,
+    OpenTerminal,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

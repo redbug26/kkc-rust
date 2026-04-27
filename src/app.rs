@@ -1,9 +1,11 @@
+mod command_palette;
 mod menu;
 mod panel_tabs;
 
+pub use self::command_palette::{CommandPaletteState, PALETTE_DATA, PaletteEntry};
 pub use self::menu::{
-    MENU_DATA, MENU_HEADERS, MenuAction, MenuEntry, MenuState, ViewerMenuKind, ViewerMenuState,
-    ViewerPluginPaletteState,
+    MENU_DATA, MENU_HEADERS, MenuAction, MenuEntry, MenuState,
+    ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,
 };
 use self::panel_tabs::{PanelTabs, panel_config_for_save, restore_panel_side};
 use crate::config::{Config, SortMode};
@@ -97,6 +99,8 @@ pub enum AppMode {
     Plugins(PluginsState),
     /// Context actions returned by Lua action plugins (Ctrl-A).
     ActionPalette(ActionPaletteState),
+    /// Command palette (Ctrl-P) – searchable list of all menu commands.
+    CommandPalette(CommandPaletteState),
     /// Choose from multiple registered openers.
     Opener(OpenerState),
     /// File-type association editor (Options > Associations).
@@ -449,6 +453,8 @@ pub struct RemoteEditState {
     pub input_cursor: usize,
     /// Original name when editing an existing profile (for rename support).
     pub edit_original_name: Option<String>,
+    /// Fetched share list for SMB connections (populated on F5), with cursor.
+    pub share_picker: Option<(Vec<String>, usize)>,
 }
 
 impl RemoteEditState {
@@ -480,6 +486,7 @@ impl RemoteEditState {
             cursor: 0,
             input_cursor,
             edit_original_name: None,
+            share_picker: None,
         }
     }
 
@@ -525,6 +532,7 @@ impl RemoteEditState {
             fields,
             cursor: 0,
             edit_original_name: Some(profile.name.clone()),
+            share_picker: None,
         }
     }
 

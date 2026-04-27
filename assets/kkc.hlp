@@ -86,14 +86,16 @@
     C-F3         Sort by date.
     C-F4         Sort by size.
     C-F5         No sorting (original order).
+    C-A          Open plugin action palette (Lua action plugins).
     C-D          <bookmarks;Directory bookmarks>.
-    C-F          <Remote;Remote connect> (SFTP / IMAP).
+    C-F          <Remote;Remote connect> (SFTP / IMAP / SMB).
     C-H          Toggle display of hidden files.
+    C-N          Switch to next tab.
     C-R          Reload directory listing.
     C-T          Open new tab in active panel.
-    C-W          Close current tab.
-    C-TAB / C-N  Switch to next tab.
     C-U / ESC    Switch to terminal / command line.
+    C-W          Close current tab.
+    C-TAB        Switch to next tab (alternative).
 
 % Alt shortcuts
 

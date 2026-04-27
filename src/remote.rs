@@ -366,6 +366,11 @@ pub fn list_dir(profile: &RemoteProfile, cwd: &str, show_hidden: bool) -> Result
     }
 }
 
+/// Enumerate SMB shares available on the server (SMB only; fails for other kinds).
+pub fn list_smb_shares(profile: &RemoteProfile) -> Result<Vec<String>> {
+    smb_impl::list_smb_shares(profile)
+}
+
 pub fn join_remote(parent: &str, name: &str) -> String {
     if parent == "/" {
         format!("/{}", name)
