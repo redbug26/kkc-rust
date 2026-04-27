@@ -70,6 +70,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry { category: "Tabs", label: "Close tab",           shortcut: Some("Ctrl+W"),   fn_name: "close_tab",          action: MenuAction::CloseTab },
     PaletteEntry { category: "Tabs", label: "Next tab",            shortcut: Some("Ctrl+N"),   fn_name: "next_tab",           action: MenuAction::NextTab },
     PaletteEntry { category: "Tools", label: "Open terminal",      shortcut: Some("Ctrl+U"),   fn_name: "open_terminal",      action: MenuAction::OpenTerminal },
+    PaletteEntry { category: "Tools", label: "Capture GIF frame",  shortcut: Some("Ctrl+G"),   fn_name: "capture_gif",        action: MenuAction::CaptureGif },
 ];
 
 // ---------------------------------------------------------------------------

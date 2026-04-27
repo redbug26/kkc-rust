@@ -5,6 +5,7 @@ mod copy;
 mod events;
 mod file_ops;
 mod file_types;
+mod gif_recorder;
 mod help;
 mod idf;
 mod panel;
@@ -77,7 +78,33 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
             last_kitty_image = None;
         }
 
-        terminal.draw(|f| ui::render(f, &app))?;
+        let completed = terminal.draw(|f| ui::render(f, &app))?;
+
+        // Ctrl+G GIF capture: append the just-rendered frame to <data_dir>/screen.gif
+        if app.capture_gif {
+            app.capture_gif = false;
+            let gif_path = gif_recorder::gif_path();
+            let frame_count = if gif_path.exists() {
+                // Count existing frames to use in the notification.
+                std::fs::File::open(&gif_path)
+                    .ok()
+                    .and_then(|f| {
+                        use image::{AnimationDecoder, codecs::gif::GifDecoder};
+                        use std::io::BufReader;
+                        GifDecoder::new(BufReader::new(f)).ok().map(|d| d.into_frames().count())
+                    })
+                    .unwrap_or(0)
+            } else {
+                0
+            };
+            match gif_recorder::capture_frame(completed.buffer, &gif_path) {
+                Ok(()) => {
+                    app.status.text =
+                        format!("GIF: frame {} → {}", frame_count + 1, gif_path.display()).into();
+                }
+                Err(e) => app.notify(format!("GIF capture failed: {e}")),
+            }
+        }
 
         let term_size = terminal.size()?;
         let term_area = Rect {

@@ -59,6 +59,7 @@ pub enum MenuAction {
     CloseTab,
     NextTab,
     OpenTerminal,
+    CaptureGif,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

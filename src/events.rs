@@ -32,6 +32,16 @@ pub fn handle_event(app: &mut App, event: Event) -> Result<bool> {
         return Ok(false);
     };
 
+    // Global shortcut available in every mode.
+    if key.modifiers.contains(KeyModifiers::CONTROL)
+        && !key.modifiers.contains(KeyModifiers::ALT)
+        && !key.modifiers.contains(KeyModifiers::SHIFT)
+        && key.code == KeyCode::Char('g')
+    {
+        app.capture_gif = true;
+        return Ok(false);
+    }
+
     match &app.mode {
         AppMode::Help(_) => return handle_help(app, key),
         AppMode::Viewer(_) => return handle_viewer(app, key),

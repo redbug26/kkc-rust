@@ -89,8 +89,10 @@
     C-A          Open plugin action palette (Lua action plugins).
     C-D          <bookmarks;Directory bookmarks>.
     C-F          <Remote;Remote connect> (SFTP / IMAP / SMB).
+    C-G          Append a GIF frame of the current screen to data/screen.gif.
     C-H          Toggle display of hidden files.
     C-N          Switch to next tab.
+    C-P          Open command palette.
     C-R          Reload directory listing.
     C-T          Open new tab in active panel.
     C-U / ESC    Switch to terminal / command line.

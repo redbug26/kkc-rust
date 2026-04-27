@@ -813,6 +813,9 @@ pub struct App {
     /// Set to true after spawning an external program so the main loop can
     /// call terminal.clear() before the next draw.
     pub needs_clear: bool,
+    /// Set to true when the user presses Ctrl+G; the main loop will capture
+    /// the rendered frame to a GIF and reset this flag.
+    pub capture_gif: bool,
     /// Persistent pseudo-terminal state (survives mode switches and quit/reopen).
     pub terminal: TerminalState,
     /// Streaming output from a running external command.
@@ -879,6 +882,7 @@ impl App {
             copy_scan: None,
             copy_task: None,
             needs_clear: false,
+            capture_gif: false,
             terminal: TerminalState {
                 history: term_history,
                 output: term_output,

@@ -304,6 +304,9 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
         MenuAction::OpenTerminal => {
             app.mode = AppMode::Terminal;
         }
+        MenuAction::CaptureGif => {
+            app.capture_gif = true;
+        }
         MenuAction::Separator => {}
     }
     Ok(false)
