@@ -2148,7 +2148,7 @@ fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, area: Rect) 
     safe_render_widget(f, List::new(items), list_area);
     safe_render_widget(
         f,
-        Paragraph::new(" Type:Filter  Enter:Connect  F6:Edit  F7:SFTP  F8:IMAP  Esc:Cancel ")
+        Paragraph::new(" Type:Filter  Enter:Connect  Tab:SSH  F6:Edit  F7:SFTP  F8:IMAP  Esc:Cancel ")
             .style(Style::default().fg(CLR_BUTTON_FG).bg(CLR_STATUS_BG)),
         hint_area,
     );

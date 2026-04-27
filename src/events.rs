@@ -15,7 +15,7 @@ use crate::config::SortMode;
 use crate::copy::CopyDialogState;
 use crate::remote::{
     download_to_temp, join_remote, load_profiles, make_dir as remote_make_dir,
-    rename_path as remote_rename_path, upload_into_dir,
+    rename_path as remote_rename_path, upload_into_dir, RemoteKind, RemoteSource,
 };
 use anyhow::Result;
 use crossterm::{
@@ -1623,6 +1623,9 @@ fn handle_assoc_editor(app: &mut App, key: KeyEvent) -> Result<bool> {
 fn handle_remote_connect(app: &mut App, key: KeyEvent) -> Result<bool> {
     match key.code {
         KeyCode::Esc => app.mode = AppMode::Browse,
+        KeyCode::Tab => {
+            launch_ssh_for_profile(app)?;
+        }
         KeyCode::Up => {
             if let AppMode::RemoteConnect(ref mut s) = app.mode {
                 s.move_prev();
@@ -1677,6 +1680,54 @@ fn handle_remote_connect(app: &mut App, key: KeyEvent) -> Result<bool> {
         _ => {}
     }
     Ok(false)
+}
+
+fn launch_ssh_for_profile(app: &mut App) -> Result<()> {
+    let profile = if let AppMode::RemoteConnect(ref s) = app.mode {
+        s.filtered_indices()
+            .get(s.match_pos)
+            .and_then(|idx| s.items.get(*idx))
+            .cloned()
+    } else {
+        None
+    };
+    let Some(profile) = profile else {
+        return Ok(());
+    };
+    let sftp = match &profile.kind {
+        RemoteKind::Sftp(sftp) => sftp.clone(),
+        RemoteKind::Imap(_) => return Ok(()),
+    };
+    let mut args: Vec<String> = vec!["ssh".to_string()];
+    match profile.source {
+        RemoteSource::SshConfig => {
+            args.push(profile.name.clone());
+        }
+        RemoteSource::UserToml => {
+            if let Some(ref identity) = sftp.identity_file {
+                args.push("-i".to_string());
+                args.push(identity.clone());
+            }
+            if let Some(port) = sftp.port {
+                args.push("-p".to_string());
+                args.push(port.to_string());
+            }
+            let host = sftp.host.clone().unwrap_or_else(|| profile.name.clone());
+            let target = if let Some(ref user) = sftp.user {
+                format!("{}@{}", user, host)
+            } else {
+                host
+            };
+            args.push(target);
+        }
+    }
+    disable_raw_mode()?;
+    execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture)?;
+    let _ = std::process::Command::new(&args[0]).args(&args[1..]).status();
+    enable_raw_mode()?;
+    execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
+    app.needs_clear = true;
+    Ok(())
 }
 
 fn handle_remote_connecting(app: &mut App, key: KeyEvent) -> Result<bool> {
