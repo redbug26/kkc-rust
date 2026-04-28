@@ -288,10 +288,7 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
             app.open_help();
         }
         MenuAction::About => {
-            app.set_status(format!(
-                "KKC {} — Rust reimplementation of KKC-DOS",
-                env!("CARGO_PKG_VERSION")
-            ));
+            app.mode = AppMode::About(crate::about::AboutState::new());
         }
         MenuAction::NewTab => {
             app.new_active_tab();

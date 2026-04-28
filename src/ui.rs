@@ -242,6 +242,7 @@ pub fn render(f: &mut Frame, app: &App) {
             render_quicksearch_palette(f, app, f.area());
         }
         AppMode::Terminal => render_terminal(f, app, f.area()),
+        AppMode::About(state) => crate::about::render_about(f, state, f.area()),
         _ => {}
     }
 }

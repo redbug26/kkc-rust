@@ -13,6 +13,7 @@ use crate::copy::{
     CopyDestination, CopyDialogState, CopyJob, CopyProgressState, CopyScanTask, CopySource,
     CopyTask, CopyTaskMessage, count_local_files, spawn_copy_scan, spawn_copy_task,
 };
+use crate::about::AboutState;
 use crate::file_ops::{self, CopyOptions};
 use crate::help::HelpState;
 use crate::idf::render_idf_card;
@@ -119,6 +120,8 @@ pub enum AppMode {
     CopyProgress(CopyProgressState),
     /// Pseudo-terminal mode (Ctrl-U / Esc toggle).
     Terminal,
+    /// About / credits dialog (animated).
+    About(AboutState),
 }
 
 // ---------------------------------------------------------------------------

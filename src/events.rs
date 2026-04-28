@@ -69,10 +69,16 @@ pub fn handle_event(app: &mut App, event: Event) -> Result<bool> {
         AppMode::RemoteAddMenu(_) => return handle_remote_add_menu(app, key),
         AppMode::RemoteConnecting(_) => return handle_remote_connecting(app, key),
         AppMode::Terminal => return crate::terminal::handle_terminal(app, key),
+        AppMode::About(_) => return handle_about(app, key),
         AppMode::Browse => {}
     }
 
     handle_browse(app, key)
+}
+
+fn handle_about(app: &mut App, _key: KeyEvent) -> Result<bool> {
+    app.mode = AppMode::Browse;
+    Ok(false)
 }
 
 fn handle_copy_progress(app: &mut App, key: KeyEvent) -> Result<bool> {

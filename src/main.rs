@@ -1,3 +1,4 @@
+mod about;
 mod app;
 mod archive;
 mod config;
@@ -84,6 +85,12 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
             app.needs_clear = false;
             terminal.clear()?;
             last_kitty_image = None;
+        }
+
+        // Advance About animation tick every frame (~60 fps)
+        if let AppMode::About(ref mut state) = app.mode {
+            state.tick = state.tick.wrapping_add(1);
+            state.step_worm();
         }
 
         let completed = terminal.draw(|f| ui::render(f, &app))?;
