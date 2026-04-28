@@ -14,6 +14,7 @@ use std::fs;
 use std::cell::Cell;
 use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -31,6 +32,68 @@ use self::viewer_search::parse_hex_query;
 fn viewer_positions() -> &'static Mutex<HashMap<PathBuf, ViewerPosition>> {
     static POSITIONS: OnceLock<Mutex<HashMap<PathBuf, ViewerPosition>>> = OnceLock::new();
     POSITIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+// ---------------------------------------------------------------------------
+// Debug logger
+// ---------------------------------------------------------------------------
+
+static DEBUG_LOG_ENABLED: AtomicBool = AtomicBool::new(false);
+static DEBUG_LOG_PATH: OnceLock<PathBuf> = OnceLock::new();
+
+/// Call once at startup (after loading config) to enable/disable debug logging.
+/// Creates the parent directory if needed and writes a startup marker.
+pub fn init_debug_log(enabled: bool, path: PathBuf) {
+    // Always create the parent dir so the path is usable as soon as logging is
+    // turned on (either now or later via set_debug_log_enabled).
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    DEBUG_LOG_PATH.get_or_init(|| path);
+    DEBUG_LOG_ENABLED.store(enabled, Ordering::Relaxed);
+    if enabled {
+        debug_log(&format!(
+            "=== kkc debug log started (log path: {}) ===",
+            DEBUG_LOG_PATH.get().unwrap().display()
+        ));
+    }
+}
+
+/// Toggle debug logging at runtime (e.g. from the config panel).
+pub fn set_debug_log_enabled(enabled: bool) {
+    let was = DEBUG_LOG_ENABLED.swap(enabled, Ordering::Relaxed);
+    if enabled && !was {
+        debug_log(&format!(
+            "=== kkc debug log enabled (log path: {}) ===",
+            DEBUG_LOG_PATH
+                .get()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "<unset>".into())
+        ));
+    }
+}
+
+fn debug_log(msg: &str) {
+    if !DEBUG_LOG_ENABLED.load(Ordering::Relaxed) {
+        return;
+    }
+    let Some(path) = DEBUG_LOG_PATH.get() else {
+        return;
+    };
+    use std::fs::OpenOptions;
+    use std::time::SystemTime;
+    let ts = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(f, "[{ts}] {msg}");
+    }
+}
+
+/// Returns the path to the debug log file (regardless of whether logging is enabled).
+pub fn debug_log_path() -> Option<PathBuf> {
+    DEBUG_LOG_PATH.get().cloned()
 }
 
 #[derive(Debug)]
@@ -171,7 +234,40 @@ impl Viewer {
     }
 
     pub fn open(path: &Path, wrap: bool) -> Result<Self> {
-        let raw = fs::read(path).with_context(|| format!("Reading {}", path.display()))?;
+        Self::open_with_limit(path, wrap, None)
+    }
+
+    /// Like `open`, but caps the bytes read to `max_bytes`.
+    /// Used by quick-preview so that large files don't stall the UI on every
+    /// cursor movement.
+    pub fn open_preview(path: &Path, wrap: bool) -> Result<Self> {
+        const MAX_QUICK_PREVIEW_BYTES: usize = 512 * 1024; // 512 KB
+        debug_log(&format!(
+            "open_preview: {} (limit=512 KB)",
+            path.display()
+        ));
+        Self::open_with_limit(path, wrap, Some(MAX_QUICK_PREVIEW_BYTES))
+    }
+
+    fn open_with_limit(path: &Path, wrap: bool, max_bytes: Option<usize>) -> Result<Self> {
+        debug_log(&format!(
+            "open_with_limit: {} max_bytes={:?}",
+            path.display(),
+            max_bytes
+        ));
+        let raw = if let Some(limit) = max_bytes {
+            use std::io::Read;
+            let mut file =
+                std::fs::File::open(path).with_context(|| format!("Reading {}", path.display()))?;
+            let file_len = file.metadata().map(|m| m.len() as usize).unwrap_or(limit);
+            let cap = file_len.min(limit);
+            let mut buf = vec![0u8; cap];
+            let n = file.read(&mut buf).with_context(|| format!("Reading {}", path.display()))?;
+            buf.truncate(n);
+            buf
+        } else {
+            fs::read(path).with_context(|| format!("Reading {}", path.display()))?
+        };
         let line_feed = LineFeedMode::Mixed;
         let encoding = EncodingMode::Cp437;
         let image = detect_image_info(path, &raw);
@@ -208,7 +304,9 @@ impl Viewer {
         if let Some(plugin_name) = crate::plugins::default_viewer_plugin_for_path(path) {
             viewer.set_viewer_plugin(plugin_name);
         }
-        viewer.restore_position();
+        if max_bytes.is_none() {
+            viewer.restore_position();
+        }
         viewer.rebuild_matches();
         Ok(viewer)
     }

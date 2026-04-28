@@ -172,6 +172,7 @@ pub struct ConfigState {
     pub show_hidden: bool,
     pub color_by_type: bool,
     pub show_fkey_bar: bool,
+    pub debug_log: bool,
     // text fields
     pub editor: String,
     pub pager: String,
@@ -191,6 +192,7 @@ impl ConfigState {
             show_hidden: cfg.left.show_hidden,
             color_by_type: cfg.color_by_type,
             show_fkey_bar: cfg.show_fkey_bar,
+            debug_log: cfg.debug_log,
             editor: cfg.editor.clone(),
             pager: cfg.pager.clone(),
             dir_history_max: cfg.dir_history_max.to_string(),
@@ -209,6 +211,7 @@ impl ConfigState {
         cfg.right.show_hidden = self.show_hidden;
         cfg.color_by_type = self.color_by_type;
         cfg.show_fkey_bar = self.show_fkey_bar;
+        cfg.debug_log = self.debug_log;
         if !self.editor.trim().is_empty() {
             cfg.editor = self.editor.trim().to_owned();
         }
@@ -222,8 +225,8 @@ impl ConfigState {
         }
     }
 
-    pub const NUM_CHECKBOXES: usize = 8;
-    pub const NUM_TOTAL: usize = 13; // 8 + 3 + OK + Cancel
+    pub const NUM_CHECKBOXES: usize = 9;
+    pub const NUM_TOTAL: usize = 14; // 9 + 3 + OK + Cancel
 }
 
 // ---------------------------------------------------------------------------
@@ -1929,7 +1932,7 @@ impl App {
                 self.quick_preview = Some(v);
             }
             Some(entry) => {
-                if let Ok(mut v) = Viewer::open(&entry.path, wrap) {
+                if let Ok(mut v) = Viewer::open_preview(&entry.path, wrap) {
                     v.zoomed = true;
                     if let Some(mode) = self.quick_preview_forced_mode {
                         v.set_mode(mode);

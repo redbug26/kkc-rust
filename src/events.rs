@@ -1458,8 +1458,8 @@ fn handle_config(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(false);
     };
 
-    let total = ConfigState::NUM_TOTAL; // 8 booleans + 3 text + OK + Cancel
-    let n_bool = ConfigState::NUM_CHECKBOXES; // 8
+    let total = ConfigState::NUM_TOTAL; // 9 booleans + 3 text + OK + Cancel
+    let n_bool = ConfigState::NUM_CHECKBOXES; // 9
     let n_text = 3;
     let ok_idx = n_bool + n_text; // 11
     let cancel_idx = n_bool + n_text + 1; // 12
@@ -1497,8 +1497,9 @@ fn handle_config(app: &mut App, key: KeyEvent) -> Result<bool> {
                 5 => cs.show_hidden = !cs.show_hidden,
                 6 => cs.color_by_type = !cs.color_by_type,
                 7 => cs.show_fkey_bar = !cs.show_fkey_bar,
+                8 => cs.debug_log = !cs.debug_log,
                 // text fields: Enter moves focus to next
-                8 | 9 | 10 => {
+                9 | 10 | 11 => {
                     if let AppMode::Config(ref mut cs) = app.mode {
                         if cs.cursor + 1 < total {
                             cs.cursor += 1;
@@ -1513,10 +1514,21 @@ fn handle_config(app: &mut App, key: KeyEvent) -> Result<bool> {
                     // Sync hidden flag on live panels
                     app.left.show_hidden = app.config.left.show_hidden;
                     app.right.show_hidden = app.config.right.show_hidden;
+                    // Apply debug-log toggle immediately
+                    crate::viewer::set_debug_log_enabled(app.config.debug_log);
                     let _ = app.left.reload();
                     let _ = app.right.reload();
                     match app.save_config() {
-                        Ok(_) => app.status.text = "Config saved".into(),
+                        Ok(_) => {
+                            if app.config.debug_log {
+                                let log_path = crate::viewer::debug_log_path()
+                                    .map(|p| p.display().to_string())
+                                    .unwrap_or_else(|| "?".into());
+                                app.status.text = format!("Config saved — debug log: {}", log_path);
+                            } else {
+                                app.status.text = "Config saved".into();
+                            }
+                        }
                         Err(e) => app.status.text = format!("Save error: {}", e),
                     }
                 }
@@ -1531,9 +1543,9 @@ fn handle_config(app: &mut App, key: KeyEvent) -> Result<bool> {
         KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
             if let AppMode::Config(ref mut cs) = app.mode {
                 match cs.cursor {
-                    8 => cs.editor.push(ch),
-                    9 => cs.pager.push(ch),
-                    10 => cs.dir_history_max.push(ch),
+                    9 => cs.editor.push(ch),
+                    10 => cs.pager.push(ch),
+                    11 => cs.dir_history_max.push(ch),
                     _ => {}
                 }
             }
@@ -1541,13 +1553,13 @@ fn handle_config(app: &mut App, key: KeyEvent) -> Result<bool> {
         KeyCode::Backspace => {
             if let AppMode::Config(ref mut cs) = app.mode {
                 match cs.cursor {
-                    8 => {
+                    9 => {
                         cs.editor.pop();
                     }
-                    9 => {
+                    10 => {
                         cs.pager.pop();
                     }
-                    10 => {
+                    11 => {
                         cs.dir_history_max.pop();
                     }
                     _ => {}

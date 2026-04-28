@@ -54,6 +54,14 @@ fn teardown_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Resul
 
 fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
     let config = Config::load().unwrap_or_default();
+    // Initialise the viewer debug logger before any Viewer is created.
+    {
+        let log_path = config::project_dirs()
+            .ok()
+            .map(|d| d.cache_dir().join("debug.log"))
+            .unwrap_or_else(|| PathBuf::from("/tmp/kkc_debug.log"));
+        viewer::init_debug_log(config.debug_log, log_path);
+    }
     let mut app = App::new(config);
     let mut last_kitty_image: Option<(PathBuf, ratatui::layout::Rect, bool)> = None;
 

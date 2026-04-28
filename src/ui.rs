@@ -3761,7 +3761,7 @@ fn format_mode(mode: u32) -> String {
 
 fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
     const W: u16 = 58;
-    const H: u16 = 22;
+    const H: u16 = 23;
     let x = area.x + (area.width.saturating_sub(W)) / 2;
     let y = area.y + (area.height.saturating_sub(H)) / 2;
     let popup = clamp_rect(
@@ -3807,7 +3807,7 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
     safe_render_widget(f, block, popup);
 
     // ── Checkboxes ────────────────────────────────────────────────────────
-    const LABELS: [&str; 8] = [
+    const LABELS: [&str; 9] = [
         "Confirm exit",
         "Confirm delete",
         "Auto reload",
@@ -3816,6 +3816,7 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
         "Show hidden files",
         "Color by type",
         "Show F-key bar",
+        "Debug log",
     ];
     let values = [
         cs.confirm_exit,
@@ -3826,6 +3827,7 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
         cs.show_hidden,
         cs.color_by_type,
         cs.show_fkey_bar,
+        cs.debug_log,
     ];
 
     for (i, (label, val)) in LABELS.iter().zip(values.iter()).enumerate() {
@@ -3858,7 +3860,7 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
     }
 
     // ── Separator ──────────────────────────────────────────────────────────
-    let sep_y = inner.y + 8;
+    let sep_y = inner.y + 9;
     if sep_y < inner.y + inner.height {
         let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
         safe_render_widget(
@@ -3874,7 +3876,7 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
     }
 
     // ── Text fields ────────────────────────────────────────────────────────
-    const TEXT_LABELS: [(&str, usize); 3] = [("Editor", 8), ("Pager", 9), ("History max", 10)];
+    const TEXT_LABELS: [(&str, usize); 3] = [("Editor", 9), ("Pager", 10), ("History max", 11)];
     let text_values = [
         cs.editor.as_str(),
         cs.pager.as_str(),
@@ -3884,7 +3886,7 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
     for (row_offset, ((label, cursor_idx), value)) in
         TEXT_LABELS.iter().zip(text_values.iter()).enumerate()
     {
-        let row = inner.y + 9 + row_offset as u16 * 3;
+        let row = inner.y + 10 + row_offset as u16 * 3;
         if row + 1 >= inner.y + inner.height {
             break;
         }
@@ -3950,8 +3952,8 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
     }
 
     // ── OK / Cancel buttons ────────────────────────────────────────────────
-    let ok_idx = ConfigState::NUM_CHECKBOXES + 3; // 11
-    let cancel_idx = ConfigState::NUM_CHECKBOXES + 3 + 1; // 12
+    let ok_idx = ConfigState::NUM_CHECKBOXES + 3; // 12
+    let cancel_idx = ConfigState::NUM_CHECKBOXES + 3 + 1; // 13
     let btn_y = inner.y + inner.height.saturating_sub(2);
     let btn_w: u16 = 10;
     let gap: u16 = 4;

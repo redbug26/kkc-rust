@@ -330,7 +330,7 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
                 let mut v = if entry.is_dir || entry.name == ".." {
                     Viewer::placeholder(&entry.path, "Folder", app.config.viewer.word_wrap)
                 } else {
-                    match Viewer::open(&entry.path, app.config.viewer.word_wrap) {
+                    match Viewer::open_preview(&entry.path, app.config.viewer.word_wrap) {
                         Ok(v) => v,
                         Err(e) => {
                             app.notify(format!("Cannot open preview: {}", e));

@@ -236,6 +236,11 @@ pub struct Config {
     /// File-type associations (extension → opener commands).
     #[serde(default)]
     pub file_assoc: Vec<FileAssoc>,
+
+    // --- Debug ---
+    /// Write debug messages to a log file (disabled by default).
+    #[serde(default)]
+    pub debug_log: bool,
 }
 
 impl Default for Config {
@@ -265,6 +270,7 @@ impl Default for Config {
             dir_history: Vec::new(),
             bookmarks: default_bookmarks(),
             file_assoc: Vec::new(),
+            debug_log: false,
         }
     }
 }
