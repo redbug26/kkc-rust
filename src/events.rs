@@ -656,7 +656,7 @@ fn open_wildcard_dialog(prompt: &str, select: bool) -> AppMode {
 
 fn handle_quicksearch(app: &mut App, key: KeyEvent) -> Result<bool> {
     match key.code {
-        // Confirm: jump to highlighted match
+        // Confirm: jump to highlighted match, or enter directory
         KeyCode::Enter => {
             let entry_idx = {
                 let p = app.active_panel();
@@ -668,6 +668,14 @@ fn handle_quicksearch(app: &mut App, key: KeyEvent) -> Result<bool> {
                 app.active_panel_mut().cursor = idx;
             }
             app.mode = AppMode::Browse;
+            // If the selected entry is a directory, navigate into it
+            if let Some(entry) = app.active_panel().current_entry().cloned() {
+                if entry.name == ".." {
+                    app.go_parent()?;
+                } else if entry.is_dir {
+                    app.enter_dir(entry.path.clone())?;
+                }
+            }
         }
         // Cancel: restore original cursor
         KeyCode::Esc => {
