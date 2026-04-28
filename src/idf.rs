@@ -158,7 +158,21 @@ fn file_attrs(meta: &fs::Metadata) -> String {
 }
 
 fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
-    let data = fs::read(path)?;
+    // Most format magic bytes are in the first few hundred bytes.
+    // The deepest probe is ISO9660 at offset 0x8001 (32 769 B), so 64 KB
+    // is always sufficient.  Capping the read here avoids stalling the UI
+    // when the cursor lands on a large unrecognised file for the first time.
+    const MAX_PROBE_BYTES: usize = 64 * 1024;
+    let data = {
+        use std::io::Read;
+        let mut file = std::fs::File::open(path)?;
+        let file_len = file.metadata().map(|m| m.len() as usize).unwrap_or(MAX_PROBE_BYTES);
+        let cap = file_len.min(MAX_PROBE_BYTES);
+        let mut buf = vec![0u8; cap];
+        let n = file.read(&mut buf)?;
+        buf.truncate(n);
+        buf
+    };
     let ext = path
         .extension()
         .and_then(|s| s.to_str())
