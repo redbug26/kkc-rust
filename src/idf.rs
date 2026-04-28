@@ -335,7 +335,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             IdfKind::Bitmap,
             None,
             None,
-            wh_lines(w, h),
+            png_info_lines(w, h, &data),
         ))
     } else if data.starts_with(b"RIFF") && data.get(8..12) == Some(b"WEBP") {
         let (w, h) = webp_size(&data).unwrap_or((0, 0));
@@ -525,6 +525,15 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             vec![],
         ))
+    } else if data.starts_with(b"SQLite format 3\x00") {
+        Some(info(
+            "application/vnd.sqlite3",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(b"\x7FELF") {
         Some(info(
             "application/x-elf",
@@ -658,6 +667,15 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             "application/mbox",
             path,
             IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if ext == "dmg" {
+        Some(info(
+            "application/x-apple-diskimage",
+            path,
+            IdfKind::Archive,
             None,
             None,
             vec![],
@@ -796,6 +814,8 @@ fn format_from_mime_type(mime_type: &str) -> Option<&'static str> {
         "application/x-amstrad-cpc-dsk" => Some("Amstrad CPC DSK image"),
         "application/x-c64-d64" => Some("Commodore 64 D64 disk image"),
         "application/x-bittorrent" => Some("BitTorrent metadata"),
+        "application/x-sqlite3" => Some("SQLite database"),
+        "application/x-apple-diskimage" => Some("Apple Disk Image"),
         "text/vcard" => Some("vCard contact"),
         "application/json" => Some("JSON document"),
         "image/svg+xml" => Some("SVG vector image"),
@@ -918,6 +938,25 @@ fn is_office_mime_type(mime_type: &str) -> bool {
             | "application/vnd.oasis.opendocument.spreadsheet"
             | "application/vnd.oasis.opendocument.presentation"
     )
+}
+
+fn png_info_lines(w: u32, h: u32, data: &[u8]) -> Vec<String> {
+    let mut lines = wh_lines(w, h);
+    // PNG IHDR: signature(8) + length(4) + "IHDR"(4) + width(4) + height(4) + bit_depth(1) + color_type(1)
+    if data.len() >= 26 {
+        let bit_depth = data[24];
+        let color_type = data[25];
+        let color_desc = match color_type {
+            0 => "Grayscale",
+            2 => "RGB",
+            3 => "Indexed",
+            4 => "Gray+Alpha",
+            6 => "RGBA",
+            _ => "Unknown",
+        };
+        lines.push(format!(" {}-bit {}", bit_depth, color_desc));
+    }
+    lines
 }
 
 fn wh_lines(w: u32, h: u32) -> Vec<String> {

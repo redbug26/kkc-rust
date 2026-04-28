@@ -1,7 +1,31 @@
 use crate::app::{App, AppMode, ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState};
-use crate::viewer::{EncodingMode, LineFeedMode, MaskKind, PreprocOpKind, ViewMode};
+use crate::viewer::{EncodingMode, LineFeedMode, MaskKind, PreprocOpKind, ViewMode, Viewer};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+/// Number of display rows available for viewer content in full-screen mode.
+/// Full-screen viewer: terminal height − 1 (footer) − 2 (border) = height − 3.
+fn viewer_display_rows() -> usize {
+    crossterm::terminal::size()
+        .map(|(_, h)| (h as usize).saturating_sub(3).max(1))
+        .unwrap_or(20)
+}
+
+/// Full-screen viewer text-area width (term_width − 2 borders).
+fn viewer_text_width(v: &Viewer) -> usize {
+    crossterm::terminal::size()
+        .map(|(w, _)| {
+            let ln = v.line_number_width();
+            (w as usize).saturating_sub(2 + ln).max(1)
+        })
+        .unwrap_or(78)
+}
+
+/// Logical lines per page, accounting for word-wrap in text/ansi modes.
+fn viewer_page_size(v: &Viewer) -> usize {
+    let rows = viewer_display_rows();
+    v.page_lines_for(rows, viewer_text_width(v))
+}
 
 /// Convert a viewer key event to a plugin-facing key string.
 /// Returns `None` for Ctrl-modified keys and unrecognised key codes.
@@ -98,6 +122,8 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(false);
     };
 
+    let page_size = viewer_page_size(v);
+
     if key.modifiers.contains(KeyModifiers::CONTROL) {
         match key.code {
             KeyCode::Left => v.scroll_left(40),
@@ -106,9 +132,9 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
             _ => match key.code {
                 KeyCode::Up => v.scroll_up(),
                 KeyCode::Down => v.scroll_down(),
-                KeyCode::PageUp => v.page_up(20),
-                KeyCode::PageDown => v.page_down(20),
-                KeyCode::End => v.goto_end(20),
+                KeyCode::PageUp => v.page_up(page_size),
+                KeyCode::PageDown => v.page_down(page_size),
+                KeyCode::End => v.goto_end(page_size),
                 KeyCode::Char('n') => v.search_next(),
                 KeyCode::Char('N') => v.search_prev(),
                 _ => {}
@@ -124,10 +150,10 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
         match key.code {
             KeyCode::Up => v.scroll_up(),
             KeyCode::Down => v.scroll_down(),
-            KeyCode::PageUp => v.page_up(20),
-            KeyCode::PageDown => v.page_down(20),
+            KeyCode::PageUp => v.page_up(page_size),
+            KeyCode::PageDown | KeyCode::Char(' ') => v.page_down(page_size),
             KeyCode::Home => v.goto_start(),
-            KeyCode::End => v.goto_end(20),
+            KeyCode::End => v.goto_end(page_size),
             KeyCode::Left => v.scroll_left(8),
             KeyCode::Right => v.scroll_right(8),
             KeyCode::F(2) => v.toggle_wrap(),
@@ -646,7 +672,13 @@ pub(super) fn handle_viewer_goto_line(app: &mut App, key: KeyEvent) -> Result<bo
             else {
                 return Ok(false);
             };
-            if let Ok(n) = input.parse::<usize>() {
+            if matches!(v.mode, ViewMode::Hex) {
+                // Hex mode: input is a byte offset in hex
+                if let Ok(offset) = usize::from_str_radix(&input, 16) {
+                    let bpr = v.hex_bytes_per_row.get().max(1);
+                    v.goto_line(offset / bpr);
+                }
+            } else if let Ok(n) = input.parse::<usize>() {
                 if n > 0 {
                     v.goto_line(n - 1);
                 }
@@ -658,9 +690,12 @@ pub(super) fn handle_viewer_goto_line(app: &mut App, key: KeyEvent) -> Result<bo
                 input.pop();
             }
         }
-        KeyCode::Char(ch) if ch.is_ascii_digit() => {
-            if let AppMode::ViewerGotoLine(_, ref mut input) = app.mode {
-                input.push(ch);
+        KeyCode::Char(ch) if ch.is_ascii_hexdigit() => {
+            if let AppMode::ViewerGotoLine(ref v, ref mut input) = app.mode {
+                // In text mode restrict to decimal digits
+                if matches!(v.mode, ViewMode::Hex) || ch.is_ascii_digit() {
+                    input.push(ch);
+                }
             }
         }
         _ => {}

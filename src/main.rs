@@ -107,8 +107,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
             };
             match gif_recorder::capture_frame(completed.buffer, &gif_path) {
                 Ok(()) => {
-                    app.status.text =
-                        format!("GIF: frame {} → {}", frame_count + 1, gif_path.display()).into();
+                    app.set_status(format!("GIF: frame {} → {}", frame_count + 1, gif_path.display()));
                 }
                 Err(e) => app.notify(format!("GIF capture failed: {e}")),
             }

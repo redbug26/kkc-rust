@@ -37,7 +37,7 @@ pub fn handle_event(app: &mut App, event: Event) -> Result<bool> {
     if key.modifiers.contains(KeyModifiers::CONTROL)
         && !key.modifiers.contains(KeyModifiers::ALT)
         && !key.modifiers.contains(KeyModifiers::SHIFT)
-        && key.code == KeyCode::Char('g')
+        && key.code == KeyCode::Char('b')
     {
         app.capture_gif = true;
         return Ok(false);
@@ -198,7 +198,7 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
             }
             KeyCode::Char('r') => {
                 app.reload_panels();
-                app.status.text = "Reloaded".into();
+                app.set_status("Reloaded");
                 return Ok(false);
             }
             KeyCode::Char('h') => {
@@ -302,7 +302,7 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
         KeyCode::Tab => {
             if app.quick_preview.is_some() {
                 app.quick_preview_active = true;
-            } else if app.file_id_preview {
+            } else if app.file_preview_info {
                 app.file_id_active = true;
                 app.file_id_scroll = 0;
             } else {
@@ -1001,7 +1001,7 @@ fn handle_copy_dialog(app: &mut App, key: KeyEvent) -> Result<bool> {
             KeyCode::Esc | KeyCode::Enter => {
                 app.cancel_copy_scan();
                 app.mode = AppMode::Browse;
-                app.status.text = "Copy aborted".into();
+                app.set_status("Copy aborted");
             }
             _ => {}
         }
@@ -1373,13 +1373,13 @@ fn handle_plugins(app: &mut App, key: KeyEvent) -> Result<bool> {
                 return Ok(false);
             };
             if dir.as_os_str().is_empty() {
-                app.status.text = "Plugin directory unavailable".into();
+                app.set_status("Plugin directory unavailable");
             } else {
                 app.mode = AppMode::Browse;
                 if let Err(e) = app.enter_dir(dir.clone()) {
-                    app.status.text = format!("Cannot enter plugin directory: {}", e);
+                    app.set_status(format!("Cannot enter plugin directory: {}", e));
                 } else {
-                    app.status.text = format!("Plugin directory: {}", dir.display());
+                    app.set_status(format!("Plugin directory: {}", dir.display()));
                 }
             }
         }
@@ -1524,12 +1524,12 @@ fn handle_config(app: &mut App, key: KeyEvent) -> Result<bool> {
                                 let log_path = crate::viewer::debug_log_path()
                                     .map(|p| p.display().to_string())
                                     .unwrap_or_else(|| "?".into());
-                                app.status.text = format!("Config saved — debug log: {}", log_path);
+                                app.set_status(format!("Config saved — debug log: {}", log_path));
                             } else {
-                                app.status.text = "Config saved".into();
+                                app.set_status("Config saved");
                             }
                         }
-                        Err(e) => app.status.text = format!("Save error: {}", e),
+                        Err(e) => app.set_status(format!("Save error: {}", e)),
                     }
                 }
                 c if c == cancel_idx => {
@@ -1892,7 +1892,7 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
     {
         let host = s.fields[crate::app::RemoteEditState::HOST].trim().to_string();
         if host.is_empty() {
-            app.status.text = "Enter host first".into();
+            app.set_status("Enter host first");
             return Ok(false);
         }
         let user = s.fields[crate::app::RemoteEditState::USER].trim();
@@ -1921,7 +1921,7 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
                 s.share_picker = Some((shares, cur));
             }
             Err(e) => {
-                app.status.text = format!("Share list: {}", e);
+                app.set_status(format!("Share list: {}", e));
             }
         }
         return Ok(false);
@@ -1990,10 +1990,11 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
                             app.mode =
                                 AppMode::RemoteConnect(crate::app::RemoteConnectState::load())
                         }
-                        Err(e) => app.status.text = format!("Cannot save connection: {}", e),
+                        Err(e) => app.set_status(format!("Cannot save connection: {}", e)),
                     }
                 } else {
-                    app.status.text = s.kind.validation_message().into();
+                    let msg = s.kind.validation_message().to_string();
+                    app.set_status(msg);
                 }
             } else {
                 s.cursor = (s.cursor + 1).min(crate::app::RemoteEditState::CANCEL);
@@ -2112,7 +2113,7 @@ fn handle_help(app: &mut App, key: KeyEvent) -> Result<bool> {
                     .map(str::to_string);
                 if let Some(target) = target {
                     if !state.open_topic_by_name(&target) {
-                        app.status.text = format!("Unknown help topic: {}", target);
+                        app.set_status(format!("Unknown help topic: {}", target));
                     }
                 }
             }

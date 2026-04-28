@@ -792,6 +792,8 @@ pub struct SearchState {
 #[derive(Debug, Default)]
 pub struct StatusMessage {
     pub text: String,
+    /// When the current text was last set (used for auto-clear after 30 s).
+    pub set_at: Option<std::time::Instant>,
 }
 
 // ---------------------------------------------------------------------------
@@ -805,7 +807,7 @@ pub struct App {
     left_tabs: PanelTabs,
     right_tabs: PanelTabs,
     pub active: ActivePanel,
-    pub file_id_preview: bool,
+    pub file_preview_info: bool,
     pub file_id_active: bool,
     pub file_id_scroll: u16,
     pub mode: AppMode,
@@ -874,7 +876,7 @@ impl App {
             left_tabs,
             right_tabs,
             active: ActivePanel::Left,
-            file_id_preview: false,
+            file_preview_info: false,
             file_id_active: false,
             file_id_scroll: 0,
             mode: if let Some(msg) = plugin_status {
@@ -992,11 +994,11 @@ impl App {
             ActivePanel::Left => PanelTabs::new_tab(&mut self.left, &mut self.left_tabs),
             ActivePanel::Right => PanelTabs::new_tab(&mut self.right, &mut self.right_tabs),
         }
-        self.status.text = format!(
+        self.set_status(format!(
             "Tab {}/{}",
             self.active_panel_tab_index() + 1,
             self.active_panel_tab_count()
-        );
+        ));
     }
 
     pub fn close_active_tab(&mut self) {
@@ -1005,11 +1007,11 @@ impl App {
             ActivePanel::Right => PanelTabs::close_tab(&mut self.right, &mut self.right_tabs),
         };
         if closed {
-            self.status.text = format!(
+            self.set_status(format!(
                 "Tab {}/{}",
                 self.active_panel_tab_index() + 1,
                 self.active_panel_tab_count()
-            );
+            ));
         } else {
             self.notify("Cannot close last tab");
         }
@@ -1021,11 +1023,11 @@ impl App {
             ActivePanel::Right => PanelTabs::next_tab(&mut self.right, &mut self.right_tabs),
         };
         if switched {
-            self.status.text = format!(
+            self.set_status(format!(
                 "Tab {}/{}",
                 self.active_panel_tab_index() + 1,
                 self.active_panel_tab_count()
-            );
+            ));
         }
     }
 
@@ -1297,7 +1299,7 @@ impl App {
         return_state: RemoteConnectState,
     ) {
         self.pending_remote_cwd = None;
-        self.file_id_preview = false;
+        self.file_preview_info = false;
         self.remote_connect_return = Some(return_state);
         let protocol_label = profile.protocol().label();
         self.remote_connect_task = Some(spawn_remote_connect_task(
@@ -1313,7 +1315,7 @@ impl App {
 
     pub fn start_remote_connect_with_cwd(&mut self, profile: RemoteProfile, target_cwd: String) {
         self.pending_remote_cwd = Some(target_cwd);
-        self.file_id_preview = false;
+        self.file_preview_info = false;
         self.remote_connect_return = None;
         let protocol_label = profile.protocol().label();
         self.remote_connect_task = Some(spawn_remote_connect_task(
@@ -1437,6 +1439,13 @@ impl App {
     pub fn poll_background_tasks(&mut self) {
         self.poll_running_cmd();
         self.poll_search();
+        // Auto-clear status bar text after 30 seconds.
+        if let Some(set_at) = self.status.set_at {
+            if set_at.elapsed() >= std::time::Duration::from_secs(30) {
+                self.status.text.clear();
+                self.status.set_at = None;
+            }
+        }
         let mut remote_connect_result: Option<RemoteConnectMessage> = None;
         if let Some(task) = &self.remote_connect_task {
             match task.rx.try_recv() {
@@ -1906,14 +1915,20 @@ impl App {
                 entry.path.clone()
             };
             match Viewer::open(&view_path, self.config.viewer.word_wrap) {
-                Ok(v) => self.mode = AppMode::Viewer(v),
+                Ok(mut v) => {
+                    // Image mode always zooms; for other modes, honour the config default.
+                    if !matches!(v.mode, ViewMode::Image) {
+                        v.zoomed = self.config.viewer.default_zoom;
+                    }
+                    self.mode = AppMode::Viewer(v);
+                }
                 Err(e) => self.notify(format!("Cannot open viewer: {}", e)),
             }
         }
     }
 
     pub fn open_file_id_view(&mut self) {
-        self.file_id_preview = !self.file_id_preview;
+        self.file_preview_info = !self.file_preview_info;
         self.file_id_active = false;
         self.file_id_scroll = 0;
     }
@@ -2008,11 +2023,19 @@ impl App {
         card
     }
 
+    /// Set the status bar text and record its timestamp for auto-clear.
+    pub fn set_status(&mut self, text: impl Into<String>) {
+        self.status.text = text.into();
+        self.status.set_at = Some(std::time::Instant::now());
+    }
+
     pub fn run_with_busy<T, F>(&mut self, message: &str, op: F) -> Result<T>
     where
         F: FnOnce(&mut Self) -> Result<T>,
     {
         let previous_status = self.status.text.clone();
+        // Don't update set_at for transient busy messages so the original
+        // 30-second window is preserved when the previous message is restored.
         self.status.text = message.to_string();
         let _ = draw_busy_status(message, self.config.show_fkey_bar);
         let result = op(self);

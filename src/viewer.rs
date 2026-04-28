@@ -567,6 +567,38 @@ impl Viewer {
         self.scroll = self.line_count().saturating_sub(height.max(1));
     }
 
+    /// How many logical lines fit in `display_rows` terminal rows from the
+    /// current scroll position, accounting for word-wrap.
+    ///
+    /// In non-wrap modes every logical line is exactly one row, so the result
+    /// equals `display_rows`. In wrap text/ansi mode a long logical line
+    /// occupies `ceil(len / text_width)` rows, so fewer logical lines fit.
+    pub fn page_lines_for(&self, display_rows: usize, text_width: usize) -> usize {
+        if display_rows == 0 {
+            return 1;
+        }
+        if !self.wrap
+            || !matches!(self.mode, ViewMode::Text | ViewMode::Ansi)
+            || self.viewer_plugin.is_some()
+            || text_width == 0
+        {
+            return display_rows;
+        }
+        let lines = self.current_plain_lines();
+        let mut rows_used = 0usize;
+        let mut count = 0usize;
+        for i in self.scroll..lines.len() {
+            let line_chars = lines[i].chars().count();
+            let rows_for_line = ((line_chars + text_width - 1) / text_width).max(1);
+            if rows_used + rows_for_line > display_rows {
+                break;
+            }
+            rows_used += rows_for_line;
+            count += 1;
+        }
+        count.max(1)
+    }
+
     /// Jump to a 0-based line index, clamped to the valid range.
     pub fn goto_line(&mut self, line: usize) {
         self.scroll = line.min(self.line_count().saturating_sub(1));

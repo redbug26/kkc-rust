@@ -54,7 +54,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     // ── Tools ────────────────────────────────────────────────────────────
     PaletteEntry { category: "Tools", label: "Search files…",      shortcut: Some("Alt+F7"),   fn_name: "search_files",       action: MenuAction::SearchFiles },
     PaletteEntry { category: "Tools", label: "Remote connect…",    shortcut: Some("Ctrl+F"),   fn_name: "remote_connect",     action: MenuAction::RemoteConnect },
-    PaletteEntry { category: "Tools", label: "File ID preview",    shortcut: Some("Alt+F4"),   fn_name: "file_id_preview",    action: MenuAction::FileIdPreview },
+    PaletteEntry { category: "Tools", label: "File Info preview",    shortcut: Some("Alt+F4"),   fn_name: "file_preview_info",  action: MenuAction::FileIdPreview },
     PaletteEntry { category: "Tools", label: "Bookmarks",          shortcut: Some("Ctrl+D"),   fn_name: "dir_bookmarks",      action: MenuAction::DirBookmarks },
     // ── Options ──────────────────────────────────────────────────────────
     PaletteEntry { category: "Options", label: "Setup…",           shortcut: None,             fn_name: "setup",              action: MenuAction::Setup },
@@ -70,7 +70,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry { category: "Tabs", label: "Close tab",           shortcut: Some("Ctrl+W"),   fn_name: "close_tab",          action: MenuAction::CloseTab },
     PaletteEntry { category: "Tabs", label: "Next tab",            shortcut: Some("Ctrl+N"),   fn_name: "next_tab",           action: MenuAction::NextTab },
     PaletteEntry { category: "Tools", label: "Open terminal",      shortcut: Some("Ctrl+U"),   fn_name: "open_terminal",      action: MenuAction::OpenTerminal },
-    PaletteEntry { category: "Tools", label: "Capture GIF frame",  shortcut: Some("Ctrl+G"),   fn_name: "capture_gif",        action: MenuAction::CaptureGif },
+    PaletteEntry { category: "Tools", label: "Capture GIF frame",  shortcut: Some("Ctrl+B"),       fn_name: "capture_gif",     action: MenuAction::CaptureGif },
     // ── OS integration ───────────────────────────────────────────────────
     PaletteEntry { category: "File",  label: "Open in OS",           shortcut: None,             fn_name: "open_in_os",         action: MenuAction::OpenInOs },
     PaletteEntry { category: "File",  label: "Open folder in OS",    shortcut: None,             fn_name: "open_folder_in_os",  action: MenuAction::OpenFolderInOs },

@@ -145,6 +145,9 @@ pub struct ViewerConfig {
     /// Tab width (in spaces).
     #[serde(default = "tab_default")]
     pub tab_width: usize,
+    /// Open the viewer in zoomed (full-screen) mode by default.
+    #[serde(default = "t")]
+    pub default_zoom: bool,
 }
 
 impl Default for ViewerConfig {
@@ -152,6 +155,7 @@ impl Default for ViewerConfig {
         Self {
             word_wrap: true,
             tab_width: 4,
+            default_zoom: true,
         }
     }
 }

@@ -209,7 +209,7 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
         }
         MenuAction::SwapPanels => {
             app.swap_panels();
-            app.status.text = "Panels swapped".into();
+            app.set_status("Panels swapped");
         }
         MenuAction::SortName => {
             app.set_sort(SortMode::Name);
@@ -233,7 +233,7 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
         }
         MenuAction::Reload => {
             app.reload_panels();
-            app.status.text = "Reloaded".into();
+            app.set_status("Reloaded");
         }
         MenuAction::GoToPath => {
             let current = app.active_panel().display_path();
@@ -281,17 +281,17 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
             app.mode = AppMode::AssocEditor(AssocEditorState::from_config(&app.config));
         }
         MenuAction::SaveConfig => match app.save_config() {
-            Ok(_) => app.status.text = "Config saved".into(),
-            Err(e) => app.status.text = format!("Save error: {}", e),
+            Ok(_) => app.set_status("Config saved"),
+            Err(e) => app.set_status(format!("Save error: {}", e)),
         },
         MenuAction::Help => {
             app.open_help();
         }
         MenuAction::About => {
-            app.status.text = format!(
-                "KKC {} \u{2014} Rust reimplementation of KKC-DOS",
+            app.set_status(format!(
+                "KKC {} — Rust reimplementation of KKC-DOS",
                 env!("CARGO_PKG_VERSION")
-            );
+            ));
         }
         MenuAction::NewTab => {
             app.new_active_tab();

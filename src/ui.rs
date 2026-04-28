@@ -193,7 +193,7 @@ pub fn render(f: &mut Frame, app: &App) {
         panel_chunks[0],
         left_active,
         app.config.color_by_type,
-        app.file_id_preview && !left_active,
+        app.file_preview_info && !left_active,
         if left_active { None } else { app.quick_preview.as_ref() },
         app.quick_preview_active && !left_active,
         app.left_panel_tab_index(),
@@ -207,7 +207,7 @@ pub fn render(f: &mut Frame, app: &App) {
         panel_chunks[2],
         !left_active,
         app.config.color_by_type,
-        app.file_id_preview && left_active,
+        app.file_preview_info && left_active,
         if !left_active { None } else { app.quick_preview.as_ref() },
         app.quick_preview_active && left_active,
         app.right_panel_tab_index(),
@@ -878,13 +878,18 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, goto_input: Option<
     } else if let Some(input) = goto_input
         && show_footer
     {
-        let bar_text = format!(" Goto line: {}_ ", input);
+        let (label, label_len) = if matches!(v.mode, ViewMode::Hex) {
+            (" Goto offset (hex): ", 21u16)
+        } else {
+            (" Goto line: ", 13u16)
+        };
+        let bar_text = format!("{}{}_", label, input);
         f.render_widget(
             Paragraph::new(bar_text).style(Style::default().fg(Color::Black).bg(Color::LightCyan)),
             footer_area,
         );
         let cx =
-            (footer_area.x + 12 + input.len() as u16).min(footer_area.x + footer_area.width - 1);
+            (footer_area.x + label_len + input.len() as u16).min(footer_area.x + footer_area.width - 1);
         safe_set_cursor_position(f, cx, footer_area.y);
     } else if show_footer {
         let help = Paragraph::new(" F10:Close  F2:Wrap  F3:LnFeed  F4:Mode  F5:Zoom  F6:Prepro  F7:Search  F8:Enc  F9:Syntax  ^G:Goto ")
