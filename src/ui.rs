@@ -130,24 +130,24 @@ pub fn render(f: &mut Frame, app: &App) {
 
     match &app.mode {
         AppMode::Viewer(v) => {
-            render_viewer(f, v, false, None, f.area());
+            render_viewer(f, v, false, None, f.area(), true, true, None);
             return;
         }
         AppMode::ViewerSearching(v) => {
-            render_viewer(f, v, true, None, f.area());
+            render_viewer(f, v, true, None, f.area(), true, true, None);
             return;
         }
         AppMode::ViewerGotoLine(v, input) => {
-            render_viewer(f, v, false, Some(input), f.area());
+            render_viewer(f, v, false, Some(input), f.area(), true, true, None);
             return;
         }
         AppMode::ViewerMenu(v, menu) => {
-            render_viewer(f, v, false, None, f.area());
+            render_viewer(f, v, false, None, f.area(), true, true, None);
             render_viewer_menu(f, v, menu, f.area());
             return;
         }
         AppMode::ViewerPluginPalette(v, state) => {
-            render_viewer(f, v, false, None, f.area());
+            render_viewer(f, v, false, None, f.area(), true, true, None);
             render_viewer_plugin_palette(f, state, f.area());
             return;
         }
@@ -194,6 +194,8 @@ pub fn render(f: &mut Frame, app: &App) {
         left_active,
         app.config.color_by_type,
         app.file_id_preview && !left_active,
+        if left_active { None } else { app.quick_preview.as_ref() },
+        app.quick_preview_active && !left_active,
         app.left_panel_tab_index(),
         app.left_panel_tab_count(),
     );
@@ -206,6 +208,8 @@ pub fn render(f: &mut Frame, app: &App) {
         !left_active,
         app.config.color_by_type,
         app.file_id_preview && left_active,
+        if !left_active { None } else { app.quick_preview.as_ref() },
+        app.quick_preview_active && left_active,
         app.right_panel_tab_index(),
         app.right_panel_tab_count(),
     );
@@ -600,21 +604,27 @@ pub fn kitty_image_area(v: &Viewer, area: Rect) -> Option<Rect> {
     }
 }
 
-fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, goto_input: Option<&str>, area: Rect) {
-    let footer_area = clamp_rect(
-        area,
-        Rect {
+fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, goto_input: Option<&str>, area: Rect, show_footer: bool, active: bool, quick_preview_label: Option<&str>) {
+    let (footer_area, viewer_host) = if show_footer {
+        let footer = clamp_rect(
+            area,
+            Rect {
+                x: area.x,
+                y: area.y + area.height.saturating_sub(1),
+                width: area.width,
+                height: 1,
+            },
+        );
+        let host = Rect {
             x: area.x,
-            y: area.y + area.height.saturating_sub(1),
+            y: area.y,
             width: area.width,
-            height: 1,
-        },
-    );
-    let viewer_host = Rect {
-        x: area.x,
-        y: area.y,
-        width: area.width,
-        height: area.height.saturating_sub(1),
+            height: area.height.saturating_sub(1),
+        };
+        (footer, host)
+    } else {
+        // Embedded (quick-preview): no footer row, use full area for content
+        (Rect::default(), area)
     };
     let area = viewer_area(v, viewer_host);
     let file_name = v.path.file_name().unwrap_or_default().to_string_lossy();
@@ -680,10 +690,45 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, goto_input: Option<
         match_info,
     );
 
+    let (border_style, border_type, title_span) = if let Some(label) = quick_preview_label {
+        // Quick-preview embedded panel: custom compact title
+        if active {
+            (
+                Style::default().fg(CLR_HEADER_FG).add_modifier(Modifier::BOLD),
+                BorderType::Thick,
+                Span::styled(
+                    format!(" {} ", label),
+                    Style::default().fg(CLR_HEADER_FG).add_modifier(Modifier::BOLD),
+                ),
+            )
+        } else {
+            (
+                Style::default().fg(CLR_PANEL_BORDER_DIM),
+                BorderType::Rounded,
+                Span::styled(
+                    format!(" {} ", label),
+                    Style::default().fg(CLR_PANEL_BORDER_DIM),
+                ),
+            )
+        }
+    } else if active {
+        (
+            Style::default().fg(CLR_PANEL_BORDER).add_modifier(Modifier::BOLD),
+            BorderType::Thick,
+            Span::raw(title.clone()),
+        )
+    } else {
+        (
+            Style::default().fg(CLR_PANEL_BORDER_DIM),
+            BorderType::Rounded,
+            Span::raw(title.clone()),
+        )
+    };
     let block = Block::default()
-        .title(title)
+        .title(title_span)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_PANEL_BORDER));
+        .border_type(border_type)
+        .border_style(border_style);
     let inner = block.inner(area);
     f.render_widget(block, area);
     f.render_widget(
@@ -736,9 +781,11 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, goto_input: Option<
                 .style(Style::default().bg(Color::Black)),
             inner,
         );
-        let help = Paragraph::new(" F10:Close  F4:Mode  F5:Zoom ")
-            .style(Style::default().fg(Color::Black).bg(Color::Cyan));
-        f.render_widget(help, footer_area);
+        if show_footer {
+            let help = Paragraph::new(" F10:Close  F4:Mode  F5:Zoom ")
+                .style(Style::default().fg(Color::Black).bg(Color::Cyan));
+            f.render_widget(help, footer_area);
+        }
         return;
     }
 
@@ -811,7 +858,7 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, goto_input: Option<
         f.render_widget(list, inner);
     }
 
-    if searching {
+    if searching && show_footer {
         let label = format!(" Search: {}_ ", v.search);
         let found_count = v.matches.len();
         let found_label = if v.search.is_empty() {
@@ -828,7 +875,9 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, goto_input: Option<
         let cx =
             (footer_area.x + 9 + v.search.len() as u16).min(footer_area.x + footer_area.width - 1);
         safe_set_cursor_position(f, cx, footer_area.y);
-    } else if let Some(input) = goto_input {
+    } else if let Some(input) = goto_input
+        && show_footer
+    {
         let bar_text = format!(" Goto line: {}_ ", input);
         f.render_widget(
             Paragraph::new(bar_text).style(Style::default().fg(Color::Black).bg(Color::LightCyan)),
@@ -837,7 +886,7 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, goto_input: Option<
         let cx =
             (footer_area.x + 12 + input.len() as u16).min(footer_area.x + footer_area.width - 1);
         safe_set_cursor_position(f, cx, footer_area.y);
-    } else {
+    } else if show_footer {
         let help = Paragraph::new(" F10:Close  F2:Wrap  F3:LnFeed  F4:Mode  F5:Zoom  F6:Prepro  F7:Search  F8:Enc  F9:Syntax  ^G:Goto ")
             .style(Style::default().fg(Color::Black).bg(Color::Cyan));
         f.render_widget(help, footer_area);

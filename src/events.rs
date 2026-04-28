@@ -15,6 +15,7 @@ use crate::app::{
 use crate::archive::supports_archive_navigation;
 use crate::config::SortMode;
 use crate::copy::CopyDialogState;
+use crate::viewer::ViewMode;
 use crate::remote::{
     download_to_temp, join_remote, load_profiles, make_dir as remote_make_dir,
     rename_path as remote_rename_path, upload_into_dir, RemoteKind, RemoteSource,
@@ -92,6 +93,41 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     let shift = key.modifiers.contains(KeyModifiers::SHIFT);
     let alt = key.modifiers.contains(KeyModifiers::ALT);
+
+    // Quick-preview panel focus mode: Up/Down scroll the viewer
+    if app.quick_preview_active {
+        match key.code {
+            KeyCode::Tab | KeyCode::Esc => {
+                app.quick_preview_active = false;
+            }
+            KeyCode::Up => {
+                app.quick_preview_scroll_up();
+            }
+            KeyCode::Down => {
+                app.quick_preview_scroll_down();
+            }
+            KeyCode::F(4) => {
+                // Cycle forced mode: Auto → Text → Hex → Ansi → Image → Auto
+                app.quick_preview_forced_mode = match app.quick_preview_forced_mode {
+                    None => Some(ViewMode::Text),
+                    Some(ViewMode::Text) => Some(ViewMode::Hex),
+                    Some(ViewMode::Hex) => Some(ViewMode::Ansi),
+                    Some(ViewMode::Ansi) => Some(ViewMode::Image),
+                    Some(ViewMode::Image) => None,
+                };
+                if let Some(mode) = app.quick_preview_forced_mode {
+                    if let Some(v) = app.quick_preview.as_mut() {
+                        v.set_mode(mode);
+                    }
+                } else {
+                    // Auto: re-open current file so it detects the mode naturally
+                    app.refresh_quick_preview();
+                }
+            }
+            _ => {}
+        }
+        return Ok(false);
+    }
 
     // FileID panel focus mode: all navigation keys scroll the IDF card
     if app.file_id_active {
@@ -241,24 +277,32 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
         // --- Navigation ---
         KeyCode::Up => {
             app.active_panel_mut().move_up();
+            app.refresh_quick_preview();
         }
         KeyCode::Down => {
             app.active_panel_mut().move_down();
+            app.refresh_quick_preview();
         }
         KeyCode::PageUp => {
             app.active_panel_mut().move_page_up(20);
+            app.refresh_quick_preview();
         }
         KeyCode::PageDown => {
             app.active_panel_mut().move_page_down(20);
+            app.refresh_quick_preview();
         }
         KeyCode::Home => {
             app.active_panel_mut().move_home();
+            app.refresh_quick_preview();
         }
         KeyCode::End => {
             app.active_panel_mut().move_end();
+            app.refresh_quick_preview();
         }
         KeyCode::Tab => {
-            if app.file_id_preview {
+            if app.quick_preview.is_some() {
+                app.quick_preview_active = true;
+            } else if app.file_id_preview {
                 app.file_id_active = true;
                 app.file_id_scroll = 0;
             } else {

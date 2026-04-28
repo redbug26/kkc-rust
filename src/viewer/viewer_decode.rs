@@ -86,7 +86,7 @@ pub(super) fn ansi_lines(
     }
 }
 
-pub(super) fn hex_line(offset: usize, chunk: &[u8], encoding: EncodingMode) -> String {
+pub(super) fn hex_line(offset: usize, chunk: &[u8], bpr: usize, encoding: EncodingMode) -> String {
     let hex = chunk
         .iter()
         .map(|b| format!("{:02X}", b))
@@ -102,7 +102,8 @@ pub(super) fn hex_line(offset: usize, chunk: &[u8], encoding: EncodingMode) -> S
             }
         })
         .collect();
-    format!("{:08X}  {:<47}  {}", offset, hex, ascii)
+    let pad = bpr.saturating_mul(3).saturating_sub(1).max(1);
+    format!("{:08X}  {:<width$}  {}", offset, hex, ascii, width = pad)
 }
 
 fn split_line_bytes(input: &[u8], mode: LineFeedMode) -> Vec<Vec<u8>> {

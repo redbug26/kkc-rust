@@ -71,6 +71,10 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry { category: "Tabs", label: "Next tab",            shortcut: Some("Ctrl+N"),   fn_name: "next_tab",           action: MenuAction::NextTab },
     PaletteEntry { category: "Tools", label: "Open terminal",      shortcut: Some("Ctrl+U"),   fn_name: "open_terminal",      action: MenuAction::OpenTerminal },
     PaletteEntry { category: "Tools", label: "Capture GIF frame",  shortcut: Some("Ctrl+G"),   fn_name: "capture_gif",        action: MenuAction::CaptureGif },
+    // ── OS integration ───────────────────────────────────────────────────
+    PaletteEntry { category: "File",  label: "Open in OS",           shortcut: None,             fn_name: "open_in_os",         action: MenuAction::OpenInOs },
+    PaletteEntry { category: "File",  label: "Open folder in OS",    shortcut: None,             fn_name: "open_folder_in_os",  action: MenuAction::OpenFolderInOs },
+    PaletteEntry { category: "File",  label: "Quick Preview",        shortcut: None,             fn_name: "quick_preview",      action: MenuAction::QuickPreview },
 ];
 
 // ---------------------------------------------------------------------------

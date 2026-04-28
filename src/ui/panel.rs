@@ -8,14 +8,42 @@ pub(super) fn render_panel_or_file_id(
     active: bool,
     color_by_type: bool,
     show_file_id: bool,
+    quick_preview: Option<&crate::viewer::Viewer>,
+    quick_preview_active: bool,
     tab_index: usize,
     tab_count: usize,
 ) {
     if show_file_id {
         render_file_id_panel(f, app, area);
+    } else if let Some(viewer) = quick_preview {
+        render_quick_preview(f, app, viewer, area, quick_preview_active);
     } else {
         render_panel(f, panel, area, active, color_by_type, tab_index, tab_count);
     }
+}
+
+fn render_quick_preview(
+    f: &mut Frame,
+    app: &App,
+    viewer: &crate::viewer::Viewer,
+    area: Rect,
+    active: bool,
+) {
+    use crate::viewer::ViewMode;
+    // Build a short title that shows the current mode and, when focused, the F4 hint.
+    let mode_str = match app.quick_preview_forced_mode {
+        None => format!("Auto:{}", viewer.mode_label()),
+        Some(ViewMode::Text) => "Text".to_string(),
+        Some(ViewMode::Hex) => "Hex".to_string(),
+        Some(ViewMode::Ansi) => "Ansi".to_string(),
+        Some(ViewMode::Image) => "Image".to_string(),
+    };
+    let label = if active {
+        format!("[{}]  F4:mode  \u{2191}\u{2193}  Tab=exit", mode_str)
+    } else {
+        format!("[{}]  Tab=focus", mode_str)
+    };
+    super::render_viewer(f, viewer, false, None, area, false, active, Some(&label));
 }
 
 pub(super) fn render_center_buttons(f: &mut Frame, area: Rect) {

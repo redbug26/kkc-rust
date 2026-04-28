@@ -26,7 +26,7 @@ use crate::search::{
     SearchBackend, SearchQuery, SearchResult, search, search_locate, search_spotlight,
 };
 use crate::terminal::{CmdLine, RunningCmd, TerminalState};
-use crate::viewer::Viewer;
+use crate::viewer::{ViewMode, Viewer};
 use anyhow::Result;
 use crossterm::{
     cursor::MoveTo,
@@ -345,7 +345,13 @@ impl RemoteConnectState {
     }
 
     pub fn move_prev(&mut self) {
-        if self.match_pos > 0 {
+        let len = self.filtered_indices().len();
+        if len == 0 {
+            return;
+        }
+        if self.match_pos == 0 {
+            self.match_pos = len - 1;
+        } else {
             self.match_pos -= 1;
         }
         self.sync_cursor();
@@ -353,9 +359,10 @@ impl RemoteConnectState {
 
     pub fn move_next(&mut self) {
         let len = self.filtered_indices().len();
-        if self.match_pos + 1 < len {
-            self.match_pos += 1;
+        if len == 0 {
+            return;
         }
+        self.match_pos = (self.match_pos + 1) % len;
         self.sync_cursor();
     }
 }
@@ -820,6 +827,12 @@ pub struct App {
     pub terminal: TerminalState,
     /// Streaming output from a running external command.
     pub running_cmd: Option<RunningCmd>,
+    /// Quick-preview viewer shown in the other panel (toggled via Ctrl-P > Quick Preview).
+    pub quick_preview: Option<Viewer>,
+    /// Whether keyboard focus is in the quick-preview panel (Tab to enter, Tab/Esc to leave).
+    pub quick_preview_active: bool,
+    /// Forced view mode for quick-preview (`None` = auto-detect).
+    pub quick_preview_forced_mode: Option<ViewMode>,
 }
 
 impl App {
@@ -889,6 +902,9 @@ impl App {
                 ..TerminalState::new()
             },
             running_cmd: None,
+            quick_preview: None,
+            quick_preview_active: false,
+            quick_preview_forced_mode: None,
         }
     }
 
@@ -1865,7 +1881,8 @@ impl App {
     pub fn open_viewer(&mut self) {
         if let Some(entry) = self.active_panel().current_entry().cloned() {
             if entry.is_dir || entry.name == ".." {
-                self.notify("Cannot view a directory");
+                let v = Viewer::placeholder(&entry.path, "Folder", self.config.viewer.word_wrap);
+                self.mode = AppMode::Viewer(v);
                 return;
             }
             let view_path = if self.active_panel().is_remote_view() {
@@ -1896,6 +1913,50 @@ impl App {
         self.file_id_preview = !self.file_id_preview;
         self.file_id_active = false;
         self.file_id_scroll = 0;
+    }
+
+    /// Refresh the quick-preview viewer when the cursor moves to a new file.
+    /// Does nothing if quick_preview is None. Clears the preview for dirs.
+    pub fn refresh_quick_preview(&mut self) {
+        if self.quick_preview.is_none() {
+            return;
+        }
+        let wrap = self.config.viewer.word_wrap;
+        match self.active_panel().current_entry().cloned() {
+            Some(entry) if entry.is_dir || entry.name == ".." => {
+                let mut v = Viewer::placeholder(&entry.path, "Folder", wrap);
+                v.zoomed = true;
+                self.quick_preview = Some(v);
+            }
+            Some(entry) => {
+                if let Ok(mut v) = Viewer::open(&entry.path, wrap) {
+                    v.zoomed = true;
+                    if let Some(mode) = self.quick_preview_forced_mode {
+                        v.set_mode(mode);
+                    }
+                    self.quick_preview = Some(v);
+                }
+                // On failure keep the previous preview (better than blank)
+            }
+            None => {
+                self.quick_preview = None;
+                self.quick_preview_active = false;
+            }
+        }
+    }
+
+    /// Scroll the quick-preview viewer up one line.
+    pub fn quick_preview_scroll_up(&mut self) {
+        if let Some(v) = self.quick_preview.as_mut() {
+            v.scroll_up();
+        }
+    }
+
+    /// Scroll the quick-preview viewer down one line.
+    pub fn quick_preview_scroll_down(&mut self) {
+        if let Some(v) = self.quick_preview.as_mut() {
+            v.scroll_down();
+        }
     }
 
     pub fn file_id_scroll_up(&mut self) {

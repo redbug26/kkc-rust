@@ -11,6 +11,7 @@ use ratatui::text::{Line, Span};
 use std::collections::HashMap;
 use std::env;
 use std::fs;
+use std::cell::Cell;
 use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -55,6 +56,8 @@ pub struct Viewer {
     text_lines: Vec<String>,
     ansi_lines: Vec<String>,
     image: Option<ImageInfo>,
+    /// Bytes-per-row for hex mode, updated lazily during rendering to match panel width.
+    pub hex_bytes_per_row: Cell<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -136,6 +139,37 @@ struct ViewerPosition {
 }
 
 impl Viewer {
+    /// Create a viewer displaying synthetic plain-text content (no file is read).
+    /// Useful for placeholder views such as folder placeholders.
+    pub fn placeholder(path: &Path, text: &str, wrap: bool) -> Self {
+        let raw = text.as_bytes().to_vec();
+        let lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
+        Self {
+            path: path.to_path_buf(),
+            raw,
+            scroll: 0,
+            hscroll: 0,
+            mode: ViewMode::Text,
+            viewer_plugin: None,
+            plugin_state: HashMap::new(),
+            wrap,
+            search: String::new(),
+            matches: Vec::new(),
+            match_pos: 0,
+            zoomed: false,
+            save_position: false,
+            encoding: EncodingMode::Plain,
+            line_feed: LineFeedMode::UnixLf,
+            mask: MaskKind::Auto,
+            mask_enabled: false,
+            preproc_ops: Vec::new(),
+            text_lines: lines,
+            ansi_lines: Vec::new(),
+            image: None,
+            hex_bytes_per_row: Cell::new(16),
+        }
+    }
+
     pub fn open(path: &Path, wrap: bool) -> Result<Self> {
         let raw = fs::read(path).with_context(|| format!("Reading {}", path.display()))?;
         let line_feed = LineFeedMode::Mixed;
@@ -164,6 +198,7 @@ impl Viewer {
             text_lines: Vec::new(),
             ansi_lines: Vec::new(),
             image,
+            hex_bytes_per_row: Cell::new(16),
         };
         // Only decode the initial mode — other modes are built lazily on first access.
         viewer.ensure_mode_decoded(mode);
@@ -589,17 +624,19 @@ impl Viewer {
     }
 
     fn hex_line_count(&self) -> usize {
-        self.raw.len().div_ceil(16).max(1)
+        let bpr = self.hex_bytes_per_row.get();
+        self.raw.len().div_ceil(bpr).max(1)
     }
 
     fn hex_plain_line_at(&self, idx: usize) -> String {
-        let offset = idx.saturating_mul(16);
+        let bpr = self.hex_bytes_per_row.get();
+        let offset = idx.saturating_mul(bpr);
         if offset >= self.raw.len() {
             return String::new();
         }
-        let end = offset.saturating_add(16).min(self.raw.len());
+        let end = offset.saturating_add(bpr).min(self.raw.len());
         let chunk = preprocess_bytes(&self.raw[offset..end], &self.preproc_ops);
-        hex_line(offset, &chunk, self.encoding)
+        hex_line(offset, &chunk, bpr, self.encoding)
     }
 
     fn render_hex_lines(
@@ -608,6 +645,11 @@ impl Viewer {
         start: usize,
         height: usize,
     ) -> Vec<Line<'static>> {
+        // Compute bytes-per-row from the available panel width and cache it so that
+        // hex_line_count() and scroll arithmetic stay consistent across frames.
+        // Formula: total line width = 8 (offset) + 2 + (bpr*3-1) + 2 + bpr = 11 + 4*bpr
+        let bpr = ((selected_width.saturating_sub(11)) / 4).max(1).min(16);
+        self.hex_bytes_per_row.set(bpr);
         let end = start.saturating_add(height).min(self.hex_line_count());
         (start..end)
             .map(|idx| {
@@ -650,6 +692,7 @@ impl Viewer {
     }
 
     fn rebuild_hex_matches(&self) -> Vec<usize> {
+        let bpr = self.hex_bytes_per_row.get();
         if let Some(bytes) = parse_hex_query(&self.search) {
             if bytes.is_empty() || bytes.len() > self.raw.len() {
                 return Vec::new();
@@ -657,7 +700,7 @@ impl Viewer {
             let mut matches = Vec::new();
             for start in 0..=self.raw.len() - bytes.len() {
                 if self.raw[start..start + bytes.len()] == *bytes {
-                    matches.push(start / 16);
+                    matches.push(start / bpr);
                 }
             }
             matches.sort_unstable();
@@ -675,7 +718,7 @@ impl Viewer {
                     .zip(&needle)
                     .all(|(hay, needle)| hay.to_ascii_lowercase() == *needle)
                 {
-                    matches.push(start / 16);
+                    matches.push(start / bpr);
                 }
             }
             matches.sort_unstable();

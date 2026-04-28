@@ -60,6 +60,9 @@ pub enum MenuAction {
     NextTab,
     OpenTerminal,
     CaptureGif,
+    OpenInOs,
+    OpenFolderInOs,
+    QuickPreview,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
