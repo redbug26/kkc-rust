@@ -3765,8 +3765,8 @@ fn format_mode(mode: u32) -> String {
 // ---------------------------------------------------------------------------
 
 fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
-    const W: u16 = 58;
-    const H: u16 = 23;
+    const W: u16 = 62;
+    const H: u16 = 26;
     let x = area.x + (area.width.saturating_sub(W)) / 2;
     let y = area.y + (area.height.saturating_sub(H)) / 2;
     let popup = clamp_rect(
@@ -3811,38 +3811,78 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
 
-    // ── Checkboxes ────────────────────────────────────────────────────────
-    const LABELS: [&str; 9] = [
-        "Confirm exit",
-        "Confirm delete",
-        "Auto reload",
-        "Insert moves down",
-        "Select directories",
-        "Show hidden files",
-        "Color by type",
-        "Show F-key bar",
-        "Debug log",
-    ];
-    let values = [
-        cs.confirm_exit,
-        cs.confirm_delete,
-        cs.auto_reload,
-        cs.insert_moves_down,
-        cs.select_dirs,
-        cs.show_hidden,
-        cs.color_by_type,
-        cs.show_fkey_bar,
-        cs.debug_log,
+    let iw = inner.width as usize;
+
+    // ── Section header helper ──────────────────────────────────────────────
+    let section_style = Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG);
+    let render_section_hdr = |f: &mut Frame, row: u16, label: &str| {
+        let y = inner.y + row;
+        if y >= inner.y + inner.height {
+            return;
+        }
+        let prefix = format!("  \u{2500} {} ", label);
+        let fill_len = iw.saturating_sub(prefix.chars().count());
+        let line = format!("{}{}", prefix, "\u{2500}".repeat(fill_len));
+        safe_render_widget(
+            f,
+            Paragraph::new(line).style(section_style),
+            Rect {
+                x: inner.x,
+                y,
+                width: inner.width,
+                height: 1,
+            },
+        );
+    };
+
+    // ── Checkboxes with section grouping ──────────────────────────────────
+    // Layout (row → cursor index):
+    //  Row  0: section "Behaviour"
+    //  Row  1: idx  0 confirm_exit
+    //  Row  2: idx  1 confirm_delete
+    //  Row  3: idx  2 auto_reload
+    //  Row  4: idx  3 insert_moves_down
+    //  Row  5: idx  4 select_dirs
+    //  Row  6: section "Display"
+    //  Row  7: idx  5 show_hidden
+    //  Row  8: idx  6 color_by_type
+    //  Row  9: idx  7 show_fkey_bar
+    //  Row 10: section "Viewer"
+    //  Row 11: idx  8 word_wrap
+    //  Row 12: idx  9 default_zoom
+    //  Row 13: idx 10 debug_log
+    //  Row 14: section "External"
+    //  Row 15: Editor label
+    //  Row 16: idx 11 editor field
+    //  Row 17: Pager label
+    //  Row 18: idx 12 pager field
+    //  Row 19: History label
+    //  Row 20: idx 13 dir_history_max field
+    //  Row 21: separator
+    //  Row 22: OK / Cancel
+
+    let checkbox_items: &[(u16, &str, usize, bool)] = &[
+        (1, "Confirm exit", 0, cs.confirm_exit),
+        (2, "Confirm delete", 1, cs.confirm_delete),
+        (3, "Auto reload", 2, cs.auto_reload),
+        (4, "Insert moves down", 3, cs.insert_moves_down),
+        (5, "Select directories", 4, cs.select_dirs),
+        (7, "Show hidden files", 5, cs.show_hidden),
+        (8, "Color by type", 6, cs.color_by_type),
+        (9, "Show F-key bar", 7, cs.show_fkey_bar),
+        (11, "Word wrap", 8, cs.word_wrap),
+        (12, "Default zoom", 9, cs.default_zoom),
+        (13, "Debug log", 10, cs.debug_log),
     ];
 
-    for (i, (label, val)) in LABELS.iter().zip(values.iter()).enumerate() {
-        let row = inner.y + i as u16;
-        if row >= inner.y + inner.height {
-            break;
+    for &(row, label, cursor_idx, val) in checkbox_items {
+        let y = inner.y + row;
+        if y >= inner.y + inner.height {
+            continue;
         }
-        let tick = if *val { "X" } else { " " };
+        let tick = if val { "X" } else { " " };
         let text = format!("  [{}] {}", tick, label);
-        let selected = cs.cursor == i;
+        let selected = cs.cursor == cursor_idx;
         let style = if selected {
             Style::default()
                 .fg(Color::Black)
@@ -3851,93 +3891,79 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
         } else {
             Style::default().fg(Color::Rgb(50, 36, 22)).bg(CLR_APP_BG)
         };
-        let padded = format!("{:<width$}", text, width = (inner.width) as usize);
+        let padded = format!("{:<width$}", text, width = iw);
         safe_render_widget(
             f,
             Paragraph::new(padded).style(style),
             Rect {
                 x: inner.x,
-                y: row,
+                y,
                 width: inner.width,
                 height: 1,
             },
         );
     }
 
-    // ── Separator ──────────────────────────────────────────────────────────
-    let sep_y = inner.y + 9;
-    if sep_y < inner.y + inner.height {
-        let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
-        safe_render_widget(
-            f,
-            Paragraph::new(sep).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
-            Rect {
-                x: inner.x,
-                y: sep_y,
-                width: inner.width,
-                height: 1,
-            },
-        );
-    }
+    // Section headers
+    render_section_hdr(f, 0, "Behaviour");
+    render_section_hdr(f, 6, "Display");
+    render_section_hdr(f, 10, "Viewer");
+    render_section_hdr(f, 14, "External");
 
     // ── Text fields ────────────────────────────────────────────────────────
-    const TEXT_LABELS: [(&str, usize); 3] = [("Editor", 9), ("Pager", 10), ("History max", 11)];
-    let text_values = [
-        cs.editor.as_str(),
-        cs.pager.as_str(),
-        cs.dir_history_max.as_str(),
+    // cursor indices: Editor=11, Pager=12, History max=13
+    let text_layout: &[(&str, u16, usize, &str)] = &[
+        ("Editor", 15, 11, cs.editor.as_str()),
+        ("Pager", 17, 12, cs.pager.as_str()),
+        ("History max", 19, 13, cs.dir_history_max.as_str()),
     ];
 
-    for (row_offset, ((label, cursor_idx), value)) in
-        TEXT_LABELS.iter().zip(text_values.iter()).enumerate()
-    {
-        let row = inner.y + 10 + row_offset as u16 * 3;
-        if row + 1 >= inner.y + inner.height {
-            break;
+    for &(label, label_row, cursor_idx, value) in text_layout {
+        let lbl_y = inner.y + label_row;
+        if lbl_y < inner.y + inner.height {
+            safe_render_widget(
+                f,
+                Paragraph::new(format!("  {}:", label))
+                    .style(Style::default().fg(Color::Rgb(80, 60, 40)).bg(CLR_APP_BG)),
+                Rect {
+                    x: inner.x,
+                    y: lbl_y,
+                    width: inner.width,
+                    height: 1,
+                },
+            );
         }
-        let selected = cs.cursor == *cursor_idx;
-
-        // Label row
-        let label_style = Style::default().fg(Color::Rgb(80, 60, 40)).bg(CLR_APP_BG);
-        safe_render_widget(
-            f,
-            Paragraph::new(format!("  {}:", label)).style(label_style),
-            Rect {
-                x: inner.x,
-                y: row,
-                width: inner.width,
-                height: 1,
-            },
-        );
-
-        // Input row
-        let field_w = inner.width.saturating_sub(4);
-        let input_bg = if selected {
-            CLR_CURSOR_BG
-        } else {
-            Color::Rgb(160, 140, 115)
-        };
-        let input_fg = if selected {
-            Color::Black
-        } else {
-            Color::Rgb(40, 28, 18)
-        };
-        let padded = format!("{:<width$}", value, width = field_w as usize);
-        let display = if padded.len() > field_w as usize {
-            padded[padded.len() - field_w as usize..].to_string()
-        } else {
-            padded
-        };
-        safe_render_widget(
-            f,
-            Paragraph::new(display).style(Style::default().fg(input_fg).bg(input_bg)),
-            Rect {
-                x: inner.x + 2,
-                y: row + 1,
-                width: field_w,
-                height: 1,
-            },
-        );
+        let field_y = inner.y + label_row + 1;
+        if field_y < inner.y + inner.height {
+            let selected = cs.cursor == cursor_idx;
+            let field_w = inner.width.saturating_sub(4);
+            let input_bg = if selected {
+                CLR_CURSOR_BG
+            } else {
+                Color::Rgb(160, 140, 115)
+            };
+            let input_fg = if selected {
+                Color::Black
+            } else {
+                Color::Rgb(40, 28, 18)
+            };
+            let padded = format!("{:<width$}", value, width = field_w as usize);
+            let display = if padded.len() > field_w as usize {
+                padded[padded.len() - field_w as usize..].to_string()
+            } else {
+                padded
+            };
+            safe_render_widget(
+                f,
+                Paragraph::new(display).style(Style::default().fg(input_fg).bg(input_bg)),
+                Rect {
+                    x: inner.x + 2,
+                    y: field_y,
+                    width: field_w,
+                    height: 1,
+                },
+            );
+        }
     }
 
     // ── Bottom separator ───────────────────────────────────────────────────
@@ -3957,8 +3983,8 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
     }
 
     // ── OK / Cancel buttons ────────────────────────────────────────────────
-    let ok_idx = ConfigState::NUM_CHECKBOXES + 3; // 12
-    let cancel_idx = ConfigState::NUM_CHECKBOXES + 3 + 1; // 13
+    let ok_idx = ConfigState::NUM_CHECKBOXES + 3; // 14
+    let cancel_idx = ConfigState::NUM_CHECKBOXES + 3 + 1; // 15
     let btn_y = inner.y + inner.height.saturating_sub(2);
     let btn_w: u16 = 10;
     let gap: u16 = 4;

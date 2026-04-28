@@ -1458,11 +1458,11 @@ fn handle_config(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(false);
     };
 
-    let total = ConfigState::NUM_TOTAL; // 9 booleans + 3 text + OK + Cancel
-    let n_bool = ConfigState::NUM_CHECKBOXES; // 9
+    let total = ConfigState::NUM_TOTAL; // 11 booleans + 3 text + OK + Cancel
+    let n_bool = ConfigState::NUM_CHECKBOXES; // 11
     let n_text = 3;
-    let ok_idx = n_bool + n_text; // 11
-    let cancel_idx = n_bool + n_text + 1; // 12
+    let ok_idx = n_bool + n_text; // 14
+    let cancel_idx = n_bool + n_text + 1; // 15
 
     match key.code {
         KeyCode::Esc => {
@@ -1497,9 +1497,11 @@ fn handle_config(app: &mut App, key: KeyEvent) -> Result<bool> {
                 5 => cs.show_hidden = !cs.show_hidden,
                 6 => cs.color_by_type = !cs.color_by_type,
                 7 => cs.show_fkey_bar = !cs.show_fkey_bar,
-                8 => cs.debug_log = !cs.debug_log,
+                8 => cs.word_wrap = !cs.word_wrap,
+                9 => cs.default_zoom = !cs.default_zoom,
+                10 => cs.debug_log = !cs.debug_log,
                 // text fields: Enter moves focus to next
-                9 | 10 | 11 => {
+                11 | 12 | 13 => {
                     if let AppMode::Config(ref mut cs) = app.mode {
                         if cs.cursor + 1 < total {
                             cs.cursor += 1;
@@ -1543,9 +1545,9 @@ fn handle_config(app: &mut App, key: KeyEvent) -> Result<bool> {
         KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
             if let AppMode::Config(ref mut cs) = app.mode {
                 match cs.cursor {
-                    9 => cs.editor.push(ch),
-                    10 => cs.pager.push(ch),
-                    11 => cs.dir_history_max.push(ch),
+                    11 => cs.editor.push(ch),
+                    12 => cs.pager.push(ch),
+                    13 => cs.dir_history_max.push(ch),
                     _ => {}
                 }
             }
@@ -1553,13 +1555,13 @@ fn handle_config(app: &mut App, key: KeyEvent) -> Result<bool> {
         KeyCode::Backspace => {
             if let AppMode::Config(ref mut cs) = app.mode {
                 match cs.cursor {
-                    9 => {
+                    11 => {
                         cs.editor.pop();
                     }
-                    10 => {
+                    12 => {
                         cs.pager.pop();
                     }
-                    11 => {
+                    13 => {
                         cs.dir_history_max.pop();
                     }
                     _ => {}

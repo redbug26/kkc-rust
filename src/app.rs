@@ -163,15 +163,19 @@ impl PluginsState {
 /// State for the full configuration screen.
 #[derive(Debug, Clone)]
 pub struct ConfigState {
-    // checkboxes
+    // checkboxes — Behaviour
     pub confirm_exit: bool,
     pub confirm_delete: bool,
     pub auto_reload: bool,
     pub insert_moves_down: bool,
     pub select_dirs: bool,
+    // checkboxes — Display
     pub show_hidden: bool,
     pub color_by_type: bool,
     pub show_fkey_bar: bool,
+    // checkboxes — Viewer
+    pub word_wrap: bool,
+    pub default_zoom: bool,
     pub debug_log: bool,
     // text fields
     pub editor: String,
@@ -192,6 +196,8 @@ impl ConfigState {
             show_hidden: cfg.left.show_hidden,
             color_by_type: cfg.color_by_type,
             show_fkey_bar: cfg.show_fkey_bar,
+            word_wrap: cfg.viewer.word_wrap,
+            default_zoom: cfg.viewer.default_zoom,
             debug_log: cfg.debug_log,
             editor: cfg.editor.clone(),
             pager: cfg.pager.clone(),
@@ -211,6 +217,8 @@ impl ConfigState {
         cfg.right.show_hidden = self.show_hidden;
         cfg.color_by_type = self.color_by_type;
         cfg.show_fkey_bar = self.show_fkey_bar;
+        cfg.viewer.word_wrap = self.word_wrap;
+        cfg.viewer.default_zoom = self.default_zoom;
         cfg.debug_log = self.debug_log;
         if !self.editor.trim().is_empty() {
             cfg.editor = self.editor.trim().to_owned();
@@ -225,8 +233,8 @@ impl ConfigState {
         }
     }
 
-    pub const NUM_CHECKBOXES: usize = 9;
-    pub const NUM_TOTAL: usize = 14; // 9 + 3 + OK + Cancel
+    pub const NUM_CHECKBOXES: usize = 11; // 5 behaviour + 3 display + 3 viewer
+    pub const NUM_TOTAL: usize = 16; // 11 + 3 text + OK + Cancel
 }
 
 // ---------------------------------------------------------------------------

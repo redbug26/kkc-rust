@@ -294,11 +294,72 @@ impl Config {
         }
     }
 
-    /// Persist config to disk.
+    /// Persist config to disk with organised sections.
     pub fn save(&self) -> Result<()> {
         let path = config_path()?;
-        let text = toml::to_string_pretty(self).context("Serialising config")?;
-        fs::write(&path, text).with_context(|| format!("Writing config: {}", path.display()))?;
+        let mut out = String::new();
+
+        // ─── Behaviour ────────────────────────────────────────────────────
+        out.push_str("# \u{2500}\u{2500}\u{2500} Behaviour \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\n");
+        out.push_str(&format!("confirm_exit = {}\n", self.confirm_exit));
+        out.push_str(&format!("confirm_delete = {}\n", self.confirm_delete));
+        out.push_str(&format!("auto_reload = {}\n", self.auto_reload));
+        out.push_str(&format!("insert_moves_down = {}\n", self.insert_moves_down));
+        out.push_str(&format!("select_dirs = {}\n", self.select_dirs));
+        out.push('\n');
+
+        // ─── Display ──────────────────────────────────────────────────────
+        out.push_str("# \u{2500}\u{2500}\u{2500} Display \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\n");
+        out.push_str(&format!("show_fkey_bar = {}\n", self.show_fkey_bar));
+        out.push_str(&format!("color_by_type = {}\n", self.color_by_type));
+        out.push('\n');
+
+        // ─── Viewer ───────────────────────────────────────────────────────
+        out.push_str("# \u{2500}\u{2500}\u{2500} Viewer \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\n");
+        out.push_str("[viewer]\n");
+        out.push_str(&format!("word_wrap = {}\n", self.viewer.word_wrap));
+        out.push_str(&format!("tab_width = {}\n", self.viewer.tab_width));
+        out.push_str(&format!("default_zoom = {}\n", self.viewer.default_zoom));
+        out.push('\n');
+
+        // ─── External ─────────────────────────────────────────────────────
+        out.push_str("# \u{2500}\u{2500}\u{2500} External \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\n");
+        out.push_str(&format!(
+            "editor = {}\n",
+            toml::Value::String(self.editor.clone())
+        ));
+        out.push_str(&format!(
+            "pager = {}\n",
+            toml::Value::String(self.pager.clone())
+        ));
+        out.push_str(&format!("dir_history_max = {}\n", self.dir_history_max));
+        out.push('\n');
+
+        // ─── Debug ────────────────────────────────────────────────────────
+        out.push_str("# \u{2500}\u{2500}\u{2500} Debug \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\n");
+        out.push_str(&format!("debug_log = {}\n", self.debug_log));
+        out.push('\n');
+
+        // Panels, history, bookmarks and file associations (via serde)
+        #[derive(serde::Serialize)]
+        struct ConfigTail<'a> {
+            left: &'a PanelConfig,
+            right: &'a PanelConfig,
+            dir_history: &'a Vec<PathBuf>,
+            bookmarks: &'a Vec<PathBuf>,
+            file_assoc: &'a Vec<FileAssoc>,
+        }
+        let tail = toml::to_string_pretty(&ConfigTail {
+            left: &self.left,
+            right: &self.right,
+            dir_history: &self.dir_history,
+            bookmarks: &self.bookmarks,
+            file_assoc: &self.file_assoc,
+        })
+        .context("Serialising panels config")?;
+        out.push_str(&tail);
+
+        fs::write(&path, out).with_context(|| format!("Writing config: {}", path.display()))?;
         Ok(())
     }
 
