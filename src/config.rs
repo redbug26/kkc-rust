@@ -4,6 +4,27 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum PaletteRecentEntry {
+    Name(String),
+    Index(usize),
+}
+
+fn deserialize_palette_recent<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let entries = Vec::<PaletteRecentEntry>::deserialize(deserializer)?;
+    Ok(entries
+        .into_iter()
+        .map(|entry| match entry {
+            PaletteRecentEntry::Name(name) => name,
+            PaletteRecentEntry::Index(i) => i.to_string(),
+        })
+        .collect())
+}
+
 /// Returns the ProjectDirs handle for KKC.
 pub fn project_dirs() -> Result<ProjectDirs> {
     ProjectDirs::from("be", "kyuran", "kkc").context("Could not determine project directories")
@@ -241,6 +262,11 @@ pub struct Config {
     #[serde(default)]
     pub file_assoc: Vec<FileAssoc>,
 
+    // --- Command palette ---
+    /// Recently-used command palette entries (fn_name values), most-recent first.
+    #[serde(default, deserialize_with = "deserialize_palette_recent")]
+    pub palette_recent: Vec<String>,
+
     // --- Debug ---
     /// Write debug messages to a log file (disabled by default).
     #[serde(default)]
@@ -274,6 +300,7 @@ impl Default for Config {
             dir_history: Vec::new(),
             bookmarks: default_bookmarks(),
             file_assoc: Vec::new(),
+            palette_recent: Vec::new(),
             debug_log: false,
         }
     }
@@ -286,8 +313,80 @@ impl Config {
         if path.exists() {
             let text = fs::read_to_string(&path)
                 .with_context(|| format!("Reading config: {}", path.display()))?;
-            let cfg: Self = toml::from_str(&text)
+            let mut cfg: Self = toml::from_str(&text)
                 .with_context(|| format!("Parsing config: {}", path.display()))?;
+
+            // Migration path for configs written during the sectioned-save
+            // refactor where root keys were accidentally emitted under [viewer].
+            if let Ok(raw) = toml::from_str::<toml::Value>(&text) {
+                if let Some(viewer) = raw.get("viewer").and_then(|v| v.as_table()) {
+                    if cfg.bookmarks == default_bookmarks() {
+                        if let Some(arr) = viewer.get("bookmarks").and_then(|v| v.as_array()) {
+                            let restored: Vec<PathBuf> = arr
+                                .iter()
+                                .filter_map(|v| v.as_str().map(PathBuf::from))
+                                .collect();
+                            if !restored.is_empty() {
+                                cfg.bookmarks = restored;
+                            }
+                        }
+                    }
+
+                    if cfg.dir_history.is_empty() {
+                        if let Some(arr) = viewer.get("dir_history").and_then(|v| v.as_array()) {
+                            let restored: Vec<PathBuf> = arr
+                                .iter()
+                                .filter_map(|v| v.as_str().map(PathBuf::from))
+                                .collect();
+                            if !restored.is_empty() {
+                                cfg.dir_history = restored;
+                            }
+                        }
+                    }
+
+                    if cfg.palette_recent.is_empty() {
+                        if let Some(arr) = viewer.get("palette_recent").and_then(|v| v.as_array()) {
+                            let restored: Vec<String> = arr
+                                .iter()
+                                .filter_map(|v| {
+                                    if let Some(s) = v.as_str() {
+                                        Some(s.to_string())
+                                    } else {
+                                        v.as_integer()
+                                            .filter(|&n| n >= 0)
+                                            .map(|n| n.to_string())
+                                    }
+                                })
+                                .collect();
+                            if !restored.is_empty() {
+                                cfg.palette_recent = restored;
+                            }
+                        }
+                    }
+
+                    if cfg.editor == default_editor() {
+                        if let Some(v) = viewer.get("editor").and_then(|v| v.as_str()) {
+                            cfg.editor = v.to_string();
+                        }
+                    }
+                    if cfg.pager == default_pager() {
+                        if let Some(v) = viewer.get("pager").and_then(|v| v.as_str()) {
+                            cfg.pager = v.to_string();
+                        }
+                    }
+                    if cfg.dir_history_max == history_max() {
+                        if let Some(v) = viewer.get("dir_history_max").and_then(|v| v.as_integer()) {
+                            if v >= 1 {
+                                cfg.dir_history_max = v as usize;
+                            }
+                        }
+                    }
+                    if let Some(v) = viewer.get("debug_log").and_then(|v| v.as_bool()) {
+                        cfg.debug_log = v;
+                    }
+                }
+            }
+
             Ok(cfg)
         } else {
             Ok(Self::default())
@@ -316,10 +415,9 @@ impl Config {
 
         // ─── Viewer ───────────────────────────────────────────────────────
         out.push_str("# \u{2500}\u{2500}\u{2500} Viewer \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\n");
-        out.push_str("[viewer]\n");
-        out.push_str(&format!("word_wrap = {}\n", self.viewer.word_wrap));
-        out.push_str(&format!("tab_width = {}\n", self.viewer.tab_width));
-        out.push_str(&format!("default_zoom = {}\n", self.viewer.default_zoom));
+        out.push_str(&format!("viewer.word_wrap = {}\n", self.viewer.word_wrap));
+        out.push_str(&format!("viewer.tab_width = {}\n", self.viewer.tab_width));
+        out.push_str(&format!("viewer.default_zoom = {}\n", self.viewer.default_zoom));
         out.push('\n');
 
         // ─── External ─────────────────────────────────────────────────────
@@ -348,6 +446,7 @@ impl Config {
             dir_history: &'a Vec<PathBuf>,
             bookmarks: &'a Vec<PathBuf>,
             file_assoc: &'a Vec<FileAssoc>,
+            palette_recent: &'a Vec<String>,
         }
         let tail = toml::to_string_pretty(&ConfigTail {
             left: &self.left,
@@ -355,6 +454,7 @@ impl Config {
             dir_history: &self.dir_history,
             bookmarks: &self.bookmarks,
             file_assoc: &self.file_assoc,
+            palette_recent: &self.palette_recent,
         })
         .context("Serialising panels config")?;
         out.push_str(&tail);

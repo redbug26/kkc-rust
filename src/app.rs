@@ -2,7 +2,7 @@ mod command_palette;
 mod menu;
 mod panel_tabs;
 
-pub use self::command_palette::{CommandPaletteState, PALETTE_DATA};
+pub use self::command_palette::{CommandPaletteState, PALETTE_DATA, PALETTE_SEP};
 pub use self::menu::{
     MENU_DATA, MENU_HEADERS, MenuAction, MenuEntry, MenuState,
     ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,
@@ -849,6 +849,8 @@ pub struct App {
     pub quick_preview_active: bool,
     /// Forced view mode for quick-preview (`None` = auto-detect).
     pub quick_preview_forced_mode: Option<ViewMode>,
+    /// Recently-used command palette entries (fn_name values), most-recent first.
+    pub palette_recent: Vec<String>,
 }
 
 impl App {
@@ -879,6 +881,8 @@ impl App {
         let plugin_status = crate::plugins::initialize()
             .err()
             .map(|err| format!("Plugin loading failed: {err}"));
+
+        let palette_recent = config.palette_recent.clone();
 
         App {
             config,
@@ -921,6 +925,7 @@ impl App {
             quick_preview: None,
             quick_preview_active: false,
             quick_preview_forced_mode: None,
+            palette_recent,
         }
     }
 
@@ -2242,6 +2247,7 @@ impl App {
         self.config.right = panel_config_for_save(&self.right, &self.right_tabs);
         self.config.dir_history = self.dir_history.iter().cloned().collect();
         self.config.bookmarks = self.bookmarks.clone();
+        self.config.palette_recent = self.palette_recent.clone();
         // Save terminal history and output to cache (not config)
         let len = self.terminal.output.len();
         let start = len.saturating_sub(200);

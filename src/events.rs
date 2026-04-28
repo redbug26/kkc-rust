@@ -236,7 +236,10 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
                 return Ok(false);
             }
             KeyCode::Char('p') => {
-                app.mode = AppMode::CommandPalette(CommandPaletteState::default());
+                app.mode = AppMode::CommandPalette(CommandPaletteState {
+                    recent: app.palette_recent.clone(),
+                    ..Default::default()
+                });
                 return Ok(false);
             }
             KeyCode::Char('t') => {

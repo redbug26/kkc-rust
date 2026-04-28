@@ -1,23 +1,25 @@
 //! Render the Ctrl-P command palette popup.
 
 use super::*;
-use crate::app::{CommandPaletteState, PALETTE_DATA};
+use crate::app::{CommandPaletteState, PALETTE_DATA, PALETTE_SEP};
 
 // Accent colour for shortcuts and dim colour for fn_name.
 const CLR_SHORTCUT: Color = Color::Rgb(100, 195, 220);
 const CLR_CATEGORY: Color = Color::Rgb(140, 140, 140);
 const CLR_FN_NAME: Color = Color::Rgb(90, 90, 90);
 const CLR_MARKER: Color = Color::Rgb(255, 220, 80);
+const CLR_RECENT_STAR: Color = Color::Rgb(255, 190, 60);
 // Width reserved for right-aligned shortcut column (e.g. "Ctrl+F1" = 7 + padding)
 const SHORT_W: usize = 11;
 
 pub(super) fn render_command_palette(f: &mut Frame, s: &CommandPaletteState, area: Rect) {
     let indices = s.filtered_indices();
-    let total = indices.len();
+    // Total selectable (non-separator) items.
+    let total = indices.iter().filter(|&&i| i != PALETTE_SEP).count();
 
     // ── Popup geometry ────────────────────────────────────────────────────
     let w = area.width.saturating_sub(4).min(72).max(54);
-    let visible = (total as u16).min(18).max(3);
+    let visible = (indices.len() as u16).min(18).max(3);
     // 1 input + 1 sep + visible items + 1 hint + 2 border
     let h = (visible + 5).min(area.height.saturating_sub(3)).max(8);
 
@@ -45,8 +47,15 @@ pub(super) fn render_command_palette(f: &mut Frame, s: &CommandPaletteState, are
     }
 
     // ── Input field ───────────────────────────────────────────────────────
+    // Compute which selectable position match_pos corresponds to.
+    let match_selectable_pos = indices
+        .iter()
+        .take(s.match_pos.saturating_add(1))
+        .filter(|&&i| i != PALETTE_SEP)
+        .count();
+
     let count_hint = if total > 0 {
-        format!(" {}/{} ", s.match_pos + 1, total)
+        format!(" {}/{} ", match_selectable_pos, total)
     } else {
         " 0/0 ".to_string()
     };
@@ -82,10 +91,8 @@ pub(super) fn render_command_palette(f: &mut Frame, s: &CommandPaletteState, are
 
     // ── List ──────────────────────────────────────────────────────────────
     // Row format:  marker(2) + "Category/Label (fn_name)" fills + shortcut(SHORT_W)
-    // e.g.:  "> File/View file (view_file)       F3"
     const MARKER_W: usize = 2;
     let inner_w = inner.width as usize;
-    // Space available for the "Category/Label (fn_name)" text
     let label_area_w = inner_w.saturating_sub(MARKER_W + SHORT_W).max(4);
 
     let list_h = inner.height.saturating_sub(3) as usize; // -input -sep -hint
@@ -96,16 +103,36 @@ pub(super) fn render_command_palette(f: &mut Frame, s: &CommandPaletteState, are
         height: list_h as u16,
     };
 
-    // Scroll offset so the cursor stays visible
+    // Scroll offset so the cursor stays visible.
     let start = if s.match_pos >= list_h {
         s.match_pos - list_h + 1
     } else {
         0
     };
 
+    // Position of the section separator in the combined indices list, if any.
+    let sep_pos: Option<usize> = indices.iter().position(|&i| i == PALETTE_SEP);
+
     for (row_idx, &cmd_idx) in indices.iter().skip(start).take(list_h).enumerate() {
         let vis_idx = start + row_idx;
+        let row_y = list_area.y + row_idx as u16;
+
+        // ── Section separator row ─────────────────────────────────────────
+        if cmd_idx == PALETTE_SEP {
+            let sep_line: String = std::iter::repeat('─').take(inner_w).collect();
+            safe_render_widget(
+                f,
+                Paragraph::new(Line::from(vec![
+                    Span::styled(sep_line, Style::default().fg(CLR_QS_SEP).bg(CLR_QS_BG)),
+                ])),
+                Rect { x: list_area.x, y: row_y, width: list_area.width, height: 1 },
+            );
+            continue;
+        }
+
         let selected = vis_idx == s.match_pos;
+        // An entry is "recent" when it appears before the separator.
+        let is_recent = sep_pos.map_or(false, |sp| vis_idx < sp);
         let entry = &PALETTE_DATA[cmd_idx];
 
         let (row_bg, label_fg, cat_fg, fn_fg, short_fg, marker_fg) = if selected {
@@ -121,16 +148,20 @@ pub(super) fn render_command_palette(f: &mut Frame, s: &CommandPaletteState, are
             (CLR_QS_BG, CLR_QS_LIST_FG, CLR_CATEGORY, CLR_FN_NAME, CLR_SHORTCUT, Color::DarkGray)
         };
 
-        let marker = if selected { "> " } else { "  " };
+        // Marker column: ">" selected, "★" recent (unselected), "  " otherwise.
+        let (marker_str, marker_color) = if selected {
+            ("> ", marker_fg)
+        } else if is_recent {
+            ("\u{2605} ", CLR_RECENT_STAR) // ★
+        } else {
+            ("  ", marker_fg)
+        };
 
-        // Build "Category/Label (fn_name)" — truncate to fit label_area_w
-        // We split into styled sub-spans: cat (dim), / (dim), label (normal), fn (dim)
         let cat_text = entry.category;
         let slash = "/";
         let label_text = entry.label;
         let fn_text = format!(" ({})", entry.fn_name);
 
-        // Compute how much space each part gets; truncate label if needed
         let fixed_prefix = cat_text.len() + slash.len();
         let fixed_suffix = fn_text.len();
         let avail_for_label = label_area_w
@@ -138,7 +169,6 @@ pub(super) fn render_command_palette(f: &mut Frame, s: &CommandPaletteState, are
             .max(4);
         let label_shown = truncate_str(label_text, avail_for_label);
 
-        // Combined length; pad with spaces to fill label_area_w
         let used = fixed_prefix + label_shown.len() + fixed_suffix;
         let padding = " ".repeat(label_area_w.saturating_sub(used));
 
@@ -149,7 +179,7 @@ pub(super) fn render_command_palette(f: &mut Frame, s: &CommandPaletteState, are
         );
 
         let spans = vec![
-            Span::styled(marker, Style::default().fg(marker_fg).bg(row_bg)),
+            Span::styled(marker_str, Style::default().fg(marker_color).bg(row_bg)),
             Span::styled(cat_text, Style::default().fg(cat_fg).bg(row_bg)),
             Span::styled(slash, Style::default().fg(cat_fg).bg(row_bg)),
             Span::styled(label_shown, Style::default().fg(label_fg).bg(row_bg)),
@@ -163,7 +193,7 @@ pub(super) fn render_command_palette(f: &mut Frame, s: &CommandPaletteState, are
             Paragraph::new(Line::from(spans)).style(Style::default().bg(row_bg)),
             Rect {
                 x: list_area.x,
-                y: list_area.y + row_idx as u16,
+                y: row_y,
                 width: list_area.width,
                 height: 1,
             },
@@ -179,4 +209,3 @@ pub(super) fn render_command_palette(f: &mut Frame, s: &CommandPaletteState, are
         Rect { x: inner.x, y: hint_y, width: inner.width, height: 1 },
     );
 }
-

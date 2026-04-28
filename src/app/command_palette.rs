@@ -85,30 +85,84 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
 pub struct CommandPaletteState {
     pub query: String,
     pub match_pos: usize,
+    /// Snapshot of recently-used commands (fn_name values), most-recent first.
+    /// Populated from `App::palette_recent` when the palette is opened.
+    pub recent: Vec<String>,
+}
+
+/// Sentinel value used in `filtered_indices()` to represent the visual separator between
+/// the "recent" section and the full command list.
+pub const PALETTE_SEP: usize = usize::MAX;
+
+fn entry_matches(e: &PaletteEntry, q: &str) -> bool {
+    format!(
+        "{} {} {} {}",
+        e.category,
+        e.label,
+        e.fn_name,
+        e.shortcut.unwrap_or("")
+    )
+    .to_lowercase()
+    .contains(q)
 }
 
 impl CommandPaletteState {
-    /// Returns the indices into PALETTE_DATA that match the current query.
+    /// Returns indices into PALETTE_DATA that match the current query.
+    ///
+    /// When there are recent commands, the list is structured as:
+    ///   `[recent…, PALETTE_SEP, rest…]`
+    /// where `PALETTE_SEP` (`usize::MAX`) is a non-selectable visual separator row.
     pub fn filtered_indices(&self) -> Vec<usize> {
         let q = self.query.trim().to_lowercase();
-        if q.is_empty() {
-            return (0..PALETTE_DATA.len()).collect();
-        }
-        PALETTE_DATA
+
+        // Resolve persisted fn_name entries to palette indices.
+        // Also accept legacy numeric strings from older configs.
+        let mut recent_seen = std::collections::HashSet::new();
+        let recent_valid: Vec<usize> = self
+            .recent
             .iter()
-            .enumerate()
-            .filter(|(_, e)| {
-                format!(
-                    "{} {} {} {}",
-                    e.category,
-                    e.label,
-                    e.fn_name,
-                    e.shortcut.unwrap_or("")
-                )
-                .to_lowercase()
-                .contains(&q)
+            .filter_map(|name| {
+                if let Ok(i) = name.parse::<usize>() {
+                    if i < PALETTE_DATA.len() {
+                        return Some(i);
+                    }
+                }
+                PALETTE_DATA.iter().position(|e| e.fn_name == name)
             })
+            .filter(|i| recent_seen.insert(*i))
+            .collect();
+
+        if recent_valid.is_empty() {
+            // No recents — original behaviour.
+            if q.is_empty() {
+                return (0..PALETTE_DATA.len()).collect();
+            }
+            return PALETTE_DATA.iter().enumerate()
+                .filter(|(_, e)| entry_matches(e, &q))
+                .map(|(i, _)| i)
+                .collect();
+        }
+
+        // Build a set for fast membership tests.
+        let recent_set: std::collections::HashSet<usize> =
+            recent_valid.iter().copied().collect();
+
+        let recent_items: Vec<usize> = recent_valid.iter()
+            .copied()
+            .filter(|&i| q.is_empty() || entry_matches(&PALETTE_DATA[i], &q))
+            .collect();
+
+        let rest_items: Vec<usize> = PALETTE_DATA.iter().enumerate()
+            .filter(|(i, e)| !recent_set.contains(i) && (q.is_empty() || entry_matches(e, &q)))
             .map(|(i, _)| i)
-            .collect()
+            .collect();
+
+        let mut result = Vec::new();
+        if !recent_items.is_empty() {
+            result.extend_from_slice(&recent_items);
+            result.push(PALETTE_SEP); // visual separator
+        }
+        result.extend_from_slice(&rest_items);
+        result
     }
 }
