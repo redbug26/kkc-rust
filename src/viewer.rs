@@ -708,18 +708,95 @@ impl Viewer {
             return vec![Line::from(Span::raw(String::new()))];
         }
 
-        // Catimg-like scaling in "precision 2": two source rows per terminal row.
-        let max_cols = selected_width;
-        let max_rows_px = height.saturating_mul(2);
-        let scale_x = max_cols as f32 / src_w as f32;
-        let scale_y = max_rows_px as f32 / src_h as f32;
+        // Quarter-block rendering: 2×2 sub-pixels per terminal cell.
+        // Terminal cells are typically ~2:1 (height:width), so we compute the
+        // aspect-correct scale in "half-row pixel units" (1 unit = 1 col width ≈
+        // half a row height), exactly as the old ▀/▄ approach did.
+        // Then each terminal column gets 2 horizontal sub-pixels (extra detail),
+        // while each half-row unit stays at 1 vertical sub-pixel.
+        let max_pu_w = selected_width;           // 1 pixel-unit per column
+        let max_pu_h = height.saturating_mul(2); // 2 pixel-units per row (half-rows)
+        let scale_x = max_pu_w as f32 / src_w as f32;
+        let scale_y = max_pu_h as f32 / src_h as f32;
         let scale = scale_x.min(scale_y).max(0.0001);
-        let target_w = ((src_w as f32) * scale).floor().max(1.0) as usize;
-        let target_h = ((src_h as f32) * scale).floor().max(1.0) as usize;
-        let rows = target_h.div_ceil(2).max(1);
+        // target dimensions in pixel-units (aspect-correct, square at 2:1 cells)
+        let target_pu_w = ((src_w as f32) * scale).floor().max(1.0) as usize;
+        let target_pu_h = ((src_h as f32) * scale).floor().max(1.0) as usize;
+        // sub-pixel dimensions: horizontal uses 2 per column for extra detail
+        let target_w = target_pu_w * 2; // sub-pixels wide
+        let target_h = target_pu_h;     // sub-pixels tall (= half-rows)
+        let term_cols = target_pu_w;
+        let term_rows = target_h.div_ceil(2).max(1);
 
-        let pad_x = selected_width.saturating_sub(target_w) / 2;
-        let pad_y = height.saturating_sub(rows) / 2;
+        let pad_x = selected_width.saturating_sub(term_cols) / 2;
+        let pad_y = height.saturating_sub(term_rows) / 2;
+
+        // Quarter-block characters indexed by 4-bit pattern.
+        // Bit layout: bit3=TL, bit2=TR, bit1=BL, bit0=BR  (1=fg, 0=bg)
+        #[rustfmt::skip]
+        const QUAD: [&str; 16] = [
+            " ",  // 0000
+            "▗",  // 0001  BR
+            "▖",  // 0010  BL
+            "▄",  // 0011  BL+BR  (lower half)
+            "▝",  // 0100  TR
+            "▐",  // 0101  TR+BR  (right half)
+            "▞",  // 0110  TR+BL  (diagonal /)
+            "▟",  // 0111  TR+BL+BR
+            "▘",  // 1000  TL
+            "▚",  // 1001  TL+BR  (diagonal \)
+            "▌",  // 1010  TL+BL  (left half)
+            "▙",  // 1011  TL+BL+BR
+            "▀",  // 1100  TL+TR  (upper half)
+            "▜",  // 1101  TL+TR+BR
+            "▛",  // 1110  TL+TR+BL
+            "█",  // 1111  full
+        ];
+
+        // Map a sub-pixel (tx, ty) in target space → source pixel.
+        let sample = |tx: usize, ty: usize| -> [u8; 4] {
+            let sx = (tx * src_w / target_w).min(src_w - 1);
+            let sy = (ty * src_h / target_h).min(src_h - 1);
+            rgba_at(pixels, src_w, sx, sy)
+        };
+
+        // Given 4 RGBA pixels [TL, TR, BL, BR], pick 2 representative colors
+        // (fg and bg) and return the block character + colors.
+        let quantize = |block: [[u8; 4]; 4]| -> (&'static str, Color, Color) {
+            // Luminance (0=transparent treated as black)
+            let lum = |p: [u8; 4]| -> u16 {
+                if p[3] < 64 { return 0; }
+                ((p[0] as u32 * 299 + p[1] as u32 * 587 + p[2] as u32 * 114) / 1000) as u16
+            };
+            let lums = block.map(lum);
+            let max_l = *lums.iter().max().unwrap();
+            let min_l = *lums.iter().min().unwrap();
+            let mid = (max_l as u32 + min_l as u32) / 2;
+
+            let mut fg_r = 0u32; let mut fg_g = 0u32; let mut fg_b = 0u32; let mut fg_n = 0u32;
+            let mut bg_r = 0u32; let mut bg_g = 0u32; let mut bg_b = 0u32; let mut bg_n = 0u32;
+            let mut pattern = 0u8;
+
+            // bit order: TL=3, TR=2, BL=1, BR=0
+            for (i, (p, l)) in block.iter().zip(lums.iter()).enumerate() {
+                let is_fg = *l as u32 > mid || (max_l == min_l && i < 2);
+                if is_fg {
+                    pattern |= 1 << (3 - i);
+                    if p[3] >= 64 { fg_r += p[0] as u32; fg_g += p[1] as u32; fg_b += p[2] as u32; fg_n += 1; }
+                } else if p[3] >= 64 {
+                    bg_r += p[0] as u32; bg_g += p[1] as u32; bg_b += p[2] as u32; bg_n += 1;
+                }
+            }
+
+            let fg = if fg_n > 0 { Color::Rgb((fg_r/fg_n) as u8, (fg_g/fg_n) as u8, (fg_b/fg_n) as u8) } else { Color::Black };
+            let bg = if bg_n > 0 { Color::Rgb((bg_r/bg_n) as u8, (bg_g/bg_n) as u8, (bg_b/bg_n) as u8) } else { Color::Black };
+
+            // If all 4 pixels are transparent, return a blank.
+            let all_transparent = block.iter().all(|p| p[3] < 64);
+            if all_transparent { return (" ", Color::Black, Color::Black); }
+
+            (QUAD[pattern as usize], fg, bg)
+        };
 
         let mut out = Vec::with_capacity(height);
 
@@ -727,40 +804,29 @@ impl Viewer {
             out.push(Line::from(Span::raw(" ".repeat(selected_width))));
         }
 
-        for row in 0..rows {
+        for row in 0..term_rows {
             let mut spans: Vec<Span<'static>> = Vec::new();
             if pad_x > 0 {
                 spans.push(Span::raw(" ".repeat(pad_x)));
             }
 
-            let y0_scaled = row * 2;
-            let y1_scaled = y0_scaled + 1;
-            let sy0 = (y0_scaled * src_h).min((target_h.saturating_sub(1)) * src_h) / target_h;
-            let sy1 = (y1_scaled * src_h).min((target_h.saturating_sub(1)) * src_h) / target_h;
+            let py0 = row * 2;
+            let py1 = py0 + 1;
 
-            for x in 0..target_w {
-                let sx = (x * src_w).min((target_w.saturating_sub(1)) * src_w) / target_w;
-                let top = rgba_at(pixels, src_w, sx, sy0);
-                let bot = rgba_at(pixels, src_w, sx, sy1);
-
-                let top_opaque = top[3] >= 64;
-                let bot_opaque = bot[3] >= 64;
-
-                let span = match (top_opaque, bot_opaque) {
-                    (false, false) => Span::raw(" "),
-                    (true, false) => Span::styled("▀", Style::default().fg(Color::Rgb(top[0], top[1], top[2]))),
-                    (false, true) => Span::styled("▄", Style::default().fg(Color::Rgb(bot[0], bot[1], bot[2]))),
-                    (true, true) => Span::styled(
-                        "▄",
-                        Style::default()
-                            .fg(Color::Rgb(bot[0], bot[1], bot[2]))
-                            .bg(Color::Rgb(top[0], top[1], top[2])),
-                    ),
-                };
-                spans.push(span);
+            for col in 0..term_cols {
+                let px0 = col * 2;
+                let px1 = px0 + 1;
+                let block = [
+                    sample(px0, py0), // TL
+                    sample(px1, py0), // TR
+                    sample(px0, py1), // BL
+                    sample(px1, py1), // BR
+                ];
+                let (ch, fg, bg) = quantize(block);
+                spans.push(Span::styled(ch, Style::default().fg(fg).bg(bg)));
             }
 
-            let used = pad_x + target_w;
+            let used = pad_x + term_cols;
             if used < selected_width {
                 spans.push(Span::raw(" ".repeat(selected_width - used)));
             }
