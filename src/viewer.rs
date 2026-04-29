@@ -137,6 +137,7 @@ pub struct ImageInfo {
     pub width: Option<u32>,
     pub height: Option<u32>,
     kitty_png: OnceLock<Option<Vec<u8>>>,
+    decoded_rgba: OnceLock<Option<(u32, u32, Vec<u8>)>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -675,9 +676,103 @@ impl Viewer {
             ViewMode::Text | ViewMode::Ansi => {
                 self.render_text_like_lines(selected_width, start, height)
             }
-            ViewMode::Image => vec![Line::from(Span::raw(String::new()))],
+            ViewMode::Image => self.render_image_fallback_lines(selected_width, height),
             ViewMode::Hex => self.render_hex_lines(selected_width, start, height),
         }
+    }
+
+    fn render_image_fallback_lines(&self, selected_width: usize, height: usize) -> Vec<Line<'static>> {
+        if selected_width == 0 || height == 0 {
+            return Vec::new();
+        }
+        let Some(image) = self.image_info() else {
+            return vec![Line::from(Span::styled(
+                "Image unavailable",
+                Style::default().fg(Color::Yellow),
+            ))];
+        };
+
+        let decoded = image
+            .decoded_rgba
+            .get_or_init(|| decode_rgba_for_fallback(&self.raw, image.format).ok());
+        let Some((src_w, src_h, pixels)) = decoded.as_ref() else {
+            return vec![Line::from(Span::styled(
+                "Image decode failed",
+                Style::default().fg(Color::Yellow),
+            ))];
+        };
+
+        let src_w = *src_w as usize;
+        let src_h = *src_h as usize;
+        if src_w == 0 || src_h == 0 {
+            return vec![Line::from(Span::raw(String::new()))];
+        }
+
+        // Catimg-like scaling in "precision 2": two source rows per terminal row.
+        let max_cols = selected_width;
+        let max_rows_px = height.saturating_mul(2);
+        let scale_x = max_cols as f32 / src_w as f32;
+        let scale_y = max_rows_px as f32 / src_h as f32;
+        let scale = scale_x.min(scale_y).max(0.0001);
+        let target_w = ((src_w as f32) * scale).floor().max(1.0) as usize;
+        let target_h = ((src_h as f32) * scale).floor().max(1.0) as usize;
+        let rows = target_h.div_ceil(2).max(1);
+
+        let pad_x = selected_width.saturating_sub(target_w) / 2;
+        let pad_y = height.saturating_sub(rows) / 2;
+
+        let mut out = Vec::with_capacity(height);
+
+        for _ in 0..pad_y {
+            out.push(Line::from(Span::raw(" ".repeat(selected_width))));
+        }
+
+        for row in 0..rows {
+            let mut spans: Vec<Span<'static>> = Vec::new();
+            if pad_x > 0 {
+                spans.push(Span::raw(" ".repeat(pad_x)));
+            }
+
+            let y0_scaled = row * 2;
+            let y1_scaled = y0_scaled + 1;
+            let sy0 = (y0_scaled * src_h).min((target_h.saturating_sub(1)) * src_h) / target_h;
+            let sy1 = (y1_scaled * src_h).min((target_h.saturating_sub(1)) * src_h) / target_h;
+
+            for x in 0..target_w {
+                let sx = (x * src_w).min((target_w.saturating_sub(1)) * src_w) / target_w;
+                let top = rgba_at(pixels, src_w, sx, sy0);
+                let bot = rgba_at(pixels, src_w, sx, sy1);
+
+                let top_opaque = top[3] >= 64;
+                let bot_opaque = bot[3] >= 64;
+
+                let span = match (top_opaque, bot_opaque) {
+                    (false, false) => Span::raw(" "),
+                    (true, false) => Span::styled("▀", Style::default().fg(Color::Rgb(top[0], top[1], top[2]))),
+                    (false, true) => Span::styled("▄", Style::default().fg(Color::Rgb(bot[0], bot[1], bot[2]))),
+                    (true, true) => Span::styled(
+                        "▄",
+                        Style::default()
+                            .fg(Color::Rgb(bot[0], bot[1], bot[2]))
+                            .bg(Color::Rgb(top[0], top[1], top[2])),
+                    ),
+                };
+                spans.push(span);
+            }
+
+            let used = pad_x + target_w;
+            if used < selected_width {
+                spans.push(Span::raw(" ".repeat(selected_width - used)));
+            }
+            out.push(Line::from(spans));
+        }
+
+        while out.len() < height {
+            out.push(Line::from(Span::raw(" ".repeat(selected_width))));
+        }
+
+        out.truncate(height);
+        out
     }
 
     fn render_text_like_lines(
@@ -1157,6 +1252,22 @@ pub fn clear_kitty_images<W: Write>(out: &mut W) -> Result<()> {
     Ok(())
 }
 
+fn rgba_at(pixels: &[u8], width: usize, x: usize, y: usize) -> [u8; 4] {
+    let idx = (y * width + x) * 4;
+    if idx + 3 < pixels.len() {
+        [pixels[idx], pixels[idx + 1], pixels[idx + 2], pixels[idx + 3]]
+    } else {
+        [0, 0, 0, 0]
+    }
+}
+
+fn decode_rgba_for_fallback(raw: &[u8], _format: &'static str) -> Result<(u32, u32, Vec<u8>)> {
+    let dyn_img = image::load_from_memory(raw).context("decoding image for fallback renderer")?;
+    let rgba = dyn_img.to_rgba8();
+    let (w, h) = rgba.dimensions();
+    Ok((w, h, rgba.into_raw()))
+}
+
 pub fn render_kitty_image<W: Write>(out: &mut W, viewer: &Viewer, area: Rect) -> Result<()> {
     if !viewer.is_image_mode() || area.width == 0 || area.height == 0 {
         return Ok(());
@@ -1257,6 +1368,7 @@ fn detect_image_info(path: &Path, data: &[u8]) -> Option<ImageInfo> {
             width,
             height,
             kitty_png: OnceLock::new(),
+            decoded_rgba: OnceLock::new(),
         });
     }
     if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
@@ -1266,6 +1378,7 @@ fn detect_image_info(path: &Path, data: &[u8]) -> Option<ImageInfo> {
             width,
             height,
             kitty_png: OnceLock::new(),
+            decoded_rgba: OnceLock::new(),
         });
     }
     if data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a") {
@@ -1275,6 +1388,7 @@ fn detect_image_info(path: &Path, data: &[u8]) -> Option<ImageInfo> {
             width,
             height,
             kitty_png: OnceLock::new(),
+            decoded_rgba: OnceLock::new(),
         });
     }
     if data.starts_with(b"BM") {
@@ -1284,6 +1398,7 @@ fn detect_image_info(path: &Path, data: &[u8]) -> Option<ImageInfo> {
             width,
             height,
             kitty_png: OnceLock::new(),
+            decoded_rgba: OnceLock::new(),
         });
     }
     if data.len() >= 12 && &data[..4] == b"RIFF" && &data[8..12] == b"WEBP" {
@@ -1292,6 +1407,7 @@ fn detect_image_info(path: &Path, data: &[u8]) -> Option<ImageInfo> {
             width: None,
             height: None,
             kitty_png: OnceLock::new(),
+            decoded_rgba: OnceLock::new(),
         });
     }
     if matches!(
@@ -1310,6 +1426,7 @@ fn detect_image_info(path: &Path, data: &[u8]) -> Option<ImageInfo> {
             width: None,
             height: None,
             kitty_png: OnceLock::new(),
+            decoded_rgba: OnceLock::new(),
         });
     }
     None

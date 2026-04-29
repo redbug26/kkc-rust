@@ -737,8 +737,7 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, goto_input: Option<
         inner,
     );
 
-    if v.is_image_mode() {
-        let supported = crate::viewer::kitty_graphics_supported();
+    if v.is_image_mode() && crate::viewer::kitty_graphics_supported() {
         let mut lines = vec![Line::from(Span::styled(
             "Image preview",
             Style::default()
@@ -757,23 +756,11 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, goto_input: Option<
         }
         lines.push(Line::from(Span::raw("")));
         lines.push(Line::from(Span::styled(
-            if supported {
-                "Rendered with Kitty Graphics Protocol"
-            } else {
-                "Kitty Graphics Protocol unavailable in this terminal"
-            },
-            Style::default().fg(if supported {
-                Color::Cyan
-            } else {
-                Color::Yellow
-            }),
+            "Rendered with Kitty Graphics Protocol",
+            Style::default().fg(Color::Cyan),
         )));
         lines.push(Line::from(Span::styled(
-            if supported {
-                "Use F5 to toggle Auto/Full size"
-            } else {
-                "Open in kitty/ghostty/wezterm to enable inline preview"
-            },
+            "Use F5 to toggle Auto/Full size",
             Style::default().fg(Color::Gray),
         )));
         f.render_widget(
