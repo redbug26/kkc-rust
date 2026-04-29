@@ -588,6 +588,15 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             vec![],
         ))
+    } else if is_amsdos_file(&data, &ext) {
+        Some(info(
+            "application/x-amstrad-cpc-amsdos",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            amsdos_lines(&data),
+        ))
     } else if is_amstrad_dsk(&data, &ext) {
         Some(info(
             "application/x-amstrad-cpc-dsk",
@@ -820,6 +829,7 @@ fn format_from_mime_type(mime_type: &str) -> Option<&'static str> {
         "audio/x-mod" => Some("ProTracker module"),
         "audio/x-vgm" => Some("VGM audio"),
         "application/x-uf2" => Some("UF2 firmware image"),
+        "application/x-amstrad-cpc-amsdos" => Some("Amstrad AMSDOS file"),
         "application/x-amstrad-cpc-dsk" => Some("Amstrad CPC DSK image"),
         "application/x-c64-d64" => Some("Commodore 64 D64 disk image"),
         "application/x-bittorrent" => Some("BitTorrent metadata"),
@@ -1575,8 +1585,138 @@ fn email_subject(data: &[u8]) -> Option<String> {
 
 fn is_amstrad_dsk(data: &[u8], ext: &str) -> bool {
     ext == "dsk"
-        && (data.starts_with(b"MV - CPCEMU Disk-File\r\nDisk-Info\r\n")
-            || data.starts_with(b"EXTENDED CPC DSK File\r\nDisk-Info\r\n"))
+        && (data.starts_with(b"MV - CPC") || data.starts_with(b"EXTENDED CPC DSK"))
+}
+
+fn is_plausible_amsdos_name_byte(byte: u8) -> bool {
+    byte.is_ascii_uppercase() || byte.is_ascii_digit() || matches!(byte, b' ' | b'_' | b'-' | b'.')
+}
+
+fn amsdos_checksum_ok(data: &[u8]) -> bool {
+    if data.len() < 128 {
+        return false;
+    }
+    let sum = data[..67]
+        .iter()
+        .fold(0u16, |acc, b| acc.wrapping_add(*b as u16));
+    let stored = u16::from_le_bytes([data[67], data[68]]);
+    sum == stored
+}
+
+fn is_amsdos_file(data: &[u8], ext: &str) -> bool {
+    if data.len() < 128 {
+        return false;
+    }
+
+    if ext == "amsd" {
+        return true;
+    }
+
+    let user = data[0];
+    if user > 31 {
+        return false;
+    }
+
+    let mut has_non_space = false;
+    for &byte in &data[1..12] {
+        let b = byte & 0x7f;
+        if !is_plausible_amsdos_name_byte(b) {
+            return false;
+        }
+        if b != b' ' {
+            has_non_space = true;
+        }
+    }
+    if !has_non_space {
+        return false;
+    }
+
+    let length = u16::from_le_bytes([data[24], data[25]]) as usize;
+    if length == 0 {
+        return false;
+    }
+
+    let file_type = data[18];
+    let content_kind = (file_type >> 1) & 0x07;
+    if content_kind > 4 {
+        return false;
+    }
+
+    if data[12..16].iter().any(|b| *b != 0) {
+        return false;
+    }
+
+    if amsdos_checksum_ok(data) {
+        return true;
+    }
+
+    // Some legacy files have an invalid checksum but still carry a valid header.
+    // Keep supporting those by relying on structural checks above.
+
+    true
+}
+
+fn amsdos_lines(data: &[u8]) -> Vec<String> {
+    if data.len() < 128 {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+
+    let user = data[0];
+    let raw_name = &data[1..12];
+    let name = String::from_utf8_lossy(&raw_name.iter().map(|b| b & 0x7f).collect::<Vec<u8>>())
+        .to_string();
+    let base = name[..8].trim_end();
+    let ext = name[8..].trim_end();
+    let display = if ext.is_empty() {
+        base.to_string()
+    } else {
+        format!("{}.{}", base, ext)
+    };
+    let file_type = data[18];
+    let protected = (file_type & 0x01) != 0;
+    let content_kind = (file_type >> 1) & 0x07;
+    let version = (file_type >> 4) & 0x0f;
+    let kind = match content_kind {
+        0 => "BASIC",
+        1 => "Binary",
+        2 => "Screen",
+        3 => "ASCII",
+        _ => "Unknown",
+    };
+    let logical_length = u16::from_le_bytes([data[24], data[25]]) as usize;
+    let load_address = u16::from_le_bytes([data[21], data[22]]);
+    let entry_address = u16::from_le_bytes([data[26], data[27]]);
+    let real_length = (data[64] as u32) | ((data[65] as u32) << 8) | ((data[66] as u32) << 16);
+    let checksum = data[..67]
+        .iter()
+        .fold(0u16, |acc, b| acc.wrapping_add(*b as u16));
+    let stored_checksum = u16::from_le_bytes([data[67], data[68]]);
+
+    out.push(format!(" AMSDOS file: {}", display));
+    out.push(format!(" User: {}", user));
+    out.push(format!(" Type: {} (raw={})", kind, file_type));
+    out.push(format!(
+        " Protected: {}",
+        if protected { "yes" } else { "no" }
+    ));
+    out.push(format!(" Version: {}", version));
+    out.push(format!(" Load address: 0x{:04X}", load_address));
+    out.push(format!(" Exec address: 0x{:04X}", entry_address));
+    out.push(format!(" Logical length: {} bytes", logical_length));
+    out.push(format!(" Real length: {} bytes", real_length));
+    out.push(format!(
+        " Checksum: {:04X} / stored {:04X} ({})",
+        checksum,
+        stored_checksum,
+        if checksum == stored_checksum {
+            "OK"
+        } else {
+            "mismatch"
+        }
+    ));
+
+    out
 }
 
 fn is_commodore_d64(file_len: usize, ext: &str) -> bool {

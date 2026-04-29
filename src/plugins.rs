@@ -12,6 +12,8 @@ use zip::ZipArchive;
 const BUNDLED_DSK_LUA: &str = include_str!("../assets/plugins/amstrad_dsk/dsk.lua");
 const BUNDLED_DSK_LUA_LICENSE: &str = include_str!("../assets/plugins/amstrad_dsk/LICENSE.dsk-lua");
 const BUNDLED_AMSTRAD_DSK_PLUGIN: &str = include_str!("../assets/plugins/amstrad_dsk/plugin.lua");
+const BUNDLED_AMSDOS_VIEWER_PLUGIN: &str =
+    include_str!("../assets/plugins/amsdos_viewer/plugin.lua");
 const BUNDLED_COMMODORE_D64_PLUGIN: &str =
     include_str!("../assets/plugins/commodore_d64/plugin.lua");
 const BUNDLED_LHA_LZH_PLUGIN: &str = include_str!("../assets/plugins/lha_lzh/plugin.lua");
@@ -443,6 +445,10 @@ fn install_bundled_plugins(plugins_dir: &Path) -> Result<()> {
         BUNDLED_DSK_LUA_LICENSE,
     )?;
     write_bundled_file(&amstrad_dir.join("plugin.lua"), BUNDLED_AMSTRAD_DSK_PLUGIN)?;
+
+    let amsdos_dir = plugins_dir.join("amsdos_viewer");
+    fs::create_dir_all(&amsdos_dir)?;
+    write_bundled_file(&amsdos_dir.join("plugin.lua"), BUNDLED_AMSDOS_VIEWER_PLUGIN)?;
 
     let commodore_dir = plugins_dir.join("commodore_d64");
     fs::create_dir_all(&commodore_dir)?;

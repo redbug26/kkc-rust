@@ -2870,8 +2870,8 @@ fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
                 Color::Rgb(130, 140, 160)
             };
 
-            let name_str = truncate_str(&file_name, name_w);
-            let dir_str = truncate_str(&dir, dir_w);
+            let name_str = truncate_search_file_name(&file_name, name_w);
+            let dir_str = truncate_search_parent_dir(&dir, dir_w);
             let size_str = format!("{:>width$}", format_size(r.size), width = size_w);
             let date_str = r
                 .modified
@@ -2884,14 +2884,11 @@ fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
 
             ListItem::new(Line::from(vec![
                 Span::styled(
-                    format!(" {name_str:<name_w$}"),
+                    format!(" {name_str}"),
                     Style::default().fg(name_clr).bg(row_bg),
                 ),
                 Span::styled(" ", Style::default().bg(row_bg)),
-                Span::styled(
-                    format!("{dir_str:<dir_w$}"),
-                    Style::default().fg(dir_clr).bg(row_bg),
-                ),
+                Span::styled(dir_str, Style::default().fg(dir_clr).bg(row_bg)),
                 Span::styled(
                     format!(" {size_str}"),
                     Style::default().fg(size_clr).bg(row_bg),
@@ -3766,6 +3763,82 @@ pub fn truncate_str(s: &str, max: usize) -> String {
         width += 1;
     }
     result
+}
+
+fn push_display_prefix(out: &mut String, s: &str, max_width: usize) -> usize {
+    use unicode_width::UnicodeWidthChar;
+    let mut width = 0usize;
+    for ch in s.chars() {
+        let cw = ch.width().unwrap_or(1);
+        if width + cw > max_width {
+            break;
+        }
+        out.push(ch);
+        width += cw;
+    }
+    width
+}
+
+fn take_display_prefix(s: &str, max_width: usize) -> String {
+    let mut out = String::new();
+    push_display_prefix(&mut out, s, max_width);
+    out
+}
+
+fn take_display_suffix(s: &str, max_width: usize) -> String {
+    use unicode_width::UnicodeWidthChar;
+    let mut width = 0usize;
+    let mut chars = Vec::new();
+    for ch in s.chars().rev() {
+        let cw = ch.width().unwrap_or(1);
+        if width + cw > max_width {
+            break;
+        }
+        chars.push(ch);
+        width += cw;
+    }
+    chars.into_iter().rev().collect()
+}
+
+fn pad_display_width(mut s: String, width: usize) -> String {
+    while UnicodeWidthStr::width(s.as_str()) < width {
+        s.push(' ');
+    }
+    s
+}
+
+fn truncate_search_file_name(name: &str, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    if UnicodeWidthStr::width(name) <= width {
+        return pad_display_width(name.to_string(), width);
+    }
+    if width <= 3 {
+        return ".".repeat(width);
+    }
+
+    let remaining = width - 3;
+    let suffix_w = remaining.div_ceil(2);
+    let prefix_w = remaining.saturating_sub(suffix_w);
+    let prefix = take_display_prefix(name, prefix_w);
+    let suffix = take_display_suffix(name, suffix_w);
+    pad_display_width(format!("{prefix}...{suffix}"), width)
+}
+
+fn truncate_search_parent_dir(dir: &str, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    if UnicodeWidthStr::width(dir) <= width {
+        return pad_display_width(dir.to_string(), width);
+    }
+    if width <= 3 {
+        return ".".repeat(width);
+    }
+
+    let suffix = take_display_suffix(dir, width - 3);
+    pad_display_width(format!("...{suffix}"), width)
 }
 
 fn format_dos_number(value: u64) -> String {
