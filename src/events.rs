@@ -667,6 +667,7 @@ fn open_wildcard_dialog(prompt: &str, select: bool) -> AppMode {
 // ---------------------------------------------------------------------------
 
 fn handle_quicksearch(app: &mut App, key: KeyEvent) -> Result<bool> {
+    let mut refresh_preview = false;
     match key.code {
         // Confirm: jump to highlighted match, or enter directory
         KeyCode::Enter => {
@@ -678,6 +679,7 @@ fn handle_quicksearch(app: &mut App, key: KeyEvent) -> Result<bool> {
             app.active_panel_mut().qs_match_pos = 0;
             if let Some(idx) = entry_idx {
                 app.active_panel_mut().cursor = idx;
+                refresh_preview = true;
             }
             app.mode = AppMode::Browse;
             // If the selected entry is a directory, navigate into it
@@ -708,6 +710,7 @@ fn handle_quicksearch(app: &mut App, key: KeyEvent) -> Result<bool> {
                 .copied();
             if let Some(idx) = entry_idx {
                 app.active_panel_mut().cursor = idx;
+                refresh_preview = true;
             }
         }
         // Navigate DOWN in the filtered list
@@ -724,6 +727,7 @@ fn handle_quicksearch(app: &mut App, key: KeyEvent) -> Result<bool> {
                 .copied();
             if let Some(idx) = entry_idx {
                 app.active_panel_mut().cursor = idx;
+                refresh_preview = true;
             }
         }
         // Delete last char
@@ -736,6 +740,7 @@ fn handle_quicksearch(app: &mut App, key: KeyEvent) -> Result<bool> {
                 let first = app.active_panel().quicksearch_matches().into_iter().next();
                 if let Some(idx) = first {
                     app.active_panel_mut().cursor = idx;
+                    refresh_preview = true;
                 }
             }
         }
@@ -746,6 +751,7 @@ fn handle_quicksearch(app: &mut App, key: KeyEvent) -> Result<bool> {
             let first = app.active_panel().quicksearch_matches().into_iter().next();
             if let Some(idx) = first {
                 app.active_panel_mut().cursor = idx;
+                refresh_preview = true;
             }
         }
         // Any other key: close palette and pass through
@@ -755,6 +761,9 @@ fn handle_quicksearch(app: &mut App, key: KeyEvent) -> Result<bool> {
             app.mode = AppMode::Browse;
             return handle_browse(app, key);
         }
+    }
+    if refresh_preview {
+        app.refresh_quick_preview();
     }
     Ok(false)
 }
