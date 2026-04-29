@@ -9,7 +9,7 @@ pub use self::menu::{
 };
 use self::panel_tabs::{PanelTabs, panel_config_for_save, restore_panel_side};
 use crate::about::AboutState;
-use crate::config::{ActivePanelSide, Config, PanelViewType, SortMode};
+use crate::config::{ActivePanelSide, Config, PanelConfig, PanelViewType, SortMode};
 use crate::copy::{
     CopyDestination, CopyDialogState, CopyJob, CopyProgressState, CopyScanTask, CopySource,
     CopyTask, CopyTaskMessage, count_local_files, spawn_copy_scan, spawn_copy_task,
@@ -855,9 +855,33 @@ pub struct App {
 
 impl App {
     pub fn new(config: Config) -> Self {
-        let profiles = load_profiles().unwrap_or_default();
+        let app_start = std::time::Instant::now();
+        crate::viewer::debug_log("startup: App::new begin");
+        let profiles_start = std::time::Instant::now();
+        let profiles = if panel_config_needs_profiles(&config.left)
+            || panel_config_needs_profiles(&config.right)
+        {
+            let profiles = load_profiles().unwrap_or_default();
+            crate::viewer::debug_log(&format!(
+                "startup: loaded {} remote profile(s) for restored remote panel(s) in {:.3} ms",
+                profiles.len(),
+                profiles_start.elapsed().as_secs_f64() * 1000.0
+            ));
+            profiles
+        } else {
+            crate::viewer::debug_log(&format!(
+                "startup: skipped remote profile load for local panels in {:.3} ms",
+                profiles_start.elapsed().as_secs_f64() * 1000.0
+            ));
+            Vec::new()
+        };
+        let panels_start = std::time::Instant::now();
         let (left, left_tabs) = restore_panel_side(&config.left, &profiles);
         let (right, right_tabs) = restore_panel_side(&config.right, &profiles);
+        crate::viewer::debug_log(&format!(
+            "startup: restored panels in {:.3} ms",
+            panels_start.elapsed().as_secs_f64() * 1000.0
+        ));
         let max = config.dir_history_max;
         let mut history: VecDeque<PathBuf> = config.dir_history.iter().cloned().take(max).collect();
         // Always seed with the left panel path if history is empty
@@ -876,11 +900,28 @@ impl App {
             bm
         };
 
+        let terminal_cache_start = std::time::Instant::now();
         let (term_history, term_output) = crate::terminal::load_terminal_cache();
+        crate::viewer::debug_log(&format!(
+            "startup: loaded terminal cache ({} history, {} output) in {:.3} ms",
+            term_history.len(),
+            term_output.len(),
+            terminal_cache_start.elapsed().as_secs_f64() * 1000.0
+        ));
 
+        let plugins_start = std::time::Instant::now();
         let plugin_status = crate::plugins::initialize()
             .err()
             .map(|err| format!("Plugin loading failed: {err}"));
+        crate::viewer::debug_log(&format!(
+            "startup: plugin initialization completed in {:.3} ms{}",
+            plugins_start.elapsed().as_secs_f64() * 1000.0,
+            if plugin_status.is_some() {
+                " with error"
+            } else {
+                ""
+            }
+        ));
 
         let palette_recent = config.palette_recent.clone();
         let restored_active_panel = match config.active_panel {
@@ -938,6 +979,7 @@ impl App {
                 app.file_preview_info = true;
             }
             PanelViewType::QuickPreview => {
+                let preview_start = std::time::Instant::now();
                 if let Some(entry) = app.active_panel().current_entry().cloned() {
                     if entry.is_dir || entry.name == ".." {
                         let mut v =
@@ -954,9 +996,17 @@ impl App {
                         app.quick_preview = Some(v);
                     }
                 }
+                crate::viewer::debug_log(&format!(
+                    "startup: restored quick preview in {:.3} ms",
+                    preview_start.elapsed().as_secs_f64() * 1000.0
+                ));
             }
         }
 
+        crate::viewer::debug_log(&format!(
+            "startup: App::new end in {:.3} ms",
+            app_start.elapsed().as_secs_f64() * 1000.0
+        ));
         app
     }
 
@@ -2308,6 +2358,10 @@ fn trim_opt(value: &str) -> Option<String> {
     } else {
         Some(trimmed.to_string())
     }
+}
+
+fn panel_config_needs_profiles(cfg: &PanelConfig) -> bool {
+    cfg.remote_name.is_some() || cfg.tabs.iter().any(|tab| tab.remote_name.is_some())
 }
 
 fn cleanup_temp_download(path: &Path) {

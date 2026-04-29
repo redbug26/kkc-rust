@@ -124,10 +124,17 @@ pub struct ViewerSpan {
 
 pub fn initialize() -> Result<()> {
     if PLUGINS.get().is_some() {
+        crate::viewer::debug_log("startup: plugin registry already initialized");
         return Ok(());
     }
 
+    let start = std::time::Instant::now();
+    crate::viewer::debug_log("startup: plugin registry initialization begin");
     let registry = load_plugins()?;
+    crate::viewer::debug_log(&format!(
+        "startup: plugin registry loaded in {:.3} ms",
+        start.elapsed().as_secs_f64() * 1000.0
+    ));
     PLUGINS
         .set(RwLock::new(registry))
         .map_err(|_| anyhow!("Plugin registry already initialized"))?;
@@ -333,15 +340,38 @@ pub fn install_plugin_bundle(path: &Path) -> Result<String> {
 }
 
 fn load_plugins() -> Result<PluginRegistry> {
+    let load_start = std::time::Instant::now();
     let plugins_dir = ensure_plugins_dir()?;
+    crate::viewer::debug_log(&format!("startup: plugin dir {}", plugins_dir.display()));
+    let bundled_start = std::time::Instant::now();
     install_bundled_plugins(&plugins_dir)?;
+    crate::viewer::debug_log(&format!(
+        "startup: bundled plugins installed/updated in {:.3} ms",
+        bundled_start.elapsed().as_secs_f64() * 1000.0
+    ));
 
     let mut archive_plugins = Vec::new();
     let mut viewer_plugins = Vec::new();
     let mut action_plugins = Vec::new();
-    for script_path in plugin_scripts(&plugins_dir)? {
+    let scripts_start = std::time::Instant::now();
+    let scripts = plugin_scripts(&plugins_dir)?;
+    crate::viewer::debug_log(&format!(
+        "startup: discovered {} plugin script(s) in {:.3} ms",
+        scripts.len(),
+        scripts_start.elapsed().as_secs_f64() * 1000.0
+    ));
+    for script_path in scripts {
+        let script_start = std::time::Instant::now();
         let (registered, registered_viewers, registered_actions) = inspect_plugins(&script_path)
             .with_context(|| format!("Loading plugin {}", script_path.display()))?;
+        crate::viewer::debug_log(&format!(
+            "startup: inspected plugin {} in {:.3} ms (archive={}, viewer={}, action={})",
+            script_path.display(),
+            script_start.elapsed().as_secs_f64() * 1000.0,
+            registered.len(),
+            registered_viewers.len(),
+            registered_actions.len()
+        ));
         let plugin_dir = script_path
             .parent()
             .map(Path::to_path_buf)
@@ -382,6 +412,13 @@ fn load_plugins() -> Result<PluginRegistry> {
         }
     }
 
+    crate::viewer::debug_log(&format!(
+        "startup: load_plugins completed in {:.3} ms (archive={}, viewer={}, action={})",
+        load_start.elapsed().as_secs_f64() * 1000.0,
+        archive_plugins.len(),
+        viewer_plugins.len(),
+        action_plugins.len()
+    ));
     Ok(PluginRegistry {
         archive_plugins,
         viewer_plugins,

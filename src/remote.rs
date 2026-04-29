@@ -183,9 +183,29 @@ pub fn connections_path() -> Result<PathBuf> {
 }
 
 pub fn load_profiles() -> Result<Vec<RemoteProfile>> {
+    let start = std::time::Instant::now();
+    let ssh_start = std::time::Instant::now();
     let mut out = load_ssh_profiles().unwrap_or_default();
-    out.extend(load_saved_profiles()?);
+    let ssh_count = out.len();
+    crate::viewer::debug_log(&format!(
+        "remote: loaded {} ssh config profile(s) in {:.3} ms",
+        ssh_count,
+        ssh_start.elapsed().as_secs_f64() * 1000.0
+    ));
+    let saved_start = std::time::Instant::now();
+    let saved = load_saved_profiles()?;
+    crate::viewer::debug_log(&format!(
+        "remote: loaded {} saved profile(s) in {:.3} ms",
+        saved.len(),
+        saved_start.elapsed().as_secs_f64() * 1000.0
+    ));
+    out.extend(saved);
     out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    crate::viewer::debug_log(&format!(
+        "remote: load_profiles completed with {} profile(s) in {:.3} ms",
+        out.len(),
+        start.elapsed().as_secs_f64() * 1000.0
+    ));
     Ok(out)
 }
 

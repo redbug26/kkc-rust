@@ -63,6 +63,7 @@ pub enum MenuAction {
     OpenInOs,
     OpenFolderInOs,
     QuickPreview,
+    DebugLog,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

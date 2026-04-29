@@ -29,7 +29,7 @@ use crossterm::{
 use ratatui::{Terminal, backend::CrosstermBackend, layout::Rect};
 use std::io::{self, Stdout, Write};
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
     enable_raw_mode()?;
@@ -54,7 +54,10 @@ fn teardown_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Resul
 }
 
 fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
+    let startup_start = Instant::now();
+    let config_load_start = Instant::now();
     let config = Config::load().unwrap_or_default();
+    let config_load_elapsed = config_load_start.elapsed();
     // Initialise the viewer debug logger before any Viewer is created.
     {
         let log_path = config::project_dirs()
@@ -63,8 +66,19 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
             .unwrap_or_else(|| PathBuf::from("/tmp/kkc_debug.log"));
         viewer::init_debug_log(config.debug_log, log_path);
     }
+    viewer::debug_log(&format!(
+        "startup: config loaded in {:.3} ms",
+        config_load_elapsed.as_secs_f64() * 1000.0
+    ));
+    let app_new_start = Instant::now();
     let mut app = App::new(config);
+    viewer::debug_log(&format!(
+        "startup: App::new completed in {:.3} ms",
+        app_new_start.elapsed().as_secs_f64() * 1000.0
+    ));
     let mut last_kitty_image: Option<(PathBuf, ratatui::layout::Rect, bool)> = None;
+    let mut first_draw_logged = false;
+    let mut startup_ready_logged = false;
 
     loop {
         app.poll_background_tasks();
@@ -93,7 +107,15 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
             state.step_worm();
         }
 
+        let draw_start = Instant::now();
         let completed = terminal.draw(|f| ui::render(f, &app))?;
+        if !first_draw_logged {
+            first_draw_logged = true;
+            viewer::debug_log(&format!(
+                "startup: first terminal draw completed in {:.3} ms",
+                draw_start.elapsed().as_secs_f64() * 1000.0
+            ));
+        }
 
         // Ctrl+G GIF capture: append the just-rendered frame to <data_dir>/screen.gif
         if app.capture_gif {
@@ -159,10 +181,21 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
                             MoveTo(0, term_area.height.saturating_sub(1))
                         )?;
                         terminal.backend_mut().flush()?;
+                        if !startup_ready_logged {
+                            viewer::debug_log("startup: kitty image rendered after first draw");
+                        }
                     }
                 }
             }
             last_kitty_image = next_kitty_image;
+        }
+
+        if first_draw_logged && !startup_ready_logged {
+            startup_ready_logged = true;
+            viewer::debug_log(&format!(
+                "startup: first loop ready in {:.3} ms",
+                startup_start.elapsed().as_secs_f64() * 1000.0
+            ));
         }
 
         match app.mode {

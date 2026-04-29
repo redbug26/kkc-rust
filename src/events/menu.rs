@@ -344,6 +344,21 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
                 app.quick_preview = Some(v);
             }
         }
+        MenuAction::DebugLog => {
+            app.config.debug_log = !app.config.debug_log;
+            crate::viewer::set_debug_log_enabled(app.config.debug_log);
+            match app.save_config() {
+                Ok(_) if app.config.debug_log => {
+                    let log_path = crate::viewer::debug_log_path()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|| "?".into());
+                    app.set_status(format!("Debug log enabled: {}", log_path));
+                    crate::viewer::debug_log("debug_log command: enabled and saved");
+                }
+                Ok(_) => app.set_status("Debug log disabled"),
+                Err(e) => app.set_status(format!("Save error: {}", e)),
+            }
+        }
         MenuAction::Separator => {}
     }
     Ok(false)

@@ -73,7 +73,7 @@ pub fn set_debug_log_enabled(enabled: bool) {
     }
 }
 
-fn debug_log(msg: &str) {
+pub fn debug_log(msg: &str) {
     if !DEBUG_LOG_ENABLED.load(Ordering::Relaxed) {
         return;
     }
@@ -81,11 +81,7 @@ fn debug_log(msg: &str) {
         return;
     };
     use std::fs::OpenOptions;
-    use std::time::SystemTime;
-    let ts = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
     if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(path) {
         let _ = writeln!(f, "[{ts}] {msg}");
     }

@@ -287,6 +287,13 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
         fn_name: "capture_gif",
         action: MenuAction::CaptureGif,
     },
+    PaletteEntry {
+        category: "Tools",
+        label: "Toggle debug log",
+        shortcut: None,
+        fn_name: "debug_log",
+        action: MenuAction::DebugLog,
+    },
     // ── OS integration ───────────────────────────────────────────────────
     PaletteEntry {
         category: "File",
