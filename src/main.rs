@@ -131,24 +131,36 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
             AppMode::Viewer(v) | AppMode::ViewerSearching(v) | AppMode::ViewerMenu(v, _) => {
                 ui::kitty_image_area(v, term_area).map(|rect| (v.path.clone(), rect, v.zoomed))
             }
-            _ => None,
+            _ => {
+                // Quick-preview: use the inactive panel area
+                app.quick_preview.as_ref().and_then(|v| {
+                    ui::kitty_image_area_quick_preview(&app, term_area)
+                        .map(|rect| (v.path.clone(), rect, v.zoomed))
+                })
+            }
         };
 
         if next_kitty_image != last_kitty_image {
             if last_kitty_image.is_some() {
                 viewer::clear_kitty_images(terminal.backend_mut())?;
             }
-            if let Some((_, rect, _)) = &next_kitty_image {
-                if let AppMode::Viewer(v) | AppMode::ViewerSearching(v) | AppMode::ViewerMenu(v, _) =
-                    &app.mode
-                    && viewer::kitty_graphics_supported()
-                {
-                    viewer::render_kitty_image(terminal.backend_mut(), v, *rect)?;
-                    execute!(
-                        terminal.backend_mut(),
-                        MoveTo(0, term_area.height.saturating_sub(1))
-                    )?;
-                    terminal.backend_mut().flush()?;
+            if let Some((path, rect, _)) = &next_kitty_image {
+                if viewer::kitty_graphics_supported() {
+                    // Find the viewer to render (full viewer or quick_preview)
+                    let v_opt: Option<&viewer::Viewer> =
+                        match &app.mode {
+                            AppMode::Viewer(v) | AppMode::ViewerSearching(v) | AppMode::ViewerMenu(v, _)
+                                if v.path == *path => Some(v),
+                            _ => app.quick_preview.as_ref().filter(|v| v.path == *path),
+                        };
+                    if let Some(v) = v_opt {
+                        viewer::render_kitty_image(terminal.backend_mut(), v, *rect)?;
+                        execute!(
+                            terminal.backend_mut(),
+                            MoveTo(0, term_area.height.saturating_sub(1))
+                        )?;
+                        terminal.backend_mut().flush()?;
+                    }
                 }
             }
             last_kitty_image = next_kitty_image;

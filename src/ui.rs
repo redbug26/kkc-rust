@@ -605,6 +605,39 @@ pub fn kitty_image_area(v: &Viewer, area: Rect) -> Option<Rect> {
     }
 }
 
+/// Returns the kitty image rect for the quick_preview panel, if it's showing an image.
+pub fn kitty_image_area_quick_preview(app: &App, term_area: Rect) -> Option<Rect> {
+    let v = app.quick_preview.as_ref()?;
+    if !v.is_image_mode() {
+        return None;
+    }
+    let has_fbar = app.config.show_fkey_bar;
+    let main_vert = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(if has_fbar {
+            vec![
+                Constraint::Min(5),
+                Constraint::Length(1),
+                Constraint::Length(1),
+            ]
+        } else {
+            vec![Constraint::Min(5), Constraint::Length(1)]
+        })
+        .split(term_area);
+    let panels_area = main_vert[0];
+    let panel_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Min(28),
+            Constraint::Length(13),
+            Constraint::Min(28),
+        ])
+        .split(panels_area);
+    let left_active = app.active == crate::app::ActivePanel::Left;
+    let preview_area = if left_active { panel_chunks[2] } else { panel_chunks[0] };
+    kitty_image_area(v, preview_area)
+}
+
 fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, goto_input: Option<&str>, area: Rect, show_footer: bool, active: bool, quick_preview_label: Option<&str>) {
     let (footer_area, viewer_host) = if show_footer {
         let footer = clamp_rect(
