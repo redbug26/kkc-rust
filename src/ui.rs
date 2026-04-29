@@ -3167,31 +3167,35 @@ fn highlight_tokens(
     base_bg: Color,
     hi_fg: Color,
 ) -> Line<'static> {
-    // Build a boolean mask: which byte positions are highlighted
-    let name_lower = name.to_lowercase();
-    let mut mask = vec![false; name.len()];
+    // Build a boolean mask by character, not byte. Lowercasing UTF-8 text can
+    // change byte lengths, so byte slicing here can panic on names with accents.
+    let name_chars: Vec<char> = name.chars().collect();
+    let lower_chars: Vec<char> = name.to_lowercase().chars().collect();
+    let mut mask = vec![false; name_chars.len()];
     for token in tokens {
         if token.is_empty() {
             continue;
         }
-        let mut search_from = 0;
-        while search_from < name_lower.len() {
-            if let Some(pos) = name_lower[search_from..].find(token.as_str()) {
-                let abs = search_from + pos;
-                let end = abs + token.len();
-                for b in abs..end.min(mask.len()) {
-                    mask[b] = true;
+        let token_chars: Vec<char> = token.to_lowercase().chars().collect();
+        if token_chars.is_empty() || token_chars.len() > lower_chars.len() {
+            continue;
+        }
+        let mut idx = 0usize;
+        while idx + token_chars.len() <= lower_chars.len() {
+            if lower_chars[idx..idx + token_chars.len()] == token_chars[..] {
+                for slot in mask.iter_mut().skip(idx).take(token_chars.len()) {
+                    *slot = true;
                 }
-                search_from = abs + 1;
+                idx += 1;
             } else {
-                break;
+                idx += 1;
             }
         }
     }
 
     // Walk the name char by char, grouping consecutive same-style chars into spans
     let mut spans: Vec<Span<'static>> = Vec::new();
-    let mut seg_start = 0;
+    let mut segment = String::new();
     let mut current_hi = mask.first().copied().unwrap_or(false);
     let base = Style::default().fg(base_fg).bg(base_bg);
     let hi = Style::default()
@@ -3199,19 +3203,19 @@ fn highlight_tokens(
         .bg(base_bg)
         .add_modifier(Modifier::BOLD);
 
-    for (byte_pos, ch) in name.char_indices() {
-        let this_hi = mask[byte_pos];
+    for (idx, ch) in name_chars.into_iter().enumerate() {
+        let this_hi = mask.get(idx).copied().unwrap_or(false);
         if this_hi != current_hi {
-            let slice: String = name[seg_start..byte_pos].to_owned();
-            spans.push(Span::styled(slice, if current_hi { hi } else { base }));
-            seg_start = byte_pos;
+            spans.push(Span::styled(
+                std::mem::take(&mut segment),
+                if current_hi { hi } else { base },
+            ));
             current_hi = this_hi;
         }
-        let _ = ch; // consumed by char_indices
+        segment.push(ch);
     }
     // Push the last segment
-    let tail: String = name[seg_start..].to_owned();
-    spans.push(Span::styled(tail, if current_hi { hi } else { base }));
+    spans.push(Span::styled(segment, if current_hi { hi } else { base }));
 
     Line::from(spans)
 }
@@ -3804,10 +3808,18 @@ fn format_compact_size(value: u64) -> String {
 }
 
 fn truncate_path(p: &str, max: usize) -> String {
-    if p.len() <= max {
+    if p.chars().count() <= max {
         return p.to_string();
     }
-    let trimmed = &p[p.len() - max.saturating_sub(3)..];
+    let keep = max.saturating_sub(3);
+    let trimmed = p
+        .chars()
+        .rev()
+        .take(keep)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<String>();
     format!("...{}", trimmed)
 }
 
@@ -4018,7 +4030,14 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
             };
             let padded = format!("{:<width$}", value, width = field_w as usize);
             let display = if padded.len() > field_w as usize {
-                padded[padded.len() - field_w as usize..].to_string()
+                padded
+                    .chars()
+                    .rev()
+                    .take(field_w as usize)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect::<String>()
             } else {
                 padded
             };
