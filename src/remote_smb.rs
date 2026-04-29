@@ -96,12 +96,7 @@ pub(super) fn list_smb_shares(profile: &RemoteProfile) -> Result<Vec<String>> {
         .map_err(|e| anyhow::anyhow!("SMB share enumeration on '{}': {}", smb.host, e))?;
     let mut shares: Vec<String> = dirents
         .into_iter()
-        .filter(|d| {
-            matches!(
-                d.get_type(),
-                SmbDirentType::FileShare | SmbDirentType::Dir
-            )
-        })
+        .filter(|d| matches!(d.get_type(), SmbDirentType::FileShare | SmbDirentType::Dir))
         .map(|d| d.name().to_owned())
         .collect();
     shares.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
@@ -121,9 +116,13 @@ pub(super) fn list_smb_dir(
     };
     let client = smb_client(smb)?;
     let smb_path = if cwd == "/" { "" } else { cwd };
-    let entries = client
-        .list_dirplus(smb_path)
-        .map_err(|e| anyhow::anyhow!("SMB list error listing '{}': {} (check credentials and share name)", smb_path, e))?;
+    let entries = client.list_dirplus(smb_path).map_err(|e| {
+        anyhow::anyhow!(
+            "SMB list error listing '{}': {} (check credentials and share name)",
+            smb_path,
+            e
+        )
+    })?;
     let mut out = Vec::new();
     for dirent in entries {
         let name = dirent.name.clone();
@@ -180,13 +179,7 @@ pub(super) fn upload_smb_into_dir(
         .file_name()
         .context("local path has no file name")?;
     let remote_target = join_remote(remote_dir, &name.to_string_lossy());
-    upload_smb_path::<fn(&str, u64) -> bool>(
-        profile,
-        local_path,
-        &remote_target,
-        recursive,
-        None,
-    )?;
+    upload_smb_path::<fn(&str, u64) -> bool>(profile, local_path, &remote_target, recursive, None)?;
     Ok(remote_target)
 }
 
@@ -204,7 +197,13 @@ where
         .file_name()
         .context("remote path has no file name")?;
     let local_target = local_dir.join(name);
-    download_smb_path(profile, remote_path, &local_target, recursive, Some(progress))?;
+    download_smb_path(
+        profile,
+        remote_path,
+        &local_target,
+        recursive,
+        Some(progress),
+    )?;
     Ok(local_target)
 }
 
@@ -222,14 +221,17 @@ where
         .file_name()
         .context("local path has no file name")?;
     let remote_target = join_remote(remote_dir, &name.to_string_lossy());
-    upload_smb_path(profile, local_path, &remote_target, recursive, Some(progress))?;
+    upload_smb_path(
+        profile,
+        local_path,
+        &remote_target,
+        recursive,
+        Some(progress),
+    )?;
     Ok(remote_target)
 }
 
-pub(super) fn delete_smb_dir_recursive(
-    profile: &RemoteProfile,
-    remote_path: &str,
-) -> Result<()> {
+pub(super) fn delete_smb_dir_recursive(profile: &RemoteProfile, remote_path: &str) -> Result<()> {
     let RemoteKind::Smb(smb) = &profile.kind else {
         bail!("Profile is not SMB");
     };
@@ -322,13 +324,15 @@ fn smb_client(smb: &SmbProfile) -> Result<SmbClient> {
             "SMB connection error connecting to {} (user={}, share={}): {}",
             target,
             smb.user.as_deref().unwrap_or("(none)"),
-            if share_info.is_empty() { "(none)" } else { share_info },
+            if share_info.is_empty() {
+                "(none)"
+            } else {
+                share_info
+            },
             e
         )
     })
 }
-
-
 
 fn systemtime_to_local(st: SystemTime) -> Option<DateTime<Local>> {
     let secs = st.duration_since(UNIX_EPOCH).ok()?.as_secs();

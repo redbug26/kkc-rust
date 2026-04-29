@@ -88,7 +88,12 @@ pub fn render_about(f: &mut Frame, state: &AboutState, area: Rect) {
     let h = H.min(area.height);
     let x = area.x + area.width.saturating_sub(w) / 2;
     let y = area.y + area.height.saturating_sub(h) / 2;
-    let popup = Rect { x, y, width: w, height: h };
+    let popup = Rect {
+        x,
+        y,
+        width: w,
+        height: h,
+    };
 
     // Drop-shadow (2 right, 1 down)
     let sh = Rect {
@@ -120,14 +125,14 @@ pub fn render_about(f: &mut Frame, state: &AboutState, area: Rect) {
 
     // ── Animation values ──────────────────────────────────────────────────────
     let angle_rad = (state.tick as f64) * 2.0_f64.to_radians();
-    let cos_val   = angle_rad.cos();
-    let abs_cos   = cos_val.abs();
+    let cos_val = angle_rad.cos();
+    let abs_cos = cos_val.abs();
 
     // ── Section separator fills ───────────────────────────────────────────────
-    let full_sep   = INNER_W.saturating_sub(4);
+    let full_sep = INNER_W.saturating_sub(4);
     let coding_sep = "─".repeat(full_sep.saturating_sub("CODING".len() + 3));
-    let demo_sep   = "─".repeat(full_sep.saturating_sub("DEMOPARTIES".len() + 3));
-    let tech_sep   = "─".repeat(full_sep.saturating_sub("TECH".len() + 3));
+    let demo_sep = "─".repeat(full_sep.saturating_sub("DEMOPARTIES".len() + 3));
+    let tech_sep = "─".repeat(full_sep.saturating_sub("TECH".len() + 3));
     let bottom_sep = "─".repeat(INNER_W);
 
     let version = env!("CARGO_PKG_VERSION");
@@ -301,10 +306,7 @@ pub fn render_about(f: &mut Frame, state: &AboutState, area: Rect) {
         .alignment(Alignment::Center),
     );
 
-    f.render_widget(
-        Paragraph::new(lines).style(bg),
-        inner,
-    );
+    f.render_widget(Paragraph::new(lines).style(bg), inner);
 }
 
 // ---------------------------------------------------------------------------
@@ -356,14 +358,17 @@ fn render_logo_row(row_idx: usize, cos_val: f64, abs_cos: f64) -> Line<'static> 
 
     let text: String = chars.into_iter().collect();
     let fg = if cos_val >= 0.0 {
-        Color::Rgb(255, 220, 0)  // front: yellow-gold
+        Color::Rgb(255, 220, 0) // front: yellow-gold
     } else {
-        Color::Rgb(0, 215, 255)  // back:  cyan
+        Color::Rgb(0, 215, 255) // back:  cyan
     };
 
     Line::from(Span::styled(
         text,
-        Style::default().fg(fg).bg(Color::Black).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(fg)
+            .bg(Color::Black)
+            .add_modifier(Modifier::BOLD),
     ))
     .alignment(Alignment::Center)
 }
@@ -401,9 +406,9 @@ fn rainbow_line(text: &'static str, tick: u64) -> Line<'static> {
 fn render_starfield_row(plane: u64, tick: u64, width: usize) -> Line<'static> {
     // Number of stars per row per plane
     let star_count: u64 = match plane {
-        0 => 4,  // slowest / farthest: fewest, dimmest
-        1 => 6,  // medium
-        _ => 8,  // fastest / nearest: most, brightest
+        0 => 4, // slowest / farthest: fewest, dimmest
+        1 => 6, // medium
+        _ => 8, // fastest / nearest: most, brightest
     };
     // Scroll speed (chars per N ticks)
     let scroll_period: u64 = match plane {
@@ -427,12 +432,12 @@ fn render_starfield_row(plane: u64, tick: u64, width: usize) -> Line<'static> {
         let phase = (tick / twinkle_period) % 4;
 
         let (ch, brightness) = match (plane, phase) {
-            (0, _)    => ('.', 80u8),
-            (1, 0)    => ('+', 140),
-            (1, _)    => ('.', 90),
-            (_, 0)    => ('*', 255),
+            (0, _) => ('.', 80u8),
+            (1, 0) => ('+', 140),
+            (1, _) => ('.', 90),
+            (_, 0) => ('*', 255),
             (_, 1..=2) => ('+', 200),
-            _          => ('.', 120),
+            _ => ('.', 120),
         };
         let color = Color::Rgb(brightness, brightness, brightness);
         row[x] = (ch, color);
@@ -441,10 +446,7 @@ fn render_starfield_row(plane: u64, tick: u64, width: usize) -> Line<'static> {
     let spans: Vec<Span<'static>> = row
         .into_iter()
         .map(|(ch, color)| {
-            Span::styled(
-                ch.to_string(),
-                Style::default().fg(color).bg(Color::Black),
-            )
+            Span::styled(ch.to_string(), Style::default().fg(color).bg(Color::Black))
         })
         .collect();
 
@@ -454,7 +456,9 @@ fn render_starfield_row(plane: u64, tick: u64, width: usize) -> Line<'static> {
 /// Cheap integer hash (linear congruential step) for deterministic star positions.
 #[inline]
 fn lcg_hash(seed: u64) -> u64 {
-    seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407) >> 33
+    seed.wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407)
+        >> 33
 }
 
 // ---------------------------------------------------------------------------
@@ -463,22 +467,24 @@ fn lcg_hash(seed: u64) -> u64 {
 fn render_worm_row(trail: &[i32], width: usize) -> Line<'static> {
     let mut row: Vec<(char, Color)> = vec![(' ', Color::Black); width];
 
-    let worm_chars = ['◉', '●', '◎', '○', '◌', '·', '·', '·', '·', ' ', ' ', ' ', ' ', ' '];
+    let worm_chars = [
+        '◉', '●', '◎', '○', '◌', '·', '·', '·', '·', ' ', ' ', ' ', ' ', ' ',
+    ];
     let worm_colors = [
-        Color::Rgb(0, 255, 180),   // head: bright green-cyan
+        Color::Rgb(0, 255, 180), // head: bright green-cyan
         Color::Rgb(0, 220, 150),
         Color::Rgb(0, 180, 120),
         Color::Rgb(0, 140, 90),
         Color::Rgb(0, 100, 70),
-        Color::Rgb(0,  70, 50),
-        Color::Rgb(0,  50, 40),
-        Color::Rgb(0,  40, 30),
+        Color::Rgb(0, 70, 50),
+        Color::Rgb(0, 50, 40),
+        Color::Rgb(0, 40, 30),
     ];
 
     for (i, &x) in trail.iter().enumerate() {
         let xi = x as usize;
         if xi < width {
-            let ch  = worm_chars[i.min(worm_chars.len() - 1)];
+            let ch = worm_chars[i.min(worm_chars.len() - 1)];
             let col = worm_colors[i.min(worm_colors.len() - 1)];
             row[xi] = (ch, col);
         }
@@ -487,10 +493,7 @@ fn render_worm_row(trail: &[i32], width: usize) -> Line<'static> {
     let spans: Vec<Span<'static>> = row
         .into_iter()
         .map(|(ch, color)| {
-            Span::styled(
-                ch.to_string(),
-                Style::default().fg(color).bg(Color::Black),
-            )
+            Span::styled(ch.to_string(), Style::default().fg(color).bg(Color::Black))
         })
         .collect();
 
@@ -505,12 +508,12 @@ fn hue_to_rgb(h: f64) -> (u8, u8, u8) {
     let i = h6.floor() as u32;
     let f = h6 - h6.floor();
     let (r, g, b) = match i % 6 {
-        0 => (1.0_f64, f,       0.0_f64),
-        1 => (1.0 - f, 1.0,     0.0),
-        2 => (0.0,     1.0,     f),
-        3 => (0.0,     1.0 - f, 1.0),
-        4 => (f,       0.0,     1.0),
-        _ => (1.0,     0.0,     1.0 - f),
+        0 => (1.0_f64, f, 0.0_f64),
+        1 => (1.0 - f, 1.0, 0.0),
+        2 => (0.0, 1.0, f),
+        3 => (0.0, 1.0 - f, 1.0),
+        4 => (f, 0.0, 1.0),
+        _ => (1.0, 0.0, 1.0 - f),
     };
     (
         (r * 255.0).round() as u8,
@@ -518,4 +521,3 @@ fn hue_to_rgb(h: f64) -> (u8, u8, u8) {
         (b * 255.0).round() as u8,
     )
 }
-

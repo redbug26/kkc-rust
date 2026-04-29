@@ -388,7 +388,9 @@ pub fn download_into_dir(
     match &profile.kind {
         RemoteKind::Sftp(_) => download_sftp_into_dir(profile, remote_path, local_dir, recursive),
         RemoteKind::Imap(imap) => download_imap_into_dir(imap, remote_path, local_dir),
-        RemoteKind::Smb(_) => smb_impl::download_smb_into_dir(profile, remote_path, local_dir, recursive),
+        RemoteKind::Smb(_) => {
+            smb_impl::download_smb_into_dir(profile, remote_path, local_dir, recursive)
+        }
     }
 }
 
@@ -400,7 +402,9 @@ pub fn download_bulk_into_dir(
     match &profile.kind {
         RemoteKind::Sftp(_) => download_sftp_bulk_into_dir(profile, remote_path, local_dir),
         RemoteKind::Imap(imap) => download_imap_into_dir(imap, remote_path, local_dir),
-        RemoteKind::Smb(_) => smb_impl::download_smb_into_dir(profile, remote_path, local_dir, true),
+        RemoteKind::Smb(_) => {
+            smb_impl::download_smb_into_dir(profile, remote_path, local_dir, true)
+        }
     }
 }
 
@@ -413,7 +417,9 @@ pub fn upload_into_dir(
     match &profile.kind {
         RemoteKind::Sftp(_) => upload_sftp_into_dir(profile, local_path, remote_dir, recursive),
         RemoteKind::Imap(_) => bail!("Upload to IMAP is not supported"),
-        RemoteKind::Smb(_) => smb_impl::upload_smb_into_dir(profile, local_path, remote_dir, recursive),
+        RemoteKind::Smb(_) => {
+            smb_impl::upload_smb_into_dir(profile, local_path, remote_dir, recursive)
+        }
     }
 }
 
@@ -527,7 +533,9 @@ where
     match &profile.kind {
         RemoteKind::Sftp(_) => scan_sftp_stats(profile, remote_path, is_dir, progress, cancel),
         RemoteKind::Imap(imap) => scan_imap_stats(imap, remote_path, is_dir, progress, cancel),
-        RemoteKind::Smb(_) => smb_impl::scan_smb_stats(profile, remote_path, is_dir, progress, cancel),
+        RemoteKind::Smb(_) => {
+            smb_impl::scan_smb_stats(profile, remote_path, is_dir, progress, cancel)
+        }
     }
 }
 
@@ -548,9 +556,13 @@ where
         RemoteKind::Imap(imap) => {
             download_imap_with_progress(imap, remote_path, local_dir, progress)
         }
-        RemoteKind::Smb(_) => {
-            smb_impl::download_smb_with_progress(profile, remote_path, local_dir, recursive, progress)
-        }
+        RemoteKind::Smb(_) => smb_impl::download_smb_with_progress(
+            profile,
+            remote_path,
+            local_dir,
+            recursive,
+            progress,
+        ),
     }
 }
 

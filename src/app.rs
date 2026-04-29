@@ -4,16 +4,16 @@ mod panel_tabs;
 
 pub use self::command_palette::{CommandPaletteState, PALETTE_DATA, PALETTE_SEP};
 pub use self::menu::{
-    MENU_DATA, MENU_HEADERS, MenuAction, MenuEntry, MenuState,
-    ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,
+    MENU_DATA, MENU_HEADERS, MenuAction, MenuEntry, MenuState, ViewerMenuKind, ViewerMenuState,
+    ViewerPluginPaletteState,
 };
 use self::panel_tabs::{PanelTabs, panel_config_for_save, restore_panel_side};
+use crate::about::AboutState;
 use crate::config::{ActivePanelSide, Config, PanelViewType, SortMode};
 use crate::copy::{
     CopyDestination, CopyDialogState, CopyJob, CopyProgressState, CopyScanTask, CopySource,
     CopyTask, CopyTaskMessage, count_local_files, spawn_copy_scan, spawn_copy_task,
 };
-use crate::about::AboutState;
 use crate::file_ops::{self, CopyOptions};
 use crate::help::HelpState;
 use crate::idf::render_idf_card;

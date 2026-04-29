@@ -15,11 +15,11 @@ use crate::app::{
 use crate::archive::supports_archive_navigation;
 use crate::config::SortMode;
 use crate::copy::CopyDialogState;
-use crate::viewer::ViewMode;
 use crate::remote::{
-    download_to_temp, join_remote, load_profiles, make_dir as remote_make_dir,
-    rename_path as remote_rename_path, upload_into_dir, RemoteKind, RemoteSource,
+    RemoteKind, RemoteSource, download_to_temp, join_remote, load_profiles,
+    make_dir as remote_make_dir, rename_path as remote_rename_path, upload_into_dir,
 };
+use crate::viewer::ViewMode;
 use anyhow::Result;
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers},
@@ -1813,7 +1813,9 @@ fn launch_ssh_for_profile(app: &mut App) -> Result<()> {
     }
     disable_raw_mode()?;
     execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture)?;
-    let _ = std::process::Command::new(&args[0]).args(&args[1..]).status();
+    let _ = std::process::Command::new(&args[0])
+        .args(&args[1..])
+        .status();
     enable_raw_mode()?;
     execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
     app.needs_clear = true;
@@ -1901,7 +1903,9 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
         && matches!(s.kind, crate::app::RemoteEditKind::Smb)
         && s.cursor == crate::app::RemoteEditState::PATH
     {
-        let host = s.fields[crate::app::RemoteEditState::HOST].trim().to_string();
+        let host = s.fields[crate::app::RemoteEditState::HOST]
+            .trim()
+            .to_string();
         if host.is_empty() {
             app.set_status("Enter host first");
             return Ok(false);
@@ -1911,9 +1915,21 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
         let password = s.fields[crate::app::RemoteEditState::SECRET].trim();
         let smb = crate::remote::SmbProfile {
             host: host.clone(),
-            user: if user.is_empty() { None } else { Some(user.to_string()) },
-            workgroup: if workgroup.is_empty() { None } else { Some(workgroup.to_string()) },
-            password: if password.is_empty() { None } else { Some(password.to_string()) },
+            user: if user.is_empty() {
+                None
+            } else {
+                Some(user.to_string())
+            },
+            workgroup: if workgroup.is_empty() {
+                None
+            } else {
+                Some(workgroup.to_string())
+            },
+            password: if password.is_empty() {
+                None
+            } else {
+                Some(password.to_string())
+            },
             share: None,
             path: None,
         };
@@ -1924,7 +1940,9 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
         };
         match crate::remote::list_smb_shares(&profile) {
             Ok(shares) => {
-                let current = s.fields[crate::app::RemoteEditState::PATH].trim().to_lowercase();
+                let current = s.fields[crate::app::RemoteEditState::PATH]
+                    .trim()
+                    .to_lowercase();
                 let cur = shares
                     .iter()
                     .position(|sh| sh.to_lowercase() == current)

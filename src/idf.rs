@@ -163,15 +163,18 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
     // is always sufficient.  Capping the read here avoids stalling the UI
     // when the cursor lands on a large unrecognised file for the first time.
     const MAX_PROBE_BYTES: usize = 64 * 1024;
-    let data = {
+    let (data, file_len) = {
         use std::io::Read;
         let mut file = std::fs::File::open(path)?;
-        let file_len = file.metadata().map(|m| m.len() as usize).unwrap_or(MAX_PROBE_BYTES);
+        let file_len = file
+            .metadata()
+            .map(|m| m.len() as usize)
+            .unwrap_or(MAX_PROBE_BYTES);
         let cap = file_len.min(MAX_PROBE_BYTES);
         let mut buf = vec![0u8; cap];
         let n = file.read(&mut buf)?;
         buf.truncate(n);
-        buf
+        (buf, file_len)
     };
     let ext = path
         .extension()
@@ -588,7 +591,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             vec![],
         ))
-    } else if is_commodore_d64(&data, &ext) {
+    } else if is_commodore_d64(file_len, &ext) {
         Some(info(
             "application/x-c64-d64",
             path,
@@ -1399,9 +1402,9 @@ fn is_amstrad_dsk(data: &[u8], ext: &str) -> bool {
             || data.starts_with(b"EXTENDED CPC DSK File\r\nDisk-Info\r\n"))
 }
 
-fn is_commodore_d64(data: &[u8], ext: &str) -> bool {
+fn is_commodore_d64(file_len: usize, ext: &str) -> bool {
     const D64_SIZES: &[usize] = &[174_848, 175_531, 196_608, 197_376, 205_312];
-    ext == "d64" && D64_SIZES.contains(&data.len())
+    ext == "d64" && D64_SIZES.contains(&file_len)
 }
 
 fn seems_text(data: &[u8]) -> bool {

@@ -106,7 +106,9 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
                     .and_then(|f| {
                         use image::{AnimationDecoder, codecs::gif::GifDecoder};
                         use std::io::BufReader;
-                        GifDecoder::new(BufReader::new(f)).ok().map(|d| d.into_frames().count())
+                        GifDecoder::new(BufReader::new(f))
+                            .ok()
+                            .map(|d| d.into_frames().count())
                     })
                     .unwrap_or(0)
             } else {
@@ -114,7 +116,11 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
             };
             match gif_recorder::capture_frame(completed.buffer, &gif_path) {
                 Ok(()) => {
-                    app.set_status(format!("GIF: frame {} → {}", frame_count + 1, gif_path.display()));
+                    app.set_status(format!(
+                        "GIF: frame {} → {}",
+                        frame_count + 1,
+                        gif_path.display()
+                    ));
                 }
                 Err(e) => app.notify(format!("GIF capture failed: {e}")),
             }
@@ -151,12 +157,16 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
             if let Some((path, rect, _)) = &next_kitty_image {
                 if viewer::kitty_graphics_supported() {
                     // Find the viewer to render (full viewer or quick_preview)
-                    let v_opt: Option<&viewer::Viewer> =
-                        match &app.mode {
-                            AppMode::Viewer(v) | AppMode::ViewerSearching(v) | AppMode::ViewerMenu(v, _)
-                                if v.path == *path => Some(v),
-                            _ => app.quick_preview.as_ref().filter(|v| v.path == *path),
-                        };
+                    let v_opt: Option<&viewer::Viewer> = match &app.mode {
+                        AppMode::Viewer(v)
+                        | AppMode::ViewerSearching(v)
+                        | AppMode::ViewerMenu(v, _)
+                            if v.path == *path =>
+                        {
+                            Some(v)
+                        }
+                        _ => app.quick_preview.as_ref().filter(|v| v.path == *path),
+                    };
                     if let Some(v) = v_opt {
                         viewer::render_kitty_image(terminal.backend_mut(), v, *rect)?;
                         execute!(

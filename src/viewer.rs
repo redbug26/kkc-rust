@@ -8,20 +8,20 @@ use image::{ImageFormat, ImageReader};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
-use std::cell::Cell;
 use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+mod syntax;
 mod viewer_decode;
 mod viewer_render;
 mod viewer_search;
-mod syntax;
 
 use self::viewer_decode::{
     ansi_lines, detect_mode, hex_line, preproc_op_label, preprocess_bytes, text_lines,
@@ -243,10 +243,7 @@ impl Viewer {
     /// cursor movement.
     pub fn open_preview(path: &Path, wrap: bool) -> Result<Self> {
         const MAX_QUICK_PREVIEW_BYTES: usize = 512 * 1024 * 8; // 4 MB
-        debug_log(&format!(
-            "open_preview: {} (limit=4 MB)",
-            path.display()
-        ));
+        debug_log(&format!("open_preview: {} (limit=4 MB)", path.display()));
         Self::open_with_limit(path, wrap, Some(MAX_QUICK_PREVIEW_BYTES))
     }
 
@@ -263,7 +260,9 @@ impl Viewer {
             let file_len = file.metadata().map(|m| m.len() as usize).unwrap_or(limit);
             let cap = file_len.min(limit);
             let mut buf = vec![0u8; cap];
-            let n = file.read(&mut buf).with_context(|| format!("Reading {}", path.display()))?;
+            let n = file
+                .read(&mut buf)
+                .with_context(|| format!("Reading {}", path.display()))?;
             buf.truncate(n);
             buf
         } else {
@@ -681,7 +680,11 @@ impl Viewer {
         }
     }
 
-    fn render_image_fallback_lines(&self, selected_width: usize, height: usize) -> Vec<Line<'static>> {
+    fn render_image_fallback_lines(
+        &self,
+        selected_width: usize,
+        height: usize,
+    ) -> Vec<Line<'static>> {
         if selected_width == 0 || height == 0 {
             return Vec::new();
         }
@@ -714,7 +717,7 @@ impl Viewer {
         // half a row height), exactly as the old ▀/▄ approach did.
         // Then each terminal column gets 2 horizontal sub-pixels (extra detail),
         // while each half-row unit stays at 1 vertical sub-pixel.
-        let max_pu_w = selected_width;           // 1 pixel-unit per column
+        let max_pu_w = selected_width; // 1 pixel-unit per column
         let max_pu_h = height.saturating_mul(2); // 2 pixel-units per row (half-rows)
         let scale_x = max_pu_w as f32 / src_w as f32;
         let scale_y = max_pu_h as f32 / src_h as f32;
@@ -724,7 +727,7 @@ impl Viewer {
         let target_pu_h = ((src_h as f32) * scale).floor().max(1.0) as usize;
         // sub-pixel dimensions: horizontal uses 2 per column for extra detail
         let target_w = target_pu_w * 2; // sub-pixels wide
-        let target_h = target_pu_h;     // sub-pixels tall (= half-rows)
+        let target_h = target_pu_h; // sub-pixels tall (= half-rows)
         let term_cols = target_pu_w;
         let term_rows = target_h.div_ceil(2).max(1);
 
@@ -765,7 +768,9 @@ impl Viewer {
         let quantize = |block: [[u8; 4]; 4]| -> (&'static str, Color, Color) {
             // Luminance (0=transparent treated as black)
             let lum = |p: [u8; 4]| -> u16 {
-                if p[3] < 64 { return 0; }
+                if p[3] < 64 {
+                    return 0;
+                }
                 ((p[0] as u32 * 299 + p[1] as u32 * 587 + p[2] as u32 * 114) / 1000) as u16
             };
             let lums = block.map(lum);
@@ -773,8 +778,14 @@ impl Viewer {
             let min_l = *lums.iter().min().unwrap();
             let mid = (max_l as u32 + min_l as u32) / 2;
 
-            let mut fg_r = 0u32; let mut fg_g = 0u32; let mut fg_b = 0u32; let mut fg_n = 0u32;
-            let mut bg_r = 0u32; let mut bg_g = 0u32; let mut bg_b = 0u32; let mut bg_n = 0u32;
+            let mut fg_r = 0u32;
+            let mut fg_g = 0u32;
+            let mut fg_b = 0u32;
+            let mut fg_n = 0u32;
+            let mut bg_r = 0u32;
+            let mut bg_g = 0u32;
+            let mut bg_b = 0u32;
+            let mut bg_n = 0u32;
             let mut pattern = 0u8;
 
             // bit order: TL=3, TR=2, BL=1, BR=0
@@ -782,18 +793,44 @@ impl Viewer {
                 let is_fg = *l as u32 > mid || (max_l == min_l && i < 2);
                 if is_fg {
                     pattern |= 1 << (3 - i);
-                    if p[3] >= 64 { fg_r += p[0] as u32; fg_g += p[1] as u32; fg_b += p[2] as u32; fg_n += 1; }
+                    if p[3] >= 64 {
+                        fg_r += p[0] as u32;
+                        fg_g += p[1] as u32;
+                        fg_b += p[2] as u32;
+                        fg_n += 1;
+                    }
                 } else if p[3] >= 64 {
-                    bg_r += p[0] as u32; bg_g += p[1] as u32; bg_b += p[2] as u32; bg_n += 1;
+                    bg_r += p[0] as u32;
+                    bg_g += p[1] as u32;
+                    bg_b += p[2] as u32;
+                    bg_n += 1;
                 }
             }
 
-            let fg = if fg_n > 0 { Color::Rgb((fg_r/fg_n) as u8, (fg_g/fg_n) as u8, (fg_b/fg_n) as u8) } else { Color::Black };
-            let bg = if bg_n > 0 { Color::Rgb((bg_r/bg_n) as u8, (bg_g/bg_n) as u8, (bg_b/bg_n) as u8) } else { Color::Black };
+            let fg = if fg_n > 0 {
+                Color::Rgb(
+                    (fg_r / fg_n) as u8,
+                    (fg_g / fg_n) as u8,
+                    (fg_b / fg_n) as u8,
+                )
+            } else {
+                Color::Black
+            };
+            let bg = if bg_n > 0 {
+                Color::Rgb(
+                    (bg_r / bg_n) as u8,
+                    (bg_g / bg_n) as u8,
+                    (bg_b / bg_n) as u8,
+                )
+            } else {
+                Color::Black
+            };
 
             // If all 4 pixels are transparent, return a blank.
             let all_transparent = block.iter().all(|p| p[3] < 64);
-            if all_transparent { return (" ", Color::Black, Color::Black); }
+            if all_transparent {
+                return (" ", Color::Black, Color::Black);
+            }
 
             (QUAD[pattern as usize], fg, bg)
         };
@@ -1321,7 +1358,12 @@ pub fn clear_kitty_images<W: Write>(out: &mut W) -> Result<()> {
 fn rgba_at(pixels: &[u8], width: usize, x: usize, y: usize) -> [u8; 4] {
     let idx = (y * width + x) * 4;
     if idx + 3 < pixels.len() {
-        [pixels[idx], pixels[idx + 1], pixels[idx + 2], pixels[idx + 3]]
+        [
+            pixels[idx],
+            pixels[idx + 1],
+            pixels[idx + 2],
+            pixels[idx + 3],
+        ]
     } else {
         [0, 0, 0, 0]
     }

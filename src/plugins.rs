@@ -1718,7 +1718,7 @@ mod tests {
 
         assert_eq!(plugins.len(), 1);
         assert_eq!(plugins[0].name, "html_viewer");
-        assert_eq!(plugins[0].version, "1.0.0");
+        assert_eq!(plugins[0].version, "2.0.0");
         assert_eq!(plugins[0].modes, vec!["text"]);
         assert_eq!(
             plugins[0].mime_types,
@@ -1867,7 +1867,7 @@ mod tests {
             .expect("html viewer should render")
             .expect("html viewer should return lines");
         let text = lines_to_text(&rendered);
-        assert!(text.contains("HTML"));
+        assert!(text.contains("kkc-html-viewer"));
         assert!(text.contains("Title"));
         assert!(text.contains("Hello"));
         assert!(text.contains("link"));

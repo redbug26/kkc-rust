@@ -94,6 +94,7 @@ pub enum ActivePanelSide {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PanelTabConfig {
     /// Last visited local fallback path for this tab.
+    #[serde(default = "dirs_home")]
     pub path: PathBuf,
     /// Remote profile name if this tab was on a remote location.
     #[serde(default)]
@@ -132,6 +133,7 @@ impl Default for PanelTabConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PanelConfig {
     /// Last visited path for this panel.
+    #[serde(default = "dirs_home")]
     pub path: PathBuf,
     /// Remote profile name if this panel was on a remote location.
     #[serde(default)]
@@ -389,9 +391,7 @@ impl Config {
                                     if let Some(s) = v.as_str() {
                                         Some(s.to_string())
                                     } else {
-                                        v.as_integer()
-                                            .filter(|&n| n >= 0)
-                                            .map(|n| n.to_string())
+                                        v.as_integer().filter(|&n| n >= 0).map(|n| n.to_string())
                                     }
                                 })
                                 .collect();
@@ -412,7 +412,8 @@ impl Config {
                         }
                     }
                     if cfg.dir_history_max == history_max() {
-                        if let Some(v) = viewer.get("dir_history_max").and_then(|v| v.as_integer()) {
+                        if let Some(v) = viewer.get("dir_history_max").and_then(|v| v.as_integer())
+                        {
                             if v >= 1 {
                                 cfg.dir_history_max = v as usize;
                             }
@@ -433,6 +434,13 @@ impl Config {
     /// Persist config to disk with organised sections.
     pub fn save(&self) -> Result<()> {
         let path = config_path()?;
+        let out = self.to_toml_string()?;
+
+        fs::write(&path, out).with_context(|| format!("Writing config: {}", path.display()))?;
+        Ok(())
+    }
+
+    fn to_toml_string(&self) -> Result<String> {
         let mut out = String::new();
 
         // ─── Behaviour ────────────────────────────────────────────────────
@@ -450,20 +458,24 @@ impl Config {
         out.push_str(&format!("color_by_type = {}\n", self.color_by_type));
         out.push_str(&format!(
             "panel_view_type = {}\n",
-            toml::Value::String(match self.panel_view_type {
-                PanelViewType::Normal => "normal",
-                PanelViewType::FilePreviewInfo => "file_preview_info",
-                PanelViewType::QuickPreview => "quick_preview",
-            }
-            .to_string())
+            toml::Value::String(
+                match self.panel_view_type {
+                    PanelViewType::Normal => "normal",
+                    PanelViewType::FilePreviewInfo => "file_preview_info",
+                    PanelViewType::QuickPreview => "quick_preview",
+                }
+                .to_string()
+            )
         ));
         out.push_str(&format!(
             "active_panel = {}\n",
-            toml::Value::String(match self.active_panel {
-                ActivePanelSide::Left => "left",
-                ActivePanelSide::Right => "right",
-            }
-            .to_string())
+            toml::Value::String(
+                match self.active_panel {
+                    ActivePanelSide::Left => "left",
+                    ActivePanelSide::Right => "right",
+                }
+                .to_string()
+            )
         ));
         out.push('\n');
 
@@ -471,7 +483,10 @@ impl Config {
         out.push_str("# \u{2500}\u{2500}\u{2500} Viewer \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\n");
         out.push_str(&format!("viewer.word_wrap = {}\n", self.viewer.word_wrap));
         out.push_str(&format!("viewer.tab_width = {}\n", self.viewer.tab_width));
-        out.push_str(&format!("viewer.default_zoom = {}\n", self.viewer.default_zoom));
+        out.push_str(&format!(
+            "viewer.default_zoom = {}\n",
+            self.viewer.default_zoom
+        ));
         out.push('\n');
 
         // ─── External ─────────────────────────────────────────────────────
@@ -513,8 +528,7 @@ impl Config {
         .context("Serialising panels config")?;
         out.push_str(&tail);
 
-        fs::write(&path, out).with_context(|| format!("Writing config: {}", path.display()))?;
-        Ok(())
+        Ok(out)
     }
 
     /// Return the registered openers for the given file extension.
@@ -559,4 +573,106 @@ const fn history_max() -> usize {
 
 fn default_bookmarks() -> Vec<PathBuf> {
     vec![dirs_home()]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn saved_config_toml_roundtrips_core_state() {
+        let mut cfg = Config::default();
+        cfg.confirm_exit = false;
+        cfg.confirm_delete = false;
+        cfg.auto_reload = false;
+        cfg.insert_moves_down = false;
+        cfg.select_dirs = true;
+        cfg.show_fkey_bar = false;
+        cfg.color_by_type = false;
+        cfg.panel_view_type = PanelViewType::QuickPreview;
+        cfg.active_panel = ActivePanelSide::Right;
+        cfg.viewer.word_wrap = false;
+        cfg.viewer.tab_width = 8;
+        cfg.viewer.default_zoom = false;
+        cfg.editor = "vim".into();
+        cfg.pager = "less -R".into();
+        cfg.dir_history_max = 64;
+        cfg.debug_log = true;
+        cfg.dir_history = vec![PathBuf::from("/tmp"), PathBuf::from("/var")];
+        cfg.bookmarks = vec![PathBuf::from("/Users/test")];
+        cfg.palette_recent = vec!["copy".into(), "save_config".into()];
+        cfg.file_assoc = vec![FileAssoc {
+            ext: "txt".into(),
+            openers: vec!["vim %f".into()],
+        }];
+        cfg.left = PanelConfig {
+            path: PathBuf::from("/left/current"),
+            remote_name: None,
+            remote_path: None,
+            sort: SortMode::Date,
+            show_hidden: true,
+            active_tab: 1,
+            tabs: vec![
+                PanelTabConfig {
+                    path: PathBuf::from("/left/one"),
+                    sort: SortMode::Name,
+                    show_hidden: false,
+                    cursor_name: Some("one.txt".into()),
+                    selected_names: vec!["selected.bin".into()],
+                    ..PanelTabConfig::default()
+                },
+                PanelTabConfig {
+                    path: PathBuf::from("/left/two"),
+                    sort: SortMode::Size,
+                    show_hidden: true,
+                    cursor_name: Some("two.txt".into()),
+                    selected_names: Vec::new(),
+                    ..PanelTabConfig::default()
+                },
+            ],
+        };
+
+        let text = cfg.to_toml_string().expect("serialize config");
+        let parsed: Config = toml::from_str(&text).expect("parse saved config");
+
+        assert!(!parsed.confirm_exit);
+        assert!(parsed.select_dirs);
+        assert_eq!(parsed.panel_view_type, PanelViewType::QuickPreview);
+        assert_eq!(parsed.active_panel, ActivePanelSide::Right);
+        assert!(!parsed.viewer.word_wrap);
+        assert_eq!(parsed.viewer.tab_width, 8);
+        assert_eq!(parsed.editor, "vim");
+        assert_eq!(parsed.dir_history_max, 64);
+        assert_eq!(
+            parsed.dir_history,
+            vec![PathBuf::from("/tmp"), PathBuf::from("/var")]
+        );
+        assert_eq!(parsed.palette_recent, vec!["copy", "save_config"]);
+        assert_eq!(parsed.file_assoc[0].openers, vec!["vim %f"]);
+        assert_eq!(parsed.left.active_tab, 1);
+        assert_eq!(parsed.left.tabs.len(), 2);
+        assert_eq!(parsed.left.tabs[1].path, PathBuf::from("/left/two"));
+        assert_eq!(parsed.left.tabs[0].cursor_name.as_deref(), Some("one.txt"));
+        assert_eq!(parsed.left.tabs[0].selected_names, vec!["selected.bin"]);
+    }
+
+    #[test]
+    fn partial_panel_config_uses_home_defaults() {
+        let cfg: Config = toml::from_str(
+            r#"
+[left]
+sort = "size"
+
+[[left.tabs]]
+sort = "date"
+"#,
+        )
+        .expect("partial config should parse");
+
+        assert_eq!(cfg.left.sort, SortMode::Size);
+        assert_eq!(cfg.left.path, dirs_home());
+        assert_eq!(cfg.left.tabs.len(), 1);
+        assert_eq!(cfg.left.tabs[0].path, dirs_home());
+        assert_eq!(cfg.left.tabs[0].sort, SortMode::Date);
+    }
 }

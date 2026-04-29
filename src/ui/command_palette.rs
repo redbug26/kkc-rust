@@ -71,14 +71,23 @@ pub(super) fn render_command_palette(f: &mut Frame, s: &CommandPaletteState, are
         Span::styled(
             count_hint,
             Style::default()
-                .fg(if total == 0 { Color::Red } else { CLR_QS_NO_MATCH })
+                .fg(if total == 0 {
+                    Color::Red
+                } else {
+                    CLR_QS_NO_MATCH
+                })
                 .bg(CLR_QS_INPUT_BG),
         ),
     ]);
     safe_render_widget(
         f,
         Paragraph::new(input_row).style(Style::default().bg(CLR_QS_INPUT_BG)),
-        Rect { x: inner.x, y: inner.y, width: inner.width, height: 1 },
+        Rect {
+            x: inner.x,
+            y: inner.y,
+            width: inner.width,
+            height: 1,
+        },
     );
 
     // ── Separator ─────────────────────────────────────────────────────────
@@ -86,7 +95,12 @@ pub(super) fn render_command_palette(f: &mut Frame, s: &CommandPaletteState, are
     safe_render_widget(
         f,
         Paragraph::new(sep).style(Style::default().fg(CLR_QS_SEP).bg(CLR_QS_BG)),
-        Rect { x: inner.x, y: inner.y + 1, width: inner.width, height: 1 },
+        Rect {
+            x: inner.x,
+            y: inner.y + 1,
+            width: inner.width,
+            height: 1,
+        },
     );
 
     // ── List ──────────────────────────────────────────────────────────────
@@ -122,10 +136,16 @@ pub(super) fn render_command_palette(f: &mut Frame, s: &CommandPaletteState, are
             let sep_line: String = std::iter::repeat('─').take(inner_w).collect();
             safe_render_widget(
                 f,
-                Paragraph::new(Line::from(vec![
-                    Span::styled(sep_line, Style::default().fg(CLR_QS_SEP).bg(CLR_QS_BG)),
-                ])),
-                Rect { x: list_area.x, y: row_y, width: list_area.width, height: 1 },
+                Paragraph::new(Line::from(vec![Span::styled(
+                    sep_line,
+                    Style::default().fg(CLR_QS_SEP).bg(CLR_QS_BG),
+                )])),
+                Rect {
+                    x: list_area.x,
+                    y: row_y,
+                    width: list_area.width,
+                    height: 1,
+                },
             );
             continue;
         }
@@ -145,7 +165,14 @@ pub(super) fn render_command_palette(f: &mut Frame, s: &CommandPaletteState, are
                 CLR_MARKER,
             )
         } else {
-            (CLR_QS_BG, CLR_QS_LIST_FG, CLR_CATEGORY, CLR_FN_NAME, CLR_SHORTCUT, Color::DarkGray)
+            (
+                CLR_QS_BG,
+                CLR_QS_LIST_FG,
+                CLR_CATEGORY,
+                CLR_FN_NAME,
+                CLR_SHORTCUT,
+                Color::DarkGray,
+            )
         };
 
         // Marker column: ">" selected, "★" recent (unselected), "  " otherwise.
@@ -172,11 +199,7 @@ pub(super) fn render_command_palette(f: &mut Frame, s: &CommandPaletteState, are
         let used = fixed_prefix + label_shown.len() + fixed_suffix;
         let padding = " ".repeat(label_area_w.saturating_sub(used));
 
-        let shortcut_str = format!(
-            "{:>width$}",
-            entry.shortcut.unwrap_or(""),
-            width = SHORT_W
-        );
+        let shortcut_str = format!("{:>width$}", entry.shortcut.unwrap_or(""), width = SHORT_W);
 
         let spans = vec![
             Span::styled(marker_str, Style::default().fg(marker_color).bg(row_bg)),
@@ -206,6 +229,11 @@ pub(super) fn render_command_palette(f: &mut Frame, s: &CommandPaletteState, are
         f,
         Paragraph::new("  \u{23ce} Run   Esc Close ")
             .style(Style::default().fg(CLR_BUTTON_FG).bg(CLR_BUTTON_BG)),
-        Rect { x: inner.x, y: hint_y, width: inner.width, height: 1 },
+        Rect {
+            x: inner.x,
+            y: hint_y,
+            width: inner.width,
+            height: 1,
+        },
     );
 }

@@ -18,7 +18,11 @@ pub(super) fn handle_command_palette(app: &mut App, key: KeyEvent) -> Result<boo
                 let indices = s.filtered_indices();
                 let len = indices.len();
                 if len > 0 {
-                    let mut pos = if s.match_pos == 0 { len - 1 } else { s.match_pos - 1 };
+                    let mut pos = if s.match_pos == 0 {
+                        len - 1
+                    } else {
+                        s.match_pos - 1
+                    };
                     // Skip over any separator sentinels.
                     let mut guard = 0;
                     while indices.get(pos).copied() == Some(PALETTE_SEP) && guard < len {

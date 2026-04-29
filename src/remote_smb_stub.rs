@@ -108,10 +108,7 @@ where
     bail!("SMB support not compiled in (rebuild with --features smb)")
 }
 
-pub(super) fn delete_smb_dir_recursive(
-    _profile: &RemoteProfile,
-    _remote_path: &str,
-) -> Result<()> {
+pub(super) fn delete_smb_dir_recursive(_profile: &RemoteProfile, _remote_path: &str) -> Result<()> {
     bail!("SMB support not compiled in (rebuild with --features smb)")
 }
 

@@ -6,11 +6,10 @@ use self::command_palette::render_command_palette;
 use self::panel::{render_center_buttons, render_panel_or_file_id};
 use self::plugins::render_plugins;
 use crate::app::{
-    ActionPaletteState, ActivePanel, App, AppMode, AssocEditorState, BookmarkListItem,
-    ConfigState, ConfirmAction, ConfirmDialog, InputDialog, MENU_DATA,
-    MENU_HEADERS, MenuAction, MenuState, OpenerState, PluginsState,
-    RemoteConnectState, RemoteConnectingState, RemoteEditKind, RemoteEditState, SearchState,
-    ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,
+    ActionPaletteState, ActivePanel, App, AppMode, AssocEditorState, BookmarkListItem, ConfigState,
+    ConfirmAction, ConfirmDialog, InputDialog, MENU_DATA, MENU_HEADERS, MenuAction, MenuState,
+    OpenerState, PluginsState, RemoteConnectState, RemoteConnectingState, RemoteEditKind,
+    RemoteEditState, SearchState, ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,
 };
 use crate::config::SortMode;
 use crate::copy::{CopyDialogState, CopyProgressState};
@@ -194,7 +193,11 @@ pub fn render(f: &mut Frame, app: &App) {
         left_active,
         app.config.color_by_type,
         app.file_preview_info && !left_active,
-        if left_active { None } else { app.quick_preview.as_ref() },
+        if left_active {
+            None
+        } else {
+            app.quick_preview.as_ref()
+        },
         app.quick_preview_active && !left_active,
         app.left_panel_tab_index(),
         app.left_panel_tab_count(),
@@ -208,7 +211,11 @@ pub fn render(f: &mut Frame, app: &App) {
         !left_active,
         app.config.color_by_type,
         app.file_preview_info && left_active,
-        if !left_active { None } else { app.quick_preview.as_ref() },
+        if !left_active {
+            None
+        } else {
+            app.quick_preview.as_ref()
+        },
         app.quick_preview_active && left_active,
         app.right_panel_tab_index(),
         app.right_panel_tab_count(),
@@ -634,11 +641,24 @@ pub fn kitty_image_area_quick_preview(app: &App, term_area: Rect) -> Option<Rect
         ])
         .split(panels_area);
     let left_active = app.active == crate::app::ActivePanel::Left;
-    let preview_area = if left_active { panel_chunks[2] } else { panel_chunks[0] };
+    let preview_area = if left_active {
+        panel_chunks[2]
+    } else {
+        panel_chunks[0]
+    };
     kitty_image_area(v, preview_area)
 }
 
-fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, goto_input: Option<&str>, area: Rect, show_footer: bool, active: bool, quick_preview_label: Option<&str>) {
+fn render_viewer(
+    f: &mut Frame,
+    v: &Viewer,
+    searching: bool,
+    goto_input: Option<&str>,
+    area: Rect,
+    show_footer: bool,
+    active: bool,
+    quick_preview_label: Option<&str>,
+) {
     let (footer_area, viewer_host) = if show_footer {
         let footer = clamp_rect(
             area,
@@ -728,11 +748,15 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, goto_input: Option<
         // Quick-preview embedded panel: custom compact title
         if active {
             (
-                Style::default().fg(CLR_HEADER_FG).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(CLR_HEADER_FG)
+                    .add_modifier(Modifier::BOLD),
                 BorderType::Thick,
                 Span::styled(
                     format!(" {} ", label),
-                    Style::default().fg(CLR_HEADER_FG).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(CLR_HEADER_FG)
+                        .add_modifier(Modifier::BOLD),
                 ),
             )
         } else {
@@ -747,7 +771,9 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, goto_input: Option<
         }
     } else if active {
         (
-            Style::default().fg(CLR_PANEL_BORDER).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(CLR_PANEL_BORDER)
+                .add_modifier(Modifier::BOLD),
             BorderType::Thick,
             Span::raw(title.clone()),
         )
@@ -909,8 +935,8 @@ fn render_viewer(f: &mut Frame, v: &Viewer, searching: bool, goto_input: Option<
             Paragraph::new(bar_text).style(Style::default().fg(Color::Black).bg(Color::LightCyan)),
             footer_area,
         );
-        let cx =
-            (footer_area.x + label_len + input.len() as u16).min(footer_area.x + footer_area.width - 1);
+        let cx = (footer_area.x + label_len + input.len() as u16)
+            .min(footer_area.x + footer_area.width - 1);
         safe_set_cursor_position(f, cx, footer_area.y);
     } else if show_footer {
         let help = Paragraph::new(" F10:Close  F2:Wrap  F3:LnFeed  F4:Mode  F5:Zoom  F6:Prepro  F7:Search  F8:Enc  F9:Syntax  ^G:Goto ")
@@ -2138,9 +2164,7 @@ fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, area: Rect) 
                 let protocol = item.protocol();
                 let (r, g, b) = protocol.color_rgb();
                 let proto = protocol.name();
-                let proto_style = Style::default()
-                    .fg(Color::Rgb(r, g, b))
-                    .bg(CLR_MENU_DD_BG);
+                let proto_style = Style::default().fg(Color::Rgb(r, g, b)).bg(CLR_MENU_DD_BG);
                 let (source, badge_style) = match item.source {
                     RemoteSource::SshConfig => (
                         "ssh",
@@ -2266,7 +2290,12 @@ fn render_remote_add_menu(f: &mut Frame, cursor: usize, area: Rect) {
     for (i, kind) in choices.iter().enumerate() {
         let (r, g, b) = kind.color_rgb();
         let label = kind.name();
-        let row = Rect { x: inner.x, y: inner.y + i as u16, width: inner.width, height: 1 };
+        let row = Rect {
+            x: inner.x,
+            y: inner.y + i as u16,
+            width: inner.width,
+            height: 1,
+        };
         let selected = i == cursor;
         let text = if selected {
             format!(" ► {:<16}", label)
@@ -2279,9 +2308,7 @@ fn render_remote_add_menu(f: &mut Frame, cursor: usize, area: Rect) {
                 .bg(Color::Rgb(r, g, b))
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default()
-                .fg(Color::Rgb(r, g, b))
-                .bg(CLR_MENU_DD_BG)
+            Style::default().fg(Color::Rgb(r, g, b)).bg(CLR_MENU_DD_BG)
         };
         safe_render_widget(f, Paragraph::new(text).style(style), row);
     }
@@ -2416,11 +2443,19 @@ fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: Rect) {
 
         let dd_area = clamp_rect(
             area,
-            Rect { x: dd_x, y: dd_y, width: dd_w, height: dd_h },
+            Rect {
+                x: dd_x,
+                y: dd_y,
+                width: dd_w,
+                height: dd_h,
+            },
         );
         safe_render_widget(f, Clear, dd_area);
         let dd_block = Block::default()
-            .title(Span::styled(" Shares ", Style::default().fg(CLR_MENU_BAR_FG).bg(CLR_MENU_DD_BG)))
+            .title(Span::styled(
+                " Shares ",
+                Style::default().fg(CLR_MENU_BAR_FG).bg(CLR_MENU_DD_BG),
+            ))
             .borders(Borders::ALL)
             .border_style(Style::default().fg(CLR_QS_BORDER).bg(CLR_MENU_DD_BG))
             .style(Style::default().bg(CLR_MENU_DD_BG));
@@ -2432,7 +2467,10 @@ fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: Rect) {
         } else {
             0
         };
-        for (row, idx) in (scroll..shares.len()).take(dd_inner.height as usize).enumerate() {
+        for (row, idx) in (scroll..shares.len())
+            .take(dd_inner.height as usize)
+            .enumerate()
+        {
             let selected = idx == picker_cur;
             let (fg, bg) = if selected {
                 (CLR_MENU_SEL_FG, CLR_MENU_SEL_BG)
@@ -2441,11 +2479,21 @@ fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: Rect) {
             };
             let marker = if selected { "▶ " } else { "  " };
             let name = truncate_str(&shares[idx], dd_inner.width.saturating_sub(2) as usize);
-            let padded = format!("{}{:<width$}", marker, name, width = dd_inner.width.saturating_sub(2) as usize);
+            let padded = format!(
+                "{}{:<width$}",
+                marker,
+                name,
+                width = dd_inner.width.saturating_sub(2) as usize
+            );
             safe_render_widget(
                 f,
                 Paragraph::new(padded).style(Style::default().fg(fg).bg(bg)),
-                Rect { x: dd_inner.x, y: dd_inner.y + row as u16, width: dd_inner.width, height: 1 },
+                Rect {
+                    x: dd_inner.x,
+                    y: dd_inner.y + row as u16,
+                    width: dd_inner.width,
+                    height: 1,
+                },
             );
         }
     }

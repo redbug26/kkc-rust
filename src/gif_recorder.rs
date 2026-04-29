@@ -53,9 +53,7 @@ pub fn capture_frame(buffer: &Buffer, path: &Path) -> Result<()> {
     if path.exists() {
         let file = File::open(path)?;
         let decoder = GifDecoder::new(BufReader::new(file))?;
-        frames = decoder
-            .into_frames()
-            .collect::<Result<Vec<_>, _>>()?;
+        frames = decoder.into_frames().collect::<Result<Vec<_>, _>>()?;
     }
     frames.push(new_frame);
 
@@ -164,7 +162,11 @@ fn render_glyph(
 fn color_to_rgba(color: Color, is_fg: bool) -> image::Rgba<u8> {
     let (r, g, b) = match color {
         Color::Reset => {
-            if is_fg { (212, 212, 212) } else { (20, 20, 20) }
+            if is_fg {
+                (212, 212, 212)
+            } else {
+                (20, 20, 20)
+            }
         }
         Color::Black => (0, 0, 0),
         Color::Red => (128, 0, 0),
@@ -191,16 +193,16 @@ fn color_to_rgba(color: Color, is_fg: bool) -> image::Rgba<u8> {
 /// Map an ANSI 256-colour index to (r, g, b).
 fn indexed_to_rgb(i: u8) -> (u8, u8, u8) {
     match i {
-        0  => (0, 0, 0),
-        1  => (128, 0, 0),
-        2  => (0, 128, 0),
-        3  => (128, 128, 0),
-        4  => (0, 0, 128),
-        5  => (128, 0, 128),
-        6  => (0, 128, 128),
-        7  => (192, 192, 192),
-        8  => (128, 128, 128),
-        9  => (255, 0, 0),
+        0 => (0, 0, 0),
+        1 => (128, 0, 0),
+        2 => (0, 128, 0),
+        3 => (128, 128, 0),
+        4 => (0, 0, 128),
+        5 => (128, 0, 128),
+        6 => (0, 128, 128),
+        7 => (192, 192, 192),
+        8 => (128, 128, 128),
+        9 => (255, 0, 0),
         10 => (0, 255, 0),
         11 => (255, 255, 0),
         12 => (0, 0, 255),
