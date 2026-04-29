@@ -8,7 +8,7 @@ pub use self::menu::{
     ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,
 };
 use self::panel_tabs::{PanelTabs, panel_config_for_save, restore_panel_side};
-use crate::config::{Config, SortMode};
+use crate::config::{ActivePanelSide, Config, PanelViewType, SortMode};
 use crate::copy::{
     CopyDestination, CopyDialogState, CopyJob, CopyProgressState, CopyScanTask, CopySource,
     CopyTask, CopyTaskMessage, count_local_files, spawn_copy_scan, spawn_copy_task,
@@ -883,14 +883,18 @@ impl App {
             .map(|err| format!("Plugin loading failed: {err}"));
 
         let palette_recent = config.palette_recent.clone();
+        let restored_active_panel = match config.active_panel {
+            ActivePanelSide::Left => ActivePanel::Left,
+            ActivePanelSide::Right => ActivePanel::Right,
+        };
 
-        App {
+        let mut app = App {
             config,
             left,
             right,
             left_tabs,
             right_tabs,
-            active: ActivePanel::Left,
+            active: restored_active_panel,
             file_preview_info: false,
             file_id_active: false,
             file_id_scroll: 0,
@@ -926,7 +930,34 @@ impl App {
             quick_preview_active: false,
             quick_preview_forced_mode: None,
             palette_recent,
+        };
+
+        match app.config.panel_view_type {
+            PanelViewType::Normal => {}
+            PanelViewType::FilePreviewInfo => {
+                app.file_preview_info = true;
+            }
+            PanelViewType::QuickPreview => {
+                if let Some(entry) = app.active_panel().current_entry().cloned() {
+                    if entry.is_dir || entry.name == ".." {
+                        let mut v =
+                            Viewer::placeholder(&entry.path, "Folder", app.config.viewer.word_wrap);
+                        v.zoomed = true;
+                        app.quick_preview = Some(v);
+                    } else if let Ok(mut v) =
+                        Viewer::open_preview(&entry.path, app.config.viewer.word_wrap)
+                    {
+                        v.zoomed = true;
+                        if let Some(mode) = app.quick_preview_forced_mode {
+                            v.set_mode(mode);
+                        }
+                        app.quick_preview = Some(v);
+                    }
+                }
+            }
         }
+
+        app
     }
 
     // -----------------------------------------------------------------------
@@ -2248,6 +2279,17 @@ impl App {
         self.config.dir_history = self.dir_history.iter().cloned().collect();
         self.config.bookmarks = self.bookmarks.clone();
         self.config.palette_recent = self.palette_recent.clone();
+        self.config.active_panel = match self.active {
+            ActivePanel::Left => ActivePanelSide::Left,
+            ActivePanel::Right => ActivePanelSide::Right,
+        };
+        self.config.panel_view_type = if self.quick_preview.is_some() {
+            PanelViewType::QuickPreview
+        } else if self.file_preview_info {
+            PanelViewType::FilePreviewInfo
+        } else {
+            PanelViewType::Normal
+        };
         // Save terminal history and output to cache (not config)
         let len = self.terminal.output.len();
         let start = len.saturating_sub(200);

@@ -114,12 +114,21 @@ pub(super) fn restore_panel_side(
 }
 
 fn panel_to_tab_config(panel: &Panel) -> PanelTabConfig {
+    let cursor_name = panel.current_entry().map(|e| e.name.clone());
+    let selected_names = panel
+        .entries
+        .iter()
+        .filter(|e| e.selected && e.name != "..")
+        .map(|e| e.name.clone())
+        .collect();
     PanelTabConfig {
         path: panel.persisted_path(),
         remote_name: panel.remote_profile().map(|p| p.name),
         remote_path: panel.remote_cwd().map(|s| s.to_string()),
         sort: panel.sort,
         show_hidden: panel.show_hidden,
+        cursor_name,
+        selected_names,
     }
 }
 
@@ -131,6 +140,10 @@ fn panel_from_tab_config(cfg: &PanelTabConfig, profiles: &[RemoteProfile]) -> Pa
         cfg.remote_path.as_ref(),
         profiles,
     );
+    if let Some(name) = &cfg.cursor_name {
+        panel.restore_cursor_by_name(name);
+    }
+    panel.restore_selection_by_names(&cfg.selected_names);
     panel
 }
 

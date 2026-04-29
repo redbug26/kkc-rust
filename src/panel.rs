@@ -701,6 +701,23 @@ impl Panel {
         self.entries.get(self.cursor)
     }
 
+    pub fn restore_cursor_by_name(&mut self, name: &str) {
+        if let Some(idx) = self.entries.iter().position(|e| e.name == name) {
+            self.cursor = idx;
+        }
+    }
+
+    pub fn restore_selection_by_names(&mut self, names: &[String]) {
+        if names.is_empty() {
+            self.deselect_all();
+            return;
+        }
+        let wanted: std::collections::HashSet<&str> = names.iter().map(String::as_str).collect();
+        for e in &mut self.entries {
+            e.selected = e.name != ".." && wanted.contains(e.name.as_str());
+        }
+    }
+
     pub fn find_file_id_path(&self) -> Option<PathBuf> {
         if self.is_remote_view() {
             return None;

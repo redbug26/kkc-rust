@@ -70,6 +70,23 @@ pub enum SortMode {
     Unsorted,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PanelViewType {
+    #[default]
+    Normal,
+    FilePreviewInfo,
+    QuickPreview,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ActivePanelSide {
+    #[default]
+    Left,
+    Right,
+}
+
 // ---------------------------------------------------------------------------
 // Panel config (saved per side)
 // ---------------------------------------------------------------------------
@@ -90,6 +107,12 @@ pub struct PanelTabConfig {
     /// Show hidden files.
     #[serde(default)]
     pub show_hidden: bool,
+    /// Last highlighted entry name in this tab.
+    #[serde(default)]
+    pub cursor_name: Option<String>,
+    /// Selected entry names in this tab.
+    #[serde(default)]
+    pub selected_names: Vec<String>,
 }
 
 impl Default for PanelTabConfig {
@@ -100,6 +123,8 @@ impl Default for PanelTabConfig {
             remote_path: None,
             sort: SortMode::Name,
             show_hidden: false,
+            cursor_name: None,
+            selected_names: Vec::new(),
         }
     }
 }
@@ -150,6 +175,8 @@ impl PanelConfig {
             remote_path: self.remote_path.clone(),
             sort: self.sort,
             show_hidden: self.show_hidden,
+            cursor_name: None,
+            selected_names: Vec::new(),
         }
     }
 }
@@ -271,6 +298,14 @@ pub struct Config {
     /// Write debug messages to a log file (disabled by default).
     #[serde(default)]
     pub debug_log: bool,
+
+    /// Last panel rendering mode in browse view.
+    #[serde(default)]
+    pub panel_view_type: PanelViewType,
+
+    /// Active panel when the app was closed.
+    #[serde(default)]
+    pub active_panel: ActivePanelSide,
 }
 
 impl Default for Config {
@@ -302,6 +337,8 @@ impl Default for Config {
             file_assoc: Vec::new(),
             palette_recent: Vec::new(),
             debug_log: false,
+            panel_view_type: PanelViewType::Normal,
+            active_panel: ActivePanelSide::Left,
         }
     }
 }
@@ -411,6 +448,23 @@ impl Config {
         out.push_str("# \u{2500}\u{2500}\u{2500} Display \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\n");
         out.push_str(&format!("show_fkey_bar = {}\n", self.show_fkey_bar));
         out.push_str(&format!("color_by_type = {}\n", self.color_by_type));
+        out.push_str(&format!(
+            "panel_view_type = {}\n",
+            toml::Value::String(match self.panel_view_type {
+                PanelViewType::Normal => "normal",
+                PanelViewType::FilePreviewInfo => "file_preview_info",
+                PanelViewType::QuickPreview => "quick_preview",
+            }
+            .to_string())
+        ));
+        out.push_str(&format!(
+            "active_panel = {}\n",
+            toml::Value::String(match self.active_panel {
+                ActivePanelSide::Left => "left",
+                ActivePanelSide::Right => "right",
+            }
+            .to_string())
+        ));
         out.push('\n');
 
         // ─── Viewer ───────────────────────────────────────────────────────
