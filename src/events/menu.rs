@@ -4,7 +4,6 @@ use crate::app::{
     MenuAction, PluginsState,
 };
 use crate::config::SortMode;
-use crate::viewer::Viewer;
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent};
 
@@ -319,29 +318,8 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
             }
         }
         MenuAction::QuickPreview => {
-            // Toggle: if already showing a preview, close it; otherwise open one.
-            if app.quick_preview.is_some() {
-                app.quick_preview = None;
-                app.quick_preview_active = false;
-            } else if let Some(entry) = app.active_panel().current_entry().cloned() {
-                let mut v = if entry.is_dir || entry.name == ".." {
-                    Viewer::placeholder(&entry.path, "Folder", app.config.viewer.word_wrap)
-                } else {
-                    match Viewer::open_preview(&entry.path, app.config.viewer.word_wrap) {
-                        Ok(v) => v,
-                        Err(e) => {
-                            app.notify(format!("Cannot open preview: {}", e));
-                            return Ok(false);
-                        }
-                    }
-                };
-                v.zoomed = true;
-                if let Some(mode) = app.quick_preview_forced_mode {
-                    if !(entry.is_dir || entry.name == "..") {
-                        v.set_mode(mode);
-                    }
-                }
-                app.quick_preview = Some(v);
+            if let Err(e) = app.toggle_quick_preview() {
+                app.notify(format!("Cannot open preview: {}", e));
             }
         }
         MenuAction::DebugLog => {

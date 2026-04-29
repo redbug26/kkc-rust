@@ -107,9 +107,7 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
                 app.quick_preview_active = false;
             }
             KeyCode::Esc => {
-                app.quick_preview = None;
-                app.quick_preview_active = false;
-                app.quick_preview_forced_mode = None;
+                app.close_quick_preview();
             }
             KeyCode::Up => {
                 app.quick_preview_scroll_up();

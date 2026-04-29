@@ -20,6 +20,7 @@ const BUNDLED_HTML_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/html_vi
 const BUNDLED_EML_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/eml_viewer/plugin.lua");
 const BUNDLED_JSON_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/json_viewer/plugin.lua");
 const BUNDLED_XML_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/xml_viewer/plugin.lua");
+const BUNDLED_VCARD_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/vcard_viewer/plugin.lua");
 const BUNDLED_CSV_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/csv_viewer/plugin.lua");
 const BUNDLED_MARKDOWN_VIEWER_PLUGIN: &str =
     include_str!("../assets/plugins/markdown_viewer/plugin.lua");
@@ -473,6 +474,10 @@ fn install_bundled_plugins(plugins_dir: &Path) -> Result<()> {
     let xml_dir = plugins_dir.join("xml_viewer");
     fs::create_dir_all(&xml_dir)?;
     write_bundled_file(&xml_dir.join("plugin.lua"), BUNDLED_XML_VIEWER_PLUGIN)?;
+
+    let vcard_dir = plugins_dir.join("vcard_viewer");
+    fs::create_dir_all(&vcard_dir)?;
+    write_bundled_file(&vcard_dir.join("plugin.lua"), BUNDLED_VCARD_VIEWER_PLUGIN)?;
 
     let csv_dir = plugins_dir.join("csv_viewer");
     fs::create_dir_all(&csv_dir)?;
@@ -1744,6 +1749,23 @@ mod tests {
     }
 
     #[test]
+    fn bundled_vcard_viewer_plugin_registers() {
+        let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("plugins")
+            .join("vcard_viewer")
+            .join("plugin.lua");
+
+        let plugins = inspect_viewer_plugin(&script).expect("viewer plugin should load");
+
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(plugins[0].name, "vcard_viewer");
+        assert_eq!(plugins[0].version, "1.0.0");
+        assert_eq!(plugins[0].modes, vec!["text"]);
+        assert_eq!(plugins[0].mime_types, vec!["text/vcard"]);
+    }
+
+    #[test]
     fn bundled_html_viewer_plugin_registers() {
         let script = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("assets")
@@ -2109,6 +2131,46 @@ mod tests {
         assert_eq!(state.get("wrap").map(String::as_str), Some("0"));
 
         let _ = fs::remove_file(&xml_path);
+    }
+
+    #[test]
+    fn bundled_vcard_viewer_renders_contact() {
+        let vcf_path =
+            std::env::temp_dir().join(format!("kkc-vcard-viewer-{}.vcf", std::process::id()));
+        fs::write(
+            &vcf_path,
+            "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Miguel Van Hove\r\nORG:KKC;Plugins\r\nTITLE:Developer\r\nEMAIL;TYPE=work:miguel@example.com\r\nTEL;TYPE=cell:+32 123\r\nADR;TYPE=home:;;Main Street;Brussels;;1000;Belgium\r\nURL:https://example.com\r\nNOTE:Line one\\nLine two\r\nEND:VCARD\r\n",
+        )
+        .expect("write vcf");
+
+        let script_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("plugins")
+            .join("vcard_viewer")
+            .join("plugin.lua");
+        let plugin = ViewerPlugin {
+            name: "vcard_viewer".into(),
+            version: "1.0.0".into(),
+            description: String::new(),
+            plugin_dir: script_path.parent().expect("plugin dir").to_path_buf(),
+            script_path,
+            modes: vec!["text".into()],
+            mime_types: vec!["text/vcard".into()],
+            extensions: vec!["vcf".into()],
+        };
+
+        let rendered = plugin
+            .render_document(&vcf_path, "text", &HashMap::new(), 100)
+            .expect("vcard viewer should render")
+            .expect("vcard viewer should return lines");
+        let text = lines_to_text(&rendered);
+        assert!(text.contains("vCard contacts"));
+        assert!(text.contains("Miguel Van Hove"));
+        assert!(text.contains("KKC / Plugins"));
+        assert!(text.contains("miguel@example.com"));
+        assert!(text.contains("Brussels"));
+
+        let _ = fs::remove_file(&vcf_path);
     }
 
     #[test]

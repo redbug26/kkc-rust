@@ -158,11 +158,17 @@ fn file_attrs(meta: &fs::Metadata) -> String {
 }
 
 fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_ascii_lowercase())
+        .unwrap_or_default();
     // Most format magic bytes are in the first few hundred bytes.
     // The deepest probe is ISO9660 at offset 0x8001 (32 769 B), so 64 KB
     // is always sufficient.  Capping the read here avoids stalling the UI
     // when the cursor lands on a large unrecognised file for the first time.
     const MAX_PROBE_BYTES: usize = 64 * 1024;
+    const PDF_PROBE_BYTES: usize = 8 * 1024;
     let (data, file_len) = {
         use std::io::Read;
         let mut file = std::fs::File::open(path)?;
@@ -170,17 +176,17 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             .metadata()
             .map(|m| m.len() as usize)
             .unwrap_or(MAX_PROBE_BYTES);
-        let cap = file_len.min(MAX_PROBE_BYTES);
+        let max_probe = if ext == "pdf" {
+            PDF_PROBE_BYTES
+        } else {
+            MAX_PROBE_BYTES
+        };
+        let cap = file_len.min(max_probe);
         let mut buf = vec![0u8; cap];
         let n = file.read(&mut buf)?;
         buf.truncate(n);
         (buf, file_len)
     };
-    let ext = path
-        .extension()
-        .and_then(|s| s.to_str())
-        .map(|s| s.to_ascii_lowercase())
-        .unwrap_or_default();
 
     let info = if data.starts_with(b"PK\x03\x04")
         || data.starts_with(b"PK\x05\x06")
@@ -971,11 +977,182 @@ fn wh_lines(w: u32, h: u32) -> Vec<String> {
 }
 
 fn pdf_lines(data: &[u8]) -> Vec<String> {
-    let sample = String::from_utf8_lossy(&data[..data.len().min(16)]);
-    sample
-        .strip_prefix("%PDF-")
-        .map(|v| vec![format!(" PDF version {}", v.trim())])
-        .unwrap_or_default()
+    const PDF_IDF_SCAN_BYTES: usize = 8 * 1024;
+    let sample = &data[..data.len().min(PDF_IDF_SCAN_BYTES)];
+    let text = String::from_utf8_lossy(sample);
+    let mut lines = Vec::new();
+
+    if let Some(version) = pdf_version(sample) {
+        lines.push(format!(" PDF version {}", version));
+    }
+    if text.contains("/Linearized") {
+        lines.push(" Linearized / fast web view".into());
+    }
+    if text.contains("/Encrypt") {
+        lines.push(" Encrypted document".into());
+    }
+    if let Some(pages) = pdf_page_count(&text) {
+        lines.push(format!(" {} page(s)", pages));
+    }
+    let object_count = byte_pattern_count(sample, b" obj");
+    if object_count > 0 {
+        lines.push(format!(" {} object marker(s) in probe", object_count));
+    }
+
+    for (key, label) in [
+        ("Title", "Title"),
+        ("Author", "Author"),
+        ("Subject", "Subject"),
+        ("Creator", "Creator"),
+        ("Producer", "Producer"),
+        ("CreationDate", "Created"),
+        ("ModDate", "Modified"),
+    ] {
+        if let Some(value) = pdf_dict_string(&text, key) {
+            lines.push(format!(" {}: {}", label, value));
+        }
+    }
+
+    lines
+}
+
+fn pdf_version(data: &[u8]) -> Option<String> {
+    let header = std::str::from_utf8(data.get(..data.len().min(16))?).ok()?;
+    let rest = header.strip_prefix("%PDF-")?;
+    let version = rest
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit() || *ch == '.')
+        .collect::<String>();
+    (!version.is_empty()).then_some(version)
+}
+
+fn pdf_page_count(text: &str) -> Option<usize> {
+    let mut best: Option<usize> = None;
+    for cap in text.match_indices("/Count") {
+        let rest = &text[cap.0 + "/Count".len()..];
+        let value = rest
+            .trim_start()
+            .chars()
+            .take_while(|ch| ch.is_ascii_digit())
+            .collect::<String>();
+        if let Ok(count) = value.parse::<usize>()
+            && count > 0
+        {
+            best = Some(best.map_or(count, |current| current.max(count)));
+        }
+    }
+    best
+}
+
+fn byte_pattern_count(data: &[u8], pattern: &[u8]) -> usize {
+    if pattern.is_empty() || data.len() < pattern.len() {
+        return 0;
+    }
+    data.windows(pattern.len())
+        .filter(|window| *window == pattern)
+        .count()
+}
+
+fn pdf_dict_string(text: &str, key: &str) -> Option<String> {
+    let marker = format!("/{key}");
+    let mut search_from = 0;
+    while let Some(pos) = text[search_from..].find(&marker) {
+        let start = search_from + pos + marker.len();
+        let rest = text[start..].trim_start();
+        let parsed = if rest.starts_with('(') {
+            pdf_literal_string(rest)
+        } else if rest.starts_with('<') && !rest.starts_with("<<") {
+            pdf_hex_string(rest)
+        } else {
+            None
+        };
+        if let Some(value) = parsed.filter(|value| !value.trim().is_empty()) {
+            return Some(value);
+        }
+        search_from = start;
+    }
+    None
+}
+
+fn pdf_literal_string(input: &str) -> Option<String> {
+    let mut out = String::new();
+    let mut depth = 0usize;
+    let mut escaped = false;
+    for ch in input.chars() {
+        if depth == 0 {
+            if ch == '(' {
+                depth = 1;
+            }
+            continue;
+        }
+        if escaped {
+            match ch {
+                'n' => out.push('\n'),
+                'r' => out.push('\r'),
+                't' => out.push('\t'),
+                'b' => out.push('\u{0008}'),
+                'f' => out.push('\u{000c}'),
+                '(' | ')' | '\\' => out.push(ch),
+                _ => out.push(ch),
+            }
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' => escaped = true,
+            '(' => {
+                depth += 1;
+                out.push(ch);
+            }
+            ')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(clean_pdf_text(&out));
+                }
+                out.push(ch);
+            }
+            _ => out.push(ch),
+        }
+    }
+    None
+}
+
+fn pdf_hex_string(input: &str) -> Option<String> {
+    let end = input.get(1..)?.find('>')? + 1;
+    let hex = input[1..end]
+        .chars()
+        .filter(|ch| ch.is_ascii_hexdigit())
+        .collect::<String>();
+    if hex.is_empty() {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    let mut chars = hex.chars();
+    while let Some(hi) = chars.next() {
+        let lo = chars.next().unwrap_or('0');
+        let pair = [hi, lo].iter().collect::<String>();
+        bytes.push(u8::from_str_radix(&pair, 16).ok()?);
+    }
+    if bytes.starts_with(&[0xfe, 0xff]) {
+        let mut out = String::new();
+        for pair in bytes[2..].chunks(2) {
+            if pair.len() == 2 {
+                if let Some(ch) = char::from_u32(u16::from_be_bytes([pair[0], pair[1]]) as u32) {
+                    out.push(ch);
+                }
+            }
+        }
+        Some(clean_pdf_text(&out))
+    } else {
+        Some(clean_pdf_text(&String::from_utf8_lossy(&bytes)))
+    }
+}
+
+fn clean_pdf_text(text: &str) -> String {
+    text.replace(['\r', '\n', '\t'], " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn midi_info(path: &Path, data: &[u8]) -> IdInfo {
@@ -1687,6 +1864,41 @@ mod tests {
         }
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn pdf_metadata_is_reported() {
+        let path = std::env::temp_dir().join(format!("kkc-idf-pdf-{}.pdf", std::process::id()));
+        fs::write(
+            &path,
+            b"%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Count 12 >>\nendobj\n3 0 obj\n<< /Title (Demo PDF) /Author (Miguel) /Producer <feff004b004b0043> /CreationDate (D:20260429110442+02'00') >>\nendobj\ntrailer\n<< /Root 1 0 R /Info 3 0 R >>\n",
+        )
+        .expect("write pdf");
+
+        let info = probe_file(&path)
+            .expect("probe should not fail")
+            .expect("pdf should be detected");
+        assert_eq!(info.mime_type, "application/pdf");
+        assert_eq!(info.format, "PDF document");
+        assert!(
+            info.extra
+                .iter()
+                .any(|line| line.contains("PDF version 1.7"))
+        );
+        assert!(info.extra.iter().any(|line| line.contains("12 page(s)")));
+        assert!(
+            info.extra
+                .iter()
+                .any(|line| line.contains("Title: Demo PDF"))
+        );
+        assert!(
+            info.extra
+                .iter()
+                .any(|line| line.contains("Author: Miguel"))
+        );
+        assert!(info.extra.iter().any(|line| line.contains("Producer: KKC")));
+
+        let _ = fs::remove_file(path);
     }
 
     #[test]

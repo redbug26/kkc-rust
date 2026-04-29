@@ -2025,9 +2025,47 @@ impl App {
     }
 
     pub fn open_file_id_view(&mut self) {
-        self.file_preview_info = !self.file_preview_info;
+        let enable = !self.file_preview_info;
+        self.file_preview_info = enable;
         self.file_id_active = false;
         self.file_id_scroll = 0;
+        if enable {
+            self.close_quick_preview();
+        }
+    }
+
+    pub fn close_quick_preview(&mut self) {
+        self.quick_preview = None;
+        self.quick_preview_active = false;
+        self.quick_preview_forced_mode = None;
+    }
+
+    pub fn toggle_quick_preview(&mut self) -> Result<()> {
+        if self.quick_preview.is_some() {
+            self.close_quick_preview();
+            return Ok(());
+        }
+
+        let Some(entry) = self.active_panel().current_entry().cloned() else {
+            return Ok(());
+        };
+        self.file_preview_info = false;
+        self.file_id_active = false;
+        self.file_id_scroll = 0;
+
+        let mut v = if entry.is_dir || entry.name == ".." {
+            Viewer::placeholder(&entry.path, "Folder", self.config.viewer.word_wrap)
+        } else {
+            Viewer::open_preview(&entry.path, self.config.viewer.word_wrap)?
+        };
+        v.zoomed = true;
+        if let Some(mode) = self.quick_preview_forced_mode
+            && !(entry.is_dir || entry.name == "..")
+        {
+            v.set_mode(mode);
+        }
+        self.quick_preview = Some(v);
+        Ok(())
     }
 
     /// Refresh the quick-preview viewer when the cursor moves to a new file.
