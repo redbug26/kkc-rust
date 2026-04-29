@@ -1496,7 +1496,8 @@ fn handle_plugins(app: &mut App, key: KeyEvent) -> Result<bool> {
                         };
                         let mut refreshed = crate::app::PluginsState::load();
                         if !refreshed.plugins.is_empty() {
-                            refreshed.cursor = cursor.min(refreshed.plugins.len().saturating_sub(1));
+                            refreshed.cursor =
+                                cursor.min(refreshed.plugins.len().saturating_sub(1));
                         }
                         app.notify("Plugin removed");
                         app.reload_panels();

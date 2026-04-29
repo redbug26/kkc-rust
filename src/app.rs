@@ -4,8 +4,8 @@ mod panel_tabs;
 
 pub use self::command_palette::{CommandPaletteState, PALETTE_DATA, PALETTE_SEP};
 pub use self::menu::{
-    MENU_DATA, MENU_HEADERS, MenuAction, MenuEntry, MenuState, ViewerMenuKind, ViewerMenuState,
-    ViewerPluginPaletteState, StoreInstallPaletteState,
+    MENU_DATA, MENU_HEADERS, MenuAction, MenuEntry, MenuState, StoreInstallPaletteState,
+    ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,
 };
 use self::panel_tabs::{PanelTabs, panel_config_for_save, restore_panel_side};
 use crate::about::AboutState;

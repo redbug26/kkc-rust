@@ -129,6 +129,27 @@ pub(super) fn handle_store_install_palette(app: &mut App, key: KeyEvent) -> Resu
             state.match_pos = state.filtered_indices().len().saturating_sub(1);
         }
         KeyCode::Backspace => state.pop_query(),
+        KeyCode::Char('r') | KeyCode::Char('R') if ctrl && !alt => {
+            let index_path = state.index_path.clone();
+            let query = state.query.clone();
+            match crate::app::StoreInstallPaletteState::load(index_path.clone()) {
+                Ok(mut refreshed) => {
+                    refreshed.query = query;
+                    refreshed.clamp_match();
+                    app.notify(format!("Store index refreshed: {}", index_path.display()));
+                    app.mode = AppMode::StoreInstallPalette(refreshed);
+                }
+                Err(e) => {
+                    app.notify(format!(
+                        "Cannot refresh plugin store index {}: {}",
+                        index_path.display(),
+                        e
+                    ));
+                    app.mode = AppMode::StoreInstallPalette(state);
+                }
+            }
+            return Ok(false);
+        }
         KeyCode::Char('u') | KeyCode::Char('U') if ctrl && !alt => {
             let selected = state
                 .filtered_indices()

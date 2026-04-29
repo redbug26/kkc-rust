@@ -3629,7 +3629,9 @@ fn render_store_install_palette(f: &mut Frame, state: &StoreInstallPaletteState,
     let input_row = Line::from(vec![
         Span::styled(
             truncate_str(&input_text, input_inner_w),
-            Style::default().fg(Color::Rgb(34, 20, 12)).bg(Color::Rgb(232, 220, 192)),
+            Style::default()
+                .fg(Color::Rgb(34, 20, 12))
+                .bg(Color::Rgb(232, 220, 192)),
         ),
         Span::styled(
             count_hint,
@@ -3652,10 +3654,24 @@ fn render_store_install_palette(f: &mut Frame, state: &StoreInstallPaletteState,
     let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
     safe_render_widget(
         f,
-        Paragraph::new(sep.clone()).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
+        Paragraph::new(truncate_str(
+            &format!("  {}", state.index_version_label()),
+            inner.width as usize,
+        ))
+        .style(Style::default().fg(Color::Rgb(88, 66, 45)).bg(CLR_APP_BG)),
         Rect {
             x: inner.x,
             y: inner.y + 1,
+            width: inner.width,
+            height: 1,
+        },
+    );
+    safe_render_widget(
+        f,
+        Paragraph::new(sep.clone()).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
+        Rect {
+            x: inner.x,
+            y: inner.y + 2,
             width: inner.width,
             height: 1,
         },
@@ -3675,12 +3691,13 @@ fn render_store_install_palette(f: &mut Frame, state: &StoreInstallPaletteState,
     );
     safe_render_widget(
         f,
-        Paragraph::new("  [ Enter Install ]  [ Ctrl+U Update ]  [ Esc Close ]").style(
-            Style::default()
-                .fg(Color::Rgb(255, 252, 226))
-                .bg(CLR_BUTTON_BG)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Paragraph::new("  [ Enter Install ]  [ Ctrl+U Update ]  [ Ctrl+R Refresh ]  [ Esc Close ]")
+            .style(
+                Style::default()
+                    .fg(Color::Rgb(255, 252, 226))
+                    .bg(CLR_BUTTON_BG)
+                    .add_modifier(Modifier::BOLD),
+            ),
         Rect {
             x: inner.x,
             y: button_y,
@@ -3689,7 +3706,7 @@ fn render_store_install_palette(f: &mut Frame, state: &StoreInstallPaletteState,
         },
     );
 
-    let body_y = inner.y + 2;
+    let body_y = inner.y + 3;
     let body_h = footer_sep_y.saturating_sub(body_y);
     if body_h == 0 {
         return;
@@ -3707,7 +3724,9 @@ fn render_store_install_palette(f: &mut Frame, state: &StoreInstallPaletteState,
         .map(|p| p.name.len() + 18)
         .max()
         .unwrap_or(8);
-    let left_w = ((max_name + 4) as u16).clamp(36, 64).min(body.width.saturating_sub(30));
+    let left_w = ((max_name + 4) as u16)
+        .clamp(36, 64)
+        .min(body.width.saturating_sub(30));
     let right_w = body.width.saturating_sub(left_w + 1);
 
     let left_area = Rect {

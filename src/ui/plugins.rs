@@ -87,7 +87,9 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
     let input_row = Line::from(vec![
         Span::styled(
             truncate_str(&input_text, input_inner_w),
-            Style::default().fg(Color::Rgb(34, 20, 12)).bg(Color::Rgb(232, 220, 192)),
+            Style::default()
+                .fg(Color::Rgb(34, 20, 12))
+                .bg(Color::Rgb(232, 220, 192)),
         ),
         Span::styled(
             count_hint,
@@ -132,12 +134,13 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
     );
     safe_render_widget(
         f,
-        Paragraph::new("  [ Enter Open Dir ]  [ Ctrl+S Store ]  [ Del Remove ]  [ Esc Close ]").style(
-            Style::default()
-                .fg(Color::Rgb(255, 252, 226))
-                .bg(CLR_BUTTON_BG)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Paragraph::new("  [ Enter Open Dir ]  [ Ctrl+S Store ]  [ Del Remove ]  [ Esc Close ]")
+            .style(
+                Style::default()
+                    .fg(Color::Rgb(255, 252, 226))
+                    .bg(CLR_BUTTON_BG)
+                    .add_modifier(Modifier::BOLD),
+            ),
         Rect {
             x: inner.x,
             y: button_y,
@@ -169,7 +172,9 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
         })
         .max()
         .unwrap_or(8);
-    let left_w = ((max_name + 4) as u16).clamp(32, 56).min(body.width.saturating_sub(28));
+    let left_w = ((max_name + 4) as u16)
+        .clamp(32, 56)
+        .min(body.width.saturating_sub(28));
     let right_w = body.width.saturating_sub(left_w + 1); // +1 for separator
 
     let left_area = Rect {
@@ -237,8 +242,7 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
         };
         safe_render_widget(
             f,
-            Paragraph::new(msg)
-                .style(Style::default().fg(Color::Rgb(72, 48, 28)).bg(CLR_APP_BG)),
+            Paragraph::new(msg).style(Style::default().fg(Color::Rgb(72, 48, 28)).bg(CLR_APP_BG)),
             Rect {
                 x: left_area.x,
                 y: left_area.y + 1,
@@ -329,9 +333,7 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
         .bg(CLR_APP_BG)
         .add_modifier(Modifier::BOLD);
     let val_style = Style::default().fg(Color::Rgb(34, 20, 12)).bg(CLR_APP_BG);
-    let dim_style = Style::default()
-        .fg(Color::Rgb(88, 66, 45))
-        .bg(CLR_APP_BG);
+    let dim_style = Style::default().fg(Color::Rgb(88, 66, 45)).bg(CLR_APP_BG);
     let rw = right_area.width as usize;
 
     let mut lines: Vec<(Rect, Paragraph)> = Vec::new();

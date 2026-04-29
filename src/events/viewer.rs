@@ -1,6 +1,6 @@
+use super::fx_shortcut;
 use crate::app::{App, AppMode, ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState};
 use crate::viewer::{EncodingMode, LineFeedMode, MaskKind, PreprocOpKind, ViewMode, Viewer};
-use super::fx_shortcut;
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 

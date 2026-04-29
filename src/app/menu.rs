@@ -1,4 +1,5 @@
 use crate::viewer::{EncodingMode, LineFeedMode, MaskKind, ViewMode, Viewer};
+use chrono::{DateTime, Local};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -96,6 +97,7 @@ pub struct ViewerPluginPaletteState {
 #[derive(Debug, Clone)]
 pub struct StoreInstallPaletteState {
     pub index_path: PathBuf,
+    pub index_info: crate::plugins::StoreIndexInfo,
     pub items: Vec<crate::plugins::StorePluginInfo>,
     pub installed_versions: HashMap<String, String>,
     pub query: String,
@@ -105,7 +107,7 @@ pub struct StoreInstallPaletteState {
 impl StoreInstallPaletteState {
     pub fn load(index_path: PathBuf) -> anyhow::Result<Self> {
         let installed_versions = crate::plugins::installed_plugin_versions_by_dir();
-        let mut items = crate::plugins::list_store_plugins(&index_path)?;
+        let (mut items, index_info) = crate::plugins::list_store_plugins_with_info(&index_path)?;
         items.sort_by(|a, b| {
             let a_update = {
                 let dir = crate::plugins::store_plugin_install_dir_name(&a.id);
@@ -131,10 +133,27 @@ impl StoreInstallPaletteState {
         Ok(Self {
             items,
             index_path,
+            index_info,
             installed_versions,
             query: String::new(),
             match_pos: 0,
         })
+    }
+
+    pub fn index_version_label(&self) -> String {
+        let tag = self.index_info.tag.as_deref().unwrap_or("?");
+        let count = self.index_info.plugins_count.unwrap_or(self.items.len());
+        let mut parts = vec![format!("Index {tag}"), format!("plugins {count}")];
+        if let Some(generated_at) = self.index_info.generated_at.as_deref() {
+            parts.push(format!(
+                "generated {}",
+                format_store_generated_at(generated_at)
+            ));
+        }
+        if let Some(source_repo) = self.index_info.source_repo.as_deref() {
+            parts.push(format!("source {source_repo}"));
+        }
+        parts.join("  ")
     }
 
     pub fn install_dir_name_for(&self, item: &crate::plugins::StorePluginInfo) -> String {
@@ -232,7 +251,7 @@ impl StoreInstallPaletteState {
         self.clamp_match();
     }
 
-    fn clamp_match(&mut self) {
+    pub(crate) fn clamp_match(&mut self) {
         let len = self.filtered_indices().len();
         if len == 0 {
             self.match_pos = 0;
@@ -240,6 +259,16 @@ impl StoreInstallPaletteState {
             self.match_pos = self.match_pos.min(len.saturating_sub(1));
         }
     }
+}
+
+fn format_store_generated_at(value: &str) -> String {
+    DateTime::parse_from_rfc3339(value)
+        .map(|dt| {
+            dt.with_timezone(&Local)
+                .format("%Y-%m-%d %H:%M:%S %Z")
+                .to_string()
+        })
+        .unwrap_or_else(|_| value.to_string())
 }
 
 impl ViewerPluginPaletteState {
@@ -440,7 +469,11 @@ pub static MENU_DATA: &[&[MenuEntry]] = &[
     ],
     &[
         ("Search..", Some("A-F7"), MenuAction::SearchFiles),
-        ("Install from Store..", None, MenuAction::InstallPluginFromStore),
+        (
+            "Install from Store..",
+            None,
+            MenuAction::InstallPluginFromStore,
+        ),
         ("Remote Connect..", Some("^F"), MenuAction::RemoteConnect),
         ("File ID Preview", Some("A-F4"), MenuAction::FileIdPreview),
         ("Bookmarks", Some("^D"), MenuAction::DirBookmarks),

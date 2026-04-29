@@ -1584,8 +1584,7 @@ fn email_subject(data: &[u8]) -> Option<String> {
 }
 
 fn is_amstrad_dsk(data: &[u8], ext: &str) -> bool {
-    ext == "dsk"
-        && (data.starts_with(b"MV - CPC") || data.starts_with(b"EXTENDED CPC DSK"))
+    ext == "dsk" && (data.starts_with(b"MV - CPC") || data.starts_with(b"EXTENDED CPC DSK"))
 }
 
 fn is_plausible_amsdos_name_byte(byte: u8) -> bool {
