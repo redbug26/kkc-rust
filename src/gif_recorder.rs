@@ -36,7 +36,8 @@ const FRAME_DELAY_MS: u64 = 500;
 
 /// Render `buffer` as one GIF frame and append it to `path`.
 /// Creates `path` (and its parent directories) if they do not exist yet.
-pub fn capture_frame(buffer: &Buffer, path: &Path) -> Result<()> {
+/// Returns the total number of frames after appending.
+pub fn capture_frame(buffer: &Buffer, path: &Path) -> Result<usize> {
     // Ensure parent directory exists.
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
@@ -56,6 +57,7 @@ pub fn capture_frame(buffer: &Buffer, path: &Path) -> Result<()> {
         frames = decoder.into_frames().collect::<Result<Vec<_>, _>>()?;
     }
     frames.push(new_frame);
+    let frame_count = frames.len();
 
     // Write all frames back to disk.
     let out = File::create(path)?;
@@ -64,7 +66,7 @@ pub fn capture_frame(buffer: &Buffer, path: &Path) -> Result<()> {
     for frame in frames {
         encoder.encode_frame(frame)?;
     }
-    Ok(())
+    Ok(frame_count)
 }
 
 // ---------------------------------------------------------------------------
