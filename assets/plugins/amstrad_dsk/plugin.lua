@@ -32,38 +32,44 @@ local function read_block(block_num)
     return first .. second
 end
 
--- Detect AMSDOS header using the CRC checksum stored at bytes 65-66 (1-indexed).
--- The checksum is the 16-bit sum of bytes 1-64, combined with a valid file type check.
-local function detect_amsdos_header(data)
+local function upper_ascii(byte)
+    if byte >= 0x61 and byte <= 0x7a then
+        return byte - 0x20
+    end
+    return byte
+end
+
+-- Compare AMSDOS 8.3 name bytes from header and catalog entry while ignoring
+-- CPC attribute bits (bit 7 may be set in extension bytes).
+local function amsdos_name_matches(raw_name, data)
+    if #raw_name < 11 or #data < 12 then
+        return false
+    end
+    for i = 1, 11 do
+        local header_b = (data:byte(1 + i) or 0) & 0x7f
+        local entry_b = (raw_name:byte(i) or 0) & 0x7f
+        if upper_ascii(header_b) ~= upper_ascii(entry_b) then
+            return false
+        end
+    end
+    return true
+end
+
+local function detect_amsdos_header(raw_name, data)
     if #data < 128 then
         return false
     end
-    -- Verify checksum: sum of bytes 1-64 must equal the 16-bit value at bytes 65-66
-    local sum = 0
-    for i = 1, 64 do
-        sum = sum + (data:byte(i) or 0)
-    end
-    sum = sum & 0xFFFF
-    -- Reject trivial all-zero case (would always match for empty/filler blocks)
-    if sum == 0 then
+    if not amsdos_name_matches(raw_name, data) then
         return false
     end
-    local lo = data:byte(65) or 0
-    local hi = data:byte(66) or 0
-    local stored = lo + hi * 256
-    if sum ~= stored then
-        return false
-    end
-    -- File type at byte 13 must be a known AMSDOS type: 0=BASIC, 1=Protected, 2=Binary
-    local ftype = data:byte(13) or 0xFF
+    local ftype = data:byte(13) or 0xff
     return ftype <= 2
 end
 
-local function strip_amsdos_header(data)
-    if not detect_amsdos_header(data) then
+local function strip_amsdos_header(raw_name, data)
+    if not detect_amsdos_header(raw_name, data) then
         return data
     end
-    -- Actual byte length is at positions 25-26 (logical length field, lo-hi, 1-indexed)
     local lo = data:byte(25) or 0
     local hi = data:byte(26) or 0
     local length = lo + hi * 256
@@ -73,7 +79,7 @@ local function strip_amsdos_header(data)
     return data:sub(129)
 end
 
-local function read_catalog_file(entries)
+local function read_catalog_file_raw(entries)
     table.sort(entries, function(left, right)
         return (left.numextension or 0) < (right.numextension or 0)
     end)
@@ -92,7 +98,12 @@ local function read_catalog_file(entries)
         data = data .. part
     end
 
-    return strip_amsdos_header(data)
+    return data
+end
+
+local function read_catalog_file(entries)
+    local raw_data = read_catalog_file_raw(entries)
+    return strip_amsdos_header(entries[1].filename, raw_data)
 end
 
 local function basename(path)
@@ -268,26 +279,6 @@ local function render_dsk_directory(path, mode)
     if catalog_ok then
         rows = catalog_rows()
     end
-    
-    -- Group entries by raw_name (filename) to handle multi-part files
-    local grouped = {}
-    for _, entry in ipairs(rows) do
-        grouped[entry.filename] = grouped[entry.filename] or {}
-        table.insert(grouped[entry.filename], entry)
-    end
-    
-    -- Sort grouped entries
-    local sorted_groups = {}
-    for raw_name, entries in pairs(grouped) do
-        table.sort(entries, function(left, right)
-            return (left.numextension or 0) < (right.numextension or 0)
-        end)
-        table.insert(sorted_groups, { name = raw_name, entries = entries })
-    end
-    table.sort(sorted_groups, function(left, right)
-        return left.name < right.name
-    end)
-    
     local free, total = free_block_count()
     local lines = {}
     table.insert(lines, line(span("Amstrad CPC DSK directory", "yellow", true)))
@@ -304,7 +295,7 @@ local function render_dsk_directory(path, mode)
     ))
     table.insert(lines, line(
         span("Entries: ", "gray"),
-        span(tostring(#sorted_groups), "cyan"),
+        span(tostring(#rows), "cyan"),
         span("  Free blocks: ", "gray"),
         span(tostring(free) .. "/" .. tostring(total), "cyan")
     ))
@@ -318,15 +309,15 @@ local function render_dsk_directory(path, mode)
     table.insert(lines, line(
         span("Usr ", "yellow", true),
         span("Ext ", "yellow", true),
-        span("Name              ", "yellow", true),
+        span("Name         ", "yellow", true),
         span("Rec  ", "yellow", true),
         span("Blk  ", "yellow", true),
         span("Size   ", "yellow", true),
         span("Blocks", "yellow", true)
     ))
-    table.insert(lines, line(span(string.rep("-", 77), "gray")))
+    table.insert(lines, line(span(string.rep("-", 72), "gray")))
 
-    if #sorted_groups == 0 then
+    if #rows == 0 then
         if not catalog_ok then
             table.insert(lines, line(span("This image can be viewed as a disk image, but not entered as an AMSDOS archive.", "gray")))
             return lines
@@ -335,73 +326,19 @@ local function render_dsk_directory(path, mode)
         return lines
     end
 
-    -- Render each group, showing two entries if AMSDOS header is detected
-    for _, group in ipairs(sorted_groups) do
-        local raw_name = group.name
-        local entries = group.entries
-        
-        -- Read the full file data
-        local data = ""
-        for _, entry in ipairs(entries) do
-            local part = ""
-            for _, block in ipairs(entry.blocks or {}) do
-                part = part .. read_block(block)
-            end
-            local records = entry.nbrecords or 0
-            if records > 0 and records < 128 then
-                part = part:sub(1, records * 128)
-            end
-            data = data .. part
-        end
-        
-        -- Check if AMSDOS header is present
-        local has_header = detect_amsdos_header(data)
-        local first_entry = entries[1]
-        local records = first_entry.nbrecords or 0
-        local blocks = first_entry.blocks or {}
-        local total_blocks = 0
-        for _, entry in ipairs(entries) do
-            total_blocks = total_blocks + (#(entry.blocks or {}))
-        end
-        
-        if has_header then
-            -- Show version with header (.amsd)
-            local size_with_header = records * 128
-            table.insert(lines, line(
-                span(pad_left(first_entry.user or 0, 3) .. " ", "white"),
-                span(pad_left(first_entry.numextension or 0, 3) .. " ", "white"),
-                span(pad_right(amsdos_name(raw_name) .. ".amsd", 18), "lightcyan"),
-                span(pad_left(records, 3) .. "  ", "cyan"),
-                span(pad_left(total_blocks, 3) .. "  ", "cyan"),
-                span(pad_left(size_with_header, 5) .. "  ", "green"),
-                span(block_list(first_entry), "darkgray")
-            ))
-            
-            -- Show user-friendly version (without header)
-            local stripped = strip_amsdos_header(data)
-            local size_without_header = #stripped
-            table.insert(lines, line(
-                span(pad_left(first_entry.user or 0, 3) .. " ", "white"),
-                span(pad_left(first_entry.numextension or 0, 3) .. " ", "white"),
-                span(pad_right(amsdos_name(raw_name), 18), "lightcyan", true),
-                span(pad_left(math.ceil(size_without_header / 128), 3) .. "  ", "cyan"),
-                span(pad_left(total_blocks, 3) .. "  ", "cyan"),
-                span(pad_left(size_without_header, 5) .. "  ", "green"),
-                span(block_list(first_entry), "white")
-            ))
-        else
-            -- No AMSDOS header, show only the regular entry
-            local size = records * 128
-            table.insert(lines, line(
-                span(pad_left(first_entry.user or 0, 3) .. " ", "white"),
-                span(pad_left(first_entry.numextension or 0, 3) .. " ", "white"),
-                span(pad_right(amsdos_name(raw_name), 18), "lightcyan", true),
-                span(pad_left(records, 3) .. "  ", "cyan"),
-                span(pad_left(total_blocks, 3) .. "  ", "cyan"),
-                span(pad_left(size, 5) .. "  ", "green"),
-                span(block_list(first_entry), "white")
-            ))
-        end
+    for _, entry in ipairs(rows) do
+        local records = entry.nbrecords or 0
+        local blocks = entry.blocks or {}
+        local size = records * 128
+        table.insert(lines, line(
+            span(pad_left(entry.user or 0, 3) .. " ", "white"),
+            span(pad_left(entry.numextension or 0, 3) .. " ", "white"),
+            span(pad_right(amsdos_name(entry.filename), 13), "lightcyan", true),
+            span(pad_left(records, 3) .. "  ", "cyan"),
+            span(pad_left(#blocks, 3) .. "  ", "cyan"),
+            span(pad_left(size, 5) .. "  ", "green"),
+            span(block_list(entry), "white")
+        ))
     end
 
     return lines
@@ -442,31 +379,17 @@ local function extract_dsk(path, destination)
         table.sort(entries, function(left, right)
             return (left.numextension or 0) < (right.numextension or 0)
         end)
-        
-        -- Read the full file data
-        local data = read_catalog_file(entries)
-        
-        -- Read again without stripping to get full data
-        local full_data = ""
-        for _, entry in ipairs(entries) do
-            local part = ""
-            for _, block in ipairs(entry.blocks or {}) do
-                part = part .. read_block(block)
-            end
-            local records = entry.nbrecords or 0
-            if records > 0 and records < 128 then
-                part = part:sub(1, records * 128)
-            end
-            full_data = full_data .. part
-        end
-        
+
+        local full_data = read_catalog_file_raw(entries)
+        local data = strip_amsdos_header(raw_name, full_data)
+
         local friendly_name = amsdos_name(raw_name)
         if friendly_name ~= "" then
             -- Extract the user-friendly version (without header)
             kkc.write_file(kkc.path_join(destination, friendly_name), data)
-            
+
             -- If AMSDOS header is detected, also extract the version with header
-            if detect_amsdos_header(full_data) then
+            if #data ~= #full_data then
                 local amsd_name = friendly_name .. ".amsd"
                 kkc.write_file(kkc.path_join(destination, amsd_name), full_data)
             end
