@@ -2,7 +2,7 @@
 
 use super::fx_shortcut;
 use super::menu::execute_menu_action;
-use crate::app::{App, AppMode, PALETTE_DATA, PALETTE_SEP};
+use crate::app::{App, AppMode, PALETTE_DATA, PALETTE_SEP, PluginsState};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -97,5 +97,125 @@ pub(super) fn handle_command_palette(app: &mut App, key: KeyEvent) -> Result<boo
         }
         _ => {}
     }
+    Ok(false)
+}
+
+pub(super) fn handle_store_install_palette(app: &mut App, key: KeyEvent) -> Result<bool> {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let alt = key.modifiers.contains(KeyModifiers::ALT);
+    let fn_key = fx_shortcut(key);
+
+    let mut state = match std::mem::replace(&mut app.mode, AppMode::Browse) {
+        AppMode::StoreInstallPalette(state) => state,
+        other => {
+            app.mode = other;
+            return Ok(false);
+        }
+    };
+
+    match key.code {
+        KeyCode::Esc => {
+            app.mode = AppMode::Browse;
+            return Ok(false);
+        }
+        _ if fn_key == Some(10) => {
+            app.mode = AppMode::Browse;
+            return Ok(false);
+        }
+        KeyCode::Up => state.move_prev(),
+        KeyCode::Down => state.move_next(),
+        KeyCode::Home => state.match_pos = 0,
+        KeyCode::End => {
+            state.match_pos = state.filtered_indices().len().saturating_sub(1);
+        }
+        KeyCode::Backspace => state.pop_query(),
+        KeyCode::Char('u') | KeyCode::Char('U') if ctrl && !alt => {
+            let selected = state
+                .filtered_indices()
+                .get(state.match_pos)
+                .and_then(|idx| state.items.get(*idx))
+                .cloned();
+            if let Some(item) = selected {
+                if !state.has_update(&item) {
+                    app.notify("Selected plugin is already up to date");
+                    app.mode = AppMode::StoreInstallPalette(state);
+                    return Ok(false);
+                }
+                let index_path = state.index_path.clone();
+                app.mode = AppMode::Browse;
+                match app.run_with_progress("Updating plugin from store", |report| {
+                    crate::plugins::install_plugin_from_store_with_progress(
+                        &index_path,
+                        &item.id,
+                        report,
+                    )
+                }) {
+                    Ok(installed_name) => {
+                        app.notify(format!("Plugin updated: {}", installed_name));
+                        app.reload_panels();
+                        let mut plugins = PluginsState::load();
+                        if let Some(pos) = plugins.plugins.iter().position(|p| {
+                            p.dir
+                                .file_name()
+                                .and_then(|name| name.to_str())
+                                .map(|name| name == installed_name)
+                                .unwrap_or(false)
+                        }) {
+                            plugins.cursor = pos;
+                        }
+                        app.mode = AppMode::Plugins(plugins);
+                    }
+                    Err(e) => {
+                        app.notify(format!("Store update error: {}", e));
+                        app.mode = AppMode::Plugins(PluginsState::load());
+                    }
+                }
+                return Ok(false);
+            }
+        }
+        KeyCode::Char(ch) if !ctrl && !alt && !ch.is_control() => state.append_query(ch),
+        KeyCode::Enter => {
+            let selected = state
+                .filtered_indices()
+                .get(state.match_pos)
+                .and_then(|idx| state.items.get(*idx))
+                .cloned();
+            if let Some(item) = selected {
+                let index_path = state.index_path.clone();
+                app.mode = AppMode::Browse;
+                match app.run_with_progress("Installing plugin from store", |report| {
+                    crate::plugins::install_plugin_from_store_with_progress(
+                        &index_path,
+                        &item.id,
+                        report,
+                    )
+                }) {
+                    Ok(installed_name) => {
+                        app.notify(format!("Plugin installed: {}", installed_name));
+                        app.reload_panels();
+                        let mut plugins = PluginsState::load();
+                        if let Some(pos) = plugins.plugins.iter().position(|p| {
+                            p.dir
+                                .file_name()
+                                .and_then(|name| name.to_str())
+                                .map(|name| name == installed_name)
+                                .unwrap_or(false)
+                        }) {
+                            plugins.cursor = pos;
+                        }
+                        app.mode = AppMode::Plugins(plugins);
+                    }
+                    Err(e) => {
+                        app.notify(format!("Store install error: {}", e));
+                        app.mode = AppMode::Plugins(PluginsState::load());
+                    }
+                }
+                return Ok(false);
+            }
+        }
+        _ => {}
+    }
+
+    app.mode = AppMode::StoreInstallPalette(state);
     Ok(false)
 }

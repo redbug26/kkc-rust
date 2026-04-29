@@ -1,7 +1,7 @@
 use super::{confirm_quit, launch_editor, open_wildcard_dialog, start_mkdir, start_rename};
 use crate::app::{
     App, AppMode, AssocEditorState, ConfigState, InputAction, InputDialog, MENU_DATA, MENU_HEADERS,
-    MenuAction, PluginsState,
+    MenuAction, PluginsState, StoreInstallPaletteState,
 };
 use crate::config::SortMode;
 use anyhow::Result;
@@ -256,6 +256,17 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
         }
         MenuAction::SearchFiles => {
             app.open_search();
+        }
+        MenuAction::InstallPluginFromStore => {
+            let index_path = crate::plugins::store_index_path();
+            match StoreInstallPaletteState::load(index_path.clone()) {
+                Ok(state) => app.mode = AppMode::StoreInstallPalette(state),
+                Err(e) => app.notify(format!(
+                    "Cannot load plugin store index {}: {}",
+                    index_path.display(),
+                    e
+                )),
+            }
         }
         MenuAction::RemoteConnect => {
             app.open_remote_connect();

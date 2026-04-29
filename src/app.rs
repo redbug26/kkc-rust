@@ -5,7 +5,7 @@ mod panel_tabs;
 pub use self::command_palette::{CommandPaletteState, PALETTE_DATA, PALETTE_SEP};
 pub use self::menu::{
     MENU_DATA, MENU_HEADERS, MenuAction, MenuEntry, MenuState, ViewerMenuKind, ViewerMenuState,
-    ViewerPluginPaletteState,
+    ViewerPluginPaletteState, StoreInstallPaletteState,
 };
 use self::panel_tabs::{PanelTabs, panel_config_for_save, restore_panel_side};
 use crate::about::AboutState;
@@ -102,6 +102,8 @@ pub enum AppMode {
     ActionPalette(ActionPaletteState),
     /// Command palette (Ctrl-P) – searchable list of all menu commands.
     CommandPalette(CommandPaletteState),
+    /// Store plugin install palette with searchable plugin list.
+    StoreInstallPalette(StoreInstallPaletteState),
     /// Choose from multiple registered openers.
     Opener(OpenerState),
     /// File-type association editor (Options > Associations).
@@ -133,6 +135,7 @@ pub struct PluginsState {
     pub plugins: Vec<crate::plugins::PluginInfo>,
     pub plugins_dir: PathBuf,
     pub cursor: usize,
+    pub query: String,
 }
 
 #[derive(Debug, Clone)]
@@ -155,10 +158,104 @@ impl ActionPaletteState {
 impl PluginsState {
     pub fn load() -> Self {
         let plugins_dir = crate::plugins::plugins_dir().unwrap_or_else(|_| PathBuf::new());
+        let mut plugins = crate::plugins::plugin_infos();
+        plugins.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
         Self {
-            plugins: crate::plugins::plugin_infos(),
+            plugins,
             plugins_dir,
             cursor: 0,
+            query: String::new(),
+        }
+    }
+
+    pub fn filtered_indices(&self) -> Vec<usize> {
+        if self.query.trim().is_empty() {
+            return (0..self.plugins.len()).collect();
+        }
+
+        let tokens: Vec<String> = self
+            .query
+            .split_whitespace()
+            .map(|token| token.to_lowercase())
+            .filter(|token| !token.is_empty())
+            .collect();
+        if tokens.is_empty() {
+            return (0..self.plugins.len()).collect();
+        }
+
+        let first = &tokens[0];
+        let rest = &tokens[1..];
+        let mut starts = Vec::new();
+        let mut contains = Vec::new();
+
+        for (idx, item) in self.plugins.iter().enumerate() {
+            let source = crate::plugins::plugin_source_label(&item.dir, &self.plugins_dir);
+            let searchable = format!(
+                "{} {} {} {} {} {}",
+                item.name,
+                item.kind,
+                item.version,
+                item.description,
+                item.extensions.join(" "),
+                source,
+            );
+            let lowered = searchable.to_lowercase();
+            if !rest.iter().all(|token| lowered.contains(token.as_str())) {
+                continue;
+            }
+            if item.name.to_lowercase().starts_with(first.as_str()) {
+                starts.push(idx);
+            } else if lowered.contains(first.as_str()) {
+                contains.push(idx);
+            }
+        }
+
+        starts.extend(contains);
+        starts
+    }
+
+    pub fn append_query(&mut self, ch: char) {
+        self.query.push(ch);
+        self.cursor = 0;
+        self.clamp_cursor();
+    }
+
+    pub fn pop_query(&mut self) {
+        self.query.pop();
+        self.cursor = 0;
+        self.clamp_cursor();
+    }
+
+    pub fn move_prev(&mut self) {
+        let len = self.filtered_indices().len();
+        if len == 0 {
+            self.cursor = 0;
+            return;
+        }
+        self.cursor = if self.cursor == 0 {
+            len - 1
+        } else {
+            self.cursor - 1
+        };
+        self.clamp_cursor();
+    }
+
+    pub fn move_next(&mut self) {
+        let len = self.filtered_indices().len();
+        if len == 0 {
+            self.cursor = 0;
+            return;
+        }
+        self.cursor = (self.cursor + 1) % len;
+        self.clamp_cursor();
+    }
+
+    fn clamp_cursor(&mut self) {
+        let len = self.filtered_indices().len();
+        if len == 0 {
+            self.cursor = 0;
+        } else {
+            self.cursor = self.cursor.min(len.saturating_sub(1));
         }
     }
 }
@@ -2180,6 +2277,29 @@ impl App {
         result
     }
 
+    pub fn run_with_progress<T, F>(&mut self, title: &str, op: F) -> Result<T>
+    where
+        F: FnOnce(&mut dyn FnMut(u8, &str)) -> Result<T>,
+    {
+        let previous_status = self.status.text.clone();
+        let has_fkey_bar = self.config.show_fkey_bar;
+
+        let mut report = |percent: u8, phase: &str| {
+            let pct = percent.min(100);
+            let bar = progress_bar(pct, 24);
+            let msg = format!("{} {} {:>3}% {}", title, bar, pct, phase);
+            self.status.text = msg.clone();
+            let _ = draw_busy_status(&msg, has_fkey_bar);
+        };
+
+        report(0, "Starting...");
+        let result = op(&mut report);
+        if self.status.text.starts_with(title) {
+            self.status.text = previous_status;
+        }
+        result
+    }
+
     fn move_between_panels(&self, entry: &crate::panel::Entry) -> Result<()> {
         let src_remote = self.active_panel().remote_profile();
         let dst_remote = self.other_panel().remote_profile();
@@ -2456,6 +2576,17 @@ fn draw_busy_status(message: &str, has_fkey_bar: bool) -> Result<()> {
     )?;
     stdout.flush()?;
     Ok(())
+}
+
+fn progress_bar(percent: u8, width: usize) -> String {
+    let p = percent.min(100) as usize;
+    let filled = (p * width) / 100;
+    let mut bar = String::with_capacity(width + 2);
+    bar.push('[');
+    bar.extend(std::iter::repeat('#').take(filled));
+    bar.extend(std::iter::repeat('-').take(width.saturating_sub(filled)));
+    bar.push(']');
+    bar
 }
 
 fn spawn_remote_connect_task(profile: RemoteProfile, show_hidden: bool) -> RemoteConnectTask {

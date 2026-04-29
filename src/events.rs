@@ -3,7 +3,7 @@ mod palette;
 mod viewer;
 
 use self::menu::handle_menu;
-use self::palette::handle_command_palette;
+use self::palette::{handle_command_palette, handle_store_install_palette};
 use self::viewer::{
     handle_viewer, handle_viewer_goto_line, handle_viewer_menu, handle_viewer_plugin_palette,
     handle_viewer_searching,
@@ -80,6 +80,7 @@ pub fn handle_event(app: &mut App, event: Event) -> Result<bool> {
         AppMode::Plugins(_) => return handle_plugins(app, key),
         AppMode::ActionPalette(_) => return handle_action_palette(app, key),
         AppMode::CommandPalette(_) => return handle_command_palette(app, key),
+        AppMode::StoreInstallPalette(_) => return handle_store_install_palette(app, key),
         AppMode::Opener(_) => return handle_opener(app, key),
         AppMode::AssocEditor(_) => return handle_assoc_editor(app, key),
         AppMode::RemoteConnect(_) => return handle_remote_connect(app, key),
@@ -1399,6 +1400,8 @@ fn handle_dir_bookmarks(app: &mut App, key: KeyEvent) -> Result<bool> {
 }
 
 fn handle_plugins(app: &mut App, key: KeyEvent) -> Result<bool> {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let alt = key.modifiers.contains(KeyModifiers::ALT);
     let fn_key = fx_shortcut(key);
     match key.code {
         KeyCode::Esc => {
@@ -1409,20 +1412,42 @@ fn handle_plugins(app: &mut App, key: KeyEvent) -> Result<bool> {
         }
         KeyCode::Up => {
             if let AppMode::Plugins(ref mut s) = app.mode {
-                s.cursor = s.cursor.saturating_sub(1);
+                s.move_prev();
             }
         }
         KeyCode::Down => {
             if let AppMode::Plugins(ref mut s) = app.mode {
-                let max = s.plugins.len().saturating_sub(1);
-                s.cursor = (s.cursor + 1).min(max);
+                s.move_next();
+            }
+        }
+        KeyCode::Home => {
+            if let AppMode::Plugins(ref mut s) = app.mode {
+                s.cursor = 0;
+            }
+        }
+        KeyCode::End => {
+            if let AppMode::Plugins(ref mut s) = app.mode {
+                s.cursor = s.filtered_indices().len().saturating_sub(1);
+            }
+        }
+        KeyCode::Backspace => {
+            if let AppMode::Plugins(ref mut s) = app.mode {
+                s.pop_query();
+            }
+        }
+        KeyCode::Char(ch) if !ctrl && !alt && !ch.is_control() => {
+            if let AppMode::Plugins(ref mut s) = app.mode {
+                s.append_query(ch);
             }
         }
         KeyCode::Enter | KeyCode::Char('o') | KeyCode::Char('O') => {
             let dir = if let AppMode::Plugins(ref s) = app.mode {
                 // Use the selected plugin's own directory; fall back to the global plugins_dir
-                s.plugins
+                let selected = s
+                    .filtered_indices()
                     .get(s.cursor)
+                    .and_then(|idx| s.plugins.get(*idx));
+                selected
                     .map(|p| p.dir.clone())
                     .filter(|d| !d.as_os_str().is_empty())
                     .unwrap_or_else(|| s.plugins_dir.clone())
@@ -1437,6 +1462,50 @@ fn handle_plugins(app: &mut App, key: KeyEvent) -> Result<bool> {
                     app.set_status(format!("Cannot enter plugin directory: {}", e));
                 } else {
                     app.set_status(format!("Plugin directory: {}", dir.display()));
+                }
+            }
+        }
+        KeyCode::Char('s') | KeyCode::Char('S') if ctrl && !alt => {
+            let index_path = crate::plugins::store_index_path();
+            match crate::app::StoreInstallPaletteState::load(index_path.clone()) {
+                Ok(state) => app.mode = AppMode::StoreInstallPalette(state),
+                Err(e) => app.notify(format!(
+                    "Cannot load plugin store index {}: {}",
+                    index_path.display(),
+                    e
+                )),
+            }
+        }
+        KeyCode::Delete => {
+            let selected_dir = if let AppMode::Plugins(ref s) = app.mode {
+                s.filtered_indices()
+                    .get(s.cursor)
+                    .and_then(|idx| s.plugins.get(*idx))
+                    .map(|p| p.dir.clone())
+            } else {
+                None
+            };
+
+            if let Some(dir) = selected_dir {
+                match crate::plugins::remove_plugin(&dir) {
+                    Ok(()) => {
+                        let cursor = if let AppMode::Plugins(ref s) = app.mode {
+                            s.cursor
+                        } else {
+                            0
+                        };
+                        let mut refreshed = crate::app::PluginsState::load();
+                        if !refreshed.plugins.is_empty() {
+                            refreshed.cursor = cursor.min(refreshed.plugins.len().saturating_sub(1));
+                        }
+                        app.notify("Plugin removed");
+                        app.reload_panels();
+                        app.mode = AppMode::Plugins(refreshed);
+                    }
+                    Err(e) => {
+                        app.notify(format!("Cannot remove plugin: {}", e));
+                        app.mode = AppMode::Plugins(crate::app::PluginsState::load());
+                    }
                 }
             }
         }

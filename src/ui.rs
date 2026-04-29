@@ -9,7 +9,8 @@ use crate::app::{
     ActionPaletteState, ActivePanel, App, AppMode, AssocEditorState, BookmarkListItem, ConfigState,
     ConfirmAction, ConfirmDialog, InputDialog, MENU_DATA, MENU_HEADERS, MenuAction, MenuState,
     OpenerState, PluginsState, RemoteConnectState, RemoteConnectingState, RemoteEditKind,
-    RemoteEditState, SearchState, ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,
+    RemoteEditState, SearchState, StoreInstallPaletteState, ViewerMenuKind, ViewerMenuState,
+    ViewerPluginPaletteState,
 };
 use crate::config::SortMode;
 use crate::copy::{CopyDialogState, CopyProgressState};
@@ -238,6 +239,7 @@ pub fn render(f: &mut Frame, app: &App) {
         AppMode::Plugins(s) => render_plugins(f, s, f.area()),
         AppMode::ActionPalette(s) => render_action_palette(f, s, f.area()),
         AppMode::CommandPalette(s) => render_command_palette(f, s, f.area()),
+        AppMode::StoreInstallPalette(s) => render_store_install_palette(f, s, f.area()),
         AppMode::Opener(s) => render_opener(f, s, f.area()),
         AppMode::AssocEditor(s) => render_assoc_editor(f, s, f.area()),
         AppMode::RemoteConnect(s) => render_remote_connect(f, s, f.area()),
@@ -3579,6 +3581,380 @@ fn render_viewer_plugin_palette(f: &mut Frame, state: &ViewerPluginPaletteState,
             sb,
             &mut sb_state,
         );
+    }
+}
+
+fn render_store_install_palette(f: &mut Frame, state: &StoreInstallPaletteState, area: Rect) {
+    let matches = state.filtered_indices();
+    let total = matches.len();
+
+    let w: u16 = area.width.saturating_sub(4).min(140).max(90);
+    let h: u16 = area.height.saturating_sub(4).min(30).max(22);
+    let x = area.x + (area.width.saturating_sub(w)) / 2;
+    let y = area.y + (area.height.saturating_sub(h)) / 2;
+    let popup = clamp_rect(
+        area,
+        Rect {
+            x,
+            y,
+            width: w,
+            height: h,
+        },
+    );
+
+    safe_render_widget(f, Clear, popup);
+
+    let block = Block::default()
+        .title(" Plugin Store ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG))
+        .style(Style::default().bg(CLR_APP_BG));
+    let inner = block.inner(popup);
+    safe_render_widget(f, block, popup);
+
+    if inner.height < 8 || inner.width < 48 {
+        return;
+    }
+
+    let count_hint = if !state.query.is_empty() && total > 0 {
+        format!(" {}/{} ", state.match_pos + 1, total)
+    } else if !state.query.is_empty() {
+        " 0/0 ".to_owned()
+    } else {
+        format!(" {} ", state.items.len())
+    };
+    let hint_w = count_hint.len() as u16;
+    let input_inner_w = inner.width.saturating_sub(hint_w) as usize;
+    let input_text = format!(" \u{2315} {}\u{2581}", state.query);
+    let input_row = Line::from(vec![
+        Span::styled(
+            truncate_str(&input_text, input_inner_w),
+            Style::default().fg(Color::Rgb(34, 20, 12)).bg(Color::Rgb(232, 220, 192)),
+        ),
+        Span::styled(
+            count_hint,
+            Style::default()
+                .fg(Color::Rgb(88, 66, 45))
+                .bg(Color::Rgb(232, 220, 192)),
+        ),
+    ]);
+    safe_render_widget(
+        f,
+        Paragraph::new(input_row).style(Style::default().bg(Color::Rgb(232, 220, 192))),
+        Rect {
+            x: inner.x,
+            y: inner.y,
+            width: inner.width,
+            height: 1,
+        },
+    );
+
+    let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
+    safe_render_widget(
+        f,
+        Paragraph::new(sep.clone()).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
+        Rect {
+            x: inner.x,
+            y: inner.y + 1,
+            width: inner.width,
+            height: 1,
+        },
+    );
+
+    let button_y = inner.y + inner.height.saturating_sub(1);
+    let footer_sep_y = button_y.saturating_sub(1);
+    safe_render_widget(
+        f,
+        Paragraph::new(sep).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
+        Rect {
+            x: inner.x,
+            y: footer_sep_y,
+            width: inner.width,
+            height: 1,
+        },
+    );
+    safe_render_widget(
+        f,
+        Paragraph::new("  [ Enter Install ]  [ Ctrl+U Update ]  [ Esc Close ]").style(
+            Style::default()
+                .fg(Color::Rgb(255, 252, 226))
+                .bg(CLR_BUTTON_BG)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Rect {
+            x: inner.x,
+            y: button_y,
+            width: inner.width,
+            height: 1,
+        },
+    );
+
+    let body_y = inner.y + 2;
+    let body_h = footer_sep_y.saturating_sub(body_y);
+    if body_h == 0 {
+        return;
+    }
+    let body = Rect {
+        x: inner.x,
+        y: body_y,
+        width: inner.width,
+        height: body_h,
+    };
+
+    let max_name = state
+        .items
+        .iter()
+        .map(|p| p.name.len() + 18)
+        .max()
+        .unwrap_or(8);
+    let left_w = ((max_name + 4) as u16).clamp(36, 64).min(body.width.saturating_sub(30));
+    let right_w = body.width.saturating_sub(left_w + 1);
+
+    let left_area = Rect {
+        x: body.x,
+        y: body.y,
+        width: left_w,
+        height: body.height,
+    };
+    let sep_col = body.x + left_w;
+    let right_area = Rect {
+        x: sep_col + 1,
+        y: body.y,
+        width: right_w,
+        height: body.height,
+    };
+
+    for row in 0..body.height {
+        safe_render_widget(
+            f,
+            Paragraph::new("│").style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
+            Rect {
+                x: sep_col,
+                y: body.y + row,
+                width: 1,
+                height: 1,
+            },
+        );
+    }
+
+    safe_render_widget(
+        f,
+        Paragraph::new(format!(
+            "  {:<w$}",
+            "Name                              Status",
+            w = (left_w as usize).saturating_sub(2)
+        ))
+        .style(
+            Style::default()
+                .fg(CLR_HEADER_FG)
+                .bg(CLR_HEADER_BG)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Rect {
+            x: left_area.x,
+            y: left_area.y,
+            width: left_area.width,
+            height: 1,
+        },
+    );
+
+    let list_h = (body.height.saturating_sub(1)) as usize;
+    let scroll = if total == 0 || state.match_pos < list_h {
+        0
+    } else {
+        state.match_pos.saturating_sub(list_h - 1)
+    };
+
+    if total == 0 {
+        let msg = if state.query.is_empty() {
+            "  (no plugin available in store index)"
+        } else {
+            "  (no match)"
+        };
+        safe_render_widget(
+            f,
+            Paragraph::new(msg).style(Style::default().fg(Color::Rgb(72, 48, 28)).bg(CLR_APP_BG)),
+            Rect {
+                x: left_area.x,
+                y: left_area.y + 1,
+                width: left_area.width,
+                height: 1,
+            },
+        );
+        return;
+    }
+
+    for (match_row, idx) in (scroll..).zip(0..list_h) {
+        if match_row >= total {
+            break;
+        }
+        let plugin = &state.items[matches[match_row]];
+        let row_y = left_area.y + 1 + idx as u16;
+        let selected = state.match_pos == match_row;
+        let installed = state.is_installed(plugin);
+        let has_update = state.has_update(plugin);
+
+        let style = if selected {
+            Style::default()
+                .fg(Color::Rgb(16, 10, 6))
+                .bg(Color::Rgb(235, 220, 188))
+                .add_modifier(Modifier::BOLD)
+        } else if has_update {
+            Style::default().fg(Color::Rgb(150, 74, 10)).bg(CLR_APP_BG)
+        } else if installed {
+            Style::default().fg(Color::Rgb(26, 104, 46)).bg(CLR_APP_BG)
+        } else {
+            Style::default().fg(Color::Rgb(46, 28, 16)).bg(CLR_APP_BG)
+        };
+
+        let status = if has_update {
+            "[UPDATE]"
+        } else if installed {
+            "[INSTALLED]"
+        } else {
+            "[NEW]"
+        };
+        let icon = if selected { "▶ " } else { "  " };
+        let available = (left_area.width as usize).saturating_sub(3);
+        let name_w = available.saturating_sub(status.len() + 1);
+        let text = format!(
+            "{icon}{:<name_w$} {}",
+            truncate_str(&plugin.name, name_w),
+            status,
+        );
+        safe_render_widget(
+            f,
+            Paragraph::new(text).style(style),
+            Rect {
+                x: left_area.x,
+                y: row_y,
+                width: left_area.width,
+                height: 1,
+            },
+        );
+    }
+
+    if right_area.width < 10 || right_area.height < 3 {
+        return;
+    }
+
+    safe_render_widget(
+        f,
+        Paragraph::new(format!(
+            "  {:<w$}",
+            "Details",
+            w = (right_area.width as usize).saturating_sub(2)
+        ))
+        .style(
+            Style::default()
+                .fg(CLR_HEADER_FG)
+                .bg(CLR_HEADER_BG)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Rect {
+            x: right_area.x,
+            y: right_area.y,
+            width: right_area.width,
+            height: 1,
+        },
+    );
+
+    let detail_y = right_area.y + 1;
+    let detail_h = right_area.height.saturating_sub(1);
+    let Some(plugin) = matches
+        .get(state.match_pos)
+        .and_then(|idx| state.items.get(*idx))
+    else {
+        return;
+    };
+
+    let lbl_style = Style::default()
+        .fg(Color::Rgb(48, 64, 96))
+        .bg(CLR_APP_BG)
+        .add_modifier(Modifier::BOLD);
+    let val_style = Style::default().fg(Color::Rgb(34, 20, 12)).bg(CLR_APP_BG);
+    let dim_style = Style::default().fg(Color::Rgb(88, 66, 45)).bg(CLR_APP_BG);
+    let rw = right_area.width as usize;
+
+    let mut row: u16 = 0;
+    let mut push_kv = |label: &str, value: &str, row: &mut u16| {
+        if *row >= detail_h {
+            return;
+        }
+        let text = Line::from(vec![
+            Span::styled(format!("  {label:<12}"), lbl_style),
+            Span::styled(truncate_str(value, rw.saturating_sub(14)), val_style),
+        ]);
+        safe_render_widget(
+            f,
+            Paragraph::new(text).style(Style::default().bg(CLR_APP_BG)),
+            Rect {
+                x: right_area.x,
+                y: detail_y + *row,
+                width: right_area.width,
+                height: 1,
+            },
+        );
+        *row += 1;
+    };
+
+    push_kv("Type :", &plugin.plugin_type, &mut row);
+    push_kv("Version :", &plugin.version, &mut row);
+    push_kv("Id :", &plugin.id, &mut row);
+
+    let installed_version = state.installed_version_for(plugin);
+    let status = if state.has_update(plugin) {
+        "Update available"
+    } else if installed_version.is_some() {
+        "Installed"
+    } else {
+        "Not installed"
+    };
+    push_kv("Status :", status, &mut row);
+    if let Some(v) = installed_version {
+        push_kv("Installed :", v, &mut row);
+    }
+
+    if row < detail_h {
+        row += 1;
+    }
+
+    if !plugin.description.is_empty() && row < detail_h {
+        safe_render_widget(
+            f,
+            Paragraph::new(Line::from(vec![Span::styled("  Description :", lbl_style)]))
+                .style(Style::default().bg(CLR_APP_BG)),
+            Rect {
+                x: right_area.x,
+                y: detail_y + row,
+                width: right_area.width,
+                height: 1,
+            },
+        );
+        row += 1;
+        let desc_indent = "    ";
+        let max_w = rw.saturating_sub(desc_indent.len());
+        let mut rest = plugin.description.as_str();
+        while !rest.is_empty() && row < detail_h {
+            let (chunk, remainder) = if rest.len() <= max_w {
+                (rest, "")
+            } else {
+                let cut = rest[..max_w].rfind(' ').unwrap_or(max_w);
+                (&rest[..cut], rest[cut..].trim_start())
+            };
+            safe_render_widget(
+                f,
+                Paragraph::new(format!("{desc_indent}{chunk}")).style(dim_style),
+                Rect {
+                    x: right_area.x,
+                    y: detail_y + row,
+                    width: right_area.width,
+                    height: 1,
+                },
+            );
+            row += 1;
+            rest = remainder;
+        }
     }
 }
 

@@ -1,9 +1,10 @@
 use anyhow::{Context, Result, anyhow, bail};
 use mlua::{Function, Lua, Table, Value};
+use serde::Deserialize;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs;
-use std::io::{self, Read, Seek};
+use std::io::{self, Cursor, Read, Seek};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{OnceLock, RwLock};
@@ -22,14 +23,70 @@ const BUNDLED_HTML_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/html_vi
 const BUNDLED_EML_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/eml_viewer/plugin.lua");
 const BUNDLED_JSON_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/json_viewer/plugin.lua");
 const BUNDLED_XML_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/xml_viewer/plugin.lua");
-const BUNDLED_VCARD_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/vcard_viewer/plugin.lua");
 const BUNDLED_CSV_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/csv_viewer/plugin.lua");
 const BUNDLED_MARKDOWN_VIEWER_PLUGIN: &str =
     include_str!("../assets/plugins/markdown_viewer/plugin.lua");
 const BUNDLED_TEXT_SYNTAX_PLUGIN: &str = include_str!("../assets/plugins/text_syntax/plugin.lua");
 const BUNDLED_GIT_ACTION_PLUGIN: &str = include_str!("../assets/plugins/git_action/plugin.lua");
+const BUNDLED_PLUGIN_DIRS: &[&str] = &[
+    "amstrad_dsk",
+    "amsdos_viewer",
+    "commodore_d64",
+    "lha_lzh",
+    "pdf_file",
+    "html_viewer",
+    "eml_viewer",
+    "json_viewer",
+    "xml_viewer",
+    "csv_viewer",
+    "markdown_viewer",
+    "text_syntax",
+    "git_action",
+];
 
 static PLUGINS: OnceLock<RwLock<PluginRegistry>> = OnceLock::new();
+
+#[derive(Debug, Deserialize)]
+struct StoreIndex {
+    plugins: Vec<StorePluginDescriptor>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StorePluginDescriptor {
+    id: String,
+    name: Option<String>,
+    version: Option<String>,
+    #[serde(rename = "type")]
+    plugin_type: Option<String>,
+    description: Option<String>,
+    location: StoreLocation,
+}
+
+#[derive(Debug, Deserialize)]
+struct StoreLocation {
+    kind: String,
+    path: Option<String>,
+    repo: Option<String>,
+    #[serde(rename = "ref")]
+    git_ref: Option<String>,
+    asset_url: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StorePluginInfo {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub plugin_type: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone)]
+struct StoreIndexSource {
+    local_root: Option<PathBuf>,
+    github_repo: Option<String>,
+    github_ref: Option<String>,
+}
 
 #[derive(Debug, Clone)]
 pub struct PluginRegistry {
@@ -199,6 +256,66 @@ pub fn plugin_infos() -> Vec<PluginInfo> {
         .unwrap_or_default()
 }
 
+pub fn installed_plugin_versions_by_dir() -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    for plugin in plugin_infos() {
+        if let Some(name) = plugin
+            .dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|s| s.to_string())
+        {
+            out.entry(name).or_insert(plugin.version);
+        }
+    }
+    out
+}
+
+pub fn store_plugin_install_dir_name(plugin_id: &str) -> String {
+    plugin_bundle_name(Path::new(plugin_id))
+}
+
+pub fn plugin_source_label(plugin_dir: &Path, plugins_root: &Path) -> &'static str {
+    if plugin_dir_is_bundled(plugin_dir) {
+        return "kkc";
+    }
+    if plugin_dir.starts_with(plugins_root) {
+        return "store/local";
+    }
+    "external"
+}
+
+pub fn plugin_can_remove(plugin_dir: &Path, plugins_root: &Path) -> bool {
+    if plugin_dir_is_bundled(plugin_dir) {
+        return false;
+    }
+    plugin_dir.starts_with(plugins_root)
+}
+
+pub fn remove_plugin(plugin_dir: &Path) -> Result<()> {
+    let plugins_root = ensure_plugins_dir()?;
+    if !plugin_can_remove(plugin_dir, &plugins_root) {
+        bail!("Plugin cannot be removed (bundled or external): {}", plugin_dir.display());
+    }
+    if !plugin_dir.exists() {
+        bail!("Plugin directory not found: {}", plugin_dir.display());
+    }
+    fs::remove_dir_all(plugin_dir)
+        .with_context(|| format!("Removing plugin directory {}", plugin_dir.display()))?;
+
+    let registry = load_plugins()?;
+    if let Some(lock) = PLUGINS.get() {
+        *lock
+            .write()
+            .map_err(|_| anyhow!("Plugin registry lock poisoned"))? = registry;
+    } else {
+        PLUGINS
+            .set(RwLock::new(registry))
+            .map_err(|_| anyhow!("Plugin registry already initialized"))?;
+    }
+    Ok(())
+}
+
 pub fn highlight_viewer_lines(
     path: &Path,
     mode: &str,
@@ -342,6 +459,338 @@ pub fn install_plugin_bundle(path: &Path) -> Result<String> {
         .to_string())
 }
 
+pub fn list_store_plugins(index_path: &Path) -> Result<Vec<StorePluginInfo>> {
+    let (index, _) = read_store_index(index_path)?;
+    let mut out = index
+        .plugins
+        .into_iter()
+        .map(|p| StorePluginInfo {
+            id: p.id,
+            name: p.name.unwrap_or_else(|| "Unnamed plugin".to_string()),
+            version: p.version.unwrap_or_else(|| "?".to_string()),
+            plugin_type: p.plugin_type.unwrap_or_else(|| "other".to_string()),
+            description: p.description.unwrap_or_default(),
+        })
+        .collect::<Vec<_>>();
+    out.sort_by(|a, b| a.id.cmp(&b.id));
+    Ok(out)
+}
+
+pub fn store_index_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("KKC_PLUGIN_STORE_INDEX") {
+        return PathBuf::from(path);
+    }
+    if let Some(url) = std::env::var_os("KKC_PLUGIN_STORE_URL") {
+        return PathBuf::from(url);
+    }
+    PathBuf::from("https://raw.githubusercontent.com/redbug26/kkc-plugins/main/dist/store-index.json")
+}
+
+pub fn install_plugin_from_store_with_progress<F>(
+    index_path: &Path,
+    plugin_id: &str,
+    mut progress: F,
+) -> Result<String>
+where
+    F: FnMut(u8, &str),
+{
+    progress(5, "Preparing installation...");
+    let plugins_dir = ensure_plugins_dir()?;
+    let installed_dir = install_plugin_from_store_into(index_path, plugin_id, &plugins_dir, &mut progress)?;
+    progress(90, "Reloading plugin registry...");
+    let registry = load_plugins()?;
+    if let Some(lock) = PLUGINS.get() {
+        *lock
+            .write()
+            .map_err(|_| anyhow!("Plugin registry lock poisoned"))? = registry;
+    } else {
+        PLUGINS
+            .set(RwLock::new(registry))
+            .map_err(|_| anyhow!("Plugin registry already initialized"))?;
+    }
+    progress(100, "Installation complete");
+    Ok(installed_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("plugin")
+        .to_string())
+}
+
+fn install_plugin_from_store_into(
+    index_path: &Path,
+    plugin_id: &str,
+    plugins_dir: &Path,
+    progress: &mut dyn FnMut(u8, &str),
+) -> Result<PathBuf> {
+    progress(12, "Reading store index...");
+    let (index, source) = read_store_index(index_path)?;
+
+    let descriptor = index
+        .plugins
+        .iter()
+        .find(|p| p.id == plugin_id)
+        .ok_or_else(|| anyhow!("Plugin '{}' not found in store index", plugin_id))?;
+
+    let install_name = plugin_bundle_name(Path::new(plugin_id));
+    let install_dir = plugins_dir.join(&install_name);
+    let temp_dir = plugins_dir.join(format!(".store-install-{}-{}", install_name, std::process::id()));
+    if temp_dir.exists() {
+        fs::remove_dir_all(&temp_dir)
+            .with_context(|| format!("Cleaning {}", temp_dir.display()))?;
+    }
+
+    match descriptor.location.kind.as_str() {
+        "local" => {
+            progress(25, "Resolving plugin source...");
+            let rel = descriptor
+                .location
+                .path
+                .as_deref()
+                .ok_or_else(|| anyhow!("Store local plugin '{}' is missing location.path", plugin_id))?;
+            if let Some(store_root) = source.local_root.as_ref() {
+                progress(45, "Copying plugin files...");
+                let src_dir = store_root.join(rel);
+                copy_plugin_directory_to_temp(&src_dir, &temp_dir)?;
+            } else if let Some(repo) = source.github_repo.as_deref() {
+                let git_ref = source.github_ref.as_deref().unwrap_or("main");
+                copy_github_plugin_path_to_temp(repo, git_ref, rel, &temp_dir, progress)?;
+            } else {
+                bail!(
+                    "Cannot resolve local store plugin '{}' from source {}",
+                    plugin_id,
+                    index_path.display()
+                );
+            }
+        }
+        "github" => {
+            progress(25, "Resolving plugin source...");
+            let repo = descriptor
+                .location
+                .repo
+                .as_deref()
+                .ok_or_else(|| anyhow!("Store github plugin '{}' is missing location.repo", plugin_id))?;
+            let repo_path = descriptor
+                .location
+                .path
+                .as_deref()
+                .ok_or_else(|| anyhow!(
+                    "Store github plugin '{}' is missing location.path (asset_url is not supported yet)",
+                    plugin_id
+                ))?;
+            if descriptor.location.asset_url.is_some() {
+                bail!(
+                    "Store github plugin '{}' uses asset_url, which is not supported yet",
+                    plugin_id
+                );
+            }
+            let git_ref = descriptor
+                .location
+                .git_ref
+                .as_deref()
+                .or(source.github_ref.as_deref())
+                .unwrap_or("main");
+            copy_github_plugin_path_to_temp(repo, git_ref, repo_path, &temp_dir, progress)?;
+        }
+        other => {
+            bail!("Unsupported store location kind '{}' for plugin '{}': expected local or github", other, plugin_id)
+        }
+    }
+
+    if !temp_dir.join("plugin.lua").is_file() {
+        let _ = fs::remove_dir_all(&temp_dir);
+        bail!("Installed store plugin '{}' does not contain plugin.lua at its root", plugin_id);
+    }
+
+    if install_dir.exists() {
+        progress(78, "Replacing existing plugin...");
+        fs::remove_dir_all(&install_dir)
+            .with_context(|| format!("Replacing {}", install_dir.display()))?;
+    }
+    progress(85, "Finalizing installation...");
+    fs::rename(&temp_dir, &install_dir)
+        .with_context(|| format!("Installing plugin '{}' into {}", plugin_id, install_dir.display()))?;
+    Ok(install_dir)
+}
+
+fn read_store_index(index_path: &Path) -> Result<(StoreIndex, StoreIndexSource)> {
+    let source = index_path.to_string_lossy().to_string();
+    if source.starts_with("http://") || source.starts_with("https://") {
+        let raw = fetch_url_text(&source)?;
+        let index: StoreIndex = serde_json::from_str(&raw)
+            .with_context(|| format!("Parsing store index from {}", source))?;
+        let (github_repo, github_ref) = github_repo_and_ref_from_raw_url(&source);
+        Ok((
+            index,
+            StoreIndexSource {
+                local_root: None,
+                github_repo,
+                github_ref,
+            },
+        ))
+    } else {
+        let raw = fs::read_to_string(index_path)
+            .with_context(|| format!("Reading store index {}", index_path.display()))?;
+        let index: StoreIndex = serde_json::from_str(&raw)
+            .with_context(|| format!("Parsing store index {}", index_path.display()))?;
+        let local_root = index_path.parent().and_then(Path::parent).map(Path::to_path_buf);
+        Ok((
+            index,
+            StoreIndexSource {
+                local_root,
+                github_repo: None,
+                github_ref: None,
+            },
+        ))
+    }
+}
+
+fn github_repo_and_ref_from_raw_url(url: &str) -> (Option<String>, Option<String>) {
+    let https_prefix = "https://raw.githubusercontent.com/";
+    if let Some(rest) = url.strip_prefix(https_prefix) {
+        let mut parts = rest.split('/');
+        let owner = parts.next();
+        let repo = parts.next();
+        let git_ref = parts.next();
+        if let (Some(owner), Some(repo), Some(git_ref)) = (owner, repo, git_ref) {
+            return (
+                Some(format!("{owner}/{repo}")),
+                Some(git_ref.to_string()),
+            );
+        }
+    }
+    (None, None)
+}
+
+fn copy_plugin_directory_to_temp(src_dir: &Path, temp_dir: &Path) -> Result<()> {
+    if !src_dir.is_dir() {
+        bail!("Store plugin source directory not found: {}", src_dir.display());
+    }
+    fs::create_dir_all(temp_dir).with_context(|| format!("Creating {}", temp_dir.display()))?;
+
+    for entry in walkdir::WalkDir::new(src_dir).follow_links(false) {
+        let entry = entry.with_context(|| format!("Walking {}", src_dir.display()))?;
+        let rel = entry
+            .path()
+            .strip_prefix(src_dir)
+            .with_context(|| format!("Computing relative path under {}", src_dir.display()))?;
+        if rel.as_os_str().is_empty() {
+            continue;
+        }
+        let out = temp_dir.join(rel);
+        if !out.starts_with(temp_dir) {
+            bail!("Store plugin source contains an unsafe path: {}", rel.display());
+        }
+        if entry.file_type().is_dir() {
+            fs::create_dir_all(&out).with_context(|| format!("Creating {}", out.display()))?;
+            continue;
+        }
+        if let Some(parent) = out.parent() {
+            fs::create_dir_all(parent).with_context(|| format!("Creating {}", parent.display()))?;
+        }
+        fs::copy(entry.path(), &out)
+            .with_context(|| format!("Copying {} to {}", entry.path().display(), out.display()))?;
+    }
+
+    Ok(())
+}
+
+fn copy_github_plugin_path_to_temp(
+    repo: &str,
+    git_ref: &str,
+    repo_path: &str,
+    temp_dir: &Path,
+    progress: &mut dyn FnMut(u8, &str),
+) -> Result<()> {
+    let mut parts = repo.split('/');
+    let owner = parts.next().unwrap_or_default();
+    let name = parts.next().unwrap_or_default();
+    if owner.is_empty() || name.is_empty() || parts.next().is_some() {
+        bail!("Invalid github repo '{}': expected owner/repo", repo);
+    }
+
+    progress(35, "Downloading plugin source...");
+    let zip_url = format!("https://api.github.com/repos/{}/{}/zipball/{}", owner, name, git_ref);
+    let zip_bytes = fetch_url_bytes(&zip_url)?;
+    progress(55, "Extracting plugin archive...");
+    extract_repo_path_from_zip(&zip_bytes, repo_path, temp_dir)
+}
+
+fn fetch_url_text(url: &str) -> Result<String> {
+    let bytes = fetch_url_bytes(url)?;
+    String::from_utf8(bytes).with_context(|| format!("Response from {} is not valid UTF-8", url))
+}
+
+fn fetch_url_bytes(url: &str) -> Result<Vec<u8>> {
+    let response = ureq::get(url)
+        .set("User-Agent", "kkc-plugin-store")
+        .call()
+        .with_context(|| format!("HTTP GET failed for {}", url))?;
+
+    let mut reader = response.into_reader();
+    let mut buf = Vec::new();
+    reader
+        .read_to_end(&mut buf)
+        .with_context(|| format!("Reading HTTP response from {}", url))?;
+    Ok(buf)
+}
+
+fn extract_repo_path_from_zip(zip_bytes: &[u8], repo_path: &str, temp_dir: &Path) -> Result<()> {
+    fs::create_dir_all(temp_dir).with_context(|| format!("Creating {}", temp_dir.display()))?;
+
+    let normalized = repo_path.trim_matches('/');
+    if normalized.is_empty() {
+        bail!("Store github plugin path is empty");
+    }
+
+    let mut copied_any = false;
+    let cursor = Cursor::new(zip_bytes);
+    let mut archive = ZipArchive::new(cursor).context("Opening GitHub zip archive")?;
+    for i in 0..archive.len() {
+        let mut entry = archive
+            .by_index(i)
+            .with_context(|| format!("Reading zip entry #{}", i))?;
+        let entry_name = entry.name().to_string();
+        if entry_name.ends_with('/') {
+            continue;
+        }
+
+        let Some((_, relative_to_root)) = entry_name.split_once('/') else {
+            continue;
+        };
+        if relative_to_root == normalized {
+            continue;
+        }
+        let Some(relative_to_plugin) = relative_to_root.strip_prefix(normalized) else {
+            continue;
+        };
+        let relative_to_plugin = relative_to_plugin.trim_start_matches('/');
+        if relative_to_plugin.is_empty() {
+            continue;
+        }
+        if relative_to_plugin.contains("..") {
+            bail!("Unsafe zip path in plugin archive: {}", relative_to_plugin);
+        }
+
+        let out = temp_dir.join(relative_to_plugin);
+        if !out.starts_with(temp_dir) {
+            bail!("Unsafe output path in plugin archive: {}", relative_to_plugin);
+        }
+        if let Some(parent) = out.parent() {
+            fs::create_dir_all(parent).with_context(|| format!("Creating {}", parent.display()))?;
+        }
+        let mut outfile = fs::File::create(&out).with_context(|| format!("Creating {}", out.display()))?;
+        io::copy(&mut entry, &mut outfile)
+            .with_context(|| format!("Extracting {} to {}", entry_name, out.display()))?;
+        copied_any = true;
+    }
+
+    if !copied_any {
+        bail!("Store github plugin path '{}' not found in repository zip", repo_path);
+    }
+
+    Ok(())
+}
+
 fn load_plugins() -> Result<PluginRegistry> {
     let load_start = std::time::Instant::now();
     let plugins_dir = ensure_plugins_dir()?;
@@ -481,10 +930,6 @@ fn install_bundled_plugins(plugins_dir: &Path) -> Result<()> {
     fs::create_dir_all(&xml_dir)?;
     write_bundled_file(&xml_dir.join("plugin.lua"), BUNDLED_XML_VIEWER_PLUGIN)?;
 
-    let vcard_dir = plugins_dir.join("vcard_viewer");
-    fs::create_dir_all(&vcard_dir)?;
-    write_bundled_file(&vcard_dir.join("plugin.lua"), BUNDLED_VCARD_VIEWER_PLUGIN)?;
-
     let csv_dir = plugins_dir.join("csv_viewer");
     fs::create_dir_all(&csv_dir)?;
     write_bundled_file(&csv_dir.join("plugin.lua"), BUNDLED_CSV_VIEWER_PLUGIN)?;
@@ -508,6 +953,14 @@ fn install_bundled_plugins(plugins_dir: &Path) -> Result<()> {
     )?;
 
     Ok(())
+}
+
+fn plugin_dir_is_bundled(plugin_dir: &Path) -> bool {
+    plugin_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|name| BUNDLED_PLUGIN_DIRS.contains(&name))
+        .unwrap_or(false)
 }
 
 fn write_bundled_file(path: &Path, content: &str) -> Result<()> {

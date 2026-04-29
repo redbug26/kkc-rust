@@ -1,4 +1,6 @@
 use crate::viewer::{EncodingMode, LineFeedMode, MaskKind, ViewMode, Viewer};
+use std::collections::HashMap;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub struct MenuState {
@@ -45,6 +47,7 @@ pub enum MenuAction {
     DeselectPattern,
     InvertSelection,
     SearchFiles,
+    InstallPluginFromStore,
     RemoteConnect,
     FileIdPreview,
     DirBookmarks,
@@ -88,6 +91,155 @@ pub struct ViewerPluginPaletteState {
     pub items: Vec<crate::plugins::PluginInfo>,
     pub query: String,
     pub match_pos: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoreInstallPaletteState {
+    pub index_path: PathBuf,
+    pub items: Vec<crate::plugins::StorePluginInfo>,
+    pub installed_versions: HashMap<String, String>,
+    pub query: String,
+    pub match_pos: usize,
+}
+
+impl StoreInstallPaletteState {
+    pub fn load(index_path: PathBuf) -> anyhow::Result<Self> {
+        let installed_versions = crate::plugins::installed_plugin_versions_by_dir();
+        let mut items = crate::plugins::list_store_plugins(&index_path)?;
+        items.sort_by(|a, b| {
+            let a_update = {
+                let dir = crate::plugins::store_plugin_install_dir_name(&a.id);
+                installed_versions
+                    .get(&dir)
+                    .map(|installed| installed != &a.version)
+                    .unwrap_or(false)
+            };
+            let b_update = {
+                let dir = crate::plugins::store_plugin_install_dir_name(&b.id);
+                installed_versions
+                    .get(&dir)
+                    .map(|installed| installed != &b.version)
+                    .unwrap_or(false)
+            };
+
+            b_update
+                .cmp(&a_update)
+                .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+                .then_with(|| a.id.cmp(&b.id))
+        });
+
+        Ok(Self {
+            items,
+            index_path,
+            installed_versions,
+            query: String::new(),
+            match_pos: 0,
+        })
+    }
+
+    pub fn install_dir_name_for(&self, item: &crate::plugins::StorePluginInfo) -> String {
+        crate::plugins::store_plugin_install_dir_name(&item.id)
+    }
+
+    pub fn installed_version_for(&self, item: &crate::plugins::StorePluginInfo) -> Option<&str> {
+        let dir = self.install_dir_name_for(item);
+        self.installed_versions.get(&dir).map(|s| s.as_str())
+    }
+
+    pub fn is_installed(&self, item: &crate::plugins::StorePluginInfo) -> bool {
+        self.installed_version_for(item).is_some()
+    }
+
+    pub fn has_update(&self, item: &crate::plugins::StorePluginInfo) -> bool {
+        self.installed_version_for(item)
+            .map(|v| v != item.version)
+            .unwrap_or(false)
+    }
+
+    pub fn filtered_indices(&self) -> Vec<usize> {
+        if self.query.trim().is_empty() {
+            return (0..self.items.len()).collect();
+        }
+
+        let tokens: Vec<String> = self
+            .query
+            .split_whitespace()
+            .map(|token| token.to_lowercase())
+            .filter(|token| !token.is_empty())
+            .collect();
+        if tokens.is_empty() {
+            return (0..self.items.len()).collect();
+        }
+
+        let first = &tokens[0];
+        let rest = &tokens[1..];
+        let mut starts = Vec::new();
+        let mut contains = Vec::new();
+
+        for (idx, item) in self.items.iter().enumerate() {
+            let searchable = format!(
+                "{} {} {} {} {}",
+                item.id, item.name, item.plugin_type, item.version, item.description
+            );
+            let lowered = searchable.to_lowercase();
+            if !rest.iter().all(|token| lowered.contains(token.as_str())) {
+                continue;
+            }
+            if item.id.to_lowercase().starts_with(first.as_str())
+                || item.name.to_lowercase().starts_with(first.as_str())
+            {
+                starts.push(idx);
+            } else if lowered.contains(first.as_str()) {
+                contains.push(idx);
+            }
+        }
+
+        starts.extend(contains);
+        starts
+    }
+
+    pub fn append_query(&mut self, ch: char) {
+        self.query.push(ch);
+        self.match_pos = 0;
+        self.clamp_match();
+    }
+
+    pub fn pop_query(&mut self) {
+        self.query.pop();
+        self.match_pos = 0;
+        self.clamp_match();
+    }
+
+    pub fn move_prev(&mut self) {
+        let len = self.filtered_indices().len();
+        if len == 0 {
+            self.match_pos = 0;
+        } else if self.match_pos == 0 {
+            self.match_pos = len - 1;
+        } else {
+            self.match_pos -= 1;
+        }
+        self.clamp_match();
+    }
+
+    pub fn move_next(&mut self) {
+        let len = self.filtered_indices().len();
+        if len == 0 {
+            self.match_pos = 0;
+        } else {
+            self.match_pos = (self.match_pos + 1) % len;
+        }
+        self.clamp_match();
+    }
+
+    fn clamp_match(&mut self) {
+        let len = self.filtered_indices().len();
+        if len == 0 {
+            self.match_pos = 0;
+        } else {
+            self.match_pos = self.match_pos.min(len.saturating_sub(1));
+        }
+    }
 }
 
 impl ViewerPluginPaletteState {
@@ -288,6 +440,7 @@ pub static MENU_DATA: &[&[MenuEntry]] = &[
     ],
     &[
         ("Search..", Some("A-F7"), MenuAction::SearchFiles),
+        ("Install from Store..", None, MenuAction::InstallPluginFromStore),
         ("Remote Connect..", Some("^F"), MenuAction::RemoteConnect),
         ("File ID Preview", Some("A-F4"), MenuAction::FileIdPreview),
         ("Bookmarks", Some("^D"), MenuAction::DirBookmarks),

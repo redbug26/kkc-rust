@@ -181,6 +181,13 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     },
     PaletteEntry {
         category: "Tools",
+        label: "Install plugin from store…",
+        shortcut: None,
+        fn_name: "install_plugin_from_store",
+        action: MenuAction::InstallPluginFromStore,
+    },
+    PaletteEntry {
+        category: "Tools",
         label: "Remote connect…",
         shortcut: Some("Ctrl+F"),
         fn_name: "remote_connect",

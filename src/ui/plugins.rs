@@ -1,6 +1,9 @@
 use super::*;
 
 pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
+    let matches = s.filtered_indices();
+    let total = matches.len();
+
     let w: u16 = area.width.saturating_sub(4).min(130).max(80);
     let h: u16 = area.height.saturating_sub(4).min(28).max(20);
     let x = area.x + (area.width.saturating_sub(w)) / 2;
@@ -49,7 +52,7 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
     safe_render_widget(
         f,
         Paragraph::new(truncate_str(&dir_line, inner.width as usize))
-            .style(Style::default().fg(Color::Rgb(110, 88, 65)).bg(CLR_APP_BG)),
+            .style(Style::default().fg(Color::Rgb(72, 48, 28)).bg(CLR_APP_BG)),
         Rect {
             x: inner.x,
             y: inner.y,
@@ -71,6 +74,49 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
         },
     );
 
+    let count_hint = if !s.query.is_empty() && total > 0 {
+        format!(" {}/{} ", s.cursor + 1, total)
+    } else if !s.query.is_empty() {
+        " 0/0 ".to_owned()
+    } else {
+        format!(" {} ", s.plugins.len())
+    };
+    let hint_w = count_hint.len() as u16;
+    let input_inner_w = inner.width.saturating_sub(hint_w) as usize;
+    let input_text = format!(" \u{2315} {}\u{2581}", s.query);
+    let input_row = Line::from(vec![
+        Span::styled(
+            truncate_str(&input_text, input_inner_w),
+            Style::default().fg(Color::Rgb(34, 20, 12)).bg(Color::Rgb(232, 220, 192)),
+        ),
+        Span::styled(
+            count_hint,
+            Style::default()
+                .fg(Color::Rgb(88, 66, 45))
+                .bg(Color::Rgb(232, 220, 192)),
+        ),
+    ]);
+    safe_render_widget(
+        f,
+        Paragraph::new(input_row).style(Style::default().bg(Color::Rgb(232, 220, 192))),
+        Rect {
+            x: inner.x,
+            y: inner.y + 2,
+            width: inner.width,
+            height: 1,
+        },
+    );
+    safe_render_widget(
+        f,
+        Paragraph::new(sep.clone()).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
+        Rect {
+            x: inner.x,
+            y: inner.y + 3,
+            width: inner.width,
+            height: 1,
+        },
+    );
+
     // ── Footer separator + buttons ──────────────────────────────────────
     let button_y = inner.y + inner.height.saturating_sub(1);
     let footer_sep_y = button_y.saturating_sub(1);
@@ -86,9 +132,9 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
     );
     safe_render_widget(
         f,
-        Paragraph::new("  [ Enter/O Open Dir ]   [ Esc Close ]").style(
+        Paragraph::new("  [ Enter Open Dir ]  [ Ctrl+S Store ]  [ Del Remove ]  [ Esc Close ]").style(
             Style::default()
-                .fg(CLR_BUTTON_FG)
+                .fg(Color::Rgb(255, 252, 226))
                 .bg(CLR_BUTTON_BG)
                 .add_modifier(Modifier::BOLD),
         ),
@@ -101,7 +147,7 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
     );
 
     // ── Body area (between dir separator and footer separator) ──────────
-    let body_y = inner.y + 2;
+    let body_y = inner.y + 4;
     let body_h = footer_sep_y.saturating_sub(body_y);
     if body_h == 0 {
         return;
@@ -113,9 +159,17 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
         height: body_h,
     };
 
-    // Left column width: longest name + 4 (icon + spaces), at least 22, at most 38
-    let max_name = s.plugins.iter().map(|p| p.name.len()).max().unwrap_or(8);
-    let left_w = ((max_name + 4) as u16).clamp(22, 38).min(body.width / 2);
+    // Left column width: longest name + source tag + icon, at least 32, at most 56.
+    let max_name = s
+        .plugins
+        .iter()
+        .map(|p| {
+            let src = crate::plugins::plugin_source_label(&p.dir, &s.plugins_dir);
+            p.name.len() + src.len() + 6
+        })
+        .max()
+        .unwrap_or(8);
+    let left_w = ((max_name + 4) as u16).clamp(32, 56).min(body.width.saturating_sub(28));
     let right_w = body.width.saturating_sub(left_w + 1); // +1 for separator
 
     let left_area = Rect {
@@ -151,7 +205,7 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
         f,
         Paragraph::new(format!(
             "  {:<w$}",
-            "Name",
+            "Name                              Source",
             w = (left_w as usize).saturating_sub(2)
         ))
         .style(
@@ -169,17 +223,22 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
     );
 
     let list_h = (body.height.saturating_sub(1)) as usize;
-    let start = if s.plugins.is_empty() || s.cursor < list_h {
+    let start = if total == 0 || s.cursor < list_h {
         0
     } else {
         s.cursor.saturating_sub(list_h - 1)
     };
 
-    if s.plugins.is_empty() {
+    if total == 0 {
+        let msg = if s.query.is_empty() {
+            "  (no plugins)"
+        } else {
+            "  (no match)"
+        };
         safe_render_widget(
             f,
-            Paragraph::new("  (no plugins)")
-                .style(Style::default().fg(Color::Rgb(110, 88, 65)).bg(CLR_APP_BG)),
+            Paragraph::new(msg)
+                .style(Style::default().fg(Color::Rgb(72, 48, 28)).bg(CLR_APP_BG)),
             Rect {
                 x: left_area.x,
                 y: left_area.y + 1,
@@ -188,27 +247,36 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
             },
         );
     } else {
-        for (list_row, idx) in (start..).zip(0..list_h) {
-            if list_row >= s.plugins.len() {
+        for (match_row, idx) in (start..).zip(0..list_h) {
+            if match_row >= total {
                 break;
             }
-            let plugin = &s.plugins[list_row];
+            let plugin = &s.plugins[matches[match_row]];
             let row_y = left_area.y + 1 + idx as u16;
-            let selected = s.cursor == list_row;
+            let selected = s.cursor == match_row;
+            let type_fg = match plugin.kind.as_str() {
+                "Archive" => Color::Rgb(130, 68, 18),
+                "Viewer" => Color::Rgb(26, 58, 108),
+                "Action" => Color::Rgb(52, 92, 34),
+                _ => Color::Rgb(46, 28, 16),
+            };
             let style = if selected {
                 Style::default()
-                    .fg(Color::Black)
-                    .bg(CLR_CURSOR_BG)
+                    .fg(Color::Rgb(16, 10, 6))
+                    .bg(Color::Rgb(235, 220, 188))
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(CLR_TEXT).bg(CLR_APP_BG)
+                Style::default().fg(type_fg).bg(CLR_APP_BG)
             };
             let icon = if selected { "▶ " } else { "  " };
+            let source = crate::plugins::plugin_source_label(&plugin.dir, &s.plugins_dir);
             let available = (left_area.width as usize).saturating_sub(3);
+            let source_tag = format!("[{source}]");
+            let name_w = available.saturating_sub(source_tag.len() + 1);
             let text = format!(
-                "{icon}{:<w$}",
-                truncate_str(&plugin.name, available),
-                w = available,
+                "{icon}{:<name_w$} {}",
+                truncate_str(&plugin.name, name_w),
+                source_tag,
             );
             safe_render_widget(
                 f,
@@ -252,17 +320,17 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
     let detail_y = right_area.y + 1;
     let detail_h = right_area.height.saturating_sub(1);
 
-    let Some(plugin) = s.plugins.get(s.cursor) else {
+    let Some(plugin) = matches.get(s.cursor).and_then(|idx| s.plugins.get(*idx)) else {
         return;
     };
 
     let lbl_style = Style::default()
-        .fg(Color::Rgb(120, 140, 180))
+        .fg(Color::Rgb(48, 64, 96))
         .bg(CLR_APP_BG)
         .add_modifier(Modifier::BOLD);
-    let val_style = Style::default().fg(CLR_TEXT).bg(CLR_APP_BG);
+    let val_style = Style::default().fg(Color::Rgb(34, 20, 12)).bg(CLR_APP_BG);
     let dim_style = Style::default()
-        .fg(Color::Rgb(140, 130, 110))
+        .fg(Color::Rgb(88, 66, 45))
         .bg(CLR_APP_BG);
     let rw = right_area.width as usize;
 
@@ -307,6 +375,14 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
         &mut row,
         "Version :",
         &plugin.version,
+        lbl_style,
+        val_style,
+    );
+    push_kv(
+        &mut lines,
+        &mut row,
+        "Source :",
+        crate::plugins::plugin_source_label(&plugin.dir, &s.plugins_dir),
         lbl_style,
         val_style,
     );
