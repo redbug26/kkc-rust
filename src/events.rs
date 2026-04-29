@@ -103,8 +103,13 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
     // Quick-preview panel focus mode: Up/Down scroll the viewer
     if app.quick_preview_active {
         match key.code {
-            KeyCode::Tab | KeyCode::Esc => {
+            KeyCode::Tab => {
                 app.quick_preview_active = false;
+            }
+            KeyCode::Esc => {
+                app.quick_preview = None;
+                app.quick_preview_active = false;
+                app.quick_preview_forced_mode = None;
             }
             KeyCode::Up => {
                 app.quick_preview_scroll_up();
