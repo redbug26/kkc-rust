@@ -1,5 +1,6 @@
 //! Command palette event handler (Ctrl-P).
 
+use super::fx_shortcut;
 use super::menu::execute_menu_action;
 use crate::app::{App, AppMode, PALETTE_DATA, PALETTE_SEP};
 use anyhow::Result;
@@ -8,9 +9,13 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 pub(super) fn handle_command_palette(app: &mut App, key: KeyEvent) -> Result<bool> {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     let alt = key.modifiers.contains(KeyModifiers::ALT);
+    let fn_key = fx_shortcut(key);
 
     match key.code {
-        KeyCode::Esc | KeyCode::F(10) => {
+        KeyCode::Esc => {
+            app.mode = AppMode::Browse;
+        }
+        _ if fn_key == Some(10) => {
             app.mode = AppMode::Browse;
         }
         KeyCode::Up => {

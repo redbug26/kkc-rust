@@ -125,9 +125,7 @@ cargo build --release
 | `Ctrl+R` | Reload panels |
 | `Ctrl+D` | Directory bookmarks |
 | `Ctrl+F` | Connect to remote (SFTP / IMAP) |
-| `Ctrl+U` | Drop to terminal |
-| `Alt+F4` | File identification view |
-| `Alt+F7` | Search panel |
+| `Ctrl+U` | Drop to terminal
 
 ### Viewer shortcuts
 

@@ -175,7 +175,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Tools",
         label: "Search files…",
-        shortcut: Some("Alt+F7"),
+        shortcut: None,
         fn_name: "search_files",
         action: MenuAction::SearchFiles,
     },
@@ -189,7 +189,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Tools",
         label: "File Info preview",
-        shortcut: Some("Alt+F4"),
+        shortcut: None,
         fn_name: "file_preview_info",
         action: MenuAction::FileIdPreview,
     },

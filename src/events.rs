@@ -28,6 +28,24 @@ use crossterm::{
 };
 use std::io;
 
+pub(crate) fn fx_shortcut(key: KeyEvent) -> Option<u8> {
+    match key.code {
+        KeyCode::F(n) => Some(n),
+        KeyCode::Char(c)
+            if key.modifiers.contains(KeyModifiers::ALT)
+                && !key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::SHIFT) =>
+        {
+            match c {
+                '1'..='9' => Some((c as u8) - b'0'),
+                '0' => Some(10),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 pub fn handle_event(app: &mut App, event: Event) -> Result<bool> {
     let Event::Key(key) = event else {
         return Ok(false);
@@ -83,10 +101,13 @@ fn handle_about(app: &mut App, _key: KeyEvent) -> Result<bool> {
 
 fn handle_copy_progress(app: &mut App, key: KeyEvent) -> Result<bool> {
     match key.code {
-        KeyCode::Esc | KeyCode::Enter | KeyCode::F(10) => {
+        KeyCode::Esc | KeyCode::Enter => {
             app.cancel_copy_task();
         }
         _ => {}
+    }
+    if fx_shortcut(key) == Some(10) {
+        app.cancel_copy_task();
     }
     Ok(false)
 }
@@ -99,6 +120,7 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     let shift = key.modifiers.contains(KeyModifiers::SHIFT);
     let alt = key.modifiers.contains(KeyModifiers::ALT);
+    let fn_key = fx_shortcut(key);
 
     // Quick-preview panel focus mode: Up/Down scroll the viewer
     if app.quick_preview_active {
@@ -115,7 +137,7 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
             KeyCode::Down => {
                 app.quick_preview_scroll_down();
             }
-            KeyCode::F(4) => {
+            _ if fn_key == Some(4) => {
                 // Cycle forced mode: Auto → Text → Hex → Ansi → Image → Auto
                 app.quick_preview_forced_mode = match app.quick_preview_forced_mode {
                     None => Some(ViewMode::Text),
@@ -184,101 +206,103 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
 
     // Handle Ctrl-modified keys first
     if ctrl && !alt && !shift {
-        match key.code {
-            KeyCode::F(1) => {
+        match fn_key {
+            Some(1) => {
                 app.set_sort(SortMode::Name);
                 return Ok(false);
             }
-            KeyCode::F(2) => {
+            Some(2) => {
                 app.set_sort(SortMode::Extension);
                 return Ok(false);
             }
-            KeyCode::F(3) => {
+            Some(3) => {
                 app.set_sort(SortMode::Date);
                 return Ok(false);
             }
-            KeyCode::F(4) => {
+            Some(4) => {
                 app.set_sort(SortMode::Size);
                 return Ok(false);
             }
-            KeyCode::F(5) => {
+            Some(5) => {
                 app.set_sort(SortMode::Unsorted);
                 return Ok(false);
             }
-            KeyCode::Char('r') => {
-                app.reload_panels();
-                app.set_status("Reloaded");
-                return Ok(false);
-            }
-            KeyCode::Char('h') => {
-                let p = app.active_panel_mut();
-                p.show_hidden = !p.show_hidden;
-                let _ = p.reload();
-                return Ok(false);
-            }
-            KeyCode::Char('d') => {
-                app.open_dir_bookmarks();
-                return Ok(false);
-            }
-            KeyCode::Char('f') => {
-                app.open_remote_connect();
-                return Ok(false);
-            }
-            KeyCode::Char('u') => {
-                app.mode = AppMode::Terminal;
-                return Ok(false);
-            }
-            KeyCode::Char('a') => {
-                let cwd = app.active_panel().path.clone();
-                let state = ActionPaletteState::load(cwd);
-                if state.actions.is_empty() {
-                    app.notify("No plugin action available");
-                } else {
-                    app.mode = AppMode::ActionPalette(state);
+            _ => match key.code {
+                KeyCode::Char('r') => {
+                    app.reload_panels();
+                    app.set_status("Reloaded");
+                    return Ok(false);
                 }
-                return Ok(false);
-            }
-            KeyCode::Char('p') => {
-                app.mode = AppMode::CommandPalette(CommandPaletteState {
-                    recent: app.palette_recent.clone(),
-                    ..Default::default()
-                });
-                return Ok(false);
-            }
-            KeyCode::Char('t') => {
-                app.new_active_tab();
-                return Ok(false);
-            }
-            KeyCode::Char('w') => {
-                app.close_active_tab();
-                return Ok(false);
-            }
-            KeyCode::Tab | KeyCode::Char('n') => {
-                app.next_active_tab();
-                return Ok(false);
-            }
-            _ => {}
+                KeyCode::Char('h') => {
+                    let p = app.active_panel_mut();
+                    p.show_hidden = !p.show_hidden;
+                    let _ = p.reload();
+                    return Ok(false);
+                }
+                KeyCode::Char('d') => {
+                    app.open_dir_bookmarks();
+                    return Ok(false);
+                }
+                KeyCode::Char('f') => {
+                    app.open_remote_connect();
+                    return Ok(false);
+                }
+                KeyCode::Char('u') => {
+                    app.mode = AppMode::Terminal;
+                    return Ok(false);
+                }
+                KeyCode::Char('a') => {
+                    let cwd = app.active_panel().path.clone();
+                    let state = ActionPaletteState::load(cwd);
+                    if state.actions.is_empty() {
+                        app.notify("No plugin action available");
+                    } else {
+                        app.mode = AppMode::ActionPalette(state);
+                    }
+                    return Ok(false);
+                }
+                KeyCode::Char('p') => {
+                    app.mode = AppMode::CommandPalette(CommandPaletteState {
+                        recent: app.palette_recent.clone(),
+                        ..Default::default()
+                    });
+                    return Ok(false);
+                }
+                KeyCode::Char('t') => {
+                    app.new_active_tab();
+                    return Ok(false);
+                }
+                KeyCode::Char('w') => {
+                    app.close_active_tab();
+                    return Ok(false);
+                }
+                KeyCode::Tab | KeyCode::Char('n') => {
+                    app.next_active_tab();
+                    return Ok(false);
+                }
+                _ => {}
+            },
         }
     }
 
-    // Alt-modified keys
-    if alt && !ctrl && !shift {
-        match key.code {
-            KeyCode::F(4) => {
-                app.open_file_id_view();
-                return Ok(false);
-            }
-            KeyCode::F(7) => {
-                app.open_search();
-                return Ok(false);
-            }
-            _ => {}
-        }
-    }
+    // // Alt-modified keys
+    // if alt && !ctrl && !shift {
+    //     match fn_key {
+    //         Some(4) => {
+    //             app.open_file_id_view();
+    //             return Ok(false);
+    //         }
+    //         Some(7) => {
+    //             app.open_search();
+    //             return Ok(false);
+    //         }
+    //         _ => {}
+    //     }
+    // }
 
     // Shift-modified keys
     if shift && !ctrl && !alt {
-        if let KeyCode::F(6) = key.code {
+        if fn_key == Some(6) {
             start_rename(app);
             return Ok(false);
         }
@@ -349,36 +373,6 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
             app.active_panel_mut().invert_selection();
         }
 
-        // --- F keys ---
-        KeyCode::F(1) => {
-            app.open_help();
-        }
-        KeyCode::F(2) => {
-            let mut ms = MenuState::new();
-            ms.open = false;
-            app.mode = AppMode::Menu(ms);
-        }
-        KeyCode::F(3) => {
-            app.open_viewer();
-        }
-        KeyCode::F(4) => {
-            launch_editor(app)?;
-        }
-        KeyCode::F(5) => {
-            app.open_copy_dialog();
-        }
-        KeyCode::F(6) => {
-            app.cmd_move()?;
-        }
-        KeyCode::F(7) => {
-            start_mkdir(app);
-        }
-        KeyCode::F(8) => {
-            app.cmd_delete();
-        }
-        KeyCode::F(10) => {
-            return confirm_quit(app);
-        }
         KeyCode::Char('q') => {
             return confirm_quit(app);
         }
@@ -387,6 +381,39 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
             app.mode = AppMode::Terminal;
         }
 
+        _ => {}
+    }
+
+    match fn_key {
+        Some(1) if !ctrl && !shift => {
+            app.open_help();
+        }
+        Some(2) if !ctrl && !shift => {
+            let mut ms = MenuState::new();
+            ms.open = false;
+            app.mode = AppMode::Menu(ms);
+        }
+        Some(3) if !ctrl && !shift => {
+            app.open_viewer();
+        }
+        Some(4) if !ctrl && !shift => {
+            launch_editor(app)?;
+        }
+        Some(5) if !ctrl && !shift => {
+            app.open_copy_dialog();
+        }
+        Some(6) if !ctrl && !shift => {
+            app.cmd_move()?;
+        }
+        Some(7) if !ctrl && !shift => {
+            start_mkdir(app);
+        }
+        Some(8) if !ctrl && !shift => {
+            app.cmd_delete();
+        }
+        Some(10) if !ctrl && !shift => {
+            return confirm_quit(app);
+        }
         _ => {}
     }
 
@@ -1102,9 +1129,14 @@ fn handle_copy_dialog(app: &mut App, key: KeyEvent) -> Result<bool> {
 
 fn handle_search(app: &mut App, key: KeyEvent) -> Result<bool> {
     let page_size = 10usize;
+    let fn_key = fx_shortcut(key);
     match key.code {
-        KeyCode::Esc | KeyCode::F(10) => {
+        KeyCode::Esc => {
             // If a search is running, cancel it then close the panel
+            app.cancel_search();
+            app.mode = AppMode::Browse;
+        }
+        _ if fn_key == Some(10) => {
             app.cancel_search();
             app.mode = AppMode::Browse;
         }
@@ -1125,7 +1157,7 @@ fn handle_search(app: &mut App, key: KeyEvent) -> Result<bool> {
                 s.input_field = (s.input_field + 2) % 3;
             }
         }
-        KeyCode::F(5) => {
+        _ if fn_key == Some(5) => {
             let AppMode::SearchPanel(ref mut s) = app.mode else {
                 return Ok(false);
             };
@@ -1367,8 +1399,12 @@ fn handle_dir_bookmarks(app: &mut App, key: KeyEvent) -> Result<bool> {
 }
 
 fn handle_plugins(app: &mut App, key: KeyEvent) -> Result<bool> {
+    let fn_key = fx_shortcut(key);
     match key.code {
-        KeyCode::Esc | KeyCode::F(10) => {
+        KeyCode::Esc => {
+            app.mode = AppMode::Browse;
+        }
+        _ if fn_key == Some(10) => {
             app.mode = AppMode::Browse;
         }
         KeyCode::Up => {
@@ -1410,8 +1446,12 @@ fn handle_plugins(app: &mut App, key: KeyEvent) -> Result<bool> {
 }
 
 fn handle_action_palette(app: &mut App, key: KeyEvent) -> Result<bool> {
+    let fn_key = fx_shortcut(key);
     match key.code {
-        KeyCode::Esc | KeyCode::F(10) => {
+        KeyCode::Esc => {
+            app.mode = AppMode::Browse;
+        }
+        _ if fn_key == Some(10) => {
             app.mode = AppMode::Browse;
         }
         KeyCode::Up => {
@@ -1641,6 +1681,7 @@ fn handle_opener(app: &mut App, key: KeyEvent) -> Result<bool> {
 // ---------------------------------------------------------------------------
 
 fn handle_assoc_editor(app: &mut App, key: KeyEvent) -> Result<bool> {
+    let fn_key = fx_shortcut(key);
     let total = if let AppMode::AssocEditor(ref s) = app.mode {
         s.assocs.len()
     } else {
@@ -1666,7 +1707,16 @@ fn handle_assoc_editor(app: &mut App, key: KeyEvent) -> Result<bool> {
             }
         }
         // Add new association
-        KeyCode::Char('a') | KeyCode::Char('A') | KeyCode::Char('+') | KeyCode::F(1) => {
+        KeyCode::Char('a') | KeyCode::Char('A') | KeyCode::Char('+') => {
+            app.mode = AppMode::Input(InputDialog {
+                title: "New association".into(),
+                prompt: "Extension (without dot):".into(),
+                value: String::new(),
+                cursor: 0,
+                action: InputAction::AssocAddExt,
+            });
+        }
+        _ if fn_key == Some(1) => {
             app.mode = AppMode::Input(InputDialog {
                 title: "New association".into(),
                 prompt: "Extension (without dot):".into(),
@@ -1726,6 +1776,7 @@ fn handle_assoc_editor(app: &mut App, key: KeyEvent) -> Result<bool> {
 }
 
 fn handle_remote_connect(app: &mut App, key: KeyEvent) -> Result<bool> {
+    let fn_key = fx_shortcut(key);
     match key.code {
         KeyCode::Esc => app.mode = AppMode::Browse,
         KeyCode::Tab => {
@@ -1746,10 +1797,10 @@ fn handle_remote_connect(app: &mut App, key: KeyEvent) -> Result<bool> {
                 s.pop_query();
             }
         }
-        KeyCode::F(6) => {
+        _ if fn_key == Some(6) => {
             app.open_remote_edit();
         }
-        KeyCode::F(7) => {
+        _ if fn_key == Some(7) => {
             app.open_remote_add_menu();
         }
         KeyCode::Enter => {
@@ -1867,14 +1918,17 @@ fn handle_remote_add_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
 }
 
 fn handle_remote_connecting(app: &mut App, key: KeyEvent) -> Result<bool> {
+    let fn_key = fx_shortcut(key);
     match key.code {
-        KeyCode::Esc | KeyCode::Enter | KeyCode::F(10) => app.cancel_remote_connect(),
+        KeyCode::Esc | KeyCode::Enter => app.cancel_remote_connect(),
+        _ if fn_key == Some(10) => app.cancel_remote_connect(),
         _ => {}
     }
     Ok(false)
 }
 
 fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
+    let fn_key = fx_shortcut(key);
     let AppMode::RemoteEdit(ref mut s) = app.mode else {
         return Ok(false);
     };
@@ -1882,7 +1936,10 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
     // ── Share picker navigation (intercepts all keys when open) ──────────
     if s.share_picker.is_some() {
         match key.code {
-            KeyCode::Esc | KeyCode::F(5) => {
+            KeyCode::Esc => {
+                s.share_picker = None;
+            }
+            _ if fn_key == Some(5) => {
                 s.share_picker = None;
             }
             KeyCode::Up => {
@@ -1911,7 +1968,7 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
     }
 
     // ── F5: fetch SMB share list ──────────────────────────────────────────
-    if key.code == KeyCode::F(5)
+    if fn_key == Some(5)
         && matches!(s.kind, crate::app::RemoteEditKind::Smb)
         && s.cursor == crate::app::RemoteEditState::PATH
     {
@@ -2049,6 +2106,7 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
 
 fn handle_help(app: &mut App, key: KeyEvent) -> Result<bool> {
     use crate::help::HelpView;
+    let fn_key = fx_shortcut(key);
 
     let Some(state) = (match &mut app.mode {
         AppMode::Help(state) => Some(state),
@@ -2059,7 +2117,8 @@ fn handle_help(app: &mut App, key: KeyEvent) -> Result<bool> {
 
     match state.view {
         HelpView::Index { ref mut cursor } => match key.code {
-            KeyCode::Esc | KeyCode::F(10) => app.mode = AppMode::Browse,
+            KeyCode::Esc => app.mode = AppMode::Browse,
+            _ if fn_key == Some(10) => app.mode = AppMode::Browse,
             KeyCode::Up => *cursor = cursor.saturating_sub(1),
             KeyCode::Down => {
                 let max = state.system.sections.len().saturating_sub(1);

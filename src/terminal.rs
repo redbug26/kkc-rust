@@ -1,5 +1,6 @@
 use crate::app::{ActivePanel, App, AppMode};
 use crate::config;
+use crate::events::fx_shortcut;
 use crate::remote::{RemoteEntry, join_remote, list_dir, normalize_remote_cwd};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -533,6 +534,7 @@ fn parse_extended_color(nums: &[u16], idx: &mut usize) -> Option<Color> {
 
 pub fn handle_terminal(app: &mut App, key: KeyEvent) -> Result<bool> {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let fn_key = fx_shortcut(key);
 
     // ── Ctrl chords ─────────────────────────────────────────────────────────
     if ctrl {
@@ -565,7 +567,10 @@ pub fn handle_terminal(app: &mut App, key: KeyEvent) -> Result<bool> {
 
     match key.code {
         // ── Exit ──────────────────────────────────────────────────────────
-        KeyCode::Esc | KeyCode::F(10) => {
+        KeyCode::Esc => {
+            app.mode = AppMode::Browse;
+        }
+        _ if fn_key == Some(10) => {
             app.mode = AppMode::Browse;
         }
 

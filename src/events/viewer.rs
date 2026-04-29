@@ -1,5 +1,6 @@
 use crate::app::{App, AppMode, ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState};
 use crate::viewer::{EncodingMode, LineFeedMode, MaskKind, PreprocOpKind, ViewMode, Viewer};
+use super::fx_shortcut;
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -52,60 +53,22 @@ fn keyevent_to_plugin_key(key: KeyEvent) -> Option<String> {
 }
 
 pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
+    let fn_key = fx_shortcut(key);
+
     // '/' and Esc/F3 require moving app.mode; handle them before borrowing.
     match key.code {
-        KeyCode::Esc | KeyCode::F(10) => {
+        KeyCode::Esc => {
             if let AppMode::Viewer(ref v) = app.mode {
                 v.save_position();
             }
             app.mode = AppMode::Browse;
             return Ok(false);
         }
-        KeyCode::Char('/') | KeyCode::F(7) => {
+        KeyCode::Char('/') => {
             let AppMode::Viewer(v) = std::mem::replace(&mut app.mode, AppMode::Browse) else {
                 return Ok(false);
             };
             app.mode = AppMode::ViewerSearching(v);
-            return Ok(false);
-        }
-        KeyCode::F(3) => {
-            let AppMode::Viewer(v) = std::mem::replace(&mut app.mode, AppMode::Browse) else {
-                return Ok(false);
-            };
-            let menu = ViewerMenuState::new(ViewerMenuKind::LineFeed, &v);
-            app.mode = AppMode::ViewerMenu(v, menu);
-            return Ok(false);
-        }
-        KeyCode::F(4) => {
-            let AppMode::Viewer(v) = std::mem::replace(&mut app.mode, AppMode::Browse) else {
-                return Ok(false);
-            };
-            let menu = ViewerMenuState::new(ViewerMenuKind::Mode, &v);
-            app.mode = AppMode::ViewerMenu(v, menu);
-            return Ok(false);
-        }
-        KeyCode::F(6) => {
-            let AppMode::Viewer(v) = std::mem::replace(&mut app.mode, AppMode::Browse) else {
-                return Ok(false);
-            };
-            let menu = ViewerMenuState::new(ViewerMenuKind::Preproc, &v);
-            app.mode = AppMode::ViewerMenu(v, menu);
-            return Ok(false);
-        }
-        KeyCode::F(8) => {
-            let AppMode::Viewer(v) = std::mem::replace(&mut app.mode, AppMode::Browse) else {
-                return Ok(false);
-            };
-            let menu = ViewerMenuState::new(ViewerMenuKind::Encoding, &v);
-            app.mode = AppMode::ViewerMenu(v, menu);
-            return Ok(false);
-        }
-        KeyCode::F(9) => {
-            let AppMode::Viewer(v) = std::mem::replace(&mut app.mode, AppMode::Browse) else {
-                return Ok(false);
-            };
-            let menu = ViewerMenuState::new(ViewerMenuKind::Mask, &v);
-            app.mode = AppMode::ViewerMenu(v, menu);
             return Ok(false);
         }
         KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -113,6 +76,64 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
                 return Ok(false);
             };
             app.mode = AppMode::ViewerGotoLine(v, String::new());
+            return Ok(false);
+        }
+        _ => {}
+    }
+
+    match fn_key {
+        Some(10) => {
+            if let AppMode::Viewer(ref v) = app.mode {
+                v.save_position();
+            }
+            app.mode = AppMode::Browse;
+            return Ok(false);
+        }
+        Some(7) => {
+            let AppMode::Viewer(v) = std::mem::replace(&mut app.mode, AppMode::Browse) else {
+                return Ok(false);
+            };
+            app.mode = AppMode::ViewerSearching(v);
+            return Ok(false);
+        }
+        Some(3) => {
+            let AppMode::Viewer(v) = std::mem::replace(&mut app.mode, AppMode::Browse) else {
+                return Ok(false);
+            };
+            let menu = ViewerMenuState::new(ViewerMenuKind::LineFeed, &v);
+            app.mode = AppMode::ViewerMenu(v, menu);
+            return Ok(false);
+        }
+        Some(4) => {
+            let AppMode::Viewer(v) = std::mem::replace(&mut app.mode, AppMode::Browse) else {
+                return Ok(false);
+            };
+            let menu = ViewerMenuState::new(ViewerMenuKind::Mode, &v);
+            app.mode = AppMode::ViewerMenu(v, menu);
+            return Ok(false);
+        }
+        Some(6) => {
+            let AppMode::Viewer(v) = std::mem::replace(&mut app.mode, AppMode::Browse) else {
+                return Ok(false);
+            };
+            let menu = ViewerMenuState::new(ViewerMenuKind::Preproc, &v);
+            app.mode = AppMode::ViewerMenu(v, menu);
+            return Ok(false);
+        }
+        Some(8) => {
+            let AppMode::Viewer(v) = std::mem::replace(&mut app.mode, AppMode::Browse) else {
+                return Ok(false);
+            };
+            let menu = ViewerMenuState::new(ViewerMenuKind::Encoding, &v);
+            app.mode = AppMode::ViewerMenu(v, menu);
+            return Ok(false);
+        }
+        Some(9) => {
+            let AppMode::Viewer(v) = std::mem::replace(&mut app.mode, AppMode::Browse) else {
+                return Ok(false);
+            };
+            let menu = ViewerMenuState::new(ViewerMenuKind::Mask, &v);
+            app.mode = AppMode::ViewerMenu(v, menu);
             return Ok(false);
         }
         _ => {}
@@ -156,10 +177,13 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
             KeyCode::End => v.goto_end(page_size),
             KeyCode::Left => v.scroll_left(8),
             KeyCode::Right => v.scroll_right(8),
-            KeyCode::F(2) => v.toggle_wrap(),
-            KeyCode::F(5) => v.toggle_zoom(),
             KeyCode::Char('n') => v.search_next(),
             KeyCode::Char('N') => v.search_prev(),
+            _ => {}
+        }
+        match fn_key {
+            Some(2) => v.toggle_wrap(),
+            Some(5) => v.toggle_zoom(),
             _ => {}
         }
     }
@@ -605,6 +629,7 @@ fn preproc_add_item_kind(viewer: &crate::viewer::Viewer, idx: usize) -> Option<P
 }
 
 pub(super) fn handle_viewer_searching(app: &mut App, key: KeyEvent) -> Result<bool> {
+    let fn_key = fx_shortcut(key);
     match key.code {
         KeyCode::Esc => {
             // Clear search and return to normal viewer
@@ -618,7 +643,7 @@ pub(super) fn handle_viewer_searching(app: &mut App, key: KeyEvent) -> Result<bo
             };
             app.mode = AppMode::Viewer(v);
         }
-        KeyCode::F(10) => {
+        _ if fn_key == Some(10) => {
             if let AppMode::ViewerSearching(ref v) = app.mode {
                 v.save_position();
             }
@@ -652,6 +677,7 @@ pub(super) fn handle_viewer_searching(app: &mut App, key: KeyEvent) -> Result<bo
 }
 
 pub(super) fn handle_viewer_goto_line(app: &mut App, key: KeyEvent) -> Result<bool> {
+    let fn_key = fx_shortcut(key);
     match key.code {
         KeyCode::Esc => {
             let AppMode::ViewerGotoLine(v, _) = std::mem::replace(&mut app.mode, AppMode::Browse)
@@ -660,7 +686,7 @@ pub(super) fn handle_viewer_goto_line(app: &mut App, key: KeyEvent) -> Result<bo
             };
             app.mode = AppMode::Viewer(v);
         }
-        KeyCode::F(10) => {
+        _ if fn_key == Some(10) => {
             if let AppMode::ViewerGotoLine(ref v, _) = app.mode {
                 v.save_position();
             }
