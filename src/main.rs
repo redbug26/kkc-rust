@@ -127,17 +127,21 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
             width: term_size.width,
             height: term_size.height,
         };
-        let next_kitty_image = match &app.mode {
-            AppMode::Viewer(v) | AppMode::ViewerSearching(v) | AppMode::ViewerMenu(v, _) => {
-                ui::kitty_image_area(v, term_area).map(|rect| (v.path.clone(), rect, v.zoomed))
+        let next_kitty_image = if viewer::kitty_graphics_supported() {
+            match &app.mode {
+                AppMode::Viewer(v) | AppMode::ViewerSearching(v) | AppMode::ViewerMenu(v, _) => {
+                    ui::kitty_image_area(v, term_area).map(|rect| (v.path.clone(), rect, v.zoomed))
+                }
+                _ => {
+                    // Quick-preview: use the inactive panel area
+                    app.quick_preview.as_ref().and_then(|v| {
+                        ui::kitty_image_area_quick_preview(&app, term_area)
+                            .map(|rect| (v.path.clone(), rect, v.zoomed))
+                    })
+                }
             }
-            _ => {
-                // Quick-preview: use the inactive panel area
-                app.quick_preview.as_ref().and_then(|v| {
-                    ui::kitty_image_area_quick_preview(&app, term_area)
-                        .map(|rect| (v.path.clone(), rect, v.zoomed))
-                })
-            }
+        } else {
+            None
         };
 
         if next_kitty_image != last_kitty_image {

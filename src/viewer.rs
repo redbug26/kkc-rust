@@ -242,9 +242,9 @@ impl Viewer {
     /// Used by quick-preview so that large files don't stall the UI on every
     /// cursor movement.
     pub fn open_preview(path: &Path, wrap: bool) -> Result<Self> {
-        const MAX_QUICK_PREVIEW_BYTES: usize = 512 * 1024; // 512 KB
+        const MAX_QUICK_PREVIEW_BYTES: usize = 512 * 1024 * 8; // 4 MB
         debug_log(&format!(
-            "open_preview: {} (limit=512 KB)",
+            "open_preview: {} (limit=4 MB)",
             path.display()
         ));
         Self::open_with_limit(path, wrap, Some(MAX_QUICK_PREVIEW_BYTES))
