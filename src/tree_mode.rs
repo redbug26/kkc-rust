@@ -102,8 +102,9 @@ pub struct TreeViewState {
     pub query: String,
     pub filtered: Vec<usize>,
     pub display: Vec<DisplayItem>,
-    /// For each display item, pipe-continuation flags at ancestor depths (0..entry.depth).
-    /// `display_prefixes[i][d]` = true means "depth d+1 has a later sibling → draw │".
+    /// For each display item, pipe-continuation flags for visible ancestor columns
+    /// (depths 1..entry.depth-1). Root depth (0) is intentionally skipped to keep
+    /// connector alignment compact in the popup.
     pub display_prefixes: Vec<Vec<bool>>,
     /// For each display item, whether it is the last sibling at its depth in the display list.
     pub display_is_last: Vec<bool>,
@@ -296,8 +297,9 @@ impl TreeViewState {
 
         // ── Step 2: prefix pipe flags (forward, O(n × max_depth)) ───────────────
         //
-        // For item i at depth d, column c (0 <= c < d) shows │ iff the item's
+        // For item i at depth d, column c (0 <= c < d-1) shows │ iff the item's
         // ancestor at depth c+1 is NOT the last in its sibling group.
+        // We skip depth 0 (root) to avoid an extra leading spacer column.
         // prefix_flags[i][c] = !is_last[ ancestor_of_i_at_depth_(c+1) ]
         //
         // Track the current ancestor at each depth using a slot array updated as
@@ -312,8 +314,8 @@ impl TreeViewState {
                 *slot = None;
             }
             // Build prefix flags from ancestor chain.
-            display_prefixes[i] = (0..d)
-                .map(|c| match current_ancestor.get(c + 1).and_then(|&o| o) {
+            display_prefixes[i] = (1..d)
+                .map(|c| match current_ancestor.get(c).and_then(|&o| o) {
                     Some(a) => !display_is_last[a],
                     None => false,
                 })
