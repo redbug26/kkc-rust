@@ -2262,6 +2262,12 @@ impl App {
         }
     }
 
+    pub fn close_file_id_view(&mut self) {
+        self.file_preview_info = false;
+        self.file_id_active = false;
+        self.file_id_scroll = 0;
+    }
+
     pub fn close_quick_preview(&mut self) {
         self.quick_preview = None;
         self.quick_preview_active = false;

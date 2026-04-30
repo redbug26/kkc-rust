@@ -164,8 +164,11 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
     // FileID panel focus mode: all navigation keys scroll the IDF card
     if app.file_id_active {
         match key.code {
-            KeyCode::Tab | KeyCode::Esc => {
+            KeyCode::Tab => {
                 app.file_id_active = false;
+            }
+            KeyCode::Esc => {
+                app.close_file_id_view();
             }
             KeyCode::Up => {
                 app.file_id_scroll_up();
@@ -379,7 +382,11 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
         }
 
         KeyCode::Esc => {
-            app.mode = AppMode::Terminal;
+            if app.file_preview_info {
+                app.close_file_id_view();
+            } else {
+                app.mode = AppMode::Terminal;
+            }
         }
 
         _ => {}
