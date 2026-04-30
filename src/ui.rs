@@ -50,6 +50,7 @@ const CLR_CURSOR_BG: Color = Color::Rgb(214, 196, 167);
 const CLR_CURSOR_FG: Color = Color::Black;
 const CLR_SELECTED: Color = Color::Rgb(255, 244, 114);
 const CLR_DIR: Color = Color::Rgb(228, 210, 181);
+const CLR_TREE: Color = Color::Rgb(132, 146, 166);
 const CLR_EXEC: Color = Color::Rgb(184, 234, 120);
 const CLR_ARCHIVE: Color = Color::Rgb(234, 166, 116);
 const CLR_AUDIO: Color = Color::Rgb(161, 238, 188);
@@ -3165,10 +3166,17 @@ fn render_tree_view(f: &mut Frame, state: &TreeViewState, area: Rect) {
             let icon = "\u{e5ff} ";
             let available = list_area.width.saturating_sub(2) as usize;
             let text = truncate_str(&format!("{connector}{icon}{}", entry.name), available);
-            Some(ListItem::new(Line::from(Span::styled(
-                format!(" {text}"),
-                Style::default().fg(fg).bg(bg),
-            ))))
+            let (connector_part, content_part) = if let Some(rest) = text.strip_prefix(&connector)
+            {
+                (connector.clone(), rest.to_string())
+            } else {
+                (text, String::new())
+            };
+            Some(ListItem::new(Line::from(vec![
+                Span::styled(" ", Style::default().fg(fg).bg(bg)),
+                Span::styled(connector_part, Style::default().fg(CLR_TREE).bg(bg)),
+                Span::styled(content_part, Style::default().fg(fg).bg(bg)),
+            ])))
         })
         .collect::<Vec<_>>();
 
