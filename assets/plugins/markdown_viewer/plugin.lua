@@ -8,11 +8,144 @@ local function line(...)
     return { ... }
 end
 
+local push
+
 local function text_len(text)
     return utf8.len(text) or #text
 end
 
-local function truncate_text(text, width)
+local truncate_text
+
+local function clone_span(source, text)
+    return {
+        text = text,
+        fg = source.fg or "white",
+        bg = source.bg or "black",
+        bold = source.bold or false,
+    }
+end
+
+local function text_chars(text)
+    local chars = {}
+    for _, code in utf8.codes(text) do chars[#chars + 1] = utf8.char(code) end
+    if #chars == 0 and #text > 0 then
+        for i = 1, #text do chars[#chars + 1] = text:sub(i, i) end
+    end
+    return chars
+end
+
+local function take_text(text, width)
+    local out = {}
+    local count = 0
+    for _, ch in ipairs(text_chars(text)) do
+        if count >= width then break end
+        out[#out + 1] = ch
+        count = count + 1
+    end
+    return table.concat(out)
+end
+
+local function split_wrap_tokens(text)
+    local tokens = {}
+    local current = {}
+    local current_space = nil
+    for _, ch in ipairs(text_chars(text)) do
+        local is_space = ch:match("%s") ~= nil
+        if current_space == nil or is_space == current_space then
+            current[#current + 1] = ch
+        else
+            tokens[#tokens + 1] = { text = table.concat(current), space = current_space }
+            current = { ch }
+        end
+        current_space = is_space
+    end
+    if #current > 0 then tokens[#tokens + 1] = { text = table.concat(current), space = current_space } end
+    return tokens
+end
+
+local function append_span_text(line_spans, source_span, text)
+    if text == "" then return end
+    local last = line_spans[#line_spans]
+    if last
+        and last.fg == (source_span.fg or "white")
+        and last.bg == (source_span.bg or "black")
+        and last.bold == (source_span.bold or false) then
+        last.text = last.text .. text
+    else
+        line_spans[#line_spans + 1] = clone_span(source_span, text)
+    end
+end
+
+local function push_wrapped(out, prefix, spans, width)
+    width = math.max(1, tonumber(width) or 80)
+    prefix = prefix or ""
+    local prefix_width = text_len(prefix)
+    local continuation = string.rep(" ", prefix_width)
+    local content_width = math.max(1, width - prefix_width)
+    local prefix_span = span(prefix, "darkgray", false)
+    local continuation_span = span(continuation, "darkgray", false)
+    local line_spans = prefix ~= "" and { prefix_span } or {}
+    local line_width = 0
+    local line_started = false
+
+    local function trim_trailing_spaces()
+        while #line_spans > 0 do
+            local last = line_spans[#line_spans]
+            local trimmed = (last.text or ""):gsub("%s+$", "")
+            if trimmed == last.text then break end
+            line_width = math.max(0, line_width - (text_len(last.text) - text_len(trimmed)))
+            if trimmed == "" then
+                table.remove(line_spans)
+            else
+                last.text = trimmed
+                break
+            end
+        end
+    end
+
+    local function flush()
+        trim_trailing_spaces()
+        push(out, line_spans)
+        line_spans = continuation ~= "" and { continuation_span } or {}
+        line_width = 0
+        line_started = false
+    end
+
+    local function append_token(source_span, token)
+        local token_text = token.text
+        local token_width = text_len(token_text)
+        if token.space and not line_started then return end
+        if line_started and line_width + token_width > content_width then
+            flush()
+            if token.space then return end
+        end
+        while token_width > content_width do
+            local part = take_text(token_text, math.max(1, content_width - line_width))
+            if part == "" then
+                flush()
+                part = take_text(token_text, content_width)
+            end
+            append_span_text(line_spans, source_span, part)
+            token_text = token_text:sub(#part + 1)
+            flush()
+            token_width = text_len(token_text)
+        end
+        if token_text ~= "" then
+            append_span_text(line_spans, source_span, token_text)
+            line_width = line_width + token_width
+            if not token.space then line_started = true end
+        end
+    end
+
+    for _, source_span in ipairs(spans) do
+        for _, token in ipairs(split_wrap_tokens(source_span.text or "")) do
+            append_token(source_span, token)
+        end
+    end
+    if line_started or line_width > 0 then flush() end
+end
+
+function truncate_text(text, width)
     if text_len(text) <= width then return text end
     local out = {}
     local count = 0
@@ -44,7 +177,7 @@ local function read_all(path)
     return data
 end
 
-local function push(out, spans)
+function push(out, spans)
     table.insert(out, spans)
 end
 
@@ -93,10 +226,8 @@ local function parse_inline(text, base_fg, base_bold)
     return spans
 end
 
-local function append_prefixed(out, prefix, text, fg, bold)
-    local spans = { span(prefix, "darkgray", false) }
-    for _, s in ipairs(parse_inline(text, fg, bold)) do table.insert(spans, s) end
-    push(out, spans)
+local function append_prefixed(out, prefix, text, fg, bold, width)
+    push_wrapped(out, prefix, parse_inline(text, fg, bold), width)
 end
 
 local function split_table_row(row)
@@ -158,7 +289,7 @@ local function render_table(out, rows, separator, max_width)
         end
     end
 
-    max_width = math.max(30, tonumber(max_width) or 100)
+    max_width = math.max(10, tonumber(max_width) or 100)
     local sep_width = math.max(0, col_count - 1) * 3
     local function total_width()
         local total = sep_width
@@ -203,10 +334,15 @@ local function render_markdown(path, mode, state, width)
     end
 
     input = input:gsub("\r\n", "\n"):gsub("\r", "\n")
-    local out = {
-        line(span("Markdown", "yellow", true), span("  file: ", "gray"), span(path:match("([^\\/]+)$") or path, "white"), span("  bytes: ", "gray"), span(tostring(#input), "lightmagenta")),
-        line(span("")),
-    }
+    local out = {}
+    push_wrapped(out, "", {
+        span("Markdown", "yellow", true),
+        span("  file: ", "gray"),
+        span(path:match("([^\\/]+)$") or path, "white"),
+        span("  bytes: ", "gray"),
+        span(tostring(#input), "lightmagenta"),
+    }, width)
+    push(out, line(span("")))
 
     local in_code = false
     local code_lang = ""
@@ -221,24 +357,24 @@ local function render_markdown(path, mode, state, width)
         if fence then
             in_code = not in_code
             code_lang = in_code and fence or ""
-            push(out, line(span(in_code and ("┌─ code " .. code_lang) or "└─", "darkgray")))
+            push_wrapped(out, "", { span(in_code and ("┌─ code " .. code_lang) or "└─", "darkgray") }, width)
         elseif in_code then
-            push(out, line(span("  " .. line_text, "lightgreen")))
+            push_wrapped(out, "  ", { span(line_text, "lightgreen") }, width)
         elseif line_text:match("^%s*$") then
             push(out, line(span("")))
         else
             local h, title = line_text:match("^(#+)%s+(.+)$")
             if h then
-                push(out, line(span(string.rep("#", #h) .. " ", "darkgray", true), span(title, "yellow", true)))
+                push_wrapped(out, string.rep("#", #h) .. " ", { span(title, "yellow", true) }, width)
             elseif line_text:match("^%s*>") then
                 local text = line_text:gsub("^%s*>%s?", "")
-                append_prefixed(out, "│ ", text, "gray", false)
+                append_prefixed(out, "│ ", text, "gray", false, width)
             elseif line_text:match("^%s*[-*+]%s+") then
                 local indent, text = line_text:match("^(%s*)[-*+]%s+(.+)$")
-                append_prefixed(out, string.rep(" ", math.floor(#indent / 2) * 2) .. "• ", text, "white", false)
+                append_prefixed(out, string.rep(" ", math.floor(#indent / 2) * 2) .. "• ", text, "white", false, width)
             elseif line_text:match("^%s*%d+[.)]%s+") then
                 local indent, num, text = line_text:match("^(%s*)(%d+)[.)]%s+(.+)$")
-                append_prefixed(out, string.rep(" ", math.floor(#indent / 2) * 2) .. num .. ". ", text, "white", false)
+                append_prefixed(out, string.rep(" ", math.floor(#indent / 2) * 2) .. num .. ". ", text, "white", false, width)
             elseif line_text:find("|", 1, true)
                 and source_lines[idx + 1]
                 and is_table_separator(source_lines[idx + 1]) then
@@ -254,7 +390,7 @@ local function render_markdown(path, mode, state, width)
             elseif line_text:match("^%s*[-*_][%s%-*_]+$") then
                 push(out, line(span(string.rep("─", math.min(tonumber(width) or 80, 100)), "darkgray")))
             else
-                push(out, parse_inline(line_text, "white", false))
+                push_wrapped(out, "", parse_inline(line_text, "white", false), width)
             end
         end
         idx = idx + 1

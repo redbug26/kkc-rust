@@ -2545,6 +2545,77 @@ mod tests {
     }
 
     #[test]
+    fn bundled_markdown_viewer_wraps_to_document_width() {
+        let md_path = std::env::temp_dir().join(format!(
+            "kkc-markdown-viewer-wrap-{}.md",
+            std::process::id()
+        ));
+        fs::write(
+            &md_path,
+            "# A heading that should wrap when the panel is narrow\n\nThis paragraph contains **bold words** and a [link](https://example.com) that should wrap cleanly across several terminal rows.\n\n- A list item with enough text to wrap and align continuation lines under the item text\n",
+        )
+        .expect("write markdown");
+
+        let script_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("plugins")
+            .join("markdown_viewer")
+            .join("plugin.lua");
+        let plugin = ViewerPlugin {
+            name: "markdown_viewer".into(),
+            version: "1.0.0".into(),
+            description: String::new(),
+            plugin_dir: script_path.parent().expect("plugin dir").to_path_buf(),
+            script_path,
+            modes: vec!["text".into()],
+            mime_types: vec!["text/markdown".into()],
+            extensions: vec!["md".into()],
+        };
+
+        let rendered = plugin
+            .render_document(&md_path, "text", &HashMap::new(), 32)
+            .expect("markdown viewer should render")
+            .expect("markdown viewer should return lines");
+        let rendered_text: Vec<String> = rendered
+            .iter()
+            .map(|line| line.iter().map(|span| span.text.as_str()).collect())
+            .collect();
+
+        assert!(
+            rendered_text
+                .iter()
+                .any(|line| line == "# A heading that should wrap")
+        );
+        assert!(
+            rendered_text
+                .iter()
+                .any(|line| line == "  when the panel is narrow")
+        );
+        assert!(
+            rendered_text
+                .iter()
+                .any(|line| line.starts_with("• A list item"))
+        );
+        assert!(
+            rendered_text
+                .iter()
+                .any(|line| line.starts_with("  ") && line.contains("continuation"))
+        );
+        let too_wide = rendered_text
+            .iter()
+            .filter(|line| text_len_for_test(line) > 32)
+            .cloned()
+            .collect::<Vec<_>>();
+        assert!(too_wide.is_empty(), "too-wide lines: {too_wide:?}");
+
+        let _ = fs::remove_file(&md_path);
+    }
+
+    fn text_len_for_test(text: &str) -> usize {
+        text.chars().count()
+    }
+
+    #[test]
     fn bundled_json_viewer_renders_pretty_and_tree() {
         let json_path =
             std::env::temp_dir().join(format!("kkc-json-viewer-{}.json", std::process::id()));
