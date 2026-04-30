@@ -1099,6 +1099,9 @@ impl Viewer {
     }
 
     fn plugin_document_line_count(&self) -> Option<usize> {
+        if let Some(cache) = self.plugin_document_cache.borrow().as_ref() {
+            return Some(cache.lines.len());
+        }
         self.ensure_plugin_document_cache(self.plugin_document_width())?;
         self.plugin_document_cache
             .borrow()
