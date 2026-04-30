@@ -10,13 +10,6 @@ use std::rc::Rc;
 use std::sync::{OnceLock, RwLock};
 use zip::ZipArchive;
 
-const BUNDLED_DSK_LUA: &str = include_str!("../assets/plugins/amstrad_dsk/dsk.lua");
-const BUNDLED_DSK_LUA_LICENSE: &str = include_str!("../assets/plugins/amstrad_dsk/LICENSE.dsk-lua");
-const BUNDLED_AMSTRAD_DSK_PLUGIN: &str = include_str!("../assets/plugins/amstrad_dsk/plugin.lua");
-const BUNDLED_AMSDOS_VIEWER_PLUGIN: &str =
-    include_str!("../assets/plugins/amsdos_viewer/plugin.lua");
-const BUNDLED_COMMODORE_D64_PLUGIN: &str =
-    include_str!("../assets/plugins/commodore_d64/plugin.lua");
 const BUNDLED_LHA_LZH_PLUGIN: &str = include_str!("../assets/plugins/lha_lzh/plugin.lua");
 const BUNDLED_PDF_FILE_PLUGIN: &str = include_str!("../assets/plugins/pdf_file/plugin.lua");
 const BUNDLED_HTML_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/html_viewer/plugin.lua");
@@ -29,9 +22,6 @@ const BUNDLED_MARKDOWN_VIEWER_PLUGIN: &str =
 const BUNDLED_TEXT_SYNTAX_PLUGIN: &str = include_str!("../assets/plugins/text_syntax/plugin.lua");
 const BUNDLED_GIT_ACTION_PLUGIN: &str = include_str!("../assets/plugins/git_action/plugin.lua");
 const BUNDLED_PLUGIN_DIRS: &[&str] = &[
-    "amstrad_dsk",
-    "amsdos_viewer",
-    "commodore_d64",
     "lha_lzh",
     "pdf_file",
     "html_viewer",
@@ -954,27 +944,6 @@ fn ensure_plugins_dir() -> Result<PathBuf> {
 }
 
 fn install_bundled_plugins(plugins_dir: &Path) -> Result<()> {
-    let amstrad_dir = plugins_dir.join("amstrad_dsk");
-    fs::create_dir_all(&amstrad_dir)?;
-
-    write_bundled_file(&amstrad_dir.join("dsk.lua"), BUNDLED_DSK_LUA)?;
-    write_bundled_file(
-        &amstrad_dir.join("LICENSE.dsk-lua"),
-        BUNDLED_DSK_LUA_LICENSE,
-    )?;
-    write_bundled_file(&amstrad_dir.join("plugin.lua"), BUNDLED_AMSTRAD_DSK_PLUGIN)?;
-
-    let amsdos_dir = plugins_dir.join("amsdos_viewer");
-    fs::create_dir_all(&amsdos_dir)?;
-    write_bundled_file(&amsdos_dir.join("plugin.lua"), BUNDLED_AMSDOS_VIEWER_PLUGIN)?;
-
-    let commodore_dir = plugins_dir.join("commodore_d64");
-    fs::create_dir_all(&commodore_dir)?;
-    write_bundled_file(
-        &commodore_dir.join("plugin.lua"),
-        BUNDLED_COMMODORE_D64_PLUGIN,
-    )?;
-
     let lha_dir = plugins_dir.join("lha_lzh");
     fs::create_dir_all(&lha_dir)?;
     write_bundled_file(&lha_dir.join("plugin.lua"), BUNDLED_LHA_LZH_PLUGIN)?;
@@ -1380,6 +1349,13 @@ where
         lua.create_function(|_, path: String| Ok(Path::new(&path).exists()))?,
     )?;
     kkc.set(
+        "debug_log",
+        lua.create_function(|_, message: String| {
+            crate::viewer::debug_log(&format!("plugin: {message}"));
+            Ok(())
+        })?,
+    )?;
+    kkc.set(
         "exec",
         lua.create_function(
             |lua, (program, args, cwd): (String, Option<Table>, Option<String>)| {
@@ -1777,6 +1753,12 @@ impl ViewerPlugin {
                 let Some(render) = table.get::<Option<Function>>("render")? else {
                     return Ok(None);
                 };
+
+                crate::viewer::debug_log(&format!(
+                    "Rendering document with plugin '{}'",
+                    self.name
+                ));
+
                 let result: Option<Table> = render.call((
                     path.to_string_lossy().into_owned(),
                     mode.to_string(),
@@ -2406,6 +2388,12 @@ mod tests {
         let default_text = lines_to_text(&default_rendered);
         assert!(default_text.contains("wrap: "));
         assert!(default_text.contains("on"));
+        assert_eq!(
+            default_rendered[2][0].text.as_str(),
+            " │ ",
+            "CSV header gutter should be blank"
+        );
+        assert_eq!(default_rendered[4][0].text.as_str(), "1│ ");
 
         let (_, state) = plugin
             .handle_key(&csv_path, "text", "f2", &HashMap::new())
@@ -2670,116 +2658,6 @@ mod tests {
     }
 
     #[test]
-    fn bundled_amstrad_dsk_viewer_plugin_registers() {
-        let script = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("assets")
-            .join("plugins")
-            .join("amstrad_dsk")
-            .join("plugin.lua");
-
-        let plugins = inspect_viewer_plugin(&script).expect("viewer plugin should load");
-
-        assert_eq!(plugins.len(), 1);
-        assert_eq!(plugins[0].name, "amstrad_dsk_directory");
-        assert_eq!(plugins[0].version, "1.0.0");
-        assert_eq!(plugins[0].modes, vec!["text"]);
-    }
-
-    #[test]
-    fn bundled_commodore_d64_viewer_plugin_registers() {
-        let script = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("assets")
-            .join("plugins")
-            .join("commodore_d64")
-            .join("plugin.lua");
-
-        let plugins = inspect_viewer_plugin(&script).expect("viewer plugin should load");
-
-        assert_eq!(plugins.len(), 1);
-        assert_eq!(plugins[0].name, "commodore_d64_directory");
-        assert_eq!(plugins[0].version, "1.0.0");
-        assert_eq!(plugins[0].modes, vec!["text"]);
-    }
-
-    #[test]
-    fn commodore_d64_viewer_handles_petscii_and_del_entries() {
-        fn d64_offset(track: usize, sector: usize) -> usize {
-            const SECTORS_PER_TRACK: [usize; 35] = [
-                21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 19, 19, 19, 19,
-                19, 19, 19, 18, 18, 18, 18, 18, 18, 17, 17, 17, 17, 17,
-            ];
-            (SECTORS_PER_TRACK[..track - 1].iter().sum::<usize>() + sector) * 256
-        }
-
-        let root = std::env::temp_dir().join(format!(
-            "kkc-d64-view-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        ));
-        fs::create_dir_all(&root).expect("temp dir");
-        let image_path = root.join("petscii.d64");
-        let mut image = vec![0u8; 174_848];
-
-        let bam = d64_offset(18, 0);
-        image[bam] = 18;
-        image[bam + 1] = 1;
-        image[bam + 2] = b'A';
-        image[bam + 144..bam + 148].copy_from_slice(&[0xd5, 0xc9, 0xca, 0xcb]);
-        image[bam + 162..bam + 164].copy_from_slice(b"42");
-        image[bam + 165..bam + 167].copy_from_slice(b"2A");
-
-        let dir = d64_offset(18, 1);
-        image[dir] = 0;
-        image[dir + 1] = 255;
-        image[dir + 2] = 0x80;
-        image[dir + 5..dir + 8].copy_from_slice(&[0xc4, 0xc5, 0xcc]);
-        image[dir + 8] = 0xb6;
-        image[dir + 34] = 0x82;
-        image[dir + 35] = 17;
-        image[dir + 36] = 0;
-        image[dir + 37..dir + 41].copy_from_slice(b"FILE");
-        image[dir + 62] = 5;
-
-        fs::write(&image_path, image).expect("write d64");
-
-        let script_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("assets")
-            .join("plugins")
-            .join("commodore_d64")
-            .join("plugin.lua");
-        let plugin = ViewerPlugin {
-            name: "commodore_d64_directory".into(),
-            version: "1.0.0".into(),
-            description: String::new(),
-            plugin_dir: script_path.parent().expect("plugin dir").to_path_buf(),
-            script_path,
-            modes: vec!["text".into()],
-            mime_types: vec!["application/x-c64-d64".into()],
-            extensions: Vec::new(),
-        };
-
-        let lines = plugin
-            .render_document(&image_path, "text", &HashMap::new(), 120)
-            .expect("viewer should render")
-            .expect("viewer should return lines");
-        let text = lines
-            .iter()
-            .flat_map(|line| line.iter().map(|span| span.text.as_str()))
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        assert!(text.contains("\"UIJK"));
-        assert!(text.contains("┤"));
-        assert!(text.contains("\"DEL┤"));
-        assert!(text.contains("DEL"));
-        assert!(text.contains("\"FILE"));
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
     fn bundled_text_syntax_highlights_rust_keywords() {
         let script_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("assets")
@@ -2820,6 +2698,40 @@ mod tests {
                 .iter()
                 .all(|span| span.bg.as_deref() == Some("black"))
         );
+    }
+
+    #[test]
+    fn lua_plugins_can_write_debug_log() {
+        let root = std::env::temp_dir().join(format!(
+            "kkc-debug-log-plugin-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).expect("temp dir");
+        let script_path = root.join("plugin.lua");
+        fs::write(
+            &script_path,
+            r#"local kkc = require("kkc")
+kkc.debug_log("viewer plugin registered")
+kkc.register_viewer_plugin({
+    name = "debug_log_test",
+    modes = { "text" },
+    render_line = function(_, _, line)
+        return { { text = line, fg = "white" } }
+    end,
+})
+"#,
+        )
+        .expect("write plugin");
+
+        let plugins = inspect_viewer_plugin(&script_path).expect("viewer plugin should load");
+
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(plugins[0].name, "debug_log_test");
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

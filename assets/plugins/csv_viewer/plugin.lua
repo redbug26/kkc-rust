@@ -221,6 +221,24 @@ local function span(text, fg, bold)
     return { text = text, fg = fg or "white", bg = "black", bold = bold or false }
 end
 
+local function line_no_span(line_no, width)
+    if width <= 0 then
+        return span("")
+    end
+    if line_no then
+        return span(string.format("%" .. tostring(width - 2) .. "d│ ", line_no), "darkgray")
+    end
+    return span(string.rep(" ", width - 2) .. "│ ", "darkgray")
+end
+
+local function with_line_no(line_no, width, spans)
+    local out = { line_no_span(line_no, width) }
+    for _, sp in ipairs(spans) do
+        table.insert(out, sp)
+    end
+    return out
+end
+
 local function render_csv(path, mode, state, width)
     if mode ~= "text" then
         return nil
@@ -242,53 +260,51 @@ local function render_csv(path, mode, state, width)
     local hscroll  = tonumber(state.hscroll) or 0
     if wrap then hscroll = 0 end
 
-    -- Read file line by line, capping at MAX_ROWS + header
+    -- Read and parse once. Rendering can be called often by the host, so keep
+    -- this pass linear and avoid keeping both raw and parsed copies.
     local file, err = io.open(path, "r")
     if not file then
         return { { span("Error opening file: " .. tostring(err), "red") } }
     end
 
-    local raw_lines  = {}
-    local total_rows = 0
-    for raw in file:lines() do
-        raw = raw:gsub("\r$", "")
-        total_rows = total_rows + 1
-        if total_rows <= MAX_ROWS + 1 then
-            table.insert(raw_lines, raw)
-        end
-    end
-    file:close()
-
-    if #raw_lines == 0 then
+    local first = file:read("*l")
+    if not first then
+        file:close()
         return { { span("(empty file)", "gray") } }
     end
 
-    local sep       = detect_separator(raw_lines[1])
+    first           = first:gsub("\r$", "")
+    local sep       = detect_separator(first)
     local sep_label = sep == "\t" and "TAB" or sep == "|" and "|" or sep
 
-    -- Parse all rows
     local rows      = {}
-    for _, raw in ipairs(raw_lines) do
-        table.insert(rows, parse_line(raw, sep))
-    end
-
-    -- Determine column count, widths, and numeric flags
-    local col_count = 0
-    for _, row in ipairs(rows) do
-        if #row > col_count then col_count = #row end
-    end
-
-    -- Clamp sort_col to valid range
-    sort_col          = math.min(sort_col, col_count)
-
+    local row_numbers = {}
     local col_widths  = {}
     local col_numeric = {}
-    for col = 1, col_count do
-        col_widths[col]  = 0
-        col_numeric[col] = true
+    local col_count   = 0
+    local total_rows  = 0
+
+    local function ensure_columns(count)
+        while col_count < count do
+            col_count = col_count + 1
+            col_widths[col_count] = 0
+            col_numeric[col_count] = true
+        end
     end
 
-    for row_idx, row in ipairs(rows) do
+    local function add_row(raw)
+        raw = raw:gsub("\r$", "")
+        total_rows = total_rows + 1
+        if total_rows > MAX_ROWS + 1 then
+            return
+        end
+        local row = parse_line(raw, sep)
+        ensure_columns(#row)
+        table.insert(rows, row)
+        local row_idx = #rows
+        if row_idx > 1 then
+            row_numbers[row_idx] = row_idx - 1
+        end
         for col = 1, #row do
             local val = row[col] or ""
             local w   = text_len(val)
@@ -304,6 +320,17 @@ local function render_csv(path, mode, state, width)
             end
         end
     end
+    add_row(first)
+    for raw in file:lines() do
+        add_row(raw)
+    end
+    file:close()
+
+    -- Clamp sort_col to valid range
+    sort_col = math.min(sort_col, col_count)
+
+    local line_no_width = text_len(tostring(total_rows)) + 2
+    local table_width = math.max(1, max_width - line_no_width)
 
     -- Reserve room for sort indicator "▲"/"▼" in the active column header
     if sort_col > 0 and col_widths[sort_col] then
@@ -315,20 +342,21 @@ local function render_csv(path, mode, state, width)
 
     -- Shrink column widths so the total line width fits the panel width
     if wrap then
-        col_widths = fit_widths(col_widths, max_width)
+        col_widths = fit_widths(col_widths, table_width)
     end
 
     -- Sort data rows (keep header at position 1)
     if sort_col > 0 and #rows > 1 then
         local header = rows[1]
+        local header_line_no = row_numbers[1]
         local data   = {}
         for i = 2, #rows do
-            data[i - 1] = rows[i]
+            data[i - 1] = { row = rows[i], line_no = row_numbers[i] }
         end
         local numeric_sort = col_numeric[sort_col]
         table.sort(data, function(a, b)
-            local va = a[sort_col] or ""
-            local vb = b[sort_col] or ""
+            local va = a.row[sort_col] or ""
+            local vb = b.row[sort_col] or ""
             if numeric_sort then
                 local na, nb = tonumber(va), tonumber(vb)
                 if na and nb then
@@ -348,8 +376,10 @@ local function render_csv(path, mode, state, width)
             end
         end)
         rows = { header }
-        for _, r in ipairs(data) do
-            table.insert(rows, r)
+        row_numbers = { header_line_no }
+        for _, item in ipairs(data) do
+            table.insert(rows, item.row)
+            table.insert(row_numbers, item.line_no)
         end
     end
 
@@ -428,11 +458,12 @@ local function render_csv(path, mode, state, width)
             table.insert(spans, span(padded, fg, is_header))
         end
 
-        if wrap then
-            table.insert(out, spans)
-        else
-            table.insert(out, clip_spans(spans, hscroll, max_width))
+        local line_no = row_numbers[row_idx]
+        if is_header then
+            line_no = nil
         end
+        local rendered_spans = wrap and spans or clip_spans(spans, hscroll, table_width)
+        table.insert(out, with_line_no(line_no, line_no_width, rendered_spans))
 
         -- Separator line under the header
         if is_header then
@@ -443,11 +474,8 @@ local function render_csv(path, mode, state, width)
                 end
                 table.insert(sep_spans, span(string.rep("─", col_widths[col]), "gray"))
             end
-            if wrap then
-                table.insert(out, sep_spans)
-            else
-                table.insert(out, clip_spans(sep_spans, hscroll, max_width))
-            end
+            local rendered_sep = wrap and sep_spans or clip_spans(sep_spans, hscroll, table_width)
+            table.insert(out, with_line_no(nil, line_no_width, rendered_sep))
         end
     end
 

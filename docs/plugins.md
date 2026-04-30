@@ -64,8 +64,15 @@ Available functions:
 - `kkc.path_exists(path)`: returns `true` if `path` exists.
 - `kkc.write_file(path, content)`: writes a file, creating parent directories when needed.
 - `kkc.exec(program, args, cwd)`: runs a program without a shell and returns `{ success, status, stdout, stderr }`.
+- `kkc.debug_log(message)`: writes a message to KKC's debug log when debug logging is enabled. Messages are prefixed with `plugin:`.
 
 `sj.error(message)` is also available and raises a Lua error.
+
+Example:
+
+```lua
+kkc.debug_log("loaded " .. path)
+```
 
 ## Archive Plugins
 

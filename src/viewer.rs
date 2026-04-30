@@ -8,7 +8,7 @@ use image::{ImageFormat, ImageReader};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::env;
 use std::fs;
@@ -115,8 +115,23 @@ pub struct Viewer {
     text_lines: Vec<String>,
     ansi_lines: Vec<String>,
     image: Option<ImageInfo>,
+    plugin_document_cache: RefCell<Option<PluginDocumentCache>>,
     /// Bytes-per-row for hex mode, updated lazily during rendering to match panel width.
     pub hex_bytes_per_row: Cell<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PluginDocumentCacheKey {
+    plugin_name: String,
+    mode: &'static str,
+    state: Vec<(String, String)>,
+    width: usize,
+}
+
+#[derive(Debug, Clone)]
+struct PluginDocumentCache {
+    key: PluginDocumentCacheKey,
+    lines: Vec<Vec<crate::plugins::ViewerSpan>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -226,6 +241,7 @@ impl Viewer {
             text_lines: lines,
             ansi_lines: Vec::new(),
             image: None,
+            plugin_document_cache: RefCell::new(None),
             hex_bytes_per_row: Cell::new(16),
         }
     }
@@ -290,6 +306,7 @@ impl Viewer {
             text_lines: Vec::new(),
             ansi_lines: Vec::new(),
             image,
+            plugin_document_cache: RefCell::new(None),
             hex_bytes_per_row: Cell::new(16),
         };
         // Only decode the initial mode — other modes are built lazily on first access.
@@ -1076,22 +1093,17 @@ impl Viewer {
         Some(
             highlighted
                 .into_iter()
-                .map(|spans| viewer_plugin_line(spans, width))
+                .map(|spans| viewer_plugin_line(&spans, width))
                 .collect(),
         )
     }
 
     fn plugin_document_line_count(&self) -> Option<usize> {
-        let mode = self.viewer_mode_key()?;
-        let plugin_name = self.viewer_plugin.as_deref()?;
-        crate::plugins::render_viewer_document(
-            &self.path,
-            mode,
-            plugin_name,
-            &self.plugin_state,
-            self.plugin_document_width(),
-        )
-        .map(|lines| lines.len())
+        self.ensure_plugin_document_cache(self.plugin_document_width())?;
+        self.plugin_document_cache
+            .borrow()
+            .as_ref()
+            .map(|cache| cache.lines.len())
     }
 
     fn plugin_document_width(&self) -> usize {
@@ -1101,20 +1113,13 @@ impl Viewer {
     }
 
     fn plugin_document_plain_lines(&self, width: usize) -> Option<Vec<String>> {
-        let mode = self.viewer_mode_key()?;
-        let plugin_name = self.viewer_plugin.as_deref()?;
-        crate::plugins::render_viewer_document(
-            &self.path,
-            mode,
-            plugin_name,
-            &self.plugin_state,
-            width,
-        )
-        .map(|lines| {
-            lines
-                .into_iter()
+        self.ensure_plugin_document_cache(width)?;
+        self.plugin_document_cache.borrow().as_ref().map(|cache| {
+            cache
+                .lines
+                .iter()
                 .map(|line| {
-                    line.into_iter()
+                    line.iter()
                         .map(|span| sanitize_plugin_text(&span.text))
                         .collect::<String>()
                 })
@@ -1128,8 +1133,33 @@ impl Viewer {
         height: usize,
         width: usize,
     ) -> Option<Vec<Line<'static>>> {
+        self.ensure_plugin_document_cache(width)?;
+        self.plugin_document_cache.borrow().as_ref().map(|cache| {
+            cache
+                .lines
+                .iter()
+                .skip(start)
+                .take(height)
+                .map(|line| viewer_plugin_line(line, width))
+                .collect()
+        })
+    }
+
+    fn ensure_plugin_document_cache(&self, width: usize) -> Option<()> {
         let mode = self.viewer_mode_key()?;
         let plugin_name = self.viewer_plugin.as_deref()?;
+        let key = PluginDocumentCacheKey {
+            plugin_name: plugin_name.to_string(),
+            mode,
+            state: plugin_state_cache_key(&self.plugin_state),
+            width,
+        };
+        if let Some(cache) = self.plugin_document_cache.borrow().as_ref() {
+            if cache.key == key {
+                return Some(());
+            }
+        }
+
         let lines = crate::plugins::render_viewer_document(
             &self.path,
             mode,
@@ -1137,14 +1167,8 @@ impl Viewer {
             &self.plugin_state,
             width,
         )?;
-        Some(
-            lines
-                .into_iter()
-                .skip(start)
-                .take(height)
-                .map(|line| viewer_plugin_line(line, width))
-                .collect(),
-        )
+        *self.plugin_document_cache.borrow_mut() = Some(PluginDocumentCache { key, lines });
+        Some(())
     }
 
     fn viewer_mode_key(&self) -> Option<&'static str> {
@@ -1297,7 +1321,16 @@ fn sanitize_plugin_text(s: &str) -> String {
     out
 }
 
-fn viewer_plugin_line(spans: Vec<crate::plugins::ViewerSpan>, width: usize) -> Line<'static> {
+fn plugin_state_cache_key(state: &HashMap<String, String>) -> Vec<(String, String)> {
+    let mut entries = state
+        .iter()
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect::<Vec<_>>();
+    entries.sort_unstable_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+    entries
+}
+
+fn viewer_plugin_line(spans: &[crate::plugins::ViewerSpan], width: usize) -> Line<'static> {
     if width == 0 {
         return Line::from(String::new());
     }
