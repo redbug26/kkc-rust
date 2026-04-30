@@ -5,6 +5,7 @@ mod cloud_status;
 mod config;
 mod copy;
 mod events;
+mod file_icons;
 mod file_ops;
 mod file_types;
 mod gif_recorder;

@@ -313,7 +313,7 @@ fn render_panel_entries(
             };
 
             let display_name = if show_file_icons && entry.is_dir {
-                format!("\u{f07b} {}", entry.name)
+                format!("{} {}", entry.file_icon.unwrap_or("\u{e5ff}"), entry.name)
             } else if entry.is_dir && entry.name != ".." {
                 format!("/{}", entry.name)
             } else {

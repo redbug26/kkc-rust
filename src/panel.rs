@@ -1,7 +1,6 @@
 use crate::archive;
 use crate::config::SortMode;
 use crate::file_types::FileCategory;
-use crate::idf::{IdInfo, IdfKind};
 use crate::remote::{
     RemoteEntry, RemoteProfile, display_path as remote_display_path, list_dir,
     normalize_remote_cwd, resolve_initial_dir,
@@ -65,7 +64,7 @@ impl Entry {
         let file_icon = if cloud_only {
             None
         } else {
-            crate::idf::probe_path(path).as_ref().and_then(idf_icon)
+            crate::file_icons::icon_for_entry(&name, is_dir)
         };
 
         Ok(Self {
@@ -159,7 +158,7 @@ impl Panel {
                 selected: false,
                 mode: 0o755,
                 cloud_only: false,
-                file_icon: Some("\u{f07b}"),
+                file_icon: crate::file_icons::icon_for_entry("..", true),
             })
         };
         self.sort_entries(&mut entries);
@@ -288,7 +287,7 @@ impl Panel {
             selected: false,
             mode: 0o755,
             cloud_only: false,
-            file_icon: Some("\u{f07b}"),
+            file_icon: crate::file_icons::icon_for_entry("..", true),
         })
     }
 
@@ -783,28 +782,6 @@ impl Panel {
             cloud_only: false,
             file_icon: None,
         }
-    }
-}
-
-fn idf_icon(info: &IdInfo) -> Option<&'static str> {
-    if info.mime_type == "inode/directory" {
-        return Some("\u{f07b}");
-    }
-
-    match info.kind {
-        IdfKind::Archive => Some("\u{f410}"),
-        IdfKind::Module | IdfKind::Sample => Some("\u{f001}"),
-        IdfKind::Bitmap => Some("\u{f1c5}"),
-        IdfKind::Animation => Some("\u{f1c8}"),
-        IdfKind::Other => match info.mime_type.as_str() {
-            mime if mime.starts_with("text/") => Some("\u{f15c}"),
-            "application/json" | "application/xml" | "text/xml" => Some("\u{f1c9}"),
-            "application/pdf" => Some("\u{f1c1}"),
-            mime if mime.starts_with("image/") => Some("\u{f1c5}"),
-            mime if mime.starts_with("video/") => Some("\u{f1c8}"),
-            mime if mime.starts_with("audio/") => Some("\u{f001}"),
-            _ => None,
-        },
     }
 }
 
