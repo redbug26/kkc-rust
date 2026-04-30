@@ -339,6 +339,12 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
             app.active_panel_mut().move_end();
             app.refresh_quick_preview();
         }
+        KeyCode::Right if app.active == crate::app::ActivePanel::Left => {
+            app.send_active_entry_to_other_panel()?;
+        }
+        KeyCode::Left if app.active == crate::app::ActivePanel::Right => {
+            app.send_active_entry_to_other_panel()?;
+        }
         KeyCode::Tab => {
             if app.quick_preview.is_some() {
                 app.quick_preview_active = true;

@@ -1217,6 +1217,34 @@ impl App {
         self.active = self.active.other();
     }
 
+    pub fn send_active_entry_to_other_panel(&mut self) -> Result<()> {
+        let Some(entry) = self.active_panel().current_entry().cloned() else {
+            return Ok(());
+        };
+        let source_dir = self.active_panel().path.clone();
+        let source_is_remote = self.active_panel().is_remote_view();
+        let other_is_remote = self.other_panel().is_remote_view();
+
+        self.close_quick_preview();
+        self.close_file_id_view();
+
+        if source_is_remote || other_is_remote {
+            self.notify("Arrow panel sync is only supported for local panels");
+            return Ok(());
+        }
+
+        if entry.is_dir {
+            self.other_panel_mut().enter_dir(entry.path)?;
+        } else {
+            let name = entry.name;
+            let other = self.other_panel_mut();
+            other.enter_dir(source_dir)?;
+            other.restore_cursor_by_name(&name);
+        }
+        self.switch_panel();
+        Ok(())
+    }
+
     pub fn swap_panels(&mut self) {
         std::mem::swap(&mut self.left, &mut self.right);
         std::mem::swap(&mut self.left_tabs, &mut self.right_tabs);
@@ -2774,4 +2802,80 @@ fn spawn_remote_connect_task(profile: RemoteProfile, show_hidden: bool) -> Remot
         }
     });
     RemoteConnectTask { rx, cancel }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_app_with_dirs(name: &str) -> (App, PathBuf) {
+        let root = std::env::temp_dir().join(format!(
+            "kkc-app-panel-sync-{}-{}",
+            name,
+            std::process::id()
+        ));
+        let left = root.join("left");
+        let right = root.join("right");
+        fs::create_dir_all(&left).expect("create left dir");
+        fs::create_dir_all(&right).expect("create right dir");
+
+        let mut config = Config::default();
+        config.left.path = left;
+        config.right.path = right;
+        config.active_panel = ActivePanelSide::Left;
+        (App::new(config), root)
+    }
+
+    #[test]
+    fn arrow_panel_sync_opens_selected_dir_in_other_panel() {
+        let (mut app, root) = test_app_with_dirs("dir");
+        let target = app.left.path.join("folder");
+        fs::create_dir_all(&target).expect("create target dir");
+        app.left.reload().expect("reload left");
+        app.left.restore_cursor_by_name("folder");
+        app.file_preview_info = true;
+        app.file_id_active = true;
+        app.file_id_scroll = 5;
+
+        app.send_active_entry_to_other_panel()
+            .expect("sync should succeed");
+
+        assert_eq!(app.right.path, target);
+        assert_eq!(app.active, ActivePanel::Right);
+        assert!(!app.file_preview_info);
+        assert!(!app.file_id_active);
+        assert_eq!(app.file_id_scroll, 0);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn arrow_panel_sync_opens_source_dir_and_selects_file_in_other_panel() {
+        let (mut app, root) = test_app_with_dirs("file");
+        let source_dir = app.left.path.clone();
+        fs::write(source_dir.join("alpha.txt"), b"alpha").expect("write file");
+        fs::write(source_dir.join("beta.txt"), b"beta").expect("write file");
+        app.left.reload().expect("reload left");
+        app.left.restore_cursor_by_name("beta.txt");
+        app.quick_preview = Some(crate::viewer::Viewer::placeholder(
+            &source_dir.join("beta.txt"),
+            "Preview",
+            false,
+        ));
+        app.quick_preview_active = true;
+
+        app.send_active_entry_to_other_panel()
+            .expect("sync should succeed");
+
+        assert_eq!(app.right.path, source_dir);
+        assert_eq!(app.active, ActivePanel::Right);
+        assert_eq!(
+            app.right.current_entry().map(|entry| entry.name.as_str()),
+            Some("beta.txt")
+        );
+        assert!(app.quick_preview.is_none());
+        assert!(!app.quick_preview_active);
+
+        let _ = fs::remove_dir_all(root);
+    }
 }
