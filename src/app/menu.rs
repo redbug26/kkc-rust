@@ -48,6 +48,7 @@ pub enum MenuAction {
     DeselectPattern,
     InvertSelection,
     SearchFiles,
+    TreeView,
     InstallPluginFromStore,
     RemoteConnect,
     FileIdPreview,
@@ -473,6 +474,7 @@ pub static MENU_DATA: &[&[MenuEntry]] = &[
     ],
     &[
         ("Search..", Some("A-F7"), MenuAction::SearchFiles),
+        ("Tree View..", None, MenuAction::TreeView),
         (
             "Install from Store..",
             None,

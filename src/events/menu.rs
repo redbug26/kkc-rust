@@ -257,6 +257,9 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
         MenuAction::SearchFiles => {
             app.open_search();
         }
+        MenuAction::TreeView => {
+            app.open_tree_view();
+        }
         MenuAction::InstallPluginFromStore => {
             let index_path = crate::plugins::store_index_path();
             match StoreInstallPaletteState::load(index_path.clone()) {

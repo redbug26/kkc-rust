@@ -73,6 +73,7 @@ pub fn handle_event(app: &mut App, event: Event) -> Result<bool> {
         AppMode::CopyDialog(_) => return handle_copy_dialog(app, key),
         AppMode::CopyProgress(_) => return handle_copy_progress(app, key),
         AppMode::SearchPanel(_) => return handle_search(app, key),
+        AppMode::TreeView(_) => return handle_tree_view(app, key),
         AppMode::DirBookmarks => return handle_dir_bookmarks(app, key),
         AppMode::QuickSearch => return handle_quicksearch(app, key),
         AppMode::Menu(_) => return handle_menu(app, key),
@@ -1329,6 +1330,98 @@ fn handle_search(app: &mut App, key: KeyEvent) -> Result<bool> {
                 1 => s.content_query.clear(),
                 2 => s.dir_query = s.start_dir.to_string_lossy().into_owned(),
                 _ => {}
+            }
+        }
+        _ => {}
+    }
+    Ok(false)
+}
+
+fn handle_tree_view(app: &mut App, key: KeyEvent) -> Result<bool> {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let alt = key.modifiers.contains(KeyModifiers::ALT);
+    match key.code {
+        KeyCode::Esc => {
+            if let AppMode::TreeView(state) = &mut app.mode {
+                state.cancel_scan();
+            }
+            app.mode = AppMode::Browse;
+        }
+        KeyCode::Up => {
+            if let AppMode::TreeView(state) = &mut app.mode {
+                state.move_prev();
+            }
+        }
+        KeyCode::Down => {
+            if let AppMode::TreeView(state) = &mut app.mode {
+                state.move_next();
+            }
+        }
+        KeyCode::PageUp => {
+            if let AppMode::TreeView(state) = &mut app.mode {
+                for _ in 0..10 {
+                    state.move_prev();
+                }
+            }
+        }
+        KeyCode::PageDown => {
+            if let AppMode::TreeView(state) = &mut app.mode {
+                for _ in 0..10 {
+                    state.move_next();
+                }
+            }
+        }
+        KeyCode::Home => {
+            if let AppMode::TreeView(state) = &mut app.mode {
+                state.match_pos = 0;
+            }
+        }
+        KeyCode::End => {
+            if let AppMode::TreeView(state) = &mut app.mode {
+                state.match_pos = state.filtered_indices().len().saturating_sub(1);
+            }
+        }
+        KeyCode::F(5) => {
+            if let AppMode::TreeView(state) = &mut app.mode {
+                state.start_scan();
+            }
+        }
+        KeyCode::Char('r') if ctrl => {
+            if let AppMode::TreeView(state) = &mut app.mode {
+                state.start_scan();
+            }
+        }
+        KeyCode::Backspace => {
+            if let AppMode::TreeView(state) = &mut app.mode {
+                state.pop_query();
+            }
+        }
+        KeyCode::Char(ch) if !ctrl && !alt => {
+            if let AppMode::TreeView(state) = &mut app.mode {
+                state.push_query(ch);
+            }
+        }
+        KeyCode::Enter => {
+            let selected = if let AppMode::TreeView(state) = &app.mode {
+                state.selected_entry().cloned()
+            } else {
+                None
+            };
+            if let Some(entry) = selected {
+                let dir = if entry.is_dir {
+                    entry.path
+                } else {
+                    entry
+                        .path
+                        .parent()
+                        .map(std::path::Path::to_path_buf)
+                        .unwrap_or(entry.path)
+                };
+                if let AppMode::TreeView(state) = &mut app.mode {
+                    state.cancel_scan();
+                }
+                app.mode = AppMode::Browse;
+                app.enter_dir(dir)?;
             }
         }
         _ => {}

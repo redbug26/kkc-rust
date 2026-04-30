@@ -191,6 +191,13 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     },
     PaletteEntry {
         category: "Tools",
+        label: "Tree view…",
+        shortcut: None,
+        fn_name: "tree_view",
+        action: MenuAction::TreeView,
+    },
+    PaletteEntry {
+        category: "Tools",
         label: "Install plugin from store…",
         shortcut: None,
         fn_name: "install_plugin_from_store",

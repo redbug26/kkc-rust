@@ -27,6 +27,7 @@ use crate::search::{
     SearchBackend, SearchQuery, SearchResult, search, search_locate, search_spotlight,
 };
 use crate::terminal::{CmdLine, RunningCmd, TerminalState};
+use crate::tree_mode::{TreeScanMessage, TreeViewState};
 use crate::viewer::{ViewMode, Viewer};
 use anyhow::Result;
 use crossterm::{
@@ -84,6 +85,8 @@ pub enum AppMode {
     ViewerPluginPalette(Viewer, ViewerPluginPaletteState),
     /// Search panel (Alt-F7).
     SearchPanel(SearchState),
+    /// Cached user-directory tree browser.
+    TreeView(TreeViewState),
     /// Confirmation dialog.
     Confirm(ConfirmDialog),
     /// Single-line text input dialog.
@@ -1730,6 +1733,7 @@ impl App {
     pub fn poll_background_tasks(&mut self) {
         self.poll_running_cmd();
         self.poll_search();
+        self.poll_tree_view();
         // Auto-clear status bar text after 30 seconds.
         if let Some(set_at) = self.status.set_at {
             if set_at.elapsed() >= std::time::Duration::from_secs(30) {
@@ -1934,6 +1938,69 @@ impl App {
                 if !s.results.is_empty() && s.input_field < 3 {
                     s.input_field = 3;
                 }
+            }
+        }
+    }
+
+    pub fn poll_tree_view(&mut self) {
+        let AppMode::TreeView(state) = &mut self.mode else {
+            return;
+        };
+        if !state.scanning {
+            return;
+        }
+
+        let mut terminal_msg = None;
+        if let Some(rx) = &state.scan_rx {
+            for _ in 0..100 {
+                match rx.try_recv() {
+                    Ok(TreeScanMessage::Progress {
+                        visited,
+                        progress,
+                        levels,
+                        current,
+                    }) => {
+                        state.visited = visited;
+                        state.progress = progress;
+                        state.progress_levels = levels;
+                        state.current = Some(current);
+                    }
+                    Ok(msg) => {
+                        terminal_msg = Some(msg);
+                        break;
+                    }
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        terminal_msg = Some(TreeScanMessage::Failed(
+                            "Tree scan worker disconnected".into(),
+                        ));
+                        break;
+                    }
+                }
+            }
+        }
+
+        if let Some(msg) = terminal_msg {
+            state.scanning = false;
+            state.scan_rx = None;
+            state.cancel_flag = None;
+            match msg {
+                TreeScanMessage::Finished {
+                    entries,
+                    scanned_at,
+                } => {
+                    state.set_entries(entries, Some(scanned_at));
+                    state.progress = 1.0;
+                    state.progress_levels.clear();
+                    state.current = None;
+                }
+                TreeScanMessage::Cancelled => {
+                    self.set_status("Tree scan cancelled");
+                }
+                TreeScanMessage::Failed(err) => {
+                    self.set_status(format!("Tree scan error: {}", err));
+                }
+                TreeScanMessage::Progress { .. } => {}
             }
         }
     }
@@ -2562,6 +2629,18 @@ impl App {
             cancel_flag: None,
             dirs_visited: 0,
         });
+    }
+
+    pub fn open_tree_view(&mut self) {
+        let Some(user_dirs) = directories::UserDirs::new() else {
+            self.notify("Cannot determine user directory");
+            return;
+        };
+        self.close_quick_preview();
+        self.close_file_id_view();
+        self.mode = AppMode::TreeView(TreeViewState::load_or_scan(
+            user_dirs.home_dir().to_path_buf(),
+        ));
     }
 
     pub fn open_help(&mut self) {

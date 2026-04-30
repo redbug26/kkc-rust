@@ -16,6 +16,7 @@ mod plugins;
 mod remote;
 mod search;
 mod terminal;
+mod tree_mode;
 mod ui;
 mod viewer;
 
