@@ -2759,7 +2759,7 @@ fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
     let date_w = 14usize;
     let size_w = 9usize;
     let name_w = 26usize;
-    let dir_w = (results_body.width as usize).saturating_sub(name_w + size_w + date_w + 4);
+    let dir_w = (results_body.width as usize).saturating_sub(name_w + size_w + date_w + 7); // + 7 ? for spacing and truncation padding
 
     let header_area = Rect {
         x: results_body.x,

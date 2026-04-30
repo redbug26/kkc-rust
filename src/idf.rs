@@ -104,7 +104,7 @@ pub fn render_idf_card(path: &Path) -> Option<String> {
     }
     if !info.extra.is_empty() {
         out.push('\n');
-        for line in info.extra.iter().take(8) {
+        for line in info.extra.iter().take(12) {
             out.push_str(&format!("{}\n", clean_field(line)));
         }
     }
@@ -344,7 +344,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             IdfKind::Bitmap,
             None,
             None,
-            png_info_lines(w, h, &data),
+            image_info_lines(w, h, &data, ImageExifContainer::Png),
         ))
     } else if data.starts_with(b"RIFF") && data.get(8..12) == Some(b"WEBP") {
         let (w, h) = webp_size(&data).unwrap_or((0, 0));
@@ -354,7 +354,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             IdfKind::Bitmap,
             None,
             None,
-            wh_lines(w, h),
+            image_info_lines(w, h, &data, ImageExifContainer::Webp),
         ))
     } else if data.starts_with(&[0x00, 0x00, 0x01, 0x00]) {
         Some(info(
@@ -392,7 +392,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             IdfKind::Bitmap,
             None,
             None,
-            wh_lines(w, h),
+            image_info_lines(w, h, &data, ImageExifContainer::Jpeg),
         ))
     } else if data.starts_with(b"BM") {
         let (w, h) = bmp_size(&data).unwrap_or((0, 0));
@@ -411,7 +411,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             IdfKind::Bitmap,
             None,
             None,
-            vec![],
+            image_info_lines(0, 0, &data, ImageExifContainer::Tiff),
         ))
     } else if data.starts_with(b"8BPS") {
         Some(info(
@@ -984,6 +984,438 @@ fn wh_lines(w: u32, h: u32) -> Vec<String> {
     } else {
         Vec::new()
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ImageExifContainer {
+    Jpeg,
+    Png,
+    Tiff,
+    Webp,
+}
+
+fn image_info_lines(w: u32, h: u32, data: &[u8], container: ImageExifContainer) -> Vec<String> {
+    let mut lines = match container {
+        ImageExifContainer::Png => png_info_lines(w, h, data),
+        _ => wh_lines(w, h),
+    };
+    if let Some(exif) = image_exif_data(data, container) {
+        lines.extend(exif_lines(exif));
+    }
+    lines
+}
+
+fn image_exif_data(data: &[u8], container: ImageExifContainer) -> Option<&[u8]> {
+    match container {
+        ImageExifContainer::Jpeg => jpeg_exif_data(data),
+        ImageExifContainer::Png => png_exif_data(data),
+        ImageExifContainer::Tiff => Some(data),
+        ImageExifContainer::Webp => webp_exif_data(data),
+    }
+}
+
+fn jpeg_exif_data(data: &[u8]) -> Option<&[u8]> {
+    let mut i = 2usize;
+    while i + 4 <= data.len() {
+        if data[i] != 0xff {
+            i += 1;
+            continue;
+        }
+        let marker = data[i + 1];
+        i += 2;
+        if marker == 0xd8 || marker == 0x01 {
+            continue;
+        }
+        if marker == 0xd9 || marker == 0xda || i + 2 > data.len() {
+            break;
+        }
+        let len = u16::from_be_bytes(data[i..i + 2].try_into().ok()?) as usize;
+        if len < 2 || i + len > data.len() {
+            break;
+        }
+        let payload = &data[i + 2..i + len];
+        if marker == 0xe1 && payload.starts_with(b"Exif\0\0") {
+            return Some(&payload[6..]);
+        }
+        i += len;
+    }
+    None
+}
+
+fn png_exif_data(data: &[u8]) -> Option<&[u8]> {
+    if !data.starts_with(b"\x89PNG\r\n\x1A\n") {
+        return None;
+    }
+    let mut i = 8usize;
+    while i + 12 <= data.len() {
+        let len = u32::from_be_bytes(data[i..i + 4].try_into().ok()?) as usize;
+        let kind = data.get(i + 4..i + 8)?;
+        let payload_start = i + 8;
+        let payload_end = payload_start.checked_add(len)?;
+        if payload_end + 4 > data.len() {
+            break;
+        }
+        if kind == b"eXIf" {
+            return Some(&data[payload_start..payload_end]);
+        }
+        i = payload_end + 4;
+    }
+    None
+}
+
+fn webp_exif_data(data: &[u8]) -> Option<&[u8]> {
+    if !data.starts_with(b"RIFF") || data.get(8..12) != Some(b"WEBP") {
+        return None;
+    }
+    let mut i = 12usize;
+    while i + 8 <= data.len() {
+        let kind = data.get(i..i + 4)?;
+        let len = u32::from_le_bytes(data[i + 4..i + 8].try_into().ok()?) as usize;
+        let payload_start = i + 8;
+        let payload_end = payload_start.checked_add(len)?;
+        if payload_end > data.len() {
+            break;
+        }
+        if kind == b"EXIF" {
+            return Some(&data[payload_start..payload_end]);
+        }
+        i = payload_end + (len & 1);
+    }
+    None
+}
+
+#[derive(Debug, Default)]
+struct ExifSummary {
+    make: Option<String>,
+    model: Option<String>,
+    lens: Option<String>,
+    taken: Option<String>,
+    orientation: Option<u16>,
+    exposure: Option<(u32, u32)>,
+    aperture: Option<(u32, u32)>,
+    iso: Option<u32>,
+    focal_length: Option<(u32, u32)>,
+    focal_35mm: Option<u32>,
+    gps_lat: Option<f64>,
+    gps_lon: Option<f64>,
+    gps_lat_ref: Option<String>,
+    gps_lon_ref: Option<String>,
+}
+
+fn exif_lines(data: &[u8]) -> Vec<String> {
+    let Some(summary) = parse_exif_summary(data) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    if let Some(camera) = exif_camera_line(&summary) {
+        out.push(format!(" Camera: {}", camera));
+    }
+    if let Some(lens) = summary.lens.as_deref() {
+        out.push(format!(" Lens: {}", lens));
+    }
+    if let Some(taken) = summary.taken.as_deref() {
+        out.push(format!(" Taken: {}", taken));
+    }
+    if let Some((num, den)) = summary.exposure.filter(|(_, den)| *den != 0) {
+        out.push(format!(" Exposure: {}", format_exposure(num, den)));
+    }
+    if let Some((num, den)) = summary.aperture.filter(|(_, den)| *den != 0) {
+        out.push(format!(" Aperture: f/{:.1}", num as f64 / den as f64));
+    }
+    if let Some(iso) = summary.iso.filter(|iso| *iso > 0) {
+        out.push(format!(" ISO: {}", iso));
+    }
+    if let Some(focal) = exif_focal_line(&summary) {
+        out.push(format!(" Focal length: {}", focal));
+    }
+    if let Some(orientation) = summary.orientation.and_then(orientation_label) {
+        out.push(format!(" Orientation: {}", orientation));
+    }
+    if let Some(gps) = exif_gps_line(&summary) {
+        out.push(format!(" GPS: {}", gps));
+    }
+    out
+}
+
+fn exif_camera_line(summary: &ExifSummary) -> Option<String> {
+    match (summary.make.as_deref(), summary.model.as_deref()) {
+        (Some(make), Some(model)) if model.to_lowercase().contains(&make.to_lowercase()) => {
+            Some(model.to_string())
+        }
+        (Some(make), Some(model)) => Some(format!("{} {}", make, model)),
+        (Some(make), None) => Some(make.to_string()),
+        (None, Some(model)) => Some(model.to_string()),
+        (None, None) => None,
+    }
+}
+
+fn exif_focal_line(summary: &ExifSummary) -> Option<String> {
+    let (num, den) = summary.focal_length.filter(|(_, den)| *den != 0)?;
+    let mut value = format!("{:.1} mm", num as f64 / den as f64);
+    if let Some(eq) = summary.focal_35mm.filter(|eq| *eq > 0) {
+        value.push_str(&format!(" ({} mm eq.)", eq));
+    }
+    Some(value)
+}
+
+fn exif_gps_line(summary: &ExifSummary) -> Option<String> {
+    let mut lat = summary.gps_lat?;
+    let mut lon = summary.gps_lon?;
+    if summary.gps_lat_ref.as_deref() == Some("S") {
+        lat = -lat;
+    }
+    if summary.gps_lon_ref.as_deref() == Some("W") {
+        lon = -lon;
+    }
+    Some(format!("{:.6}, {:.6}", lat, lon))
+}
+
+fn format_exposure(num: u32, den: u32) -> String {
+    if num == 1 && den > 0 {
+        format!("1/{} s", den)
+    } else {
+        let seconds = num as f64 / den as f64;
+        if seconds < 1.0 && seconds > 0.0 {
+            format!("1/{:.0} s", 1.0 / seconds)
+        } else {
+            format!("{:.1} s", seconds)
+        }
+    }
+}
+
+fn orientation_label(value: u16) -> Option<&'static str> {
+    match value {
+        1 => Some("Normal"),
+        2 => Some("Mirrored horizontal"),
+        3 => Some("Rotated 180"),
+        4 => Some("Mirrored vertical"),
+        5 => Some("Mirrored horizontal, rotated 270"),
+        6 => Some("Rotated 90 CW"),
+        7 => Some("Mirrored horizontal, rotated 90"),
+        8 => Some("Rotated 270 CW"),
+        _ => None,
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ExifEndian {
+    Little,
+    Big,
+}
+
+fn parse_exif_summary(data: &[u8]) -> Option<ExifSummary> {
+    let endian = match data.get(..2)? {
+        b"II" => ExifEndian::Little,
+        b"MM" => ExifEndian::Big,
+        _ => return None,
+    };
+    if read_u16(data, 2, endian)? != 42 {
+        return None;
+    }
+    let ifd0 = read_u32(data, 4, endian)? as usize;
+    let mut summary = ExifSummary::default();
+    let (exif_ifd, gps_ifd) = parse_ifd0(data, ifd0, endian, &mut summary);
+    if let Some(offset) = exif_ifd {
+        parse_exif_ifd(data, offset, endian, &mut summary);
+    }
+    if let Some(offset) = gps_ifd {
+        parse_gps_ifd(data, offset, endian, &mut summary);
+    }
+    has_exif_summary(&summary).then_some(summary)
+}
+
+fn has_exif_summary(summary: &ExifSummary) -> bool {
+    summary.make.is_some()
+        || summary.model.is_some()
+        || summary.lens.is_some()
+        || summary.taken.is_some()
+        || summary.orientation.is_some()
+        || summary.exposure.is_some()
+        || summary.aperture.is_some()
+        || summary.iso.is_some()
+        || summary.focal_length.is_some()
+        || summary.gps_lat.is_some()
+        || summary.gps_lon.is_some()
+}
+
+fn parse_ifd0(
+    data: &[u8],
+    offset: usize,
+    endian: ExifEndian,
+    summary: &mut ExifSummary,
+) -> (Option<usize>, Option<usize>) {
+    let mut exif_ifd = None;
+    let mut gps_ifd = None;
+    for entry in ifd_entries(data, offset, endian) {
+        match entry.tag {
+            0x010f => summary.make = entry_ascii(data, entry, endian),
+            0x0110 => summary.model = entry_ascii(data, entry, endian),
+            0x0112 => summary.orientation = entry_u16(data, entry, endian),
+            0x0132 if summary.taken.is_none() => {
+                summary.taken = entry_ascii(data, entry, endian);
+            }
+            0x8769 => exif_ifd = entry_u32(data, entry, endian).map(|v| v as usize),
+            0x8825 => gps_ifd = entry_u32(data, entry, endian).map(|v| v as usize),
+            _ => {}
+        }
+    }
+    (exif_ifd, gps_ifd)
+}
+
+fn parse_exif_ifd(data: &[u8], offset: usize, endian: ExifEndian, summary: &mut ExifSummary) {
+    for entry in ifd_entries(data, offset, endian) {
+        match entry.tag {
+            0x829a => summary.exposure = entry_rational(data, entry, endian),
+            0x829d => summary.aperture = entry_rational(data, entry, endian),
+            0x8827 => summary.iso = entry_u32(data, entry, endian),
+            0x9003 => {
+                if let Some(taken) = entry_ascii(data, entry, endian) {
+                    summary.taken = Some(taken);
+                }
+            }
+            0x920a => summary.focal_length = entry_rational(data, entry, endian),
+            0xa405 => summary.focal_35mm = entry_u32(data, entry, endian),
+            0xa434 => summary.lens = entry_ascii(data, entry, endian),
+            _ => {}
+        }
+    }
+}
+
+fn parse_gps_ifd(data: &[u8], offset: usize, endian: ExifEndian, summary: &mut ExifSummary) {
+    for entry in ifd_entries(data, offset, endian) {
+        match entry.tag {
+            0x0001 => summary.gps_lat_ref = entry_ascii(data, entry, endian),
+            0x0002 => summary.gps_lat = entry_gps_coord(data, entry, endian),
+            0x0003 => summary.gps_lon_ref = entry_ascii(data, entry, endian),
+            0x0004 => summary.gps_lon = entry_gps_coord(data, entry, endian),
+            _ => {}
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct IfdEntry {
+    tag: u16,
+    ty: u16,
+    count: u32,
+    value_offset: usize,
+}
+
+fn ifd_entries(data: &[u8], offset: usize, endian: ExifEndian) -> Vec<IfdEntry> {
+    let Some(count) = read_u16(data, offset, endian).map(|v| v as usize) else {
+        return Vec::new();
+    };
+    let mut entries = Vec::new();
+    for idx in 0..count.min(128) {
+        let entry_offset = offset + 2 + idx * 12;
+        if entry_offset + 12 > data.len() {
+            break;
+        }
+        let Some(tag) = read_u16(data, entry_offset, endian) else {
+            continue;
+        };
+        let Some(ty) = read_u16(data, entry_offset + 2, endian) else {
+            continue;
+        };
+        let Some(count) = read_u32(data, entry_offset + 4, endian) else {
+            continue;
+        };
+        entries.push(IfdEntry {
+            tag,
+            ty,
+            count,
+            value_offset: entry_offset + 8,
+        });
+    }
+    entries
+}
+
+fn entry_bytes<'a>(data: &'a [u8], entry: IfdEntry, endian: ExifEndian) -> Option<&'a [u8]> {
+    let unit = match entry.ty {
+        1 | 2 | 7 => 1usize,
+        3 => 2,
+        4 | 9 => 4,
+        5 | 10 => 8,
+        _ => return None,
+    };
+    let len = unit.checked_mul(entry.count as usize)?;
+    if len <= 4 {
+        data.get(entry.value_offset..entry.value_offset + len)
+    } else {
+        let offset = read_u32(data, entry.value_offset, endian)? as usize;
+        data.get(offset..offset.checked_add(len)?)
+    }
+}
+
+fn entry_ascii(data: &[u8], entry: IfdEntry, endian: ExifEndian) -> Option<String> {
+    if entry.ty != 2 {
+        return None;
+    }
+    let bytes = entry_bytes(data, entry, endian)?;
+    let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+    let value = String::from_utf8_lossy(&bytes[..end]).trim().to_string();
+    (!value.is_empty()).then_some(value)
+}
+
+fn entry_u16(data: &[u8], entry: IfdEntry, endian: ExifEndian) -> Option<u16> {
+    match entry.ty {
+        3 => {
+            let bytes = entry_bytes(data, entry, endian)?;
+            read_u16(bytes, 0, endian)
+        }
+        4 => entry_u32(data, entry, endian).and_then(|v| u16::try_from(v).ok()),
+        _ => None,
+    }
+}
+
+fn entry_u32(data: &[u8], entry: IfdEntry, endian: ExifEndian) -> Option<u32> {
+    match entry.ty {
+        3 => entry_u16(data, entry, endian).map(u32::from),
+        4 => {
+            let bytes = entry_bytes(data, entry, endian)?;
+            read_u32(bytes, 0, endian)
+        }
+        _ => None,
+    }
+}
+
+fn entry_rational(data: &[u8], entry: IfdEntry, endian: ExifEndian) -> Option<(u32, u32)> {
+    if entry.ty != 5 || entry.count == 0 {
+        return None;
+    }
+    let bytes = entry_bytes(data, entry, endian)?;
+    Some((read_u32(bytes, 0, endian)?, read_u32(bytes, 4, endian)?))
+}
+
+fn entry_gps_coord(data: &[u8], entry: IfdEntry, endian: ExifEndian) -> Option<f64> {
+    if entry.ty != 5 || entry.count < 3 {
+        return None;
+    }
+    let bytes = entry_bytes(data, entry, endian)?;
+    let deg = rational_to_f64(read_u32(bytes, 0, endian)?, read_u32(bytes, 4, endian)?)?;
+    let min = rational_to_f64(read_u32(bytes, 8, endian)?, read_u32(bytes, 12, endian)?)?;
+    let sec = rational_to_f64(read_u32(bytes, 16, endian)?, read_u32(bytes, 20, endian)?)?;
+    Some(deg + (min / 60.0) + (sec / 3600.0))
+}
+
+fn rational_to_f64(num: u32, den: u32) -> Option<f64> {
+    (den != 0).then_some(num as f64 / den as f64)
+}
+
+fn read_u16(data: &[u8], offset: usize, endian: ExifEndian) -> Option<u16> {
+    let bytes: [u8; 2] = data.get(offset..offset + 2)?.try_into().ok()?;
+    Some(match endian {
+        ExifEndian::Little => u16::from_le_bytes(bytes),
+        ExifEndian::Big => u16::from_be_bytes(bytes),
+    })
+}
+
+fn read_u32(data: &[u8], offset: usize, endian: ExifEndian) -> Option<u32> {
+    let bytes: [u8; 4] = data.get(offset..offset + 4)?.try_into().ok()?;
+    Some(match endian {
+        ExifEndian::Little => u32::from_le_bytes(bytes),
+        ExifEndian::Big => u32::from_be_bytes(bytes),
+    })
 }
 
 fn pdf_lines(data: &[u8]) -> Vec<String> {
@@ -2038,6 +2470,131 @@ mod tests {
         assert!(info.extra.iter().any(|line| line.contains("Producer: KKC")));
 
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn jpeg_exif_metadata_is_reported() {
+        let path = std::env::temp_dir().join(format!("kkc-idf-exif-{}.jpg", std::process::id()));
+        fs::write(&path, jpeg_with_exif()).expect("write jpeg");
+
+        let info = probe_file(&path)
+            .expect("probe should not fail")
+            .expect("jpeg should be detected");
+        assert_eq!(info.mime_type, "image/jpeg");
+        assert!(
+            info.extra
+                .iter()
+                .any(|line| line.contains("32 x 16 pixels"))
+        );
+        assert!(
+            info.extra
+                .iter()
+                .any(|line| line.contains("Camera: Canon EOS R5"))
+        );
+        assert!(
+            info.extra
+                .iter()
+                .any(|line| line.contains("Taken: 2026:04:30 12:34:56"))
+        );
+        assert!(
+            info.extra
+                .iter()
+                .any(|line| line.contains("Exposure: 1/125 s"))
+        );
+        assert!(
+            info.extra
+                .iter()
+                .any(|line| line.contains("Aperture: f/2.8"))
+        );
+        assert!(info.extra.iter().any(|line| line.contains("ISO: 400")));
+        assert!(
+            info.extra
+                .iter()
+                .any(|line| line.contains("Focal length: 50.0 mm"))
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    fn jpeg_with_exif() -> Vec<u8> {
+        let mut app1 = b"Exif\0\0".to_vec();
+        app1.extend(test_exif_tiff());
+        let app1_len = u16::try_from(app1.len() + 2).expect("APP1 length fits");
+
+        let mut jpeg = vec![0xff, 0xd8, 0xff, 0xe1];
+        jpeg.extend(app1_len.to_be_bytes());
+        jpeg.extend(app1);
+        jpeg.extend([
+            0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x10, 0x00, 0x20, 0x03, 0x01, 0x11, 0x00, 0x02,
+            0x11, 0x00, 0x03, 0x11, 0x00, 0xff, 0xd9,
+        ]);
+        jpeg
+    }
+
+    fn test_exif_tiff() -> Vec<u8> {
+        let mut tiff = b"II*\0\x08\0\0\0".to_vec();
+        append_ifd_placeholder(&mut tiff, 4);
+        let make = append_ascii(&mut tiff, "Canon");
+        let model = append_ascii(&mut tiff, "EOS R5");
+        let exif_ifd = tiff.len() as u32;
+        append_ifd_placeholder(&mut tiff, 6);
+        let taken = append_ascii(&mut tiff, "2026:04:30 12:34:56");
+        let exposure = append_rational(&mut tiff, 1, 125);
+        let aperture = append_rational(&mut tiff, 28, 10);
+        let focal = append_rational(&mut tiff, 50, 1);
+        let lens = append_ascii(&mut tiff, "RF 50mm");
+
+        write_ifd_entry(&mut tiff, 8, 0, 0x010f, 2, 6, make);
+        write_ifd_entry(&mut tiff, 8, 1, 0x0110, 2, 7, model);
+        write_ifd_entry(&mut tiff, 8, 2, 0x0112, 3, 1, 1);
+        write_ifd_entry(&mut tiff, 8, 3, 0x8769, 4, 1, exif_ifd);
+
+        write_ifd_entry(&mut tiff, exif_ifd as usize, 0, 0x9003, 2, 20, taken);
+        write_ifd_entry(&mut tiff, exif_ifd as usize, 1, 0x829a, 5, 1, exposure);
+        write_ifd_entry(&mut tiff, exif_ifd as usize, 2, 0x829d, 5, 1, aperture);
+        write_ifd_entry(&mut tiff, exif_ifd as usize, 3, 0x8827, 3, 1, 400);
+        write_ifd_entry(&mut tiff, exif_ifd as usize, 4, 0x920a, 5, 1, focal);
+        write_ifd_entry(&mut tiff, exif_ifd as usize, 5, 0xa434, 2, 8, lens);
+        tiff
+    }
+
+    fn append_ifd_placeholder(buf: &mut Vec<u8>, entries: u16) {
+        buf.extend(entries.to_le_bytes());
+        buf.resize(buf.len() + entries as usize * 12 + 4, 0);
+    }
+
+    fn append_ascii(buf: &mut Vec<u8>, value: &str) -> u32 {
+        let offset = buf.len() as u32;
+        buf.extend(value.as_bytes());
+        buf.push(0);
+        offset
+    }
+
+    fn append_rational(buf: &mut Vec<u8>, num: u32, den: u32) -> u32 {
+        let offset = buf.len() as u32;
+        buf.extend(num.to_le_bytes());
+        buf.extend(den.to_le_bytes());
+        offset
+    }
+
+    fn write_ifd_entry(
+        buf: &mut [u8],
+        ifd_offset: usize,
+        idx: usize,
+        tag: u16,
+        ty: u16,
+        count: u32,
+        value: u32,
+    ) {
+        let offset = ifd_offset + 2 + idx * 12;
+        buf[offset..offset + 2].copy_from_slice(&tag.to_le_bytes());
+        buf[offset + 2..offset + 4].copy_from_slice(&ty.to_le_bytes());
+        buf[offset + 4..offset + 8].copy_from_slice(&count.to_le_bytes());
+        if ty == 3 && count == 1 {
+            buf[offset + 8..offset + 10].copy_from_slice(&(value as u16).to_le_bytes());
+        } else {
+            buf[offset + 8..offset + 12].copy_from_slice(&value.to_le_bytes());
+        }
     }
 
     #[test]
