@@ -68,6 +68,7 @@ pub enum MenuAction {
     OpenFolderInOs,
     QuickPreview,
     DebugLog,
+    DownloadCloudFile,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

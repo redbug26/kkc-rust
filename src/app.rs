@@ -2097,6 +2097,48 @@ impl App {
         Ok(())
     }
 
+    /// Download cloud-only files to local storage by reading them (forces the cloud
+    /// provider to materialise the data on disk). Works with iCloud, Dropbox, OneDrive, etc.
+    pub fn cmd_download_cloud_files(&mut self) {
+        let entries: Vec<_> = self
+            .active_panel()
+            .effective_selection()
+            .into_iter()
+            .filter(|e| e.cloud_only)
+            .map(|e| e.path.clone())
+            .collect();
+
+        if entries.is_empty() {
+            self.notify("No cloud-only file selected");
+            return;
+        }
+
+        let mut errors = Vec::new();
+        for path in &entries {
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.display().to_string());
+            let msg = format!("Downloading {}…", name);
+            let result = self.run_with_busy(&msg, |_| {
+                std::fs::read(path)?;
+                Ok(())
+            });
+            if let Err(e) = result {
+                errors.push(format!("{}: {}", name, e));
+            }
+        }
+
+        if self.config.auto_reload {
+            self.reload_panels();
+        }
+        if errors.is_empty() {
+            self.notify(format!("Downloaded {} file(s)", entries.len()));
+        } else {
+            self.notify(format!("Errors: {}", errors.join("; ")));
+        }
+    }
+
     /// Initiate a delete — show confirmation if enabled, else delete immediately.
     pub fn cmd_delete(&mut self) {
         let entries = self

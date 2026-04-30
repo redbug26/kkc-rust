@@ -349,6 +349,9 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
             }
         }
         MenuAction::Separator => {}
+        MenuAction::DownloadCloudFile => {
+            app.cmd_download_cloud_files();
+        }
     }
     Ok(false)
 }

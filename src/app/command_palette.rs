@@ -84,6 +84,13 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
         fn_name: "quit",
         action: MenuAction::Quit,
     },
+    PaletteEntry {
+        category: "File",
+        label: "Download cloud file(s)",
+        shortcut: None,
+        fn_name: "download_cloud_file",
+        action: MenuAction::DownloadCloudFile,
+    },
     // ── Panel ────────────────────────────────────────────────────────────
     PaletteEntry {
         category: "Panel",
