@@ -1,6 +1,7 @@
 mod about;
 mod app;
 mod archive;
+mod cloud_status;
 mod config;
 mod copy;
 mod events;

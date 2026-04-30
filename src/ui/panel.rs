@@ -7,6 +7,8 @@ pub(super) fn render_panel_or_file_id(
     area: Rect,
     active: bool,
     color_by_type: bool,
+    show_cloud_icons: bool,
+    show_file_icons: bool,
     show_file_id: bool,
     quick_preview: Option<&crate::viewer::Viewer>,
     quick_preview_active: bool,
@@ -18,7 +20,17 @@ pub(super) fn render_panel_or_file_id(
     } else if let Some(viewer) = quick_preview {
         render_quick_preview(f, app, viewer, area, quick_preview_active);
     } else {
-        render_panel(f, panel, area, active, color_by_type, tab_index, tab_count);
+        render_panel(
+            f,
+            panel,
+            area,
+            active,
+            color_by_type,
+            show_cloud_icons,
+            show_file_icons,
+            tab_index,
+            tab_count,
+        );
     }
 }
 
@@ -115,6 +127,8 @@ fn render_panel(
     area: Rect,
     active: bool,
     color_by_type: bool,
+    show_cloud_icons: bool,
+    show_file_icons: bool,
     tab_index: usize,
     tab_count: usize,
 ) {
@@ -197,6 +211,8 @@ fn render_panel(
         list_area,
         active,
         color_by_type,
+        show_cloud_icons,
+        show_file_icons,
         name_w,
         size_w,
         date_w,
@@ -259,6 +275,8 @@ fn render_panel_entries(
     list_area: Rect,
     active: bool,
     color_by_type: bool,
+    show_cloud_icons: bool,
+    show_file_icons: bool,
     name_w: usize,
     size_w: usize,
     date_w: usize,
@@ -294,13 +312,23 @@ fn render_panel_entries(
                 Style::default().fg(fg)
             };
 
-            let display_name = if entry.is_dir && entry.name != ".." {
+            let display_name = if show_file_icons && entry.is_dir {
+                format!("\u{f07b} {}", entry.name)
+            } else if entry.is_dir && entry.name != ".." {
                 format!("/{}", entry.name)
             } else {
                 format!(" {}", entry.name)
             };
-            let name_str = format!("{:<width$}", display_name, width = name_w);
-            let name_str = truncate_str(&name_str, name_w);
+            let suffix_icon = if show_cloud_icons && entry.cloud_only {
+                Some("\u{f0c2}")
+            } else if entry.is_dir {
+                None
+            } else if !show_file_icons {
+                None
+            } else {
+                entry.file_icon
+            };
+            let name_str = format_panel_name(&display_name, suffix_icon, name_w);
 
             let size_str = if entry.name == ".." {
                 format!("{:>width$}", "↑ up-dir ↑", width = size_w)
@@ -339,6 +367,22 @@ fn render_panel_entries(
 
     let list = List::new(items).style(Style::default().bg(CLR_PANEL_BG));
     f.render_widget(list, list_area);
+}
+
+fn format_panel_name(display_name: &str, suffix_icon: Option<&str>, width: usize) -> String {
+    let Some(icon) = suffix_icon else {
+        let name = format!("{:<width$}", display_name, width = width);
+        return truncate_str(&name, width);
+    };
+
+    if width <= 4 {
+        return truncate_str(display_name, width);
+    }
+
+    let name_w = width.saturating_sub(4);
+    let name = truncate_str(display_name, name_w);
+    let with_icon = format!("{} {}", name.trim_end(), icon);
+    truncate_str(&with_icon, width)
 }
 
 fn column_separator(base_style: Style) -> Span<'static> {

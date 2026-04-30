@@ -457,6 +457,10 @@
 #Setup
 ^Configuration (Options > Setup)
 
+   Setup is split into tabs. Use LEFT / RIGHT, PAGEUP / PAGEDOWN,
+   ALT-LEFT / ALT-RIGHT or CTRL-LEFT / CTRL-RIGHT to switch tab.
+   Use UP / DOWN or TAB / SHIFT-TAB to move inside the active tab.
+
 % Checkboxes
 
     Confirm exit        Ask before quitting KKC.
@@ -466,6 +470,8 @@
     Select directories  Include directories in wildcard selection.
     Show hidden files   Display hidden / dot files.
     Color by type       Color entries by file type / extension.
+    Cloud icons         Show a cloud icon for files available only online.
+    File icons          Show folder and file-type icons in panels.
     Show F-key bar      Display the function-key shortcut bar.
 
 % Text fields

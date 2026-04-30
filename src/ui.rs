@@ -29,7 +29,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{
         Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Scrollbar,
-        ScrollbarOrientation, ScrollbarState, Wrap,
+        ScrollbarOrientation, ScrollbarState, Tabs, Wrap,
     },
 };
 use unicode_width::UnicodeWidthStr;
@@ -193,6 +193,8 @@ pub fn render(f: &mut Frame, app: &App) {
         panel_chunks[0],
         left_active,
         app.config.color_by_type,
+        app.config.show_cloud_icons,
+        app.config.show_file_icons,
         app.file_preview_info && !left_active,
         if left_active {
             None
@@ -211,6 +213,8 @@ pub fn render(f: &mut Frame, app: &App) {
         panel_chunks[2],
         !left_active,
         app.config.color_by_type,
+        app.config.show_cloud_icons,
+        app.config.show_file_icons,
         app.file_preview_info && left_active,
         if !left_active {
             None
@@ -454,7 +458,9 @@ fn render_status(f: &mut Frame, app: &App, area: Rect) {
         if e.name == ".." {
             let mode_str = format_mode(e.mode);
             format!("Up directory  {}  dir", mode_str)
-        } else if let Some(info) = probe_path(&e.path) {
+        } else if !e.cloud_only
+            && let Some(info) = probe_path(&e.path)
+        {
             let prefix = match info.kind {
                 IdfKind::Module => "MOD",
                 IdfKind::Sample => "SMP",
@@ -4315,7 +4321,7 @@ fn format_mode(mode: u32) -> String {
 
 fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
     const W: u16 = 62;
-    const H: u16 = 26;
+    const H: u16 = 14;
     let x = area.x + (area.width.saturating_sub(W)) / 2;
     let y = area.y + (area.height.saturating_sub(H)) / 2;
     let popup = clamp_rect(
@@ -4360,188 +4366,164 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
 
-    let iw = inner.width as usize;
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(5),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(inner);
 
-    // ── Section header helper ──────────────────────────────────────────────
-    let section_style = Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG);
-    let render_section_hdr = |f: &mut Frame, row: u16, label: &str| {
-        let y = inner.y + row;
-        if y >= inner.y + inner.height {
-            return;
-        }
-        let prefix = format!("  \u{2500} {} ", label);
-        let fill_len = iw.saturating_sub(prefix.chars().count());
-        let line = format!("{}{}", prefix, "\u{2500}".repeat(fill_len));
-        safe_render_widget(
-            f,
-            Paragraph::new(line).style(section_style),
-            Rect {
-                x: inner.x,
-                y,
-                width: inner.width,
-                height: 1,
-            },
-        );
-    };
-
-    // ── Checkboxes with section grouping ──────────────────────────────────
-    // Layout (row → cursor index):
-    //  Row  0: section "Behaviour"
-    //  Row  1: idx  0 confirm_exit
-    //  Row  2: idx  1 confirm_delete
-    //  Row  3: idx  2 auto_reload
-    //  Row  4: idx  3 insert_moves_down
-    //  Row  5: idx  4 select_dirs
-    //  Row  6: section "Display"
-    //  Row  7: idx  5 show_hidden
-    //  Row  8: idx  6 color_by_type
-    //  Row  9: idx  7 show_fkey_bar
-    //  Row 10: section "Viewer"
-    //  Row 11: idx  8 word_wrap
-    //  Row 12: idx  9 default_zoom
-    //  Row 13: idx 10 debug_log
-    //  Row 14: section "External"
-    //  Row 15: Editor label
-    //  Row 16: idx 11 editor field
-    //  Row 17: Pager label
-    //  Row 18: idx 12 pager field
-    //  Row 19: History label
-    //  Row 20: idx 13 dir_history_max field
-    //  Row 21: separator
-    //  Row 22: OK / Cancel
-
-    let checkbox_items: &[(u16, &str, usize, bool)] = &[
-        (1, "Confirm exit", 0, cs.confirm_exit),
-        (2, "Confirm delete", 1, cs.confirm_delete),
-        (3, "Auto reload", 2, cs.auto_reload),
-        (4, "Insert moves down", 3, cs.insert_moves_down),
-        (5, "Select directories", 4, cs.select_dirs),
-        (7, "Show hidden files", 5, cs.show_hidden),
-        (8, "Color by type", 6, cs.color_by_type),
-        (9, "Show F-key bar", 7, cs.show_fkey_bar),
-        (11, "Word wrap", 8, cs.word_wrap),
-        (12, "Default zoom", 9, cs.default_zoom),
-        (13, "Debug log", 10, cs.debug_log),
-    ];
-
-    for &(row, label, cursor_idx, val) in checkbox_items {
-        let y = inner.y + row;
-        if y >= inner.y + inner.height {
-            continue;
-        }
-        let tick = if val { "X" } else { " " };
-        let text = format!("  [{}] {}", tick, label);
-        let selected = cs.cursor == cursor_idx;
-        let style = if selected {
+    let tabs = Tabs::new(vec!["Behaviour", "Display", "Viewer", "External"])
+        .select(cs.tab)
+        .style(Style::default().fg(Color::Rgb(80, 60, 40)).bg(CLR_APP_BG))
+        .highlight_style(
             Style::default()
-                .fg(Color::Black)
-                .bg(CLR_CURSOR_BG)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::Rgb(50, 36, 22)).bg(CLR_APP_BG)
-        };
-        let padded = format!("{:<width$}", text, width = iw);
-        safe_render_widget(
-            f,
-            Paragraph::new(padded).style(style),
-            Rect {
-                x: inner.x,
-                y,
-                width: inner.width,
-                height: 1,
-            },
-        );
-    }
+                .fg(CLR_BUTTON_FG)
+                .bg(CLR_APP_BG)
+                .add_modifier(Modifier::BOLD),
+        )
+        .divider(Span::styled(
+            "  ",
+            Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG),
+        ));
+    safe_render_widget(f, tabs, chunks[0]);
 
-    // Section headers
-    render_section_hdr(f, 0, "Behaviour");
-    render_section_hdr(f, 6, "Display");
-    render_section_hdr(f, 10, "Viewer");
-    render_section_hdr(f, 14, "External");
+    let top_sep: String = std::iter::repeat('─')
+        .take(chunks[1].width as usize)
+        .collect();
+    safe_render_widget(
+        f,
+        Paragraph::new(top_sep).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
+        chunks[1],
+    );
 
-    // ── Text fields ────────────────────────────────────────────────────────
-    // cursor indices: Editor=11, Pager=12, History max=13
-    let text_layout: &[(&str, u16, usize, &str)] = &[
-        ("Editor", 15, 11, cs.editor.as_str()),
-        ("Pager", 17, 12, cs.pager.as_str()),
-        ("History max", 19, 13, cs.dir_history_max.as_str()),
-    ];
+    let content = chunks[2];
 
-    for &(label, label_row, cursor_idx, value) in text_layout {
-        let lbl_y = inner.y + label_row;
-        if lbl_y < inner.y + inner.height {
-            safe_render_widget(
+    match cs.tab {
+        ConfigState::TAB_BEHAVIOUR => {
+            render_config_checkbox(f, content, 0, "Confirm exit", 0, cs.confirm_exit, cs.cursor);
+            render_config_checkbox(
                 f,
-                Paragraph::new(format!("  {}:", label))
-                    .style(Style::default().fg(Color::Rgb(80, 60, 40)).bg(CLR_APP_BG)),
-                Rect {
-                    x: inner.x,
-                    y: lbl_y,
-                    width: inner.width,
-                    height: 1,
-                },
+                content,
+                1,
+                "Confirm delete",
+                1,
+                cs.confirm_delete,
+                cs.cursor,
+            );
+            render_config_checkbox(f, content, 2, "Auto reload", 2, cs.auto_reload, cs.cursor);
+            render_config_checkbox(
+                f,
+                content,
+                3,
+                "Insert moves down",
+                3,
+                cs.insert_moves_down,
+                cs.cursor,
+            );
+            render_config_checkbox(
+                f,
+                content,
+                4,
+                "Select directories",
+                4,
+                cs.select_dirs,
+                cs.cursor,
             );
         }
-        let field_y = inner.y + label_row + 1;
-        if field_y < inner.y + inner.height {
-            let selected = cs.cursor == cursor_idx;
-            let field_w = inner.width.saturating_sub(4);
-            let input_bg = if selected {
-                CLR_CURSOR_BG
-            } else {
-                Color::Rgb(160, 140, 115)
-            };
-            let input_fg = if selected {
-                Color::Black
-            } else {
-                Color::Rgb(40, 28, 18)
-            };
-            let padded = format!("{:<width$}", value, width = field_w as usize);
-            let display = if padded.len() > field_w as usize {
-                padded
-                    .chars()
-                    .rev()
-                    .take(field_w as usize)
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .rev()
-                    .collect::<String>()
-            } else {
-                padded
-            };
-            safe_render_widget(
+        ConfigState::TAB_DISPLAY => {
+            render_config_checkbox(
                 f,
-                Paragraph::new(display).style(Style::default().fg(input_fg).bg(input_bg)),
-                Rect {
-                    x: inner.x + 2,
-                    y: field_y,
-                    width: field_w,
-                    height: 1,
-                },
+                content,
+                0,
+                "Show hidden files",
+                5,
+                cs.show_hidden,
+                cs.cursor,
+            );
+            render_config_checkbox(
+                f,
+                content,
+                1,
+                "Color by type",
+                6,
+                cs.color_by_type,
+                cs.cursor,
+            );
+            render_config_checkbox(
+                f,
+                content,
+                2,
+                "Cloud icons",
+                7,
+                cs.show_cloud_icons,
+                cs.cursor,
+            );
+            render_config_checkbox(
+                f,
+                content,
+                3,
+                "File icons",
+                8,
+                cs.show_file_icons,
+                cs.cursor,
+            );
+            render_config_checkbox(
+                f,
+                content,
+                4,
+                "Show F-key bar",
+                9,
+                cs.show_fkey_bar,
+                cs.cursor,
             );
         }
+        ConfigState::TAB_VIEWER => {
+            render_config_checkbox(f, content, 0, "Word wrap", 10, cs.word_wrap, cs.cursor);
+            render_config_checkbox(
+                f,
+                content,
+                1,
+                "Default zoom",
+                11,
+                cs.default_zoom,
+                cs.cursor,
+            );
+            render_config_checkbox(f, content, 2, "Debug log", 12, cs.debug_log, cs.cursor);
+        }
+        ConfigState::TAB_EXTERNAL => {
+            render_config_field(f, content, 0, "Editor", 13, cs.editor.as_str(), cs.cursor);
+            render_config_field(f, content, 3, "Pager", 14, cs.pager.as_str(), cs.cursor);
+            render_config_field(
+                f,
+                content,
+                6,
+                "History max",
+                15,
+                cs.dir_history_max.as_str(),
+                cs.cursor,
+            );
+        }
+        _ => {}
     }
 
-    // ── Bottom separator ───────────────────────────────────────────────────
-    let bot_sep_y = inner.y + inner.height.saturating_sub(3);
-    if bot_sep_y < inner.y + inner.height {
-        let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
-        safe_render_widget(
-            f,
-            Paragraph::new(sep).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
-            Rect {
-                x: inner.x,
-                y: bot_sep_y,
-                width: inner.width,
-                height: 1,
-            },
-        );
-    }
+    let sep: String = std::iter::repeat('─')
+        .take(chunks[3].width as usize)
+        .collect();
+    safe_render_widget(
+        f,
+        Paragraph::new(sep).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
+        chunks[3],
+    );
 
     // ── OK / Cancel buttons ────────────────────────────────────────────────
-    let ok_idx = ConfigState::NUM_CHECKBOXES + 3; // 14
-    let cancel_idx = ConfigState::NUM_CHECKBOXES + 3 + 1; // 15
-    let btn_y = inner.y + inner.height.saturating_sub(2);
+    let ok_idx = ConfigState::ok_cursor();
+    let cancel_idx = ConfigState::cancel_cursor();
+    let btn_y = chunks[4].y;
     let btn_w: u16 = 10;
     let gap: u16 = 4;
     let btn_x = inner.x + (inner.width.saturating_sub(btn_w * 2 + gap)) / 2;
@@ -4580,6 +4562,97 @@ fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
             x: btn_x + btn_w + gap,
             y: btn_y,
             width: btn_w,
+            height: 1,
+        },
+    );
+}
+
+fn render_config_checkbox(
+    f: &mut Frame,
+    area: Rect,
+    row: u16,
+    label: &str,
+    cursor_idx: usize,
+    checked: bool,
+    cursor: usize,
+) {
+    if row >= area.height {
+        return;
+    }
+    let selected = cursor == cursor_idx;
+    let tick = if checked { "X" } else { " " };
+    let style = if selected {
+        Style::default()
+            .fg(Color::Black)
+            .bg(CLR_CURSOR_BG)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::Rgb(50, 36, 22)).bg(CLR_APP_BG)
+    };
+    let text = format!("  [{}] {}", tick, label);
+    let padded = format!("{:<width$}", text, width = area.width as usize);
+    safe_render_widget(
+        f,
+        Paragraph::new(padded).style(style),
+        Rect {
+            x: area.x,
+            y: area.y + row,
+            width: area.width,
+            height: 1,
+        },
+    );
+}
+
+fn render_config_field(
+    f: &mut Frame,
+    area: Rect,
+    row: u16,
+    label: &str,
+    cursor_idx: usize,
+    value: &str,
+    cursor: usize,
+) {
+    if row >= area.height {
+        return;
+    }
+    let label_style = Style::default()
+        .fg(Color::Rgb(80, 60, 40))
+        .bg(CLR_APP_BG)
+        .add_modifier(Modifier::BOLD);
+    safe_render_widget(
+        f,
+        Paragraph::new(format!("  {}:", label)).style(label_style),
+        Rect {
+            x: area.x,
+            y: area.y + row,
+            width: area.width,
+            height: 1,
+        },
+    );
+
+    if row + 1 >= area.height {
+        return;
+    }
+    let selected = cursor == cursor_idx;
+    let field_w = area.width.saturating_sub(4);
+    let input_bg = if selected {
+        CLR_CURSOR_BG
+    } else {
+        Color::Rgb(160, 140, 115)
+    };
+    let input_fg = if selected {
+        Color::Black
+    } else {
+        Color::Rgb(40, 28, 18)
+    };
+    safe_render_widget(
+        f,
+        Paragraph::new(truncate_str(value, field_w as usize))
+            .style(Style::default().fg(input_fg).bg(input_bg)),
+        Rect {
+            x: area.x + 2,
+            y: area.y + row + 1,
+            width: field_w,
             height: 1,
         },
     );

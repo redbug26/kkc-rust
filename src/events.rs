@@ -1589,11 +1589,9 @@ fn handle_config(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(false);
     };
 
-    let total = ConfigState::NUM_TOTAL; // 11 booleans + 3 text + OK + Cancel
-    let n_bool = ConfigState::NUM_CHECKBOXES; // 11
-    let n_text = 3;
-    let ok_idx = n_bool + n_text; // 14
-    let cancel_idx = n_bool + n_text + 1; // 15
+    let total = ConfigState::NUM_TOTAL; // booleans + 3 text + OK + Cancel
+    let ok_idx = ConfigState::ok_cursor();
+    let cancel_idx = ConfigState::cancel_cursor();
 
     match key.code {
         KeyCode::Esc => {
@@ -1603,16 +1601,84 @@ fn handle_config(app: &mut App, key: KeyEvent) -> Result<bool> {
         // Navigate rows
         KeyCode::Up | KeyCode::BackTab => {
             if let AppMode::Config(ref mut cs) = app.mode {
-                if cs.cursor > 0 {
+                let first = ConfigState::first_cursor_for_tab(cs.tab);
+                let last = ConfigState::last_cursor_for_tab(cs.tab);
+                if cs.cursor == ok_idx {
+                    cs.cursor = last;
+                } else if cs.cursor == cancel_idx {
+                    cs.cursor = ok_idx;
+                } else if cs.cursor > first {
                     cs.cursor -= 1;
+                } else {
+                    cs.cursor = cancel_idx;
                 }
+                cs.sync_tab_to_cursor();
             }
         }
         KeyCode::Down | KeyCode::Tab => {
             if let AppMode::Config(ref mut cs) = app.mode {
-                if cs.cursor + 1 < total {
+                let last = ConfigState::last_cursor_for_tab(cs.tab);
+                if cs.cursor < last {
                     cs.cursor += 1;
+                } else if cs.cursor == ok_idx {
+                    cs.cursor = cancel_idx;
+                } else if cs.cursor == cancel_idx {
+                    cs.cursor = ConfigState::first_cursor_for_tab(cs.tab);
+                } else {
+                    cs.cursor = ok_idx;
                 }
+                cs.sync_tab_to_cursor();
+            }
+        }
+        KeyCode::Left
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                || key.modifiers.contains(KeyModifiers::ALT) =>
+        {
+            if let AppMode::Config(ref mut cs) = app.mode {
+                let tab = if cs.tab == 0 {
+                    ConfigState::TAB_COUNT - 1
+                } else {
+                    cs.tab - 1
+                };
+                cs.set_tab(tab);
+            }
+        }
+        KeyCode::Right
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                || key.modifiers.contains(KeyModifiers::ALT) =>
+        {
+            if let AppMode::Config(ref mut cs) = app.mode {
+                cs.set_tab((cs.tab + 1) % ConfigState::TAB_COUNT);
+            }
+        }
+        KeyCode::PageUp => {
+            if let AppMode::Config(ref mut cs) = app.mode {
+                let tab = if cs.tab == 0 {
+                    ConfigState::TAB_COUNT - 1
+                } else {
+                    cs.tab - 1
+                };
+                cs.set_tab(tab);
+            }
+        }
+        KeyCode::PageDown => {
+            if let AppMode::Config(ref mut cs) = app.mode {
+                cs.set_tab((cs.tab + 1) % ConfigState::TAB_COUNT);
+            }
+        }
+        KeyCode::Left => {
+            if let AppMode::Config(ref mut cs) = app.mode {
+                let tab = if cs.tab == 0 {
+                    ConfigState::TAB_COUNT - 1
+                } else {
+                    cs.tab - 1
+                };
+                cs.set_tab(tab);
+            }
+        }
+        KeyCode::Right => {
+            if let AppMode::Config(ref mut cs) = app.mode {
+                cs.set_tab((cs.tab + 1) % ConfigState::TAB_COUNT);
             }
         }
 
@@ -1627,16 +1693,19 @@ fn handle_config(app: &mut App, key: KeyEvent) -> Result<bool> {
                 4 => cs.select_dirs = !cs.select_dirs,
                 5 => cs.show_hidden = !cs.show_hidden,
                 6 => cs.color_by_type = !cs.color_by_type,
-                7 => cs.show_fkey_bar = !cs.show_fkey_bar,
-                8 => cs.word_wrap = !cs.word_wrap,
-                9 => cs.default_zoom = !cs.default_zoom,
-                10 => cs.debug_log = !cs.debug_log,
+                7 => cs.show_cloud_icons = !cs.show_cloud_icons,
+                8 => cs.show_file_icons = !cs.show_file_icons,
+                9 => cs.show_fkey_bar = !cs.show_fkey_bar,
+                10 => cs.word_wrap = !cs.word_wrap,
+                11 => cs.default_zoom = !cs.default_zoom,
+                12 => cs.debug_log = !cs.debug_log,
                 // text fields: Enter moves focus to next
-                11 | 12 | 13 => {
+                13 | 14 | 15 => {
                     if let AppMode::Config(ref mut cs) = app.mode {
                         if cs.cursor + 1 < total {
                             cs.cursor += 1;
                         }
+                        cs.sync_tab_to_cursor();
                     }
                 }
                 c if c == ok_idx => {
@@ -1676,9 +1745,9 @@ fn handle_config(app: &mut App, key: KeyEvent) -> Result<bool> {
         KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
             if let AppMode::Config(ref mut cs) = app.mode {
                 match cs.cursor {
-                    11 => cs.editor.push(ch),
-                    12 => cs.pager.push(ch),
-                    13 => cs.dir_history_max.push(ch),
+                    13 => cs.editor.push(ch),
+                    14 => cs.pager.push(ch),
+                    15 => cs.dir_history_max.push(ch),
                     _ => {}
                 }
             }
@@ -1686,13 +1755,13 @@ fn handle_config(app: &mut App, key: KeyEvent) -> Result<bool> {
         KeyCode::Backspace => {
             if let AppMode::Config(ref mut cs) = app.mode {
                 match cs.cursor {
-                    11 => {
+                    13 => {
                         cs.editor.pop();
                     }
-                    12 => {
+                    14 => {
                         cs.pager.pop();
                     }
-                    13 => {
+                    15 => {
                         cs.dir_history_max.pop();
                     }
                     _ => {}

@@ -272,6 +272,8 @@ pub struct ConfigState {
     // checkboxes — Display
     pub show_hidden: bool,
     pub color_by_type: bool,
+    pub show_cloud_icons: bool,
+    pub show_file_icons: bool,
     pub show_fkey_bar: bool,
     // checkboxes — Viewer
     pub word_wrap: bool,
@@ -283,9 +285,16 @@ pub struct ConfigState {
     pub dir_history_max: String,
     // cursor inside the form (0-based, covers checkboxes then text fields)
     pub cursor: usize,
+    pub tab: usize,
 }
 
 impl ConfigState {
+    pub const TAB_BEHAVIOUR: usize = 0;
+    pub const TAB_DISPLAY: usize = 1;
+    pub const TAB_VIEWER: usize = 2;
+    pub const TAB_EXTERNAL: usize = 3;
+    pub const TAB_COUNT: usize = 4;
+
     pub fn from_config(cfg: &crate::config::Config) -> Self {
         Self {
             confirm_exit: cfg.confirm_exit,
@@ -295,6 +304,8 @@ impl ConfigState {
             select_dirs: cfg.select_dirs,
             show_hidden: cfg.left.show_hidden,
             color_by_type: cfg.color_by_type,
+            show_cloud_icons: cfg.show_cloud_icons,
+            show_file_icons: cfg.show_file_icons,
             show_fkey_bar: cfg.show_fkey_bar,
             word_wrap: cfg.viewer.word_wrap,
             default_zoom: cfg.viewer.default_zoom,
@@ -303,6 +314,7 @@ impl ConfigState {
             pager: cfg.pager.clone(),
             dir_history_max: cfg.dir_history_max.to_string(),
             cursor: 0,
+            tab: Self::TAB_BEHAVIOUR,
         }
     }
 
@@ -316,6 +328,8 @@ impl ConfigState {
         cfg.left.show_hidden = self.show_hidden;
         cfg.right.show_hidden = self.show_hidden;
         cfg.color_by_type = self.color_by_type;
+        cfg.show_cloud_icons = self.show_cloud_icons;
+        cfg.show_file_icons = self.show_file_icons;
         cfg.show_fkey_bar = self.show_fkey_bar;
         cfg.viewer.word_wrap = self.word_wrap;
         cfg.viewer.default_zoom = self.default_zoom;
@@ -333,8 +347,55 @@ impl ConfigState {
         }
     }
 
-    pub const NUM_CHECKBOXES: usize = 11; // 5 behaviour + 3 display + 3 viewer
-    pub const NUM_TOTAL: usize = 16; // 11 + 3 text + OK + Cancel
+    pub const NUM_CHECKBOXES: usize = 13; // 5 behaviour + 5 display + 3 viewer
+    pub const NUM_TOTAL: usize = 18; // 13 + 3 text + OK + Cancel
+
+    pub fn ok_cursor() -> usize {
+        Self::NUM_CHECKBOXES + 3
+    }
+
+    pub fn cancel_cursor() -> usize {
+        Self::NUM_CHECKBOXES + 4
+    }
+
+    pub fn tab_range(tab: usize) -> std::ops::RangeInclusive<usize> {
+        match tab {
+            Self::TAB_BEHAVIOUR => 0..=4,
+            Self::TAB_DISPLAY => 5..=9,
+            Self::TAB_VIEWER => 10..=12,
+            Self::TAB_EXTERNAL => 13..=15,
+            _ => 0..=4,
+        }
+    }
+
+    pub fn first_cursor_for_tab(tab: usize) -> usize {
+        *Self::tab_range(tab).start()
+    }
+
+    pub fn last_cursor_for_tab(tab: usize) -> usize {
+        *Self::tab_range(tab).end()
+    }
+
+    pub fn tab_for_cursor(cursor: usize) -> usize {
+        match cursor {
+            0..=4 => Self::TAB_BEHAVIOUR,
+            5..=9 => Self::TAB_DISPLAY,
+            10..=12 => Self::TAB_VIEWER,
+            13..=15 => Self::TAB_EXTERNAL,
+            _ => Self::TAB_BEHAVIOUR,
+        }
+    }
+
+    pub fn set_tab(&mut self, tab: usize) {
+        self.tab = tab.min(Self::TAB_COUNT - 1);
+        self.cursor = Self::first_cursor_for_tab(self.tab);
+    }
+
+    pub fn sync_tab_to_cursor(&mut self) {
+        if self.cursor < Self::ok_cursor() {
+            self.tab = Self::tab_for_cursor(self.cursor);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1081,6 +1142,14 @@ impl App {
                     if entry.is_dir || entry.name == ".." {
                         let mut v =
                             Viewer::placeholder(&entry.path, "Folder", app.config.viewer.word_wrap);
+                        v.zoomed = true;
+                        app.quick_preview = Some(v);
+                    } else if entry.cloud_only {
+                        let mut v = Viewer::placeholder(
+                            &entry.path,
+                            "Cloud-only file\nPreview disabled to avoid downloading it.",
+                            app.config.viewer.word_wrap,
+                        );
                         v.zoomed = true;
                         app.quick_preview = Some(v);
                     } else if let Ok(mut v) =
@@ -2091,6 +2160,16 @@ impl App {
                 self.mode = AppMode::Viewer(v);
                 return;
             }
+            if entry.cloud_only && !self.active_panel().is_remote_view() {
+                let mut v = Viewer::placeholder(
+                    &entry.path,
+                    "Cloud-only file\nViewer disabled to avoid downloading it.",
+                    self.config.viewer.word_wrap,
+                );
+                v.zoomed = self.config.viewer.default_zoom;
+                self.mode = AppMode::Viewer(v);
+                return;
+            }
             let view_path = if self.active_panel().is_remote_view() {
                 let Some(profile) = self.active_panel().remote_profile() else {
                     self.notify("Remote profile missing");
@@ -2152,6 +2231,12 @@ impl App {
 
         let mut v = if entry.is_dir || entry.name == ".." {
             Viewer::placeholder(&entry.path, "Folder", self.config.viewer.word_wrap)
+        } else if entry.cloud_only {
+            Viewer::placeholder(
+                &entry.path,
+                "Cloud-only file\nPreview disabled to avoid downloading it.",
+                self.config.viewer.word_wrap,
+            )
         } else {
             Viewer::open_preview(&entry.path, self.config.viewer.word_wrap)?
         };
@@ -2175,6 +2260,15 @@ impl App {
         match self.active_panel().current_entry().cloned() {
             Some(entry) if entry.is_dir || entry.name == ".." => {
                 let mut v = Viewer::placeholder(&entry.path, "Folder", wrap);
+                v.zoomed = true;
+                self.quick_preview = Some(v);
+            }
+            Some(entry) if entry.cloud_only => {
+                let mut v = Viewer::placeholder(
+                    &entry.path,
+                    "Cloud-only file\nPreview disabled to avoid downloading it.",
+                    wrap,
+                );
                 v.zoomed = true;
                 self.quick_preview = Some(v);
             }
@@ -2244,6 +2338,9 @@ impl App {
         };
         if entry.name == ".." {
             return "No FILE_ID.DIZ.".into();
+        }
+        if entry.cloud_only {
+            return "Cloud-only file.\nFileID disabled to avoid downloading it.".into();
         }
 
         let mut card = render_idf_card(&entry.path).unwrap_or_else(|| "No FILE_ID.DIZ.".into());

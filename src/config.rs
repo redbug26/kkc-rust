@@ -261,6 +261,12 @@ pub struct Config {
     /// Color-code files by type category.
     #[serde(default = "t")]
     pub color_by_type: bool,
+    /// Show a cloud icon for files that are only available online.
+    #[serde(default = "t")]
+    pub show_cloud_icons: bool,
+    /// Show file-type icons in panel listings.
+    #[serde(default = "t")]
+    pub show_file_icons: bool,
 
     // --- External programs ---
     /// External editor command (defaults to $EDITOR or nano).
@@ -330,6 +336,8 @@ impl Default for Config {
             insert_moves_down: true,
             select_dirs: false,
             color_by_type: true,
+            show_cloud_icons: true,
+            show_file_icons: false,
             editor: default_editor(),
             pager: default_pager(),
             viewer: ViewerConfig::default(),
@@ -456,6 +464,8 @@ impl Config {
         out.push_str("# \u{2500}\u{2500}\u{2500} Display \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\n");
         out.push_str(&format!("show_fkey_bar = {}\n", self.show_fkey_bar));
         out.push_str(&format!("color_by_type = {}\n", self.color_by_type));
+        out.push_str(&format!("show_cloud_icons = {}\n", self.show_cloud_icons));
+        out.push_str(&format!("show_file_icons = {}\n", self.show_file_icons));
         out.push_str(&format!(
             "panel_view_type = {}\n",
             toml::Value::String(
@@ -589,6 +599,8 @@ mod tests {
         cfg.select_dirs = true;
         cfg.show_fkey_bar = false;
         cfg.color_by_type = false;
+        cfg.show_cloud_icons = false;
+        cfg.show_file_icons = false;
         cfg.panel_view_type = PanelViewType::QuickPreview;
         cfg.active_panel = ActivePanelSide::Right;
         cfg.viewer.word_wrap = false;
@@ -637,6 +649,8 @@ mod tests {
 
         assert!(!parsed.confirm_exit);
         assert!(parsed.select_dirs);
+        assert!(!parsed.show_cloud_icons);
+        assert!(!parsed.show_file_icons);
         assert_eq!(parsed.panel_view_type, PanelViewType::QuickPreview);
         assert_eq!(parsed.active_panel, ActivePanelSide::Right);
         assert!(!parsed.viewer.word_wrap);
