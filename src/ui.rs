@@ -2879,7 +2879,7 @@ fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
             };
 
             let name_str = truncate_search_file_name(&file_name, name_w);
-            let dir_str = truncate_search_parent_dir(&dir, dir_w);
+            let dir_str = format!("{:width$}", truncate_path(&dir, dir_w), width = dir_w);
             let size_str = format!("{:>width$}", format_size(r.size), width = size_w);
             let date_str = r
                 .modified
@@ -4227,21 +4227,6 @@ fn truncate_search_file_name(name: &str, width: usize) -> String {
     pad_display_width(format!("{prefix}...{suffix}"), width)
 }
 
-fn truncate_search_parent_dir(dir: &str, width: usize) -> String {
-    if width == 0 {
-        return String::new();
-    }
-    if UnicodeWidthStr::width(dir) <= width {
-        return pad_display_width(dir.to_string(), width);
-    }
-    if width <= 3 {
-        return ".".repeat(width);
-    }
-
-    let suffix = take_display_suffix(dir, width - 3);
-    pad_display_width(format!("...{suffix}"), width)
-}
-
 fn format_dos_number(value: u64) -> String {
     let raw = value.to_string();
     let mut out = String::with_capacity(raw.len() + raw.len() / 3);
@@ -4282,19 +4267,66 @@ fn format_compact_size(value: u64) -> String {
 }
 
 fn truncate_path(p: &str, max: usize) -> String {
+    let sep = '…';
+
+    if max == 0 {
+        return String::new();
+    }
+
     if p.chars().count() <= max {
         return p.to_string();
     }
-    let keep = max.saturating_sub(3);
-    let trimmed = p
-        .chars()
-        .rev()
-        .take(keep)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<String>();
-    format!("...{}", trimmed)
+
+    let components: Vec<&str> = p.split('/').collect();
+
+    if components.len() < 3 {
+        let keep = max.saturating_sub(1);
+        let trimmed: String = p
+            .chars()
+            .rev()
+            .take(keep)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+
+        return format!("{}{}", sep, trimmed);
+    }
+
+    let leaf = components[components.len() - 1];
+
+    // On garde toujours le début comme l’original :
+    // d’abord les 2 premiers composants si possible, sinon le premier.
+    for prefix_len in (1..=2).rev() {
+        if components.len() <= prefix_len {
+            continue;
+        }
+
+        let prefix = components[..prefix_len].join("/");
+
+        // Puis on maximise le nombre de composants de fin.
+        for suffix_len in (1..=(components.len() - prefix_len - 1)).rev() {
+            let suffix = components[components.len() - suffix_len..].join("/");
+            let candidate = format!("{}/{}/{}", prefix, sep, suffix);
+
+            if candidate.chars().count() <= max && candidate.chars().count() < p.chars().count() {
+                return candidate;
+            }
+        }
+    }
+
+    // Fichier seul
+    if leaf.chars().count() <= max {
+        return leaf.to_string();
+    }
+
+    // Fichier tronqué
+    if max >= 2 {
+        let truncated: String = leaf.chars().take(max - 1).collect();
+        return format!("{}{}", truncated, sep);
+    }
+
+    String::new()
 }
 
 fn format_mode(mode: u32) -> String {
