@@ -84,6 +84,9 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
         fn_name: "quit",
         action: MenuAction::Quit,
     },
+    // Trigger a local materialisation of cloud-only placeholder files (iCloud /
+    // Dropbox / OneDrive …).  Non-cloud entries in the selection are silently
+    // skipped.  Falls back to the entry under the cursor when nothing is selected.
     PaletteEntry {
         category: "File",
         label: "Download cloud file(s)",

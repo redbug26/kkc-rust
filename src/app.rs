@@ -2097,8 +2097,18 @@ impl App {
         Ok(())
     }
 
-    /// Download cloud-only files to local storage by reading them (forces the cloud
-    /// provider to materialise the data on disk). Works with iCloud, Dropbox, OneDrive, etc.
+    /// Force cloud-only placeholder files to be downloaded to local storage.
+    ///
+    /// Cloud providers such as iCloud, Dropbox, and OneDrive keep files as
+    /// thin placeholders (zero local blocks) until they are first accessed.
+    /// This command reads each file in full, which signals the OS / provider
+    /// daemon to materialise the real data on disk.
+    ///
+    /// The set of files to process is determined by [`Panel::effective_selection`]:
+    /// selected entries take priority; when nothing is selected the entry under
+    /// the cursor is used.  Entries that are not cloud-only are silently skipped.
+    /// After all downloads complete, the active panel is reloaded when
+    /// `auto_reload` is enabled so the cloud-only indicators disappear.
     pub fn cmd_download_cloud_files(&mut self) {
         let entries: Vec<_> = self
             .active_panel()

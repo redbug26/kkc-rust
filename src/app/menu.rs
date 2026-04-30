@@ -68,6 +68,9 @@ pub enum MenuAction {
     OpenFolderInOs,
     QuickPreview,
     DebugLog,
+    /// Force cloud-only files (iCloud, Dropbox, OneDrive …) to be downloaded
+    /// to local storage. Operates on the current selection, or the entry under
+    /// the cursor when nothing is selected. Non-cloud-only entries are skipped.
     DownloadCloudFile,
 }
 
