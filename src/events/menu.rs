@@ -182,6 +182,36 @@ fn mnemonics_for_labels(labels: &[String]) -> Vec<Option<char>> {
 
 pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<bool> {
     match action {
+        MenuAction::OpenMenu => {
+            let mut ms = crate::app::MenuState::new();
+            ms.open = false;
+            app.mode = AppMode::Menu(ms);
+        }
+        MenuAction::OpenCommandPalette => {
+            app.mode = AppMode::CommandPalette(crate::app::CommandPaletteState {
+                recent: app.palette_recent.clone(),
+                ..Default::default()
+            });
+        }
+        MenuAction::OpenActionPalette => {
+            let cwd = app.active_panel().path.clone();
+            let state = crate::app::ActionPaletteState::load(cwd);
+            if state.actions.is_empty() {
+                app.notify("No plugin action available");
+            } else {
+                app.mode = AppMode::ActionPalette(state);
+            }
+        }
+        MenuAction::SwitchPanel => {
+            if app.quick_preview.is_some() {
+                app.quick_preview_active = true;
+            } else if app.file_preview_info {
+                app.file_id_active = true;
+                app.file_id_scroll = 0;
+            } else {
+                app.switch_panel();
+            }
+        }
         MenuAction::ViewFile => {
             app.open_viewer();
         }

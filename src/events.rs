@@ -11,12 +11,10 @@ use self::viewer::{
     handle_viewer_searching,
 };
 use crate::app::{
-    ActionPaletteState, App, AppMode, AssocEditorState, BookmarkListItem, CommandPaletteState,
-    ConfigState, ConfirmAction, InputAction, InputDialog, MenuAction, MenuState, OpenerState,
-    RemoteEditKind,
+    App, AppMode, AssocEditorState, BookmarkListItem, ConfigState, ConfirmAction, InputAction,
+    InputDialog, MenuAction, OpenerState, RemoteEditKind,
 };
 use crate::archive::supports_archive_navigation;
-use crate::config::SortMode;
 use crate::copy::CopyDialogState;
 use crate::remote::{
     RemoteKind, RemoteSource, download_to_temp, join_remote, load_profiles,
@@ -219,104 +217,45 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
     // Handle Ctrl-modified keys first
     if ctrl && !alt && !shift {
         match fn_key {
-            Some(1) => {
-                app.set_sort(SortMode::Name);
-                return Ok(false);
-            }
-            Some(2) => {
-                app.set_sort(SortMode::Extension);
-                return Ok(false);
-            }
-            Some(3) => {
-                app.set_sort(SortMode::Date);
-                return Ok(false);
-            }
-            Some(4) => {
-                app.set_sort(SortMode::Size);
-                return Ok(false);
-            }
-            Some(5) => {
-                app.set_sort(SortMode::Unsorted);
-                return Ok(false);
-            }
+            Some(1) => return menu::execute_menu_action(app, MenuAction::SortName),
+            Some(2) => return menu::execute_menu_action(app, MenuAction::SortExtension),
+            Some(3) => return menu::execute_menu_action(app, MenuAction::SortDate),
+            Some(4) => return menu::execute_menu_action(app, MenuAction::SortSize),
+            Some(5) => return menu::execute_menu_action(app, MenuAction::SortUnsorted),
             _ => match key.code {
-                KeyCode::Char('r') => {
-                    app.reload_panels();
-                    app.set_status("Reloaded");
-                    return Ok(false);
-                }
+                KeyCode::Char('r') => return menu::execute_menu_action(app, MenuAction::Reload),
                 KeyCode::Char('h') => {
-                    let p = app.active_panel_mut();
-                    p.show_hidden = !p.show_hidden;
-                    let _ = p.reload();
-                    return Ok(false);
+                    return menu::execute_menu_action(app, MenuAction::ToggleHidden);
                 }
                 KeyCode::Char('d') => {
-                    app.open_dir_bookmarks();
-                    return Ok(false);
+                    return menu::execute_menu_action(app, MenuAction::DirBookmarks);
                 }
                 KeyCode::Char('f') => {
-                    app.open_remote_connect();
-                    return Ok(false);
+                    return menu::execute_menu_action(app, MenuAction::RemoteConnect);
                 }
                 KeyCode::Char('u') => {
-                    app.mode = AppMode::Terminal;
-                    return Ok(false);
+                    return menu::execute_menu_action(app, MenuAction::OpenTerminal);
                 }
                 KeyCode::Char('a') => {
-                    let cwd = app.active_panel().path.clone();
-                    let state = ActionPaletteState::load(cwd);
-                    if state.actions.is_empty() {
-                        app.notify("No plugin action available");
-                    } else {
-                        app.mode = AppMode::ActionPalette(state);
-                    }
-                    return Ok(false);
+                    return menu::execute_menu_action(app, MenuAction::OpenActionPalette);
                 }
                 KeyCode::Char('p') => {
-                    app.mode = AppMode::CommandPalette(CommandPaletteState {
-                        recent: app.palette_recent.clone(),
-                        ..Default::default()
-                    });
-                    return Ok(false);
+                    return menu::execute_menu_action(app, MenuAction::OpenCommandPalette);
                 }
-                KeyCode::Char('t') => {
-                    app.new_active_tab();
-                    return Ok(false);
-                }
-                KeyCode::Char('w') => {
-                    app.close_active_tab();
-                    return Ok(false);
-                }
+                KeyCode::Char('t') => return menu::execute_menu_action(app, MenuAction::NewTab),
+                KeyCode::Char('w') => return menu::execute_menu_action(app, MenuAction::CloseTab),
                 KeyCode::Tab | KeyCode::Char('n') => {
-                    app.next_active_tab();
-                    return Ok(false);
+                    return menu::execute_menu_action(app, MenuAction::NextTab);
                 }
                 _ => {}
             },
         }
     }
 
-    // // Alt-modified keys
-    // if alt && !ctrl && !shift {
-    //     match fn_key {
-    //         Some(4) => {
-    //             app.open_file_id_view();
-    //             return Ok(false);
-    //         }
-    //         Some(7) => {
-    //             app.open_search();
-    //             return Ok(false);
-    //         }
-    //         _ => {}
-    //     }
-    // }
-
     // Shift-modified keys
     if shift && !ctrl && !alt {
         if fn_key == Some(6) {
-            start_rename(app);
-            return Ok(false);
+            return menu::execute_menu_action(app, MenuAction::RenameFile);
         }
     }
 
@@ -354,14 +293,7 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
             app.send_active_entry_to_other_panel()?;
         }
         KeyCode::Tab => {
-            if app.quick_preview.is_some() {
-                app.quick_preview_active = true;
-            } else if app.file_preview_info {
-                app.file_id_active = true;
-                app.file_id_scroll = 0;
-            } else {
-                app.switch_panel();
-            }
+            return menu::execute_menu_action(app, MenuAction::SwitchPanel);
         }
         KeyCode::Enter => {
             handle_enter(app)?;
@@ -382,17 +314,13 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
             app.active_panel_mut().move_down();
         }
         KeyCode::Char('+') => {
-            app.mode = open_wildcard_dialog("Select pattern:", true);
+            return menu::execute_menu_action(app, MenuAction::SelectPattern);
         }
         KeyCode::Char('-') => {
-            app.mode = open_wildcard_dialog("Deselect pattern:", false);
+            return menu::execute_menu_action(app, MenuAction::DeselectPattern);
         }
         KeyCode::Char('*') => {
-            app.active_panel_mut().invert_selection();
-        }
-
-        KeyCode::Char('q') => {
-            return confirm_quit(app);
+            return menu::execute_menu_action(app, MenuAction::InvertSelection);
         }
 
         KeyCode::Esc => {
@@ -408,33 +336,31 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
 
     match fn_key {
         Some(1) if !ctrl && !shift => {
-            app.open_help();
+            return menu::execute_menu_action(app, MenuAction::Help);
         }
         Some(2) if !ctrl && !shift => {
-            let mut ms = MenuState::new();
-            ms.open = false;
-            app.mode = AppMode::Menu(ms);
+            return menu::execute_menu_action(app, MenuAction::OpenMenu);
         }
         Some(3) if !ctrl && !shift => {
-            app.open_viewer();
+            return menu::execute_menu_action(app, MenuAction::ViewFile);
         }
         Some(4) if !ctrl && !shift => {
-            launch_editor(app)?;
+            return menu::execute_menu_action(app, MenuAction::EditFile);
         }
         Some(5) if !ctrl && !shift => {
-            app.open_copy_dialog();
+            return menu::execute_menu_action(app, MenuAction::CopyFile);
         }
         Some(6) if !ctrl && !shift => {
-            app.cmd_move()?;
+            return menu::execute_menu_action(app, MenuAction::MoveFile);
         }
         Some(7) if !ctrl && !shift => {
-            start_mkdir(app);
+            return menu::execute_menu_action(app, MenuAction::MkDir);
         }
         Some(8) if !ctrl && !shift => {
-            app.cmd_delete();
+            return menu::execute_menu_action(app, MenuAction::DeleteFile);
         }
         Some(10) if !ctrl && !shift => {
-            return confirm_quit(app);
+            return menu::execute_menu_action(app, MenuAction::Quit);
         }
         _ => {}
     }

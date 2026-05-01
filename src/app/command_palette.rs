@@ -27,6 +27,35 @@ pub struct PaletteEntry {
 // ---------------------------------------------------------------------------
 
 pub static PALETTE_DATA: &[PaletteEntry] = &[
+    // ── Interface ────────────────────────────────────────────────────────
+    PaletteEntry {
+        category: "Interface",
+        label: "Switch panel",
+        shortcut: Some("Tab"),
+        fn_name: "switch_panel",
+        action: MenuAction::SwitchPanel,
+    },
+    PaletteEntry {
+        category: "Interface",
+        label: "Open menu",
+        shortcut: Some("F2"),
+        fn_name: "open_menu",
+        action: MenuAction::OpenMenu,
+    },
+    PaletteEntry {
+        category: "Interface",
+        label: "Command palette",
+        shortcut: Some("Ctrl+P"),
+        fn_name: "command_palette",
+        action: MenuAction::OpenCommandPalette,
+    },
+    PaletteEntry {
+        category: "Interface",
+        label: "Plugin actions",
+        shortcut: Some("Ctrl+A"),
+        fn_name: "plugin_actions",
+        action: MenuAction::OpenActionPalette,
+    },
     // ── File ─────────────────────────────────────────────────────────────
     PaletteEntry {
         category: "File",
