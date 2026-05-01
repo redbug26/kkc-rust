@@ -1,20 +1,17 @@
 use crate::config::project_dirs;
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
-use imap::{Client, Session};
-use native_tls::{TlsConnector, TlsStream};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
 #[cfg_attr(feature = "smb", path = "remote_smb.rs")]
 #[cfg_attr(not(feature = "smb"), path = "remote_smb_stub.rs")]
 mod smb_impl;
-use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RemoteSource {
@@ -25,7 +22,6 @@ pub enum RemoteSource {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RemoteProtocol {
     Sftp,
-    Imap,
     Smb,
 }
 
@@ -39,7 +35,6 @@ pub struct RemoteProfile {
 #[derive(Debug, Clone)]
 pub enum RemoteKind {
     Sftp(SftpProfile),
-    Imap(ImapProfile),
     Smb(SmbProfile),
 }
 
@@ -62,30 +57,19 @@ pub struct SmbProfile {
     pub path: Option<String>,
 }
 
-#[derive(Debug, Clone)]
-pub struct ImapProfile {
-    pub host: String,
-    pub user: String,
-    pub port: Option<u16>,
-    pub path: Option<String>,
-    pub password: Option<String>,
-}
-
 impl RemoteProtocol {
-    /// Lowercase short name ("sftp", "imap", "smb").
+    /// Lowercase short name ("sftp", "smb").
     pub fn name(self) -> &'static str {
         match self {
             RemoteProtocol::Sftp => "sftp",
-            RemoteProtocol::Imap => "imap",
             RemoteProtocol::Smb => "smb",
         }
     }
 
-    /// Display label ("SFTP", "IMAP", "SMB").
+    /// Display label ("SFTP", "SMB").
     pub fn label(self) -> &'static str {
         match self {
             RemoteProtocol::Sftp => "SFTP",
-            RemoteProtocol::Imap => "IMAP",
             RemoteProtocol::Smb => "SMB",
         }
     }
@@ -94,7 +78,6 @@ impl RemoteProtocol {
     pub fn color_rgb(self) -> (u8, u8, u8) {
         match self {
             RemoteProtocol::Sftp => (121, 214, 255),
-            RemoteProtocol::Imap => (181, 238, 170),
             RemoteProtocol::Smb => (255, 165, 80),
         }
     }
@@ -104,7 +87,6 @@ impl RemoteProfile {
     pub fn protocol(&self) -> RemoteProtocol {
         match self.kind {
             RemoteKind::Sftp(_) => RemoteProtocol::Sftp,
-            RemoteKind::Imap(_) => RemoteProtocol::Imap,
             RemoteKind::Smb(_) => RemoteProtocol::Smb,
         }
     }
@@ -112,7 +94,6 @@ impl RemoteProfile {
     pub fn host_label(&self) -> String {
         match &self.kind {
             RemoteKind::Sftp(sftp) => sftp.host.clone().unwrap_or_else(|| self.name.clone()),
-            RemoteKind::Imap(imap) => imap.host.clone(),
             RemoteKind::Smb(smb) => smb.host.clone(),
         }
     }
@@ -140,8 +121,6 @@ struct ConnectionStore {
     #[serde(default)]
     sftp: Vec<SftpProfileToml>,
     #[serde(default)]
-    imap: Vec<ImapProfileToml>,
-    #[serde(default)]
     smb: Vec<smb_impl::SmbProfileToml>,
 }
 
@@ -159,21 +138,6 @@ struct SftpProfileToml {
     #[serde(default)]
     identity_file: Option<String>,
 }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ImapProfileToml {
-    name: String,
-    host: String,
-    user: String,
-    #[serde(default)]
-    port: Option<u16>,
-    #[serde(default)]
-    path: Option<String>,
-    #[serde(default)]
-    password: Option<String>,
-}
-
-type ImapSession = Session<TlsStream<TcpStream>>;
 
 pub fn connections_path() -> Result<PathBuf> {
     let dirs = project_dirs()?;
@@ -238,22 +202,6 @@ pub fn save_profile(profile: &RemoteProfile, old_name: Option<&str>) -> Result<(
                 identity_file: sftp.identity_file.clone(),
             });
         }
-        RemoteKind::Imap(imap) => {
-            if let Some(old) = old_name {
-                store.imap.retain(|p| !p.name.eq_ignore_ascii_case(old));
-            }
-            store
-                .imap
-                .retain(|p| !p.name.eq_ignore_ascii_case(&profile.name));
-            store.imap.push(ImapProfileToml {
-                name: profile.name.clone(),
-                host: imap.host.clone(),
-                user: imap.user.clone(),
-                port: imap.port,
-                path: imap.path.clone(),
-                password: imap.password.clone(),
-            });
-        }
         RemoteKind::Smb(smb) => {
             if let Some(old) = old_name {
                 store.smb.retain(|p| !p.name.eq_ignore_ascii_case(old));
@@ -281,7 +229,6 @@ pub fn save_profile(profile: &RemoteProfile, old_name: Option<&str>) -> Result<(
 pub fn resolve_initial_dir(profile: &RemoteProfile) -> Result<String> {
     let cwd = match &profile.kind {
         RemoteKind::Sftp(sftp) => resolve_sftp_initial_dir(profile, sftp),
-        RemoteKind::Imap(imap) => Ok(imap.path.clone().unwrap_or_else(|| "/".into())),
         RemoteKind::Smb(smb) => Ok(smb.path.clone().unwrap_or_else(|| "/".into())),
     }?;
     Ok(normalize_remote_cwd(profile, &cwd))
@@ -296,14 +243,6 @@ pub fn normalize_remote_cwd(profile: &RemoteProfile, cwd: &str) -> String {
                 "/".into()
             } else {
                 cwd.trim_end_matches('/').to_string()
-            }
-        }
-        RemoteProtocol::Imap => {
-            let trimmed = cwd.trim();
-            if trimmed.is_empty() || trimmed == "/" {
-                "/".into()
-            } else {
-                format!("/{}", trimmed.trim_matches('/'))
             }
         }
         RemoteProtocol::Smb => {
@@ -341,7 +280,6 @@ where
     ));
     let entries = match &profile.kind {
         RemoteKind::Sftp(_) => list_sftp_dir(profile, &cwd, show_hidden)?,
-        RemoteKind::Imap(imap) => list_imap_dir_with_progress(imap, &cwd, progress)?,
         RemoteKind::Smb(_) => smb_impl::list_smb_dir(profile, &cwd, show_hidden)?,
     };
     if cancel.load(Ordering::Relaxed) {
@@ -353,14 +291,6 @@ where
 pub fn display_path(profile: &RemoteProfile, cwd: &str) -> String {
     match profile.protocol() {
         RemoteProtocol::Sftp => format!("sftp://{}{}", profile.name, cwd),
-        RemoteProtocol::Imap => {
-            if cwd == "/" {
-                format!("imap://{}/", profile.name)
-            } else {
-                let mailbox = decode_mailbox_component(cwd.trim_start_matches('/'));
-                format!("imap://{}/{}", profile.name, mailbox)
-            }
-        }
         RemoteProtocol::Smb => {
             if let RemoteKind::Smb(smb) = &profile.kind {
                 let share = smb.share.as_deref().unwrap_or("").trim_matches('/');
@@ -381,7 +311,6 @@ pub fn display_path(profile: &RemoteProfile, cwd: &str) -> String {
 pub fn list_dir(profile: &RemoteProfile, cwd: &str, show_hidden: bool) -> Result<Vec<RemoteEntry>> {
     match &profile.kind {
         RemoteKind::Sftp(_) => list_sftp_dir(profile, cwd, show_hidden),
-        RemoteKind::Imap(imap) => list_imap_dir(imap, cwd),
         RemoteKind::Smb(_) => smb_impl::list_smb_dir(profile, cwd, show_hidden),
     }
 }
@@ -407,7 +336,6 @@ pub fn download_into_dir(
 ) -> Result<PathBuf> {
     match &profile.kind {
         RemoteKind::Sftp(_) => download_sftp_into_dir(profile, remote_path, local_dir, recursive),
-        RemoteKind::Imap(imap) => download_imap_into_dir(imap, remote_path, local_dir),
         RemoteKind::Smb(_) => {
             smb_impl::download_smb_into_dir(profile, remote_path, local_dir, recursive)
         }
@@ -421,7 +349,6 @@ pub fn download_bulk_into_dir(
 ) -> Result<PathBuf> {
     match &profile.kind {
         RemoteKind::Sftp(_) => download_sftp_bulk_into_dir(profile, remote_path, local_dir),
-        RemoteKind::Imap(imap) => download_imap_into_dir(imap, remote_path, local_dir),
         RemoteKind::Smb(_) => {
             smb_impl::download_smb_into_dir(profile, remote_path, local_dir, true)
         }
@@ -436,7 +363,6 @@ pub fn upload_into_dir(
 ) -> Result<String> {
     match &profile.kind {
         RemoteKind::Sftp(_) => upload_sftp_into_dir(profile, local_path, remote_dir, recursive),
-        RemoteKind::Imap(_) => bail!("Upload to IMAP is not supported"),
         RemoteKind::Smb(_) => {
             smb_impl::upload_smb_into_dir(profile, local_path, remote_dir, recursive)
         }
@@ -450,7 +376,6 @@ pub fn upload_bulk_into_dir(
 ) -> Result<String> {
     match &profile.kind {
         RemoteKind::Sftp(_) => upload_sftp_bulk_into_dir(profile, local_path, remote_dir),
-        RemoteKind::Imap(_) => bail!("Upload to IMAP is not supported"),
         RemoteKind::Smb(_) => smb_impl::upload_smb_into_dir(profile, local_path, remote_dir, true),
     }
 }
@@ -468,7 +393,6 @@ pub fn rename_path(profile: &RemoteProfile, old_path: &str, new_path: &str) -> R
             )?;
             Ok(())
         }
-        RemoteKind::Imap(_) => bail!("Rename on IMAP is not supported"),
         RemoteKind::Smb(smb) => smb_impl::smb_rename(smb, old_path, new_path),
     }
 }
@@ -479,7 +403,6 @@ pub fn make_dir(profile: &RemoteProfile, remote_path: &str) -> Result<()> {
             run_sftp_batch(profile, &[format!("mkdir {}", batch_quote(remote_path))])?;
             Ok(())
         }
-        RemoteKind::Imap(_) => bail!("Create mailbox from KKC is not supported yet"),
         RemoteKind::Smb(smb) => smb_impl::smb_mkdir(smb, remote_path),
     }
 }
@@ -494,7 +417,6 @@ pub fn delete_path(profile: &RemoteProfile, remote_path: &str, is_dir: bool) -> 
             }
             Ok(())
         }
-        RemoteKind::Imap(_) => bail!("Delete on IMAP is not supported yet"),
         RemoteKind::Smb(_) => {
             if is_dir {
                 smb_impl::delete_smb_dir_recursive(profile, remote_path)
@@ -532,7 +454,6 @@ pub fn remote_stats(
 ) -> Result<RemoteStats> {
     match &profile.kind {
         RemoteKind::Sftp(_) => remote_sftp_stats(profile, remote_path, is_dir),
-        RemoteKind::Imap(imap) => remote_imap_stats(imap, remote_path, is_dir),
         RemoteKind::Smb(_) => smb_impl::remote_smb_stats(profile, remote_path, is_dir),
     }
 }
@@ -552,7 +473,6 @@ where
     }
     match &profile.kind {
         RemoteKind::Sftp(_) => scan_sftp_stats(profile, remote_path, is_dir, progress, cancel),
-        RemoteKind::Imap(imap) => scan_imap_stats(imap, remote_path, is_dir, progress, cancel),
         RemoteKind::Smb(_) => {
             smb_impl::scan_smb_stats(profile, remote_path, is_dir, progress, cancel)
         }
@@ -572,9 +492,6 @@ where
     match &profile.kind {
         RemoteKind::Sftp(_) => {
             download_sftp_with_progress(profile, remote_path, local_dir, recursive, progress)
-        }
-        RemoteKind::Imap(imap) => {
-            download_imap_with_progress(imap, remote_path, local_dir, progress)
         }
         RemoteKind::Smb(_) => smb_impl::download_smb_with_progress(
             profile,
@@ -600,7 +517,6 @@ where
         RemoteKind::Sftp(_) => {
             upload_sftp_with_progress(profile, local_path, remote_dir, recursive, progress)
         }
-        RemoteKind::Imap(_) => bail!("Upload to IMAP is not supported"),
         RemoteKind::Smb(_) => {
             smb_impl::upload_smb_with_progress(profile, local_path, remote_dir, recursive, progress)
         }
@@ -625,17 +541,6 @@ fn load_saved_profiles() -> Result<Vec<RemoteProfile>> {
             port: p.port,
             path: p.path,
             identity_file: p.identity_file,
-        }),
-    }));
-    out.extend(store.imap.into_iter().map(|p| RemoteProfile {
-        name: p.name,
-        source: RemoteSource::UserToml,
-        kind: RemoteKind::Imap(ImapProfile {
-            host: p.host,
-            user: p.user,
-            port: p.port,
-            path: p.path,
-            password: p.password,
         }),
     }));
     out.extend(store.smb.into_iter().map(|p| RemoteProfile {
@@ -1181,571 +1086,6 @@ fn remote_target(profile: &RemoteProfile) -> String {
         (None, Some(host)) => host.clone(),
         (None, None) => profile.name.clone(),
     }
-}
-
-fn list_imap_dir(profile: &ImapProfile, cwd: &str) -> Result<Vec<RemoteEntry>> {
-    if cwd == "/" {
-        return list_imap_mailboxes(profile, "/");
-    }
-    list_imap_mailbox_contents(profile, cwd)
-}
-
-fn list_imap_dir_with_progress<F>(
-    profile: &ImapProfile,
-    cwd: &str,
-    progress: &mut F,
-) -> Result<Vec<RemoteEntry>>
-where
-    F: FnMut(String),
-{
-    if cwd == "/" {
-        return list_imap_mailboxes_with_progress(profile, "/", progress);
-    }
-    list_imap_mailbox_contents_with_progress(profile, cwd, progress)
-}
-
-fn remote_imap_stats(
-    profile: &ImapProfile,
-    remote_path: &str,
-    is_dir: bool,
-) -> Result<RemoteStats> {
-    if !is_dir {
-        let (_, uid) = parse_imap_message_path(remote_path)?;
-        let message = fetch_imap_message_meta(profile, remote_path)?;
-        return Ok(RemoteStats {
-            files: usize::from(uid > 0),
-            bytes: message.size,
-        });
-    }
-    let mailbox = decode_mailbox_path(remote_path)?;
-    let messages = imap_fetch_messages(profile, &mailbox)?;
-    Ok(RemoteStats {
-        files: messages.len(),
-        bytes: messages.iter().map(|m| m.size).sum(),
-    })
-}
-
-fn scan_imap_stats<F>(
-    profile: &ImapProfile,
-    remote_path: &str,
-    is_dir: bool,
-    progress: &mut F,
-    cancel: &Arc<AtomicBool>,
-) -> Result<RemoteStats>
-where
-    F: FnMut(RemoteStats),
-{
-    if cancel.load(Ordering::Relaxed) {
-        bail!("Aborted");
-    }
-    if !is_dir {
-        let stats = remote_imap_stats(profile, remote_path, false)?;
-        progress(stats);
-        return Ok(stats);
-    }
-    let mailbox = decode_mailbox_path(remote_path)?;
-    let messages = imap_fetch_messages(profile, &mailbox)?;
-    let mut total = RemoteStats::default();
-    for msg in messages {
-        if cancel.load(Ordering::Relaxed) {
-            bail!("Aborted");
-        }
-        let delta = RemoteStats {
-            files: 1,
-            bytes: msg.size,
-        };
-        total.files += 1;
-        total.bytes += msg.size;
-        progress(delta);
-    }
-    Ok(total)
-}
-
-fn download_imap_into_dir(
-    profile: &ImapProfile,
-    remote_path: &str,
-    local_dir: &Path,
-) -> Result<PathBuf> {
-    if is_imap_message_path(remote_path) {
-        return save_imap_message_to_dir(profile, remote_path, local_dir);
-    }
-    let mailbox = decode_mailbox_path(remote_path)?;
-    let target = local_dir.join(safe_fs_name(&mailbox));
-    fs::create_dir_all(&target)?;
-    for message in imap_fetch_messages(profile, &mailbox)? {
-        let message_path = format!("{}/{}", remote_path.trim_end_matches('/'), message.uid);
-        let _ = save_imap_message_to_dir(profile, &message_path, &target)?;
-    }
-    Ok(target)
-}
-
-fn download_imap_with_progress<F>(
-    profile: &ImapProfile,
-    remote_path: &str,
-    local_dir: &Path,
-    progress: &mut F,
-) -> Result<PathBuf>
-where
-    F: FnMut(&str, u64) -> bool,
-{
-    let path = save_imap_message_to_dir(profile, remote_path, local_dir)?;
-    let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-    if !progress(remote_path, size) {
-        bail!("Aborted");
-    }
-    Ok(path)
-}
-
-fn list_imap_mailboxes(profile: &ImapProfile, parent_cwd: &str) -> Result<Vec<RemoteEntry>> {
-    let mut noop = |_msg: &str| {};
-    let mut session = imap_connect_with_progress(profile, &mut noop)?;
-    let names = session
-        .list(None, Some("*"))
-        .context("Listing IMAP mailboxes")?;
-    let entries = build_imap_mailbox_entries(&names, parent_cwd);
-    let _ = session.logout();
-    Ok(entries)
-}
-
-fn list_imap_mailboxes_with_progress<F>(
-    profile: &ImapProfile,
-    parent_cwd: &str,
-    progress: &mut F,
-) -> Result<Vec<RemoteEntry>>
-where
-    F: FnMut(String),
-{
-    let mut phase = |msg: &str| progress(msg.to_string());
-    let mut session = imap_connect_with_progress(profile, &mut phase)?;
-    progress("Listing mailboxes...".into());
-    let names = session
-        .list(None, Some("*"))
-        .context("Listing IMAP mailboxes")?;
-    let entries = build_imap_mailbox_entries(&names, parent_cwd);
-    let _ = session.logout();
-    Ok(entries)
-}
-
-fn list_imap_mailbox_contents(profile: &ImapProfile, cwd: &str) -> Result<Vec<RemoteEntry>> {
-    let mut entries = list_imap_mailboxes(profile, cwd)?;
-    entries.extend(list_imap_messages(profile, cwd)?);
-    Ok(entries)
-}
-
-fn list_imap_messages(profile: &ImapProfile, cwd: &str) -> Result<Vec<RemoteEntry>> {
-    let mailbox = decode_mailbox_path(cwd)?;
-    let mut messages = imap_fetch_messages(profile, &mailbox)?;
-    messages.sort_by(|a, b| b.uid.cmp(&a.uid));
-    Ok(messages
-        .into_iter()
-        .map(|msg| {
-            let subject = msg.subject.unwrap_or_else(|| "message".into());
-            let display = format!("{:08} {}", msg.uid, safe_mail_subject(&subject));
-            RemoteEntry {
-                name: truncate_name(&display, 120),
-                path: format!("{}/{}", cwd.trim_end_matches('/'), msg.uid),
-                is_dir: false,
-                is_symlink: false,
-                size: msg.size,
-                modified: msg.modified,
-                mode: 0o644,
-            }
-        })
-        .collect())
-}
-
-fn list_imap_mailbox_contents_with_progress<F>(
-    profile: &ImapProfile,
-    cwd: &str,
-    progress: &mut F,
-) -> Result<Vec<RemoteEntry>>
-where
-    F: FnMut(String),
-{
-    let mut entries = list_imap_mailboxes_with_progress(profile, cwd, progress)?;
-    entries.extend(list_imap_messages_with_progress(profile, cwd, progress)?);
-    Ok(entries)
-}
-
-fn list_imap_messages_with_progress<F>(
-    profile: &ImapProfile,
-    cwd: &str,
-    progress: &mut F,
-) -> Result<Vec<RemoteEntry>>
-where
-    F: FnMut(String),
-{
-    let mailbox = decode_mailbox_path(cwd)?;
-    let mut messages = imap_fetch_messages_with_progress(profile, &mailbox, progress)?;
-    messages.sort_by(|a, b| b.uid.cmp(&a.uid));
-    Ok(messages
-        .into_iter()
-        .map(|msg| {
-            let subject = msg.subject.unwrap_or_else(|| "message".into());
-            let display = format!("{:08} {}", msg.uid, safe_mail_subject(&subject));
-            RemoteEntry {
-                name: truncate_name(&display, 120),
-                path: format!("{}/{}", cwd.trim_end_matches('/'), msg.uid),
-                is_dir: false,
-                is_symlink: false,
-                size: msg.size,
-                modified: msg.modified,
-                mode: 0o644,
-            }
-        })
-        .collect())
-}
-
-fn build_imap_mailbox_entries(names: &[imap::types::Name], parent_cwd: &str) -> Vec<RemoteEntry> {
-    use imap::types::NameAttribute;
-    use std::collections::HashSet;
-
-    let parent_mailbox = if parent_cwd == "/" {
-        None
-    } else {
-        decode_mailbox_path(parent_cwd).ok()
-    };
-    let mut seen = HashSet::new();
-    let mut entries = Vec::new();
-
-    for name in names {
-        let mailbox = name.name();
-        let delimiter = name.delimiter().unwrap_or("/");
-        let child = match parent_mailbox.as_deref() {
-            None => {
-                if let Some((head, _)) = mailbox.split_once(delimiter) {
-                    head.to_string()
-                } else {
-                    mailbox.to_string()
-                }
-            }
-            Some(parent) => {
-                let Some(rest) = mailbox.strip_prefix(parent) else {
-                    continue;
-                };
-                let Some(rest) = rest.strip_prefix(delimiter) else {
-                    continue;
-                };
-                if rest.is_empty() {
-                    continue;
-                }
-                if let Some((head, _)) = rest.split_once(delimiter) {
-                    format!("{parent}{delimiter}{head}")
-                } else {
-                    mailbox.to_string()
-                }
-            }
-        };
-
-        if !seen.insert(child.clone()) {
-            continue;
-        }
-        let display_name = match parent_mailbox.as_deref() {
-            None => {
-                if let Some((head, _)) = child.split_once(delimiter) {
-                    head.to_string()
-                } else {
-                    child.clone()
-                }
-            }
-            Some(parent) => child
-                .strip_prefix(parent)
-                .and_then(|s| s.strip_prefix(delimiter))
-                .unwrap_or(&child)
-                .to_string(),
-        };
-        let is_noselect = name
-            .attributes()
-            .iter()
-            .any(|attr| matches!(attr, NameAttribute::NoSelect));
-        entries.push(RemoteEntry {
-            name: display_name,
-            path: format!("/{}", encode_mailbox_component(&child)),
-            is_dir: true,
-            is_symlink: false,
-            size: 0,
-            modified: None,
-            mode: if is_noselect { 0o555 } else { 0o755 },
-        });
-    }
-
-    entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-    entries
-}
-
-fn fetch_imap_message_meta(profile: &ImapProfile, remote_path: &str) -> Result<ImapMessageMeta> {
-    let (mailbox, uid) = parse_imap_message_path(remote_path)?;
-    let mut session = imap_connect(profile)?;
-    session.select(&mailbox)?;
-    let fetches = session
-        .uid_fetch(
-            uid.to_string(),
-            "(UID RFC822.SIZE INTERNALDATE BODY.PEEK[HEADER.FIELDS (SUBJECT)])",
-        )
-        .context("Fetching IMAP message metadata")?;
-    let Some(fetch) = fetches.iter().next() else {
-        bail!("Message not found");
-    };
-    let meta = parse_imap_fetch(fetch)?;
-    let _ = session.logout();
-    Ok(meta)
-}
-
-fn save_imap_message_to_dir(
-    profile: &ImapProfile,
-    remote_path: &str,
-    local_dir: &Path,
-) -> Result<PathBuf> {
-    let (mailbox, uid) = parse_imap_message_path(remote_path)?;
-    let mut session = imap_connect(profile)?;
-    session.select(&mailbox)?;
-    let body = fetch_imap_message_bytes(&mut session, uid)
-        .with_context(|| format!("Downloading IMAP message UID {} from {}", uid, mailbox))?;
-    fs::create_dir_all(local_dir)?;
-    let target = local_dir.join(format!("{uid:08}.eml"));
-    fs::write(&target, body)?;
-    let _ = session.logout();
-    Ok(target)
-}
-
-fn fetch_imap_message_bytes(session: &mut ImapSession, uid: u32) -> Result<Vec<u8>> {
-    for query in ["BODY.PEEK[]", "BODY[]", "RFC822"] {
-        let fetches = session
-            .uid_fetch(uid.to_string(), query)
-            .with_context(|| format!("IMAP FETCH {}", query))?;
-        if let Some(fetch) = fetches.iter().next()
-            && let Some(body) = fetch.body()
-        {
-            return Ok(body.to_vec());
-        }
-    }
-    bail!("Missing IMAP message body")
-}
-
-fn imap_fetch_messages(profile: &ImapProfile, mailbox: &str) -> Result<Vec<ImapMessageMeta>> {
-    let mut noop = |_msg: &str| {};
-    let mut session = imap_connect_with_progress(profile, &mut noop)?;
-    session.select(mailbox)?;
-    let fetches = session
-        .fetch(
-            "1:*",
-            "(UID RFC822.SIZE INTERNALDATE BODY.PEEK[HEADER.FIELDS (SUBJECT)])",
-        )
-        .context("Listing IMAP messages")?;
-    let mut out = Vec::new();
-    for fetch in fetches.iter() {
-        if let Ok(meta) = parse_imap_fetch(fetch) {
-            out.push(meta);
-        }
-    }
-    let _ = session.logout();
-    Ok(out)
-}
-
-fn imap_fetch_messages_with_progress<F>(
-    profile: &ImapProfile,
-    mailbox: &str,
-    progress: &mut F,
-) -> Result<Vec<ImapMessageMeta>>
-where
-    F: FnMut(String),
-{
-    let mut phase = |msg: &str| progress(msg.to_string());
-    let mut session = imap_connect_with_progress(profile, &mut phase)?;
-    progress(format!("Selecting mailbox {}...", mailbox));
-    session.select(mailbox)?;
-    progress("Fetching message headers...".into());
-    let fetches = session
-        .fetch(
-            "1:*",
-            "(UID RFC822.SIZE INTERNALDATE BODY.PEEK[HEADER.FIELDS (SUBJECT)])",
-        )
-        .context("Listing IMAP messages")?;
-    let mut out = Vec::new();
-    for fetch in fetches.iter() {
-        if let Ok(meta) = parse_imap_fetch(fetch) {
-            out.push(meta);
-        }
-    }
-    let _ = session.logout();
-    Ok(out)
-}
-
-#[derive(Debug)]
-struct ImapMessageMeta {
-    uid: u32,
-    size: u64,
-    modified: Option<DateTime<Local>>,
-    subject: Option<String>,
-}
-
-fn parse_imap_fetch(fetch: &imap::types::Fetch) -> Result<ImapMessageMeta> {
-    let uid = fetch
-        .uid
-        .ok_or_else(|| anyhow::anyhow!("Missing IMAP UID"))?;
-    let size = fetch.size.unwrap_or(0) as u64;
-    let modified = fetch.internal_date().and_then(|date| {
-        let ts = date.timestamp();
-        Local.timestamp_opt(ts, 0).single()
-    });
-    let subject = fetch
-        .header()
-        .map(|raw| parse_header_value(raw, "subject"))
-        .transpose()?
-        .flatten();
-    Ok(ImapMessageMeta {
-        uid,
-        size,
-        modified,
-        subject,
-    })
-}
-
-fn parse_header_value(raw: &[u8], key: &str) -> Result<Option<String>> {
-    let text = String::from_utf8_lossy(raw);
-    for line in text.lines() {
-        if let Some((head, value)) = line.split_once(':')
-            && head.trim().eq_ignore_ascii_case(key)
-        {
-            return Ok(Some(value.trim().to_string()));
-        }
-    }
-    Ok(None)
-}
-
-fn imap_connect(profile: &ImapProfile) -> Result<ImapSession> {
-    let mut noop = |_msg: &str| {};
-    imap_connect_with_progress(profile, &mut noop)
-}
-
-fn imap_connect_with_progress<F>(profile: &ImapProfile, progress: &mut F) -> Result<ImapSession>
-where
-    F: FnMut(&str),
-{
-    let tls = TlsConnector::builder()
-        .build()
-        .context("Building TLS connector")?;
-    let host = profile.host.trim();
-    if host.is_empty() {
-        bail!("IMAP host is required");
-    }
-    let port = profile.port.unwrap_or(993);
-    progress("Resolving host");
-    let addr = (host, port)
-        .to_socket_addrs()
-        .context("Resolving IMAP host")?
-        .next()
-        .context("No IMAP socket address resolved")?;
-    progress("Opening TCP socket");
-    let stream =
-        TcpStream::connect_timeout(&addr, Duration::from_secs(10)).context("Connecting to IMAP")?;
-    stream.set_read_timeout(Some(Duration::from_secs(15))).ok();
-    stream.set_write_timeout(Some(Duration::from_secs(15))).ok();
-    progress("Negotiating TLS");
-    let tls_stream = Client::new(
-        TlsConnector::connect(&tls, host, stream)
-            .map_err(|err| anyhow::anyhow!("TLS handshake failed: {err}"))?,
-    );
-    let mut client = tls_stream;
-    progress("Reading IMAP greeting");
-    client.read_greeting().context("Reading IMAP greeting")?;
-    let password = profile.password.clone().unwrap_or_default();
-    progress("Authenticating");
-    client
-        .login(profile.user.as_str(), password)
-        .map_err(|(err, _)| anyhow::anyhow!("IMAP login failed: {err}"))
-}
-
-fn parse_imap_message_path(path: &str) -> Result<(String, u32)> {
-    let trimmed = path.trim_matches('/');
-    let Some((mailbox_enc, uid_txt)) = trimmed.rsplit_once('/') else {
-        bail!("Invalid IMAP message path");
-    };
-    let uid = uid_txt.parse::<u32>().context("Invalid IMAP UID")?;
-    Ok((decode_mailbox_component(mailbox_enc), uid))
-}
-
-fn is_imap_message_path(path: &str) -> bool {
-    path.trim_matches('/')
-        .rsplit_once('/')
-        .map(|(_, tail)| tail.parse::<u32>().is_ok())
-        .unwrap_or(false)
-}
-
-fn decode_mailbox_path(path: &str) -> Result<String> {
-    if path == "/" {
-        bail!("Root is not a mailbox");
-    }
-    Ok(decode_mailbox_component(path.trim_matches('/')))
-}
-
-fn encode_mailbox_component(name: &str) -> String {
-    name.replace('%', "%25").replace('/', "%2F")
-}
-
-fn decode_mailbox_component(name: &str) -> String {
-    let mut out = String::new();
-    let bytes = name.as_bytes();
-    let mut i = 0usize;
-    while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            match &name[i..i + 3] {
-                "%2F" => {
-                    out.push('/');
-                    i += 3;
-                    continue;
-                }
-                "%25" => {
-                    out.push('%');
-                    i += 3;
-                    continue;
-                }
-                _ => {}
-            }
-        }
-        out.push(bytes[i] as char);
-        i += 1;
-    }
-    out
-}
-
-fn safe_fs_name(name: &str) -> String {
-    let cleaned = name
-        .chars()
-        .map(|ch| {
-            if matches!(ch, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') {
-                '_'
-            } else {
-                ch
-            }
-        })
-        .collect::<String>();
-    if cleaned.is_empty() {
-        "mailbox".into()
-    } else {
-        cleaned
-    }
-}
-
-fn safe_mail_subject(subject: &str) -> String {
-    let subject = subject.replace('\r', " ").replace('\n', " ");
-    let collapsed = subject.split_whitespace().collect::<Vec<_>>().join(" ");
-    if collapsed.is_empty() {
-        "message.eml".into()
-    } else {
-        format!("{}.eml", collapsed)
-    }
-}
-
-fn truncate_name(name: &str, max: usize) -> String {
-    let mut out = String::new();
-    for ch in name.chars() {
-        if out.chars().count() >= max {
-            break;
-        }
-        out.push(ch);
-    }
-    out
 }
 
 fn batch_quote(path: &str) -> String {

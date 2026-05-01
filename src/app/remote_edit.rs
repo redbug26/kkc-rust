@@ -3,20 +3,18 @@ use super::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RemoteEditKind {
     Sftp,
-    Imap,
     Smb,
 }
 
 impl RemoteEditKind {
     /// All protocol choices in menu order.
     pub fn all() -> &'static [Self] {
-        &[Self::Sftp, Self::Imap, Self::Smb]
+        &[Self::Sftp, Self::Smb]
     }
 
     pub fn name(self) -> &'static str {
         match self {
             Self::Sftp => "SFTP",
-            Self::Imap => "IMAP",
             Self::Smb => "SMB",
         }
     }
@@ -25,7 +23,6 @@ impl RemoteEditKind {
     pub fn color_rgb(self) -> (u8, u8, u8) {
         match self {
             Self::Sftp => (121, 214, 255),
-            Self::Imap => (181, 238, 170),
             Self::Smb => (255, 165, 80),
         }
     }
@@ -33,7 +30,6 @@ impl RemoteEditKind {
     pub fn title(self) -> &'static str {
         match self {
             Self::Sftp => " Add SFTP Server ",
-            Self::Imap => " Add IMAP Server ",
             Self::Smb => " Add SMB Server ",
         }
     }
@@ -41,7 +37,6 @@ impl RemoteEditKind {
     pub fn field_labels(self) -> [&'static str; 6] {
         match self {
             Self::Sftp => ["Name", "Host", "User", "Port", "Path", "Identity"],
-            Self::Imap => ["Name", "Host", "User", "Port", "Mailbox", "Password"],
             Self::Smb => ["Name", "Host", "User", "Workgroup", "Share", "Password"],
         }
     }
@@ -49,7 +44,6 @@ impl RemoteEditKind {
     pub fn validation_message(self) -> &'static str {
         match self {
             Self::Sftp => "SFTP name is required",
-            Self::Imap => "IMAP name, host and user are required",
             Self::Smb => "SMB name and host are required",
         }
     }
@@ -113,17 +107,6 @@ impl RemoteEditState {
                     sftp.identity_file.clone().unwrap_or_default(),
                 ],
             ),
-            RemoteKind::Imap(imap) => (
-                RemoteEditKind::Imap,
-                [
-                    profile.name.clone(),
-                    imap.host.clone(),
-                    imap.user.clone(),
-                    imap.port.map(|p| p.to_string()).unwrap_or_default(),
-                    imap.path.clone().unwrap_or_default(),
-                    imap.password.clone().unwrap_or_default(),
-                ],
-            ),
             RemoteKind::Smb(smb) => (
                 RemoteEditKind::Smb,
                 [
@@ -180,24 +163,6 @@ impl RemoteEditState {
                     identity_file: trim_opt(&self.fields[Self::SECRET]),
                 }),
             },
-            RemoteEditKind::Imap => {
-                let host = self.fields[Self::HOST].trim();
-                let user = self.fields[Self::USER].trim();
-                if host.is_empty() || user.is_empty() {
-                    return None;
-                }
-                RemoteProfile {
-                    name: name.to_string(),
-                    source: RemoteSource::UserToml,
-                    kind: RemoteKind::Imap(crate::remote::ImapProfile {
-                        host: host.to_string(),
-                        user: user.to_string(),
-                        port,
-                        path: trim_opt(&self.fields[Self::PATH]),
-                        password: trim_opt(&self.fields[Self::SECRET]),
-                    }),
-                }
-            }
             RemoteEditKind::Smb => {
                 let host = self.fields[Self::HOST].trim();
                 if host.is_empty() {
