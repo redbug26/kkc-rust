@@ -1,31 +1,36 @@
+mod assoc;
+mod bookmarks;
 mod command_palette;
-mod panel;
-mod plugins;
-mod viewer;
+mod config;
 mod confirm;
 mod copy;
+mod help;
+mod panel;
+mod plugins;
 mod remote;
 mod search;
-mod tree_view;
-mod bookmarks;
-mod help;
-mod config;
-mod assoc;
+mod shortcuts;
 mod terminal;
-pub use self::viewer::{kitty_image_area, kitty_image_area_quick_preview};
-use self::viewer::{
-    menu_dropdown_line, mnemonics_for_labels, render_viewer, render_viewer_menu,
+mod tree_view;
+mod viewer;
+use self::assoc::{render_action_palette, render_assoc_editor, render_opener};
+use self::bookmarks::{
+    render_dir_bookmarks, render_quicksearch_palette, render_store_install_palette,
+    render_viewer_plugin_palette,
 };
+use self::config::render_config;
 use self::confirm::{render_confirm, render_input};
 use self::copy::{render_copy_dialog, render_copy_progress};
-use self::remote::{render_remote_add_menu, render_remote_connect, render_remote_connecting, render_remote_edit};
-use self::search::render_search;
-use self::tree_view::render_tree_view;
-use self::bookmarks::{render_dir_bookmarks, render_quicksearch_palette, render_store_install_palette, render_viewer_plugin_palette};
 use self::help::render_help;
-use self::config::render_config;
-use self::assoc::{render_action_palette, render_assoc_editor, render_opener};
+use self::remote::{
+    render_remote_add_menu, render_remote_connect, render_remote_connecting, render_remote_edit,
+};
+use self::search::render_search;
+use self::shortcuts::render_shortcut_panel;
 use self::terminal::render_terminal;
+use self::tree_view::render_tree_view;
+pub use self::viewer::{kitty_image_area, kitty_image_area_quick_preview};
+use self::viewer::{menu_dropdown_line, mnemonics_for_labels, render_viewer, render_viewer_menu};
 
 use self::command_palette::render_command_palette;
 use self::panel::{render_center_buttons, render_panel_or_file_id};
@@ -255,7 +260,7 @@ pub fn render(f: &mut Frame, app: &App) {
     render_status(f, app, status_area);
 
     if has_fbar {
-        render_fkey_bar(f, main_vert[2]);
+        render_fkey_bar(f, app, main_vert[2]);
     }
 
     // Overlays
@@ -270,7 +275,8 @@ pub fn render(f: &mut Frame, app: &App) {
         AppMode::Config(cs) => render_config(f, cs, f.area()),
         AppMode::Plugins(s) => render_plugins(f, s, f.area()),
         AppMode::ActionPalette(s) => render_action_palette(f, s, f.area()),
-        AppMode::CommandPalette(s) => render_command_palette(f, s, f.area()),
+        AppMode::CommandPalette(s) => render_command_palette(f, app, s, f.area()),
+        AppMode::ShortcutPanel(s) => render_shortcut_panel(f, app, s, f.area()),
         AppMode::StoreInstallPalette(s) => render_store_install_palette(f, s, f.area()),
         AppMode::Opener(s) => render_opener(f, s, f.area()),
         AppMode::AssocEditor(s) => render_assoc_editor(f, s, f.area()),
@@ -278,7 +284,7 @@ pub fn render(f: &mut Frame, app: &App) {
         AppMode::RemoteEdit(s) => render_remote_edit(f, s, f.area()),
         AppMode::RemoteAddMenu(cursor) => render_remote_add_menu(f, *cursor, f.area()),
         AppMode::RemoteConnecting(s) => render_remote_connecting(f, s, f.area()),
-        AppMode::Menu(ms) => render_menu(f, ms, f.area()),
+        AppMode::Menu(ms) => render_menu(f, app, ms, f.area()),
         AppMode::QuickSearch => {
             render_quicksearch_palette(f, app, f.area());
         }
@@ -336,7 +342,7 @@ where
 // Menu bar + dropdown (F2)
 // ---------------------------------------------------------------------------
 
-fn render_menu(f: &mut Frame, state: &MenuState, area: Rect) {
+fn render_menu(f: &mut Frame, app: &App, state: &MenuState, area: Rect) {
     // ── top bar ────────────────────────────────────────────────────────────
     let bar_area = Rect {
         x: area.x,
@@ -396,10 +402,14 @@ fn render_menu(f: &mut Frame, state: &MenuState, area: Rect) {
     };
 
     // Width: widest label + key hint + padding
-    let max_label = items.iter().map(|(l, _, _)| l.len()).max().unwrap_or(6);
+    let max_label = items
+        .iter()
+        .map(|action| UnicodeWidthStr::width(menu_action_label(*action)))
+        .max()
+        .unwrap_or(6);
     let max_key = items
         .iter()
-        .filter_map(|(_, k, _)| *k)
+        .filter_map(|action| menu_action_shortcut(app, *action))
         .map(|k| k.len())
         .max()
         .unwrap_or(0);
@@ -427,16 +437,16 @@ fn render_menu(f: &mut Frame, state: &MenuState, area: Rect) {
     let avail = inner.width as usize;
     let menu_labels = items
         .iter()
-        .map(|(label, _, action)| {
+        .map(|action| {
             if *action == MenuAction::Separator {
                 String::new()
             } else {
-                (*label).to_string()
+                menu_action_label(*action).to_string()
             }
         })
         .collect::<Vec<_>>();
     let menu_mnemonics = mnemonics_for_labels(&menu_labels);
-    for (idx, (label, key_hint, action)) in items.iter().enumerate() {
+    for (idx, action) in items.iter().enumerate() {
         if idx as u16 >= inner.height {
             break;
         }
@@ -462,12 +472,15 @@ fn render_menu(f: &mut Frame, state: &MenuState, area: Rect) {
             } else {
                 Style::default().bg(CLR_MENU_DD_BG).fg(CLR_MENU_DD_FG)
             };
-            let key_text = key_hint.unwrap_or("");
-            let used = label.len() + key_text.len() + 2; // leading " " + trailing " "
+            let label = menu_action_label(*action);
+            let key_text = menu_action_shortcut(app, *action).unwrap_or_default();
+            let used = UnicodeWidthStr::width(label)
+                + UnicodeWidthStr::width(key_text.as_str())
+                + 2; // leading " " + trailing " "
             let pad = avail.saturating_sub(used);
             let line = menu_dropdown_line(
                 label,
-                key_text,
+                &key_text,
                 pad,
                 menu_mnemonics.get(idx).copied().flatten(),
                 style,
@@ -475,6 +488,17 @@ fn render_menu(f: &mut Frame, state: &MenuState, area: Rect) {
             f.render_widget(Paragraph::new(line).style(style), row);
         }
     }
+}
+
+fn menu_action_label(action: MenuAction) -> &'static str {
+    crate::app::palette_label_for_action(action)
+}
+
+fn menu_action_shortcut(app: &App, action: MenuAction) -> Option<String> {
+    crate::app::PALETTE_DATA
+        .iter()
+        .find(|entry| entry.action == action)
+        .and_then(|entry| app.effective_shortcut_for(entry.fn_name, entry.shortcut))
 }
 
 // ---------------------------------------------------------------------------
@@ -561,24 +585,28 @@ fn render_status(f: &mut Frame, app: &App, area: Rect) {
 // Function key bar
 // ---------------------------------------------------------------------------
 
-fn render_fkey_bar(f: &mut Frame, area: Rect) {
-    let labels: &[(&str, &str)] = &[
-        ("1", "Help"),
-        ("2", "Menu"),
-        ("3", "View"),
-        ("4", "Edit"),
-        ("5", "Copy"),
-        ("6", "Move"),
-        ("7", "MDir"),
-        ("8", "Delete"),
-        ("9", "Sort"),
-        ("10", "Quit"),
-    ];
+fn render_fkey_bar(f: &mut Frame, app: &App, area: Rect) {
+    let mut labels: Vec<(String, String)> =
+        (1..=10).map(|n| (n.to_string(), String::new())).collect();
+
+    for n in 1..=10 {
+        let shortcut = format!("F{}", n);
+        if let Some(entry) = crate::app::PALETTE_DATA.iter().find(|entry| {
+            app.effective_shortcut_for(entry.fn_name, entry.shortcut)
+                .as_deref()
+                == Some(shortcut.as_str())
+        }) {
+            labels[n - 1].1 = fkey_label(entry.label);
+        }
+    }
+    if labels[1].1.is_empty() {
+        labels[1].1 = "Menu".to_string();
+    }
 
     let mut spans = Vec::new();
-    for (num, label) in labels {
+    for (num, label) in &labels {
         spans.push(Span::styled(
-            format!("{}", num),
+            num.clone(),
             Style::default().fg(CLR_FKEY_NUM).bg(CLR_FKEY_NUM_BG),
         ));
         spans.push(Span::styled(
@@ -591,6 +619,23 @@ fn render_fkey_bar(f: &mut Frame, area: Rect) {
         Paragraph::new(Line::from(spans)).style(Style::default().bg(CLR_FKEY_BG)),
         area,
     );
+}
+
+fn fkey_label(label: &str) -> String {
+    let label = label
+        .trim_end_matches('.')
+        .trim_end_matches("...")
+        .trim_end_matches('…');
+    match label {
+        "Create directory" => "MDir".to_string(),
+        "View file" => "View".to_string(),
+        "Edit file" => "Edit".to_string(),
+        "Copy to" => "Copy".to_string(),
+        "Move to" => "Move".to_string(),
+        "Delete" => "Delete".to_string(),
+        "Quit" => "Quit".to_string(),
+        other => truncate_str(other, 16).trim_end().to_string(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -809,4 +854,3 @@ fn format_mode(mode: u32) -> String {
 // ---------------------------------------------------------------------------
 // Config / Setup screen
 // ---------------------------------------------------------------------------
-

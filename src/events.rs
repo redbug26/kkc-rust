@@ -1,16 +1,19 @@
 mod menu;
 mod palette;
+mod shortcuts;
 mod viewer;
 
 use self::menu::handle_menu;
 use self::palette::{handle_command_palette, handle_store_install_palette};
+use self::shortcuts::handle_shortcut_panel;
 use self::viewer::{
     handle_viewer, handle_viewer_goto_line, handle_viewer_menu, handle_viewer_plugin_palette,
     handle_viewer_searching,
 };
 use crate::app::{
     ActionPaletteState, App, AppMode, AssocEditorState, BookmarkListItem, CommandPaletteState,
-    ConfigState, ConfirmAction, InputAction, InputDialog, MenuState, OpenerState, RemoteEditKind,
+    ConfigState, ConfirmAction, InputAction, InputDialog, MenuAction, MenuState, OpenerState,
+    RemoteEditKind,
 };
 use crate::archive::supports_archive_navigation;
 use crate::config::SortMode;
@@ -52,11 +55,7 @@ pub fn handle_event(app: &mut App, event: Event) -> Result<bool> {
     };
 
     // Global shortcut available in every mode.
-    if key.modifiers.contains(KeyModifiers::CONTROL)
-        && !key.modifiers.contains(KeyModifiers::ALT)
-        && !key.modifiers.contains(KeyModifiers::SHIFT)
-        && key.code == KeyCode::Char('b')
-    {
+    if app.action_for_key(key) == Some(MenuAction::CaptureGif) {
         app.capture_gif = true;
         return Ok(false);
     }
@@ -81,6 +80,7 @@ pub fn handle_event(app: &mut App, event: Event) -> Result<bool> {
         AppMode::Plugins(_) => return handle_plugins(app, key),
         AppMode::ActionPalette(_) => return handle_action_palette(app, key),
         AppMode::CommandPalette(_) => return handle_command_palette(app, key),
+        AppMode::ShortcutPanel(_) => return handle_shortcut_panel(app, key),
         AppMode::StoreInstallPalette(_) => return handle_store_install_palette(app, key),
         AppMode::Opener(_) => return handle_opener(app, key),
         AppMode::AssocEditor(_) => return handle_assoc_editor(app, key),
@@ -188,6 +188,13 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
             }
             _ => {}
         }
+        return Ok(false);
+    }
+
+    if let Some(action) = app.action_for_key(key) {
+        return menu::execute_menu_action(app, action);
+    }
+    if app.shortcut_key_is_managed(key) {
         return Ok(false);
     }
 

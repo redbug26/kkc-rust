@@ -1,7 +1,7 @@
 //! Render the Ctrl-P command palette popup.
 
 use super::*;
-use crate::app::{CommandPaletteState, PALETTE_DATA, PALETTE_SEP};
+use crate::app::{App, CommandPaletteState, PALETTE_DATA, PALETTE_SEP};
 
 // Accent colour for shortcuts and dim colour for fn_name.
 const CLR_SHORTCUT: Color = Color::Rgb(100, 195, 220);
@@ -12,7 +12,12 @@ const CLR_RECENT_STAR: Color = Color::Rgb(255, 190, 60);
 // Width reserved for right-aligned shortcut column (e.g. "Ctrl+F1" = 7 + padding)
 const SHORT_W: usize = 11;
 
-pub(super) fn render_command_palette(f: &mut Frame, s: &CommandPaletteState, area: Rect) {
+pub(super) fn render_command_palette(
+    f: &mut Frame,
+    app: &App,
+    s: &CommandPaletteState,
+    area: Rect,
+) {
     let indices = s.filtered_indices();
     // Total selectable (non-separator) items.
     let total = indices.iter().filter(|&&i| i != PALETTE_SEP).count();
@@ -199,7 +204,10 @@ pub(super) fn render_command_palette(f: &mut Frame, s: &CommandPaletteState, are
         let used = fixed_prefix + label_shown.len() + fixed_suffix;
         let padding = " ".repeat(label_area_w.saturating_sub(used));
 
-        let shortcut_str = format!("{:>width$}", entry.shortcut.unwrap_or(""), width = SHORT_W);
+        let shortcut = app
+            .effective_shortcut_for(entry.fn_name, entry.shortcut)
+            .unwrap_or_default();
+        let shortcut_str = format!("{:>width$}", shortcut, width = SHORT_W);
 
         let spans = vec![
             Span::styled(marker_str, Style::default().fg(marker_color).bg(row_bg)),

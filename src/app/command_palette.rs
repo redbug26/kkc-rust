@@ -234,6 +234,13 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     },
     PaletteEntry {
         category: "Options",
+        label: "Shortcuts...",
+        shortcut: None,
+        fn_name: "shortcuts",
+        action: MenuAction::Shortcuts,
+    },
+    PaletteEntry {
+        category: "Options",
         label: "Plugins…",
         shortcut: None,
         fn_name: "plugins",
@@ -341,6 +348,14 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
         action: MenuAction::QuickPreview,
     },
 ];
+
+pub fn palette_label_for_action(action: MenuAction) -> &'static str {
+    PALETTE_DATA
+        .iter()
+        .find(|entry| entry.action == action)
+        .map(|entry| entry.label)
+        .unwrap_or("")
+}
 
 // ---------------------------------------------------------------------------
 // State

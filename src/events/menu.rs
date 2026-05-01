@@ -43,7 +43,7 @@ pub(super) fn handle_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
         }
         KeyCode::Char(c) if open => {
             if let Some(pos) = menu_item_shortcut(MENU_DATA[bar_pos], item_pos, c) {
-                let action = MENU_DATA[bar_pos][pos].2;
+                let action = MENU_DATA[bar_pos][pos];
                 app.mode = AppMode::Browse;
                 return execute_menu_action(app, action);
             }
@@ -85,7 +85,7 @@ pub(super) fn handle_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
             }
         }
         KeyCode::Enter if open => {
-            let action = MENU_DATA[bar_pos][item_pos].2;
+            let action = MENU_DATA[bar_pos][item_pos];
             app.mode = AppMode::Browse;
             return execute_menu_action(app, action);
         }
@@ -97,7 +97,7 @@ pub(super) fn handle_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
 fn first_selectable(items: &[crate::app::MenuEntry]) -> usize {
     items
         .iter()
-        .position(|(_, _, a)| *a != MenuAction::Separator)
+        .position(|a| *a != MenuAction::Separator)
         .unwrap_or(0)
 }
 
@@ -106,7 +106,7 @@ fn next_selectable(items: &[crate::app::MenuEntry], current: usize) -> usize {
     let mut pos = (current + 1) % n;
     let start = pos;
     loop {
-        if items[pos].2 != MenuAction::Separator {
+        if items[pos] != MenuAction::Separator {
             break;
         }
         pos = (pos + 1) % n;
@@ -122,7 +122,7 @@ fn prev_selectable(items: &[crate::app::MenuEntry], current: usize) -> usize {
     let mut pos = if current == 0 { n - 1 } else { current - 1 };
     let start = pos;
     loop {
-        if items[pos].2 != MenuAction::Separator {
+        if items[pos] != MenuAction::Separator {
             break;
         }
         pos = if pos == 0 { n - 1 } else { pos - 1 };
@@ -141,18 +141,18 @@ fn menu_item_shortcut(items: &[crate::app::MenuEntry], current: usize, ch: char)
     }
     let labels = items
         .iter()
-        .map(|(label, _, action)| {
+        .map(|action| {
             if *action == MenuAction::Separator {
                 String::new()
             } else {
-                (*label).to_string()
+                crate::app::palette_label_for_action(*action).to_string()
             }
         })
         .collect::<Vec<_>>();
     let mnemonics = mnemonics_for_labels(&labels);
 
     (1..=n).map(|offset| (current + offset) % n).find(|&idx| {
-        let (_, _, action) = items[idx];
+        let action = items[idx];
         action != MenuAction::Separator && mnemonics.get(idx).copied().flatten() == Some(ch)
     })
 }
@@ -286,6 +286,9 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
         MenuAction::Setup => {
             let cs = ConfigState::from_config(&app.config);
             app.mode = AppMode::Config(cs);
+        }
+        MenuAction::Shortcuts => {
+            app.mode = AppMode::ShortcutPanel(crate::app::ShortcutPanelState::default());
         }
         MenuAction::Plugins => {
             app.mode = AppMode::Plugins(PluginsState::load());

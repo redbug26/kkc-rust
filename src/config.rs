@@ -225,6 +225,13 @@ pub struct FileAssoc {
     pub openers: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShortcutOverride {
+    pub fn_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shortcut: Option<String>,
+}
+
 // ---------------------------------------------------------------------------
 // Main config
 // ---------------------------------------------------------------------------
@@ -302,6 +309,11 @@ pub struct Config {
     #[serde(default, deserialize_with = "deserialize_palette_recent")]
     pub palette_recent: Vec<String>,
 
+    /// User shortcut overrides. Only entries that differ from palette defaults
+    /// are written, including `shortcut = None` for removed default shortcuts.
+    #[serde(default)]
+    pub shortcut_overrides: Vec<ShortcutOverride>,
+
     // --- Debug ---
     /// Write debug messages to a log file (disabled by default).
     #[serde(default)]
@@ -346,6 +358,7 @@ impl Default for Config {
             bookmarks: default_bookmarks(),
             file_assoc: Vec::new(),
             palette_recent: Vec::new(),
+            shortcut_overrides: Vec::new(),
             debug_log: false,
             panel_view_type: PanelViewType::Normal,
             active_panel: ActivePanelSide::Left,
@@ -526,6 +539,7 @@ impl Config {
             bookmarks: &'a Vec<PathBuf>,
             file_assoc: &'a Vec<FileAssoc>,
             palette_recent: &'a Vec<String>,
+            shortcut_overrides: &'a Vec<ShortcutOverride>,
         }
         let tail = toml::to_string_pretty(&ConfigTail {
             left: &self.left,
@@ -534,6 +548,7 @@ impl Config {
             bookmarks: &self.bookmarks,
             file_assoc: &self.file_assoc,
             palette_recent: &self.palette_recent,
+            shortcut_overrides: &self.shortcut_overrides,
         })
         .context("Serialising panels config")?;
         out.push_str(&tail);

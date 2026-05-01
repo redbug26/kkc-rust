@@ -1,24 +1,28 @@
 mod command_palette;
+mod dialogs;
+mod helpers;
 mod menu;
 mod panel_tabs;
-mod dialogs;
 mod remote_edit;
-mod helpers;
+mod shortcuts;
 
-pub use self::command_palette::{CommandPaletteState, PALETTE_DATA, PALETTE_SEP};
-pub use self::menu::{
-    MENU_DATA, MENU_HEADERS, MenuAction, MenuEntry, MenuState, StoreInstallPaletteState,
-    ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,
+pub use self::command_palette::{
+    CommandPaletteState, PALETTE_DATA, PALETTE_SEP, palette_label_for_action,
 };
 pub use self::dialogs::{
     ConfirmAction, ConfirmDialog, InputAction, InputDialog, RemoteDeleteTarget, SearchState,
 };
-pub use self::remote_edit::{RemoteEditKind, RemoteEditState};
 use self::helpers::{
     cleanup_temp_download, draw_busy_status, panel_config_needs_profiles, progress_bar,
     same_remote_target, spawn_remote_connect_task,
 };
+pub use self::menu::{
+    MENU_DATA, MENU_HEADERS, MenuAction, MenuEntry, MenuState, StoreInstallPaletteState,
+    ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,
+};
 use self::panel_tabs::{PanelTabs, panel_config_for_save, restore_panel_side};
+pub use self::remote_edit::{RemoteEditKind, RemoteEditState};
+pub use self::shortcuts::{ShortcutPanelState, normalize_shortcut, shortcut_from_key_event};
 use crate::about::AboutState;
 use crate::config::{ActivePanelSide, Config, PanelConfig, PanelViewType, SortMode};
 use crate::copy::{
@@ -116,6 +120,8 @@ pub enum AppMode {
     ActionPalette(ActionPaletteState),
     /// Command palette (Ctrl-P) – searchable list of all menu commands.
     CommandPalette(CommandPaletteState),
+    /// Keyboard shortcut management panel.
+    ShortcutPanel(ShortcutPanelState),
     /// Store plugin install palette with searchable plugin list.
     StoreInstallPalette(StoreInstallPaletteState),
     /// Choose from multiple registered openers.
@@ -2391,6 +2397,7 @@ impl App {
     // -----------------------------------------------------------------------
 
     pub fn save_config(&mut self) -> Result<()> {
+        self.normalize_shortcut_overrides();
         self.config.left = panel_config_for_save(&self.left, &self.left_tabs);
         self.config.right = panel_config_for_save(&self.right, &self.right_tabs);
         self.config.dir_history = self.dir_history.iter().cloned().collect();
@@ -2417,7 +2424,6 @@ impl App {
         self.config.save()
     }
 }
-
 
 #[cfg(test)]
 mod tests {
