@@ -12,7 +12,7 @@ use self::viewer::{
 };
 use crate::app::{
     App, AppMode, AssocEditorState, BookmarkListItem, ConfigState, ConfirmAction, InputAction,
-    InputDialog, MenuAction, OpenerState, RemoteEditKind,
+    InputDialog, MenuAction, OpenerActionItem, OpenerActionKind, OpenerState, RemoteEditKind,
 };
 use crate::archive::supports_archive_navigation;
 use crate::copy::CopyDialogState;
@@ -27,7 +27,7 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use std::io;
+use std::io::{self, Write};
 
 pub(crate) fn fx_shortcut(key: KeyEvent) -> Option<u8> {
     match key.code {
@@ -407,10 +407,6 @@ fn handle_enter(app: &mut App) -> Result<()> {
             }
             Err(e) => app.notify(format!("Cannot install plugin: {}", e)),
         }
-    } else if supports_archive_navigation(&entry.path) {
-        if let Err(e) = app.enter_archive(entry.path.clone()) {
-            app.notify(format!("Cannot enter archive: {}", e));
-        }
     } else {
         let launch_path = if app.active_panel().is_remote_view() {
             let Some(profile) = app.active_panel().remote_profile() else {
@@ -434,23 +430,61 @@ fn handle_enter(app: &mut App) -> Result<()> {
             .map(|info| info.mime_type)
             .unwrap_or_else(|| "application/octet-stream".to_string());
         let openers = app.config.openers_for_mime(&mime_type).to_vec();
-        match openers.len() {
-            0 => {
-                // No association: fall back to system default
-                if let Err(e) = open::that(&launch_path) {
-                    app.notify(format!("Cannot open: {}", e));
-                }
+        let mut actions = Vec::new();
+        actions.push(OpenerActionItem {
+            category: "System",
+            label: "Open with system".to_string(),
+            detail: "Default application".to_string(),
+            kind: OpenerActionKind::System,
+        });
+        if supports_archive_navigation(&launch_path) {
+            actions.push(OpenerActionItem {
+                category: "Archive",
+                label: "Enter archive".to_string(),
+                detail: "Browse archive contents".to_string(),
+                kind: OpenerActionKind::Archive,
+            });
+        }
+        for opener in openers {
+            actions.push(OpenerActionItem {
+                category: "Associations",
+                label: opener.clone(),
+                detail: mime_type.clone(),
+                kind: OpenerActionKind::Association { command: opener },
+            });
+        }
+
+        if actions.len() == 1 {
+            execute_opener_action(app, actions.remove(0), &launch_path)?;
+        } else {
+            app.mode = AppMode::Opener(OpenerState {
+                items: actions,
+                query: String::new(),
+                match_pos: 0,
+                path: launch_path,
+            });
+        }
+    }
+    Ok(())
+}
+
+fn execute_opener_action(
+    app: &mut App,
+    action: OpenerActionItem,
+    path: &std::path::Path,
+) -> Result<()> {
+    match action.kind {
+        OpenerActionKind::System => {
+            if let Err(e) = open::that(path) {
+                app.notify(format!("Cannot open: {}", e));
             }
-            1 => {
-                launch_external(app, &openers[0], &launch_path)?;
-            }
-            _ => {
-                // Multiple openers: show picker
-                app.mode = AppMode::Opener(OpenerState {
-                    items: openers,
-                    cursor: 0,
-                    path: launch_path,
-                });
+        }
+        OpenerActionKind::Association { command } => {
+            launch_external(app, &command, path)?;
+        }
+        OpenerActionKind::Archive => {
+            if let Err(e) = app.enter_archive(path.to_path_buf()) {
+                app.notify(format!("Cannot enter archive: {}", e));
             }
         }
     }
@@ -460,6 +494,7 @@ fn handle_enter(app: &mut App) -> Result<()> {
 /// Spawn an external command with the given file path.
 /// `%f` in command is replaced by the path; otherwise path is appended.
 fn launch_external(app: &mut App, command: &str, path: &std::path::Path) -> Result<()> {
+    let wait_for_key = crate::plugins::store_application_waits_after_command(command);
     let path_str = path.to_string_lossy();
     let args: Vec<String> = if command.contains("%f") {
         // Split on whitespace, replace %f token
@@ -491,10 +526,33 @@ fn launch_external(app: &mut App, command: &str, path: &std::path::Path) -> Resu
         .args(&args[1..])
         .status();
 
+    let wait_error = if wait_for_key {
+        wait_for_key_after_external().err()
+    } else {
+        None
+    };
+
+    if let Some(e) = wait_error {
+        app.notify(format!("Wait for key failed: {}", e));
+    }
+
     enable_raw_mode()?;
     execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
     app.needs_clear = true;
     app.reload_panels();
+    Ok(())
+}
+
+fn wait_for_key_after_external() -> Result<()> {
+    let mut stdout = io::stdout();
+    write!(stdout, "\nPress a key to continue...")?;
+    stdout.flush()?;
+    enable_raw_mode()?;
+    let read_result = crossterm::event::read();
+    disable_raw_mode()?;
+    read_result?;
+    writeln!(stdout)?;
+    stdout.flush()?;
     Ok(())
 }
 
@@ -1819,34 +1877,38 @@ fn handle_opener(app: &mut App, key: KeyEvent) -> Result<bool> {
     let AppMode::Opener(ref mut s) = app.mode else {
         return Ok(false);
     };
-    let total = s.items.len();
 
     match key.code {
         KeyCode::Esc => {
             app.mode = AppMode::Browse;
         }
         KeyCode::Up | KeyCode::BackTab => {
-            if let AppMode::Opener(ref mut s) = app.mode {
-                if s.cursor > 0 {
-                    s.cursor -= 1;
-                }
-            }
+            s.move_prev();
         }
         KeyCode::Down | KeyCode::Tab => {
-            if let AppMode::Opener(ref mut s) = app.mode {
-                if s.cursor + 1 < total {
-                    s.cursor += 1;
-                }
-            }
+            s.move_next();
+        }
+        KeyCode::Backspace => {
+            s.pop_query();
+        }
+        KeyCode::Char(ch)
+            if !key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::ALT)
+                && !ch.is_control() =>
+        {
+            s.append_query(ch);
         }
         KeyCode::Enter => {
-            let (cmd, path) = if let AppMode::Opener(s) = &app.mode {
-                (s.items[s.cursor].clone(), s.path.clone())
+            let (action, path) = if let AppMode::Opener(s) = &app.mode {
+                let Some(action) = s.selected_item().cloned() else {
+                    return Ok(false);
+                };
+                (action, s.path.clone())
             } else {
                 return Ok(false);
             };
             app.mode = AppMode::Browse;
-            launch_external(app, &cmd, &path)?;
+            execute_opener_action(app, action, &path)?;
         }
         _ => {}
     }

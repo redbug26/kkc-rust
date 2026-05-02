@@ -755,7 +755,7 @@ pub(super) fn render_store_install_palette(
     safe_render_widget(
         f,
         Paragraph::new(
-            "  [ Enter Install ]  [ Ctrl+U Update Plugins ]  [ Ctrl+R Refresh ]  [ Esc Close ]",
+            "  [ Enter Install ]  [ Ctrl+D Detect ]  [ Ctrl+U Update ]  [ Ctrl+R Refresh ]  [ Esc Close ]",
         )
         .style(
             Style::default()
@@ -770,6 +770,11 @@ pub(super) fn render_store_install_palette(
             height: 1,
         },
     );
+
+    if let Some(detect) = state.detect.as_ref() {
+        render_store_detect_dialog(f, detect, inner);
+        return;
+    }
 
     let body_y = inner.y + 3;
     let body_h = footer_sep_y.saturating_sub(body_y);
@@ -1166,6 +1171,126 @@ fn render_store_install_progress(
             },
         );
     }
+}
+
+fn render_store_detect_dialog(
+    f: &mut Frame,
+    detect: &crate::app::StoreDetectState,
+    area: Rect,
+) {
+    let width = area.width.saturating_sub(4).min(104).max(56);
+    let height = area.height.saturating_sub(4).min(18).max(10);
+    let popup = Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    };
+    safe_render_widget(f, Clear, popup);
+    let block = Block::default()
+        .title(" Detect Installed Applications ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG))
+        .style(Style::default().bg(CLR_APP_BG));
+    let inner = block.inner(popup);
+    safe_render_widget(f, block, popup);
+
+    let summary = format!(
+        "  Detected {} installed app(s). Missing remembered app(s): {}",
+        detect.detected_count,
+        detect.items.len()
+    );
+    safe_render_widget(
+        f,
+        Paragraph::new(truncate_str(&summary, inner.width as usize))
+            .style(Style::default().fg(Color::Rgb(46, 28, 16)).bg(CLR_APP_BG)),
+        Rect {
+            x: inner.x,
+            y: inner.y,
+            width: inner.width,
+            height: 1,
+        },
+    );
+    safe_render_widget(
+        f,
+        Paragraph::new("  Space/Left/Right changes action. Enter applies.")
+            .style(Style::default().fg(Color::Rgb(88, 66, 45)).bg(CLR_APP_BG)),
+        Rect {
+            x: inner.x,
+            y: inner.y + 1,
+            width: inner.width,
+            height: 1,
+        },
+    );
+
+    let list_y = inner.y + 3;
+    let list_h = inner.height.saturating_sub(5) as usize;
+    if detect.items.is_empty() {
+        safe_render_widget(
+            f,
+            Paragraph::new("  No missing remembered applications.")
+                .style(Style::default().fg(Color::Rgb(26, 104, 46)).bg(CLR_APP_BG)),
+            Rect {
+                x: inner.x,
+                y: list_y,
+                width: inner.width,
+                height: 1,
+            },
+        );
+    } else {
+        let start = if detect.cursor >= list_h {
+            detect.cursor.saturating_sub(list_h.saturating_sub(1))
+        } else {
+            0
+        };
+        for (row, idx) in (start..detect.items.len()).take(list_h).enumerate() {
+            let item = &detect.items[idx];
+            let selected = idx == detect.cursor;
+            let action = match item.choice {
+                crate::app::StoreDetectChoice::Keep => "keep",
+                crate::app::StoreDetectChoice::Install => "install",
+                crate::app::StoreDetectChoice::Remove => "remove",
+            };
+            let bin = item.app.install_bin.as_deref().unwrap_or("?");
+            let text = format!(
+                " {} [{:<7}] {:<24} {}",
+                if selected { ">" } else { " " },
+                action,
+                truncate_str(&item.app.name, 24),
+                bin
+            );
+            let style = if selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(CLR_CURSOR_BG)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Rgb(46, 28, 16)).bg(CLR_APP_BG)
+            };
+            safe_render_widget(
+                f,
+                Paragraph::new(truncate_str(&text, inner.width as usize)).style(style),
+                Rect {
+                    x: inner.x,
+                    y: list_y + row as u16,
+                    width: inner.width,
+                    height: 1,
+                },
+            );
+        }
+    }
+
+    safe_render_widget(
+        f,
+        Paragraph::new("  [ Enter Apply ]  [ Esc Cancel ]")
+            .style(Style::default().fg(CLR_BUTTON_FG).bg(CLR_BUTTON_BG)),
+        Rect {
+            x: inner.x,
+            y: inner.y + inner.height.saturating_sub(1),
+            width: inner.width,
+            height: 1,
+        },
+    );
 }
 
 // ---------------------------------------------------------------------------

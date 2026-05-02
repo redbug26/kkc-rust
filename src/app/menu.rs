@@ -110,34 +110,53 @@ pub struct StoreInstallProgress {
 }
 
 #[derive(Debug, Clone)]
+pub enum StoreDetectChoice {
+    Keep,
+    Install,
+    Remove,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoreDetectItem {
+    pub app: crate::plugins::StorePluginInfo,
+    pub choice: StoreDetectChoice,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoreDetectState {
+    pub items: Vec<StoreDetectItem>,
+    pub cursor: usize,
+    pub detected_count: usize,
+}
+
+#[derive(Debug, Clone)]
 pub struct StoreInstallPaletteState {
     pub index_path: PathBuf,
     pub index_info: crate::plugins::StoreIndexInfo,
     pub items: Vec<crate::plugins::StorePluginInfo>,
     pub installed_versions: HashMap<String, String>,
+    pub installed_app_versions: HashMap<String, String>,
     pub query: String,
     pub match_pos: usize,
     pub progress: Option<StoreInstallProgress>,
+    pub detect: Option<StoreDetectState>,
 }
 
 impl StoreInstallPaletteState {
     pub fn load(index_path: PathBuf) -> anyhow::Result<Self> {
         let installed_versions = crate::plugins::installed_plugin_versions_by_dir();
+        let installed_app_versions = crate::plugins::load_store_applications()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|app| (app.id, app.version))
+            .collect::<HashMap<_, _>>();
         let (mut items, index_info) = crate::plugins::list_store_plugins_with_info(&index_path)?;
         items.sort_by(|a, b| {
             let a_update = {
-                let dir = crate::plugins::store_plugin_install_dir_name(&a.id);
-                installed_versions
-                    .get(&dir)
-                    .map(|installed| installed != &a.version)
-                    .unwrap_or(false)
+                store_item_has_update(a, &installed_versions, &installed_app_versions)
             };
             let b_update = {
-                let dir = crate::plugins::store_plugin_install_dir_name(&b.id);
-                installed_versions
-                    .get(&dir)
-                    .map(|installed| installed != &b.version)
-                    .unwrap_or(false)
+                store_item_has_update(b, &installed_versions, &installed_app_versions)
             };
 
             b_update
@@ -151,9 +170,11 @@ impl StoreInstallPaletteState {
             index_path,
             index_info,
             installed_versions,
+            installed_app_versions,
             query: String::new(),
             match_pos: 0,
             progress: None,
+            detect: None,
         })
     }
 
@@ -194,27 +215,17 @@ impl StoreInstallPaletteState {
 
     pub fn installed_version_for(&self, item: &crate::plugins::StorePluginInfo) -> Option<&str> {
         if matches!(item.item_kind, crate::plugins::StoreItemKind::Application) {
-            return None;
+            return self.installed_app_versions.get(&item.id).map(|s| s.as_str());
         }
         let dir = self.install_dir_name_for(item);
         self.installed_versions.get(&dir).map(|s| s.as_str())
     }
 
     pub fn is_installed(&self, item: &crate::plugins::StorePluginInfo) -> bool {
-        if matches!(item.item_kind, crate::plugins::StoreItemKind::Application) {
-            return item
-                .install_bin
-                .as_deref()
-                .map(crate::plugins::store_application_binary_is_installed)
-                .unwrap_or(false);
-        }
         self.installed_version_for(item).is_some()
     }
 
     pub fn has_update(&self, item: &crate::plugins::StorePluginInfo) -> bool {
-        if matches!(item.item_kind, crate::plugins::StoreItemKind::Application) {
-            return false;
-        }
         self.installed_version_for(item)
             .map(|v| v != item.version)
             .unwrap_or(false)
@@ -313,6 +324,24 @@ impl StoreInstallPaletteState {
             self.match_pos = self.match_pos.min(len.saturating_sub(1));
         }
     }
+}
+
+fn store_item_has_update(
+    item: &crate::plugins::StorePluginInfo,
+    installed_versions: &HashMap<String, String>,
+    installed_app_versions: &HashMap<String, String>,
+) -> bool {
+    if matches!(item.item_kind, crate::plugins::StoreItemKind::Application) {
+        return installed_app_versions
+            .get(&item.id)
+            .map(|installed| installed != &item.version)
+            .unwrap_or(false);
+    }
+    let dir = crate::plugins::store_plugin_install_dir_name(&item.id);
+    installed_versions
+        .get(&dir)
+        .map(|installed| installed != &item.version)
+        .unwrap_or(false)
 }
 
 fn format_store_generated_at(value: &str) -> String {

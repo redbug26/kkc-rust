@@ -1,10 +1,65 @@
 use super::*;
 
-pub(super) fn render_opener(f: &mut Frame, s: &OpenerState, area: Rect) {
-    let w = 52u16;
-    let h = (s.items.len() as u16 + 4).min(20).max(6);
-    let x = area.x + (area.width.saturating_sub(w)) / 2;
-    let y = area.y + (area.height.saturating_sub(h)) / 2;
+pub(super) fn render_opener(f: &mut Frame, s: &OpenerState, area: Rect, preferred_area: Rect) {
+    enum DisplayRow {
+        Header(&'static str),
+        Item { match_row: usize, item_idx: usize },
+    }
+
+    let matches = s.filtered_indices();
+    let mut rows = Vec::new();
+    let mut last_category: Option<&str> = None;
+    for (match_row, item_idx) in matches.iter().copied().enumerate() {
+        let item = &s.items[item_idx];
+        if last_category != Some(item.category) {
+            rows.push(DisplayRow::Header(item.category));
+            last_category = Some(item.category);
+        }
+        rows.push(DisplayRow::Item {
+            match_row,
+            item_idx,
+        });
+    }
+
+    let mime_type = crate::idf::probe_path(&s.path)
+        .map(|info| info.mime_type)
+        .unwrap_or_else(|| "application/octet-stream".to_string());
+    let title = format!(" Open {} ", mime_type);
+    let hint = "  ↑↓ Select  Enter Open  Esc Close";
+    let max_label_width = matches
+        .iter()
+        .filter_map(|idx| s.items.get(*idx))
+        .map(|item| item.label.chars().count())
+        .max()
+        .unwrap_or(12)
+        .min(28);
+    let max_detail_width = matches
+        .iter()
+        .filter_map(|idx| s.items.get(*idx))
+        .map(|item| item.detail.chars().count())
+        .max()
+        .unwrap_or(0)
+        .min(28);
+    let content_w = (max_label_width + max_detail_width + 10).max(title.chars().count() + 4);
+    let hint_w = hint.chars().count();
+    let max_w = area.width.saturating_sub(4).max(1) as usize;
+    let w = content_w.max(hint_w).max(36).min(max_w) as u16;
+    let row_count = if matches.is_empty() {
+        1
+    } else {
+        rows.len().max(1)
+    } as u16;
+    let max_h = area.height.saturating_sub(4).max(6);
+    let h = (row_count + 5).min(24).min(max_h).max(6);
+    let place_in_panel = w <= preferred_area.width.saturating_sub(2)
+        && h <= preferred_area.height.saturating_sub(2);
+    let target = if place_in_panel {
+        preferred_area
+    } else {
+        area
+    };
+    let x = target.x + (target.width.saturating_sub(w)) / 2;
+    let y = target.y + (target.height.saturating_sub(h)) / 2;
     let popup = clamp_rect(
         area,
         Rect {
@@ -25,35 +80,53 @@ pub(super) fn render_opener(f: &mut Frame, s: &OpenerState, area: Rect) {
     if sh.right() <= area.right() && sh.bottom() <= area.bottom() {
         safe_render_widget(
             f,
-            Block::default().style(Style::default().bg(Color::Rgb(20, 15, 10))),
+            Block::default().style(Style::default().bg(Color::Black)),
             sh,
         );
     }
     safe_render_widget(f, Clear, popup);
 
-    let mime_type = crate::idf::probe_path(&s.path)
-        .map(|info| info.mime_type)
-        .unwrap_or_else(|| "application/octet-stream".to_string());
-    let title = format!(" Open {} ", mime_type);
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG))
+        .border_style(Style::default().fg(CLR_QS_BORDER).bg(CLR_QS_BG))
         .title(Span::styled(
             title,
             Style::default()
-                .fg(CLR_BUTTON_FG)
-                .bg(CLR_APP_BG)
+                .fg(CLR_QS_INPUT_FG)
+                .bg(CLR_QS_BG)
                 .add_modifier(Modifier::BOLD),
         ))
-        .style(Style::default().bg(CLR_APP_BG));
+        .style(Style::default().bg(CLR_QS_BG));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
 
-    // Hint row
+    let count_hint = if s.query.is_empty() {
+        format!(" {}/{} ", s.match_pos + 1, s.items.len())
+    } else if matches.is_empty() {
+        " 0/0 ".to_string()
+    } else {
+        format!(" {}/{} ", s.match_pos + 1, matches.len())
+    };
+    let hint_w = count_hint.len() as u16;
+    let input_w = inner.width.saturating_sub(hint_w) as usize;
+    let input_text = format!(" ⌕ {}▁", s.query);
+    let input_row = Line::from(vec![
+        Span::styled(
+            truncate_str(&input_text, input_w),
+            Style::default()
+                .fg(CLR_QS_INPUT_FG)
+                .bg(CLR_QS_INPUT_BG),
+        ),
+        Span::styled(
+            count_hint,
+            Style::default()
+                .fg(CLR_QS_MATCH_HI)
+                .bg(CLR_QS_INPUT_BG),
+        ),
+    ]);
     safe_render_widget(
         f,
-        Paragraph::new("  ↑↓ select  Enter open  Esc cancel")
-            .style(Style::default().fg(Color::Rgb(110, 88, 65)).bg(CLR_APP_BG)),
+        Paragraph::new(input_row).style(Style::default().bg(CLR_QS_INPUT_BG)),
         Rect {
             x: inner.x,
             y: inner.y,
@@ -61,10 +134,11 @@ pub(super) fn render_opener(f: &mut Frame, s: &OpenerState, area: Rect) {
             height: 1,
         },
     );
-    let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
+
     safe_render_widget(
         f,
-        Paragraph::new(sep).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
+        Paragraph::new(hint)
+            .style(Style::default().fg(CLR_QS_LIST_FG).bg(CLR_QS_BG)),
         Rect {
             x: inner.x,
             y: inner.y + 1,
@@ -72,35 +146,111 @@ pub(super) fn render_opener(f: &mut Frame, s: &OpenerState, area: Rect) {
             height: 1,
         },
     );
+    let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
+    safe_render_widget(
+        f,
+        Paragraph::new(sep).style(Style::default().fg(CLR_QS_SEP).bg(CLR_QS_BG)),
+        Rect {
+            x: inner.x,
+            y: inner.y + 2,
+            width: inner.width,
+            height: 1,
+        },
+    );
 
-    // Item list
-    for (i, cmd) in s.items.iter().enumerate() {
-        let row = inner.y + 2 + i as u16;
-        if row >= inner.y + inner.height {
-            break;
-        }
-        let selected = s.cursor == i;
-        let style = if selected {
-            Style::default()
-                .fg(Color::Black)
-                .bg(CLR_CURSOR_BG)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::Rgb(50, 36, 22)).bg(CLR_APP_BG)
-        };
-        let icon = if selected { " ▶ " } else { "   " };
-        let text = format!("{}{}", icon, cmd);
-        let padded = format!("{:<width$}", text, width = inner.width as usize);
+    let list_y = inner.y + 3;
+    let list_h = inner.height.saturating_sub(3) as usize;
+
+    if matches.is_empty() {
         safe_render_widget(
             f,
-            Paragraph::new(padded).style(style),
+            Paragraph::new("  (no match)")
+                .style(Style::default().fg(CLR_QS_NO_MATCH).bg(CLR_QS_BG)),
             Rect {
                 x: inner.x,
-                y: row,
+                y: list_y,
                 width: inner.width,
                 height: 1,
             },
         );
+        return;
+    }
+
+    let selected_row = rows
+        .iter()
+        .position(|row| {
+            matches!(
+                row,
+                DisplayRow::Item { match_row, .. } if *match_row == s.match_pos
+            )
+        })
+        .unwrap_or(0);
+    let scroll = if selected_row < list_h {
+        0
+    } else {
+        selected_row.saturating_sub(list_h - 1)
+    };
+
+    for (display_offset, row_data) in rows.iter().skip(scroll).take(list_h).enumerate() {
+        let row = list_y + display_offset as u16;
+        match row_data {
+            DisplayRow::Header(category) => {
+                safe_render_widget(
+                    f,
+                    Paragraph::new(format!("  {}", category)).style(
+                        Style::default()
+                            .fg(CLR_QS_DIR_FG)
+                            .bg(CLR_QS_BG)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Rect {
+                        x: inner.x,
+                        y: row,
+                        width: inner.width,
+                        height: 1,
+                    },
+                );
+            }
+            DisplayRow::Item {
+                match_row,
+                item_idx,
+            } => {
+                let item = &s.items[*item_idx];
+                let selected = s.match_pos == *match_row;
+                let style = if selected {
+                    Style::default()
+                        .fg(CLR_QS_SEL_FG)
+                        .bg(CLR_QS_SEL_BG)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(CLR_QS_LIST_FG).bg(CLR_QS_BG)
+                };
+                let icon = if selected { " > " } else { "   " };
+                let available = inner.width as usize;
+                let detail_w = max_detail_width.min(available.saturating_sub(8));
+                let label_w = available
+                    .saturating_sub(detail_w)
+                    .saturating_sub(5)
+                    .max(8);
+                let text = format!(
+                    "{}{} {}",
+                    icon,
+                    truncate_str(&item.label, label_w),
+                    truncate_str(&item.detail, detail_w)
+                );
+                let padded = format!("{:<width$}", text, width = inner.width as usize);
+                safe_render_widget(
+                    f,
+                    Paragraph::new(padded).style(style),
+                    Rect {
+                        x: inner.x,
+                        y: row,
+                        width: inner.width,
+                        height: 1,
+                    },
+                );
+            }
+        }
     }
 }
 

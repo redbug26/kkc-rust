@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, anyhow, bail};
 use mlua::{Function, Lua, Table, Value};
 use serde::Deserialize;
+use serde::Serialize;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs;
@@ -89,6 +90,8 @@ struct StoreApplicationDescriptor {
     #[serde(default)]
     mime_types: Vec<String>,
     #[serde(default)]
+    wait_for_key_after_exit: bool,
+    #[serde(default)]
     install: Vec<StoreApplicationInstall>,
 }
 
@@ -125,6 +128,7 @@ pub struct StorePluginInfo {
     pub install_bin: Option<String>,
     pub install_methods: Vec<String>,
     pub mime_types: Vec<String>,
+    pub wait_for_key_after_exit: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -544,6 +548,7 @@ pub fn list_store_plugins_with_info(
             install_bin: None,
             install_methods: Vec::new(),
             mime_types: Vec::new(),
+            wait_for_key_after_exit: false,
         })
         .collect::<Vec<_>>();
     out.extend(index.applications.into_iter().map(|app| {
@@ -575,6 +580,7 @@ pub fn list_store_plugins_with_info(
                 .into_iter()
                 .map(|mime| mime.to_ascii_lowercase())
                 .collect(),
+            wait_for_key_after_exit: app.wait_for_key_after_exit,
         }
     }));
     out.sort_by(|a, b| a.id.cmp(&b.id));
@@ -1127,8 +1133,197 @@ fn normalize_store_os(value: &str) -> String {
     }
 }
 
-pub fn store_application_binary_is_installed(bin: &str) -> bool {
-    command_exists(bin)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoredApplication {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub bin: String,
+    #[serde(default)]
+    pub mime_types: Vec<String>,
+    #[serde(default)]
+    pub wait_for_key_after_exit: bool,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+struct StoreConfig {
+    #[serde(default)]
+    applications: Vec<StoredApplication>,
+}
+
+pub fn store_config_path() -> Result<PathBuf> {
+    let dirs = crate::config::project_dirs()?;
+    let dir = dirs.preference_dir();
+    fs::create_dir_all(dir)?;
+    Ok(dir.join("store.toml"))
+}
+
+pub fn load_store_applications() -> Result<Vec<StoredApplication>> {
+    let path = store_config_path()?;
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let text = fs::read_to_string(&path)
+        .with_context(|| format!("Reading store config {}", path.display()))?;
+    let cfg: StoreConfig = toml::from_str(&text)
+        .with_context(|| format!("Parsing store config {}", path.display()))?;
+    Ok(cfg.applications)
+}
+
+pub fn save_store_applications(applications: &[StoredApplication]) -> Result<()> {
+    let path = store_config_path()?;
+    let cfg = StoreConfig {
+        applications: applications.to_vec(),
+    };
+    let text = toml::to_string_pretty(&cfg).context("Serialising store config")?;
+    fs::write(&path, text).with_context(|| format!("Writing store config {}", path.display()))
+}
+
+pub fn remember_store_application(item: &StorePluginInfo) -> Result<bool> {
+    if !matches!(item.item_kind, StoreItemKind::Application) {
+        return Ok(false);
+    }
+    let Some(bin) = item.install_bin.as_deref() else {
+        return Ok(false);
+    };
+    let mut apps = load_store_applications()?;
+    let stored = StoredApplication {
+        id: item.id.clone(),
+        name: item.name.clone(),
+        version: item.version.clone(),
+        bin: bin.to_string(),
+        mime_types: item.mime_types.clone(),
+        wait_for_key_after_exit: item.wait_for_key_after_exit,
+    };
+    let mut changed = false;
+    if let Some(existing) = apps.iter_mut().find(|app| app.id == item.id) {
+        if existing.bin != stored.bin
+            || existing.version != stored.version
+            || existing.mime_types != stored.mime_types
+            || existing.name != stored.name
+            || existing.wait_for_key_after_exit != stored.wait_for_key_after_exit
+        {
+            *existing = stored;
+            changed = true;
+        }
+    } else {
+        apps.push(stored);
+        changed = true;
+    }
+    if changed {
+        save_store_applications(&apps)?;
+    }
+    Ok(changed)
+}
+
+pub fn remove_store_application(id: &str) -> Result<bool> {
+    let mut apps = load_store_applications()?;
+    let before = apps.len();
+    apps.retain(|app| app.id != id);
+    let changed = apps.len() != before;
+    if changed {
+        save_store_applications(&apps)?;
+    }
+    Ok(changed)
+}
+
+pub fn detect_installed_store_applications(items: &[StorePluginInfo]) -> Result<Vec<StorePluginInfo>> {
+    let mut remembered = load_store_applications()?;
+    let mut changed = false;
+    let mut detected = Vec::new();
+
+    for item in items {
+        if !matches!(item.item_kind, StoreItemKind::Application) {
+            continue;
+        }
+        let Some(bin) = item.install_bin.as_deref() else {
+            continue;
+        };
+        if !command_exists(bin) {
+            continue;
+        }
+        detected.push(item.clone());
+        let stored = StoredApplication {
+            id: item.id.clone(),
+            name: item.name.clone(),
+            version: item.version.clone(),
+            bin: bin.to_string(),
+            mime_types: item.mime_types.clone(),
+            wait_for_key_after_exit: item.wait_for_key_after_exit,
+        };
+        if let Some(existing) = remembered.iter_mut().find(|app| app.id == item.id) {
+            if existing.bin != stored.bin
+                || existing.version != stored.version
+                || existing.mime_types != stored.mime_types
+                || existing.name != stored.name
+                || existing.wait_for_key_after_exit != stored.wait_for_key_after_exit
+            {
+                *existing = stored;
+                changed = true;
+            }
+        } else {
+            remembered.push(stored);
+            changed = true;
+        }
+    }
+
+    if changed {
+        save_store_applications(&remembered)?;
+    }
+    Ok(detected)
+}
+
+pub fn missing_remembered_store_applications(items: &[StorePluginInfo]) -> Result<Vec<StorePluginInfo>> {
+    let remembered = load_store_applications()?;
+    let mut missing = Vec::new();
+    for stored in remembered {
+        if command_exists(&stored.bin) {
+            continue;
+        }
+        if let Some(item) = items.iter().find(|item| item.id == stored.id).cloned() {
+            missing.push(item);
+        } else {
+            missing.push(StorePluginInfo {
+                id: stored.id,
+                name: stored.name,
+                version: stored.version,
+                plugin_type: "application".to_string(),
+                description: "Remembered application missing from current store index".to_string(),
+                item_kind: StoreItemKind::Application,
+                install_method: None,
+                install_bin: Some(stored.bin),
+                install_methods: Vec::new(),
+                mime_types: stored.mime_types,
+                wait_for_key_after_exit: stored.wait_for_key_after_exit,
+            });
+        }
+    }
+    Ok(missing)
+}
+
+pub fn store_application_waits_after_command(command: &str) -> bool {
+    let Some(program) = command.split_whitespace().next() else {
+        return false;
+    };
+    let program_name = Path::new(program)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(program);
+
+    load_store_applications()
+        .map(|apps| {
+            apps.into_iter().any(|app| {
+                if !app.wait_for_key_after_exit {
+                    return false;
+                }
+                let bin_name = Path::new(&app.bin)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or(app.bin.as_str());
+                app.bin == program || bin_name == program_name
+            })
+        })
+        .unwrap_or(false)
 }
 
 fn command_exists(program: &str) -> bool {
@@ -2779,6 +2974,7 @@ mod tests {
       "category": "viewer",
       "type": "external_viewer",
       "mime_types": ["text/plain", "application/json"],
+      "wait_for_key_after_exit": true,
       "install": [
         { "os": ["macos", "linux", "windows"], "method": "cargo", "crate": "bat", "bin": "bat" }
       ]
@@ -2803,6 +2999,7 @@ mod tests {
         );
         assert_eq!(app.install_bin.as_deref(), Some("bat"));
         assert_eq!(app.mime_types, vec!["text/plain", "application/json"]);
+        assert!(app.wait_for_key_after_exit);
         assert_eq!(
             app.install_methods,
             vec!["cargo [macos/linux/windows]  crate bat  bin bat"]

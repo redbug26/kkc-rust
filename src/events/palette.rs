@@ -2,7 +2,7 @@
 
 use super::fx_shortcut;
 use super::menu::execute_menu_action;
-use crate::app::{App, AppMode, PALETTE_DATA, PALETTE_SEP};
+use crate::app::{App, AppMode, PALETTE_DATA, PALETTE_SEP, StoreDetectChoice};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -118,6 +118,46 @@ pub(super) fn handle_store_install_palette(app: &mut App, key: KeyEvent) -> Resu
         return Ok(false);
     }
 
+    if state.detect.is_some() {
+        match key.code {
+            KeyCode::Esc => {
+                state.detect = None;
+                app.mode = AppMode::StoreInstallPalette(state);
+            }
+            KeyCode::Up => {
+                if let Some(detect) = &mut state.detect
+                    && detect.cursor > 0
+                {
+                    detect.cursor -= 1;
+                }
+                app.mode = AppMode::StoreInstallPalette(state);
+            }
+            KeyCode::Down => {
+                if let Some(detect) = &mut state.detect
+                    && detect.cursor + 1 < detect.items.len()
+                {
+                    detect.cursor += 1;
+                }
+                app.mode = AppMode::StoreInstallPalette(state);
+            }
+            KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') => {
+                if let Some(detect) = &mut state.detect
+                    && let Some(item) = detect.items.get_mut(detect.cursor)
+                {
+                    item.choice = match item.choice {
+                        StoreDetectChoice::Keep => StoreDetectChoice::Install,
+                        StoreDetectChoice::Install => StoreDetectChoice::Remove,
+                        StoreDetectChoice::Remove => StoreDetectChoice::Keep,
+                    };
+                }
+                app.mode = AppMode::StoreInstallPalette(state);
+            }
+            KeyCode::Enter => app.apply_store_detection_choices(state),
+            _ => app.mode = AppMode::StoreInstallPalette(state),
+        }
+        return Ok(false);
+    }
+
     match key.code {
         KeyCode::Esc => {
             app.mode = AppMode::Browse;
@@ -153,6 +193,10 @@ pub(super) fn handle_store_install_palette(app: &mut App, key: KeyEvent) -> Resu
                     app.mode = AppMode::StoreInstallPalette(state);
                 }
             }
+            return Ok(false);
+        }
+        KeyCode::Char('d') | KeyCode::Char('D') if ctrl && !alt => {
+            app.open_store_detection_dialog(state);
             return Ok(false);
         }
         KeyCode::Char('u') | KeyCode::Char('U') if ctrl && !alt => {

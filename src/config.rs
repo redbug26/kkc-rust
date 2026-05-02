@@ -588,6 +588,25 @@ impl Config {
             });
         }
     }
+
+    pub fn remove_opener_for_mime(&mut self, mime_type: &str, opener: &str) -> bool {
+        let mime_type = mime_type.trim().to_ascii_lowercase();
+        if mime_type.is_empty() || opener.trim().is_empty() {
+            return false;
+        }
+
+        let mut changed = false;
+        for assoc in &mut self.file_assoc {
+            if assoc.mime_type.eq_ignore_ascii_case(&mime_type) {
+                let before = assoc.openers.len();
+                assoc.openers.retain(|cmd| cmd != opener);
+                changed |= assoc.openers.len() != before;
+            }
+        }
+        let before = self.file_assoc.len();
+        self.file_assoc.retain(|assoc| !assoc.openers.is_empty());
+        changed || self.file_assoc.len() != before
+    }
 }
 
 // ---------------------------------------------------------------------------

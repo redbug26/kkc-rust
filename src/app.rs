@@ -18,7 +18,8 @@ use self::helpers::{
 };
 pub use self::menu::{
     MENU_DATA, MENU_HEADERS, MenuAction, MenuEntry, MenuState, StoreInstallPaletteState,
-    StoreInstallProgress, ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,
+    StoreDetectChoice, StoreDetectItem, StoreDetectState, StoreInstallProgress, ViewerMenuKind,
+    ViewerMenuState, ViewerPluginPaletteState,
 };
 use self::panel_tabs::{PanelTabs, panel_config_for_save, restore_panel_side};
 pub use self::remote_edit::{RemoteEditKind, RemoteEditState};
@@ -424,10 +425,112 @@ impl ConfigState {
 
 /// State for the popup picker shown when multiple openers match a file.
 #[derive(Debug, Clone)]
+pub enum OpenerActionKind {
+    System,
+    Association { command: String },
+    Archive,
+}
+
+#[derive(Debug, Clone)]
+pub struct OpenerActionItem {
+    pub category: &'static str,
+    pub label: String,
+    pub detail: String,
+    pub kind: OpenerActionKind,
+}
+
+#[derive(Debug, Clone)]
 pub struct OpenerState {
-    pub items: Vec<String>,
-    pub cursor: usize,
+    pub items: Vec<OpenerActionItem>,
+    pub query: String,
+    pub match_pos: usize,
     pub path: std::path::PathBuf,
+}
+
+impl OpenerState {
+    pub fn filtered_indices(&self) -> Vec<usize> {
+        if self.query.trim().is_empty() {
+            return (0..self.items.len()).collect();
+        }
+
+        let tokens = self
+            .query
+            .split_whitespace()
+            .map(|token| token.to_ascii_lowercase())
+            .filter(|token| !token.is_empty())
+            .collect::<Vec<_>>();
+        if tokens.is_empty() {
+            return (0..self.items.len()).collect();
+        }
+
+        let first = &tokens[0];
+        let rest = &tokens[1..];
+        let mut starts = Vec::new();
+        let mut contains = Vec::new();
+        for (idx, item) in self.items.iter().enumerate() {
+            let searchable = format!("{} {} {}", item.category, item.label, item.detail)
+                .to_ascii_lowercase();
+            if !rest.iter().all(|token| searchable.contains(token)) {
+                continue;
+            }
+            if item.label.to_ascii_lowercase().starts_with(first)
+                || item.category.to_ascii_lowercase().starts_with(first)
+            {
+                starts.push(idx);
+            } else if searchable.contains(first) {
+                contains.push(idx);
+            }
+        }
+        starts.extend(contains);
+        starts
+    }
+
+    pub fn append_query(&mut self, ch: char) {
+        self.query.push(ch);
+        self.match_pos = 0;
+        self.clamp_match();
+    }
+
+    pub fn pop_query(&mut self) {
+        self.query.pop();
+        self.match_pos = 0;
+        self.clamp_match();
+    }
+
+    pub fn move_prev(&mut self) {
+        let len = self.filtered_indices().len();
+        if len == 0 {
+            self.match_pos = 0;
+        } else if self.match_pos == 0 {
+            self.match_pos = len - 1;
+        } else {
+            self.match_pos -= 1;
+        }
+    }
+
+    pub fn move_next(&mut self) {
+        let len = self.filtered_indices().len();
+        if len == 0 {
+            self.match_pos = 0;
+        } else {
+            self.match_pos = (self.match_pos + 1) % len;
+        }
+    }
+
+    pub fn selected_item(&self) -> Option<&OpenerActionItem> {
+        self.filtered_indices()
+            .get(self.match_pos)
+            .and_then(|idx| self.items.get(*idx))
+    }
+
+    fn clamp_match(&mut self) {
+        let len = self.filtered_indices().len();
+        if len == 0 {
+            self.match_pos = 0;
+        } else {
+            self.match_pos = self.match_pos.min(len.saturating_sub(1));
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -661,6 +764,7 @@ pub struct App {
     copy_scan: Option<CopyScanTask>,
     copy_task: Option<CopyTask>,
     store_install_task: Option<StoreInstallTask>,
+    store_install_queue: VecDeque<crate::plugins::StorePluginInfo>,
     /// Set to true after spawning an external program so the main loop can
     /// call terminal.clear() before the next draw.
     pub needs_clear: bool,
@@ -788,6 +892,7 @@ impl App {
             copy_scan: None,
             copy_task: None,
             store_install_task: None,
+            store_install_queue: VecDeque::new(),
             needs_clear: false,
             capture_gif: false,
             terminal: TerminalState {
@@ -1586,6 +1691,14 @@ impl App {
                     let mut state = StoreInstallPaletteState::load(index_path)
                         .unwrap_or_else(|_| self.current_store_state_without_progress());
                     state.progress = None;
+                    if let Some(next) = self.store_install_queue.pop_front() {
+                        self.start_store_install(
+                            state,
+                            next,
+                            "Installing missing application from store".to_string(),
+                        );
+                        return;
+                    }
                     self.mode = AppMode::StoreInstallPalette(state);
                     if configured == 0 {
                         self.notify(format!("Application installed: {}", installed_name));
@@ -1632,9 +1745,11 @@ impl App {
                     index_info: crate::plugins::StoreIndexInfo::default(),
                     items: Vec::new(),
                     installed_versions: std::collections::HashMap::new(),
+                    installed_app_versions: std::collections::HashMap::new(),
                     query: String::new(),
                     match_pos: 0,
                     progress: None,
+                    detect: None,
                 }
             })
         }
@@ -1682,10 +1797,146 @@ impl App {
         });
     }
 
+    pub fn open_store_detection_dialog(&mut self, mut state: StoreInstallPaletteState) {
+        let query = state.query.clone();
+        let selected_id = state
+            .filtered_indices()
+            .get(state.match_pos)
+            .and_then(|idx| state.items.get(*idx))
+            .map(|item| item.id.clone());
+        let detected = match crate::plugins::detect_installed_store_applications(&state.items) {
+            Ok(items) => items,
+            Err(err) => {
+                self.notify(format!("Store detection failed: {}", err));
+                self.mode = AppMode::StoreInstallPalette(state);
+                return;
+            }
+        };
+
+        let mut configured = 0;
+        for item in &detected {
+            configured += self.configure_application_associations(item);
+        }
+
+        let missing = match crate::plugins::missing_remembered_store_applications(&state.items) {
+            Ok(items) => items,
+            Err(err) => {
+                self.notify(format!("Store detection failed: {}", err));
+                self.mode = AppMode::StoreInstallPalette(state);
+                return;
+            }
+        };
+
+        state = StoreInstallPaletteState::load(state.index_path.clone()).unwrap_or(state);
+        state.query = query;
+        if let Some(selected_id) = selected_id
+            && let Some(pos) = state
+                .filtered_indices()
+                .iter()
+                .position(|idx| state.items[*idx].id == selected_id)
+        {
+            state.match_pos = pos;
+        }
+        state.clamp_match();
+
+        state.detect = Some(StoreDetectState {
+            items: missing
+                .into_iter()
+                .map(|app| StoreDetectItem {
+                    app,
+                    choice: StoreDetectChoice::Keep,
+                })
+                .collect(),
+            cursor: 0,
+            detected_count: detected.len(),
+        });
+        if configured > 0 {
+            self.notify(format!(
+                "Detected {} installed app(s); {} MIME association(s) updated",
+                detected.len(), configured
+            ));
+        }
+        self.mode = AppMode::StoreInstallPalette(state);
+    }
+
+    pub fn apply_store_detection_choices(&mut self, mut state: StoreInstallPaletteState) {
+        let Some(detect) = state.detect.take() else {
+            self.mode = AppMode::StoreInstallPalette(state);
+            return;
+        };
+        let query = state.query.clone();
+        let selected_id = state
+            .filtered_indices()
+            .get(state.match_pos)
+            .and_then(|idx| state.items.get(*idx))
+            .map(|item| item.id.clone());
+
+        let mut install_queue = Vec::new();
+        let mut removed = 0usize;
+        for item in detect.items {
+            match item.choice {
+                StoreDetectChoice::Keep => {}
+                StoreDetectChoice::Remove => {
+                    if self.remove_application_associations(&item.app) {
+                        let _ = self.save_config();
+                    }
+                    if crate::plugins::remove_store_application(&item.app.id).unwrap_or(false) {
+                        removed += 1;
+                    }
+                }
+                StoreDetectChoice::Install => install_queue.push(item.app),
+            }
+        }
+
+        let state = Self::refresh_store_state_preserving_selection(state, query, selected_id);
+        if let Some(first) = install_queue.first().cloned() {
+            self.store_install_queue = install_queue.into_iter().skip(1).collect();
+            self.start_store_install(
+                state,
+                first,
+                "Installing missing application from store".to_string(),
+            );
+            if removed > 0 {
+                self.notify(format!(
+                    "Removed {} store entry(s); installing selected app",
+                    removed
+                ));
+            }
+        } else {
+            if removed > 0 {
+                self.notify(format!("Removed {} store entry(s)", removed));
+            }
+            self.mode = AppMode::StoreInstallPalette(state);
+        }
+    }
+
+    fn refresh_store_state_preserving_selection(
+        fallback: StoreInstallPaletteState,
+        query: String,
+        selected_id: Option<String>,
+    ) -> StoreInstallPaletteState {
+        let mut state =
+            StoreInstallPaletteState::load(fallback.index_path.clone()).unwrap_or(fallback);
+        state.query = query;
+        if let Some(selected_id) = selected_id
+            && let Some(pos) = state
+                .filtered_indices()
+                .iter()
+                .position(|idx| state.items[*idx].id == selected_id)
+        {
+            state.match_pos = pos;
+        }
+        state.clamp_match();
+        state.progress = None;
+        state.detect = None;
+        state
+    }
+
     fn configure_application_associations(&mut self, item: &crate::plugins::StorePluginInfo) -> usize {
         let Some(bin) = item.install_bin.as_deref() else {
             return 0;
         };
+        let _ = crate::plugins::remember_store_application(item);
         if item.mime_types.is_empty() {
             return 0;
         }
@@ -1705,6 +1956,18 @@ impl App {
             let _ = self.save_config();
         }
         configured
+    }
+
+    fn remove_application_associations(&mut self, item: &crate::plugins::StorePluginInfo) -> bool {
+        let Some(bin) = item.install_bin.as_deref() else {
+            return false;
+        };
+        let opener = format!("{bin} %f");
+        let mut changed = false;
+        for mime_type in &item.mime_types {
+            changed |= self.config.remove_opener_for_mime(mime_type, &opener);
+        }
+        changed
     }
 
     /// Drain lines from a running streaming command into the terminal scrollback.

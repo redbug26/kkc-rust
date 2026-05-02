@@ -278,7 +278,14 @@ pub fn render(f: &mut Frame, app: &App) {
         AppMode::CommandPalette(s) => render_command_palette(f, app, s, f.area()),
         AppMode::ShortcutPanel(s) => render_shortcut_panel(f, app, s, f.area()),
         AppMode::StoreInstallPalette(s) => render_store_install_palette(f, s, f.area()),
-        AppMode::Opener(s) => render_opener(f, s, f.area()),
+        AppMode::Opener(s) => {
+            let active_panel_area = if left_active {
+                panel_chunks[0]
+            } else {
+                panel_chunks[2]
+            };
+            render_opener(f, s, f.area(), active_panel_area);
+        }
         AppMode::AssocEditor(s) => render_assoc_editor(f, s, f.area()),
         AppMode::RemoteConnect(s) => render_remote_connect(f, s, f.area()),
         AppMode::RemoteEdit(s) => render_remote_edit(f, s, f.area()),
