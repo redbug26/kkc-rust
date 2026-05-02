@@ -1441,6 +1441,11 @@ impl App {
     pub fn go_parent(&mut self) -> Result<()> {
         if self.active_panel().is_remote_view() {
             let current = self.active_panel().path.clone();
+            let old_name = current
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(|s| s.to_string())
+                .filter(|s| !s.is_empty());
             let raw_parent = current
                 .parent()
                 .unwrap_or(std::path::Path::new("/"))
@@ -1456,6 +1461,19 @@ impl App {
             self.run_with_busy("Remote: changing directory...", |app| {
                 app.active_panel_mut().enter_dir(parent)
             })?;
+            if let Some(old_name) = old_name
+                && let Some(idx) = self
+                    .active_panel()
+                    .entries
+                    .iter()
+                    .position(|e| e.name == old_name)
+            {
+                let panel = self.active_panel_mut();
+                panel.cursor = idx;
+                if panel.cursor < panel.scroll {
+                    panel.scroll = panel.cursor;
+                }
+            }
             return Ok(());
         }
         if self.active_panel().is_archive_root() {
