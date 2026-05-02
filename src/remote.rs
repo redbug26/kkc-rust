@@ -17,6 +17,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub enum RemoteSource {
     SshConfig,
     UserToml,
+    PluginAuto,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -195,12 +196,71 @@ pub fn load_profiles() -> Result<Vec<RemoteProfile>> {
         saved_start.elapsed().as_secs_f64() * 1000.0
     ));
     out.extend(saved);
+    let plugin_start = std::time::Instant::now();
+    let plugin_profiles = load_auto_remote_plugin_profiles(&out)?;
+    crate::viewer::debug_log(&format!(
+        "remote: loaded {} auto plugin profile(s) in {:.3} ms",
+        plugin_profiles.len(),
+        plugin_start.elapsed().as_secs_f64() * 1000.0
+    ));
+    out.extend(plugin_profiles);
     out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     crate::viewer::debug_log(&format!(
         "remote: load_profiles completed with {} profile(s) in {:.3} ms",
         out.len(),
         start.elapsed().as_secs_f64() * 1000.0
     ));
+    Ok(out)
+}
+
+fn load_auto_remote_plugin_profiles(existing: &[RemoteProfile]) -> Result<Vec<RemoteProfile>> {
+    let plugins_dir = match crate::plugins::plugins_dir() {
+        Ok(path) => path,
+        Err(_) => return Ok(Vec::new()),
+    };
+    let discovered = match crate::remote_plugins::discover_remote_rust_plugin_manifests(&plugins_dir)
+    {
+        Ok(items) => items,
+        Err(err) => {
+            crate::viewer::debug_log(&format!(
+                "remote: native plugin discovery skipped: {err}"
+            ));
+            return Ok(Vec::new());
+        }
+    };
+
+    let loaded_plugins = crate::remote_plugins::discover_remote_rust_plugins(&plugins_dir)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|plugin| (plugin.id, plugin.scheme))
+        .collect::<std::collections::HashMap<_, _>>();
+
+    let mut out = Vec::new();
+    for plugin in discovered {
+        let already_configured = existing.iter().any(|profile| {
+            matches!(
+                &profile.kind,
+                RemoteKind::RemotePlugin(cfg) if cfg.plugin_id == plugin.id
+            )
+        });
+        if already_configured {
+            continue;
+        }
+        let scheme = loaded_plugins
+            .get(&plugin.id)
+            .cloned()
+            .unwrap_or_else(|| plugin.id.clone());
+        out.push(RemoteProfile {
+            name: plugin.name,
+            source: RemoteSource::PluginAuto,
+            kind: RemoteKind::RemotePlugin(RemotePluginProfile {
+                plugin_id: plugin.id,
+                scheme,
+                config_json: "{}".to_string(),
+                path: Some("/".to_string()),
+            }),
+        });
+    }
     Ok(out)
 }
 

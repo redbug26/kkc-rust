@@ -328,6 +328,31 @@ pub fn installed_plugin_versions_by_dir() -> HashMap<String, String> {
             out.entry(name).or_insert(plugin.version);
         }
     }
+
+    if let Ok(plugins_root) = plugins_dir()
+        && let Ok(entries) = fs::read_dir(&plugins_root)
+    {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let Some(dir_name) = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(|s| s.to_string())
+            else {
+                continue;
+            };
+            if out.contains_key(&dir_name) {
+                continue;
+            }
+            if let Some(version) = remote_rust_manifest_version(&path) {
+                out.insert(dir_name, version);
+            }
+        }
+    }
+
     out
 }
 
@@ -1985,6 +2010,31 @@ fn is_remote_rust_plugin_dir(dir: &Path) -> Result<bool> {
         bail!("remote-rust plugin is missing [remote]");
     };
     Ok(!remote.library.trim().is_empty())
+}
+
+fn remote_rust_manifest_version(dir: &Path) -> Option<String> {
+    #[derive(Deserialize)]
+    struct Manifest {
+        plugin: ManifestPlugin,
+    }
+    #[derive(Deserialize)]
+    struct ManifestPlugin {
+        version: String,
+        #[serde(rename = "type")]
+        plugin_type: String,
+    }
+
+    let manifest_path = dir.join("plugin.toml");
+    let text = fs::read_to_string(&manifest_path).ok()?;
+    let manifest: Manifest = toml::from_str(&text).ok()?;
+    if manifest.plugin.plugin_type != "remote-rust" {
+        return None;
+    }
+    let version = manifest.plugin.version.trim();
+    if version.is_empty() {
+        return None;
+    }
+    Some(version.to_string())
 }
 
 #[cfg(test)]

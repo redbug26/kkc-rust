@@ -2112,6 +2112,7 @@ fn launch_ssh_for_profile(app: &mut App) -> Result<()> {
             };
             args.push(target);
         }
+        RemoteSource::PluginAuto => return Ok(()),
     }
     disable_raw_mode()?;
     execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture)?;

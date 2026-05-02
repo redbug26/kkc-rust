@@ -145,6 +145,12 @@ pub(super) fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, a
                             .fg(Color::Rgb(246, 237, 212))
                             .bg(CLR_MENU_DD_BG),
                     ),
+                    RemoteSource::PluginAuto => (
+                        "plugin",
+                        Style::default()
+                            .fg(Color::Rgb(168, 232, 174))
+                            .bg(CLR_MENU_DD_BG),
+                    ),
                 };
                 let host = item.host_label();
                 let selected = match_idx == state.match_pos;

@@ -591,6 +591,7 @@ impl RemoteConnectState {
             let source = match item.source {
                 RemoteSource::SshConfig => "ssh",
                 RemoteSource::UserToml => "toml",
+                RemoteSource::PluginAuto => "plugin",
             };
             let searchable = format!(
                 "{} {} {} {}",
@@ -1423,7 +1424,7 @@ impl App {
                 .get(s.match_pos)
                 .and_then(|idx| s.items.get(*idx))
                 .filter(|p| {
-                    p.source == RemoteSource::UserToml
+                    matches!(p.source, RemoteSource::UserToml | RemoteSource::PluginAuto)
                         && matches!(p.kind, RemoteKind::Sftp(_) | RemoteKind::Smb(_) | RemoteKind::RemotePlugin(_))
                 })
                 .cloned()
