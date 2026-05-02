@@ -31,8 +31,10 @@ pub(super) fn render_opener(f: &mut Frame, s: &OpenerState, area: Rect) {
     }
     safe_render_widget(f, Clear, popup);
 
-    let ext = s.path.extension().and_then(|e| e.to_str()).unwrap_or("?");
-    let title = format!(" Open .{} ", ext);
+    let mime_type = crate::idf::probe_path(&s.path)
+        .map(|info| info.mime_type)
+        .unwrap_or_else(|| "application/octet-stream".to_string());
+    let title = format!(" Open {} ", mime_type);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG))
@@ -260,7 +262,7 @@ pub(super) fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rec
     safe_render_widget(f, block, popup);
 
     // Column header
-    let header = format!("  {:<8} {}", "Ext", "Openers");
+    let header = format!("  {:<24} {}", "MIME type", "Openers");
     safe_render_widget(
         f,
         Paragraph::new(header).style(
@@ -317,7 +319,7 @@ pub(super) fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rec
             if row_y >= inner.y + inner.height {
                 break;
             }
-            let (ext, openers) = &s.assocs[list_row];
+            let (mime_type, openers) = &s.assocs[list_row];
             let selected = s.cursor == list_row;
             let style = if selected {
                 Style::default()
@@ -329,13 +331,13 @@ pub(super) fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rec
             };
             let icon = if selected { "▶" } else { " " };
             let openers_str = openers.join(", ");
-            let avail = inner.width.saturating_sub(12) as usize;
+            let avail = inner.width.saturating_sub(28) as usize;
             let openers_disp = if openers_str.len() > avail {
                 format!("{}…", &openers_str[..avail.saturating_sub(1)])
             } else {
                 openers_str
             };
-            let text = format!(" {} .{:<8} {}", icon, ext, openers_disp);
+            let text = format!(" {} {:<24} {}", icon, mime_type, openers_disp);
             let padded = format!("{:<width$}", text, width = inner.width as usize);
             safe_render_widget(
                 f,
@@ -374,5 +376,3 @@ pub(super) fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rec
         },
     );
 }
-
-

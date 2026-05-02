@@ -214,13 +214,14 @@ impl Default for ViewerConfig {
 // File-type associations
 // ---------------------------------------------------------------------------
 
-/// Maps a file extension to one or more opener commands.
-/// `ext` is stored without the leading dot, lowercase (e.g. "mp3").
+/// Maps a MIME type to one or more opener commands.
+/// `mime_type` is stored lowercase (e.g. "audio/mpeg").
 /// Commands may contain `%f` as a placeholder for the file path;
 /// if absent the path is appended as the last argument.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileAssoc {
-    pub ext: String,
+    #[serde(alias = "ext")]
+    pub mime_type: String,
     #[serde(default)]
     pub openers: Vec<String>,
 }
@@ -300,7 +301,7 @@ pub struct Config {
     #[serde(default = "default_bookmarks")]
     pub bookmarks: Vec<PathBuf>,
 
-    /// File-type associations (extension → opener commands).
+    /// File-type associations (MIME type → opener commands).
     #[serde(default)]
     pub file_assoc: Vec<FileAssoc>,
 
@@ -556,15 +557,36 @@ impl Config {
         Ok(out)
     }
 
-    /// Return the registered openers for the given file extension.
-    /// `ext` may have a leading dot or not; comparison is case-insensitive.
-    pub fn openers_for(&self, ext: &str) -> &[String] {
-        let ext = ext.trim_start_matches('.');
+    /// Return the registered openers for the given MIME type.
+    /// Comparison is case-insensitive.
+    pub fn openers_for_mime(&self, mime_type: &str) -> &[String] {
         self.file_assoc
             .iter()
-            .find(|a| a.ext.eq_ignore_ascii_case(ext))
+            .find(|a| a.mime_type.eq_ignore_ascii_case(mime_type))
             .map(|a| a.openers.as_slice())
             .unwrap_or(&[])
+    }
+
+    pub fn add_opener_for_mime(&mut self, mime_type: &str, opener: String) {
+        let mime_type = mime_type.trim().to_ascii_lowercase();
+        if mime_type.is_empty() || opener.trim().is_empty() {
+            return;
+        }
+
+        if let Some(existing) = self
+            .file_assoc
+            .iter_mut()
+            .find(|a| a.mime_type.eq_ignore_ascii_case(&mime_type))
+        {
+            if !existing.openers.iter().any(|cmd| cmd == &opener) {
+                existing.openers.push(opener);
+            }
+        } else {
+            self.file_assoc.push(FileAssoc {
+                mime_type,
+                openers: vec![opener],
+            });
+        }
     }
 }
 
@@ -629,7 +651,7 @@ mod tests {
         cfg.bookmarks = vec![PathBuf::from("/Users/test")];
         cfg.palette_recent = vec!["copy".into(), "save_config".into()];
         cfg.file_assoc = vec![FileAssoc {
-            ext: "txt".into(),
+            mime_type: "text/plain".into(),
             openers: vec!["vim %f".into()],
         }];
         cfg.left = PanelConfig {
@@ -677,6 +699,7 @@ mod tests {
             vec![PathBuf::from("/tmp"), PathBuf::from("/var")]
         );
         assert_eq!(parsed.palette_recent, vec!["copy", "save_config"]);
+        assert_eq!(parsed.file_assoc[0].mime_type, "text/plain");
         assert_eq!(parsed.file_assoc[0].openers, vec!["vim %f"]);
         assert_eq!(parsed.left.active_tab, 1);
         assert_eq!(parsed.left.tabs.len(), 2);

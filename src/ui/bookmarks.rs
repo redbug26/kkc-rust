@@ -454,7 +454,11 @@ pub(super) fn render_quicksearch_palette(f: &mut Frame, app: &App, area: Rect) {
     }
 }
 
-pub(super) fn render_viewer_plugin_palette(f: &mut Frame, state: &ViewerPluginPaletteState, area: Rect) {
+pub(super) fn render_viewer_plugin_palette(
+    f: &mut Frame,
+    state: &ViewerPluginPaletteState,
+    area: Rect,
+) {
     let query = &state.query;
     let matches = state.filtered_indices();
     let qs_pos = state.match_pos;
@@ -639,7 +643,11 @@ pub(super) fn render_viewer_plugin_palette(f: &mut Frame, state: &ViewerPluginPa
     }
 }
 
-pub(super) fn render_store_install_palette(f: &mut Frame, state: &StoreInstallPaletteState, area: Rect) {
+pub(super) fn render_store_install_palette(
+    f: &mut Frame,
+    state: &StoreInstallPaletteState,
+    area: Rect,
+) {
     let matches = state.filtered_indices();
     let total = matches.len();
 
@@ -746,13 +754,15 @@ pub(super) fn render_store_install_palette(f: &mut Frame, state: &StoreInstallPa
     );
     safe_render_widget(
         f,
-        Paragraph::new("  [ Enter Install ]  [ Ctrl+U Update ]  [ Ctrl+R Refresh ]  [ Esc Close ]")
-            .style(
-                Style::default()
-                    .fg(Color::Rgb(255, 252, 226))
-                    .bg(CLR_BUTTON_BG)
-                    .add_modifier(Modifier::BOLD),
-            ),
+        Paragraph::new(
+            "  [ Enter Install ]  [ Ctrl+U Update Plugins ]  [ Ctrl+R Refresh ]  [ Esc Close ]",
+        )
+        .style(
+            Style::default()
+                .fg(Color::Rgb(255, 252, 226))
+                .bg(CLR_BUTTON_BG)
+                .add_modifier(Modifier::BOLD),
+        ),
         Rect {
             x: inner.x,
             y: button_y,
@@ -815,7 +825,7 @@ pub(super) fn render_store_install_palette(f: &mut Frame, state: &StoreInstallPa
         f,
         Paragraph::new(format!(
             "  {:<w$}",
-            "Name                              Status",
+            "Name                              Kind Status",
             w = (left_w as usize).saturating_sub(2)
         ))
         .style(
@@ -841,7 +851,7 @@ pub(super) fn render_store_install_palette(f: &mut Frame, state: &StoreInstallPa
 
     if total == 0 {
         let msg = if state.query.is_empty() {
-            "  (no plugin available in store index)"
+            "  (no item available in store index)"
         } else {
             "  (no match)"
         };
@@ -867,6 +877,10 @@ pub(super) fn render_store_install_palette(f: &mut Frame, state: &StoreInstallPa
         let selected = state.match_pos == match_row;
         let installed = state.is_installed(plugin);
         let has_update = state.has_update(plugin);
+        let has_compatible_method = !matches!(
+            plugin.item_kind,
+            crate::plugins::StoreItemKind::Application
+        ) || plugin.install_method.is_some();
 
         let style = if selected {
             Style::default()
@@ -875,6 +889,8 @@ pub(super) fn render_store_install_palette(f: &mut Frame, state: &StoreInstallPa
                 .add_modifier(Modifier::BOLD)
         } else if has_update {
             Style::default().fg(Color::Rgb(150, 74, 10)).bg(CLR_APP_BG)
+        } else if !has_compatible_method {
+            Style::default().fg(Color::Rgb(118, 104, 88)).bg(CLR_APP_BG)
         } else if installed {
             Style::default().fg(Color::Rgb(26, 104, 46)).bg(CLR_APP_BG)
         } else {
@@ -883,17 +899,24 @@ pub(super) fn render_store_install_palette(f: &mut Frame, state: &StoreInstallPa
 
         let status = if has_update {
             "[UPDATE]"
+        } else if !has_compatible_method {
+            "[NO METHOD]"
         } else if installed {
             "[INSTALLED]"
         } else {
             "[NEW]"
         };
+        let kind = match plugin.item_kind {
+            crate::plugins::StoreItemKind::Plugin => "P",
+            crate::plugins::StoreItemKind::Application => "A",
+        };
         let icon = if selected { "▶ " } else { "  " };
         let available = (left_area.width as usize).saturating_sub(3);
-        let name_w = available.saturating_sub(status.len() + 1);
+        let name_w = available.saturating_sub(status.len() + kind.len() + 2);
         let text = format!(
-            "{icon}{:<name_w$} {}",
+            "{icon}{:<name_w$} {} {}",
             truncate_str(&plugin.name, name_w),
+            kind,
             status,
         );
         safe_render_widget(
@@ -950,6 +973,11 @@ pub(super) fn render_store_install_palette(f: &mut Frame, state: &StoreInstallPa
     let dim_style = Style::default().fg(Color::Rgb(88, 66, 45)).bg(CLR_APP_BG);
     let rw = right_area.width as usize;
 
+    if let Some(progress) = state.progress.as_ref() {
+        render_store_install_progress(f, progress, right_area);
+        return;
+    }
+
     let mut row: u16 = 0;
     let mut push_kv = |label: &str, value: &str, row: &mut u16| {
         if *row >= detail_h {
@@ -972,6 +1000,11 @@ pub(super) fn render_store_install_palette(f: &mut Frame, state: &StoreInstallPa
         *row += 1;
     };
 
+    let kind_label = match plugin.item_kind {
+        crate::plugins::StoreItemKind::Plugin => "Plugin",
+        crate::plugins::StoreItemKind::Application => "Application",
+    };
+    push_kv("Kind :", kind_label, &mut row);
     push_kv("Type :", &plugin.plugin_type, &mut row);
     push_kv("Version :", &plugin.version, &mut row);
     push_kv("Id :", &plugin.id, &mut row);
@@ -979,7 +1012,7 @@ pub(super) fn render_store_install_palette(f: &mut Frame, state: &StoreInstallPa
     let installed_version = state.installed_version_for(plugin);
     let status = if state.has_update(plugin) {
         "Update available"
-    } else if installed_version.is_some() {
+    } else if state.is_installed(plugin) {
         "Installed"
     } else {
         "Not installed"
@@ -987,6 +1020,50 @@ pub(super) fn render_store_install_palette(f: &mut Frame, state: &StoreInstallPa
     push_kv("Status :", status, &mut row);
     if let Some(v) = installed_version {
         push_kv("Installed :", v, &mut row);
+    }
+    let compatible_method = plugin.install_method.as_deref().unwrap_or("None for this OS");
+    if matches!(plugin.item_kind, crate::plugins::StoreItemKind::Application) {
+        push_kv("Method :", compatible_method, &mut row);
+    }
+    if let Some(bin) = plugin.install_bin.as_deref() {
+        push_kv("Binary :", bin, &mut row);
+    }
+
+    if !plugin.install_methods.is_empty() && row < detail_h {
+        row += 1;
+        if row < detail_h {
+            safe_render_widget(
+                f,
+                Paragraph::new(Line::from(vec![Span::styled("  Available :", lbl_style)]))
+                    .style(Style::default().bg(CLR_APP_BG)),
+                Rect {
+                    x: right_area.x,
+                    y: detail_y + row,
+                    width: right_area.width,
+                    height: 1,
+                },
+            );
+            row += 1;
+        }
+        let indent = "    ";
+        let max_w = rw.saturating_sub(indent.len());
+        for method in &plugin.install_methods {
+            if row >= detail_h {
+                break;
+            }
+            let text = format!("{indent}{}", truncate_str(method, max_w));
+            safe_render_widget(
+                f,
+                Paragraph::new(text).style(dim_style),
+                Rect {
+                    x: right_area.x,
+                    y: detail_y + row,
+                    width: right_area.width,
+                    height: 1,
+                },
+            );
+            row += 1;
+        }
     }
 
     if row < detail_h {
@@ -1032,7 +1109,65 @@ pub(super) fn render_store_install_palette(f: &mut Frame, state: &StoreInstallPa
     }
 }
 
+fn render_store_install_progress(
+    f: &mut Frame,
+    progress: &crate::app::StoreInstallProgress,
+    area: Rect,
+) {
+    if area.width < 12 || area.height < 6 {
+        return;
+    }
+
+    let box_h = area.height.saturating_sub(2).min(9).max(6);
+    let box_w = area.width.saturating_sub(4).max(12);
+    let box_area = Rect {
+        x: area.x + 2,
+        y: area.y + 1 + area.height.saturating_sub(box_h + 1) / 2,
+        width: box_w,
+        height: box_h,
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Rgb(160, 160, 160)).bg(Color::Black))
+        .style(Style::default().fg(Color::Rgb(230, 230, 230)).bg(Color::Black));
+    let inner = block.inner(box_area);
+    safe_render_widget(f, block, box_area);
+
+    let width = inner.width as usize;
+    let pct = progress.percent.min(100);
+    let bar_w = width.saturating_sub(8).clamp(8, 38);
+    let filled = (pct as usize * bar_w) / 100;
+    let bar = format!(
+        "[{}{}]",
+        "#".repeat(filled),
+        "-".repeat(bar_w.saturating_sub(filled))
+    );
+
+    let lines = vec![
+        progress.title.clone(),
+        progress.item_name.clone(),
+        format!("{} {:>3}%", bar, pct),
+        progress.phase.clone(),
+    ];
+
+    for (idx, line) in lines.iter().enumerate() {
+        if idx as u16 >= inner.height {
+            break;
+        }
+        safe_render_widget(
+            f,
+            Paragraph::new(truncate_str(line, width))
+                .style(Style::default().fg(Color::Rgb(230, 230, 230)).bg(Color::Black)),
+            Rect {
+                x: inner.x,
+                y: inner.y + idx as u16,
+                width: inner.width,
+                height: 1,
+            },
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Help overlay
 // ---------------------------------------------------------------------------
-

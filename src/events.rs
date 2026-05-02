@@ -429,13 +429,11 @@ fn handle_enter(app: &mut App) -> Result<()> {
         } else {
             entry.path.clone()
         };
-        // Check registered openers first
-        let ext = entry
-            .path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
-        let openers = app.config.openers_for(ext).to_vec();
+        // Check registered openers first, using FileID MIME types.
+        let mime_type = crate::idf::probe_path(&launch_path)
+            .map(|info| info.mime_type)
+            .unwrap_or_else(|| "application/octet-stream".to_string());
+        let openers = app.config.openers_for_mime(&mime_type).to_vec();
         match openers.len() {
             0 => {
                 // No association: fall back to system default
@@ -863,19 +861,19 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                     }
                 }
                 InputAction::AssocAddExt => {
-                    let ext = value.trim().trim_start_matches('.').to_ascii_lowercase();
-                    if ext.is_empty() {
+                    let mime_type = value.trim().to_ascii_lowercase();
+                    if mime_type.is_empty() {
                         app.mode = AppMode::AssocEditor(AssocEditorState::from_config(&app.config));
                     } else {
                         // Find existing openers for pre-fill
-                        let existing = app.config.openers_for(&ext).join(", ");
+                        let existing = app.config.openers_for_mime(&mime_type).join(", ");
                         app.mode = AppMode::Input(InputDialog {
                             title: "Association".into(),
-                            prompt: format!("Openers for .{} (comma-separated):", ext),
+                            prompt: format!("Openers for {} (comma-separated):", mime_type),
                             value: existing,
                             cursor: 0,
                             action: InputAction::AssocAddOpeners {
-                                ext,
+                                ext: mime_type,
                                 edit_index: None,
                             },
                         });
@@ -887,6 +885,7 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                     }
                 }
                 InputAction::AssocAddOpeners { ext, edit_index } => {
+                    let mime_type = ext.trim().to_ascii_lowercase();
                     let openers: Vec<String> = value
                         .split(',')
                         .map(|s| s.trim().to_string())
@@ -909,13 +908,13 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                                     .config
                                     .file_assoc
                                     .iter_mut()
-                                    .find(|a| a.ext.eq_ignore_ascii_case(&ext))
+                                    .find(|a| a.mime_type.eq_ignore_ascii_case(&mime_type))
                                 {
                                     existing.openers = openers;
                                 } else {
                                     app.config
                                         .file_assoc
-                                        .push(crate::config::FileAssoc { ext, openers });
+                                        .push(crate::config::FileAssoc { mime_type, openers });
                                 }
                             }
                         }
@@ -1888,7 +1887,7 @@ fn handle_assoc_editor(app: &mut App, key: KeyEvent) -> Result<bool> {
         KeyCode::Char('a') | KeyCode::Char('A') | KeyCode::Char('+') => {
             app.mode = AppMode::Input(InputDialog {
                 title: "New association".into(),
-                prompt: "Extension (without dot):".into(),
+                prompt: "MIME type:".into(),
                 value: String::new(),
                 cursor: 0,
                 action: InputAction::AssocAddExt,
@@ -1897,7 +1896,7 @@ fn handle_assoc_editor(app: &mut App, key: KeyEvent) -> Result<bool> {
         _ if fn_key == Some(1) => {
             app.mode = AppMode::Input(InputDialog {
                 title: "New association".into(),
-                prompt: "Extension (without dot):".into(),
+                prompt: "MIME type:".into(),
                 value: String::new(),
                 cursor: 0,
                 action: InputAction::AssocAddExt,
@@ -1905,22 +1904,22 @@ fn handle_assoc_editor(app: &mut App, key: KeyEvent) -> Result<bool> {
         }
         // Edit selected
         KeyCode::Enter | KeyCode::Char('e') | KeyCode::Char('E') => {
-            let (ext, openers_str, idx) = if let AppMode::AssocEditor(ref s) = app.mode {
+            let (mime_type, openers_str, idx) = if let AppMode::AssocEditor(ref s) = app.mode {
                 if s.assocs.is_empty() {
                     return Ok(false);
                 }
-                let (ext, openers) = &s.assocs[s.cursor];
-                (ext.clone(), openers.join(", "), s.cursor)
+                let (mime_type, openers) = &s.assocs[s.cursor];
+                (mime_type.clone(), openers.join(", "), s.cursor)
             } else {
                 return Ok(false);
             };
             app.mode = AppMode::Input(InputDialog {
                 title: "Edit association".into(),
-                prompt: format!("Openers for .{} (comma-separated):", ext),
+                prompt: format!("Openers for {} (comma-separated):", mime_type),
                 value: openers_str.clone(),
                 cursor: openers_str.len(),
                 action: InputAction::AssocAddOpeners {
-                    ext,
+                    ext: mime_type,
                     edit_index: Some(idx),
                 },
             });

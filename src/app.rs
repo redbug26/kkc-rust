@@ -13,12 +13,12 @@ pub use self::dialogs::{
     ConfirmAction, ConfirmDialog, InputAction, InputDialog, RemoteDeleteTarget, SearchState,
 };
 use self::helpers::{
-    cleanup_temp_download, draw_busy_status, panel_config_needs_profiles, progress_bar,
-    same_remote_target, spawn_remote_connect_task,
+    cleanup_temp_download, draw_busy_status, panel_config_needs_profiles, same_remote_target,
+    spawn_remote_connect_task,
 };
 pub use self::menu::{
     MENU_DATA, MENU_HEADERS, MenuAction, MenuEntry, MenuState, StoreInstallPaletteState,
-    ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,
+    StoreInstallProgress, ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,
 };
 use self::panel_tabs::{PanelTabs, panel_config_for_save, restore_panel_side};
 pub use self::remote_edit::{RemoteEditKind, RemoteEditState};
@@ -437,7 +437,7 @@ pub struct OpenerState {
 /// State for the full-screen association editor.
 #[derive(Debug, Clone)]
 pub struct AssocEditorState {
-    /// (extension, openers) pairs – mirrors config.file_assoc.
+    /// (MIME type, openers) pairs - mirrors config.file_assoc.
     pub assocs: Vec<(String, Vec<String>)>,
     pub cursor: usize,
 }
@@ -589,13 +589,26 @@ enum RemoteConnectMessage {
     Failed(String),
 }
 
+#[derive(Debug)]
+struct StoreInstallTask {
+    rx: Receiver<StoreInstallMessage>,
+    item: crate::plugins::StorePluginInfo,
+    index_path: PathBuf,
+}
+
+#[derive(Debug)]
+enum StoreInstallMessage {
+    Progress { percent: u8, phase: String },
+    Finished(std::result::Result<String, String>),
+}
+
 impl AssocEditorState {
     pub fn from_config(cfg: &crate::config::Config) -> Self {
         Self {
             assocs: cfg
                 .file_assoc
                 .iter()
-                .map(|a| (a.ext.clone(), a.openers.clone()))
+                .map(|a| (a.mime_type.clone(), a.openers.clone()))
                 .collect(),
             cursor: 0,
         }
@@ -647,6 +660,7 @@ pub struct App {
     pending_remote_cwd: Option<String>,
     copy_scan: Option<CopyScanTask>,
     copy_task: Option<CopyTask>,
+    store_install_task: Option<StoreInstallTask>,
     /// Set to true after spawning an external program so the main loop can
     /// call terminal.clear() before the next draw.
     pub needs_clear: bool,
@@ -773,6 +787,7 @@ impl App {
             pending_remote_cwd: None,
             copy_scan: None,
             copy_task: None,
+            store_install_task: None,
             needs_clear: false,
             capture_gif: false,
             terminal: TerminalState {
@@ -1387,6 +1402,7 @@ impl App {
         self.poll_running_cmd();
         self.poll_search();
         self.poll_tree_view();
+        self.poll_store_install();
         // Auto-clear status bar text after 30 seconds.
         if let Some(set_at) = self.status.set_at {
             if set_at.elapsed() >= std::time::Duration::from_secs(30) {
@@ -1521,6 +1537,174 @@ impl App {
             };
             self.notify(msg);
         }
+    }
+
+    fn poll_store_install(&mut self) {
+        let mut finished: Option<(
+            crate::plugins::StorePluginInfo,
+            PathBuf,
+            std::result::Result<String, String>,
+        )> = None;
+
+        if let Some(task) = &self.store_install_task {
+            loop {
+                match task.rx.try_recv() {
+                    Ok(StoreInstallMessage::Progress { percent, phase }) => {
+                        if let AppMode::StoreInstallPalette(state) = &mut self.mode
+                            && let Some(progress) = &mut state.progress
+                        {
+                            progress.percent = percent.min(100);
+                            progress.phase = phase;
+                        }
+                    }
+                    Ok(StoreInstallMessage::Finished(result)) => {
+                        finished = Some((task.item.clone(), task.index_path.clone(), result));
+                        break;
+                    }
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        finished = Some((
+                            task.item.clone(),
+                            task.index_path.clone(),
+                            Err("Store install worker disconnected".to_string()),
+                        ));
+                        break;
+                    }
+                }
+            }
+        }
+
+        let Some((item, index_path, result)) = finished else {
+            return;
+        };
+        self.store_install_task = None;
+
+        match result {
+            Ok(installed_name) => {
+                if matches!(item.item_kind, crate::plugins::StoreItemKind::Application) {
+                    let configured = self.configure_application_associations(&item);
+                    let mut state = StoreInstallPaletteState::load(index_path)
+                        .unwrap_or_else(|_| self.current_store_state_without_progress());
+                    state.progress = None;
+                    self.mode = AppMode::StoreInstallPalette(state);
+                    if configured == 0 {
+                        self.notify(format!("Application installed: {}", installed_name));
+                    } else {
+                        self.notify(format!(
+                            "Application installed: {}; {} MIME association(s) configured",
+                            installed_name, configured
+                        ));
+                    }
+                } else {
+                    self.notify(format!("Plugin installed: {}", installed_name));
+                    self.reload_panels();
+                    let mut plugins = PluginsState::load();
+                    if let Some(pos) = plugins.plugins.iter().position(|p| {
+                        p.dir
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .map(|name| name == installed_name)
+                            .unwrap_or(false)
+                    }) {
+                        plugins.cursor = pos;
+                    }
+                    self.mode = AppMode::Plugins(plugins);
+                }
+            }
+            Err(err) => {
+                if let AppMode::StoreInstallPalette(state) = &mut self.mode {
+                    state.progress = None;
+                }
+                self.notify(format!("Store install error: {}", err));
+            }
+        }
+    }
+
+    fn current_store_state_without_progress(&self) -> StoreInstallPaletteState {
+        if let AppMode::StoreInstallPalette(state) = &self.mode {
+            let mut state = state.clone();
+            state.progress = None;
+            state
+        } else {
+            StoreInstallPaletteState::load(crate::plugins::store_index_path()).unwrap_or_else(|_| {
+                StoreInstallPaletteState {
+                    index_path: crate::plugins::store_index_path(),
+                    index_info: crate::plugins::StoreIndexInfo::default(),
+                    items: Vec::new(),
+                    installed_versions: std::collections::HashMap::new(),
+                    query: String::new(),
+                    match_pos: 0,
+                    progress: None,
+                }
+            })
+        }
+    }
+
+    pub fn start_store_install(
+        &mut self,
+        mut state: StoreInstallPaletteState,
+        item: crate::plugins::StorePluginInfo,
+        title: String,
+    ) {
+        let index_path = state.index_path.clone();
+        let worker_index_path = index_path.clone();
+        let item_id = item.id.clone();
+        let item_name = item.name.clone();
+        let (tx, rx) = mpsc::channel();
+
+        state.progress = Some(StoreInstallProgress {
+            title: title.clone(),
+            item_name,
+            percent: 0,
+            phase: "Starting...".to_string(),
+        });
+        self.mode = AppMode::StoreInstallPalette(state);
+
+        std::thread::spawn(move || {
+            let report = |percent: u8, phase: &str| {
+                let _ = tx.send(StoreInstallMessage::Progress {
+                    percent: percent.min(100),
+                    phase: phase.to_string(),
+                });
+            };
+            let result =
+                crate::plugins::install_plugin_from_store_with_progress(&worker_index_path, &item_id, |p, phase| {
+                    report(p, phase);
+                })
+                .map_err(|err| err.to_string());
+            let _ = tx.send(StoreInstallMessage::Finished(result));
+        });
+
+        self.store_install_task = Some(StoreInstallTask {
+            rx,
+            item,
+            index_path,
+        });
+    }
+
+    fn configure_application_associations(&mut self, item: &crate::plugins::StorePluginInfo) -> usize {
+        let Some(bin) = item.install_bin.as_deref() else {
+            return 0;
+        };
+        if item.mime_types.is_empty() {
+            return 0;
+        }
+
+        let opener = format!("{bin} %f");
+        let mut configured = 0;
+        for mime_type in &item.mime_types {
+            let before = self.config.openers_for_mime(mime_type).len();
+            self.config.add_opener_for_mime(mime_type, opener.clone());
+            let after = self.config.openers_for_mime(mime_type).len();
+            if after > before {
+                configured += 1;
+            }
+        }
+
+        if configured > 0 {
+            let _ = self.save_config();
+        }
+        configured
     }
 
     /// Drain lines from a running streaming command into the terminal scrollback.
@@ -2175,29 +2359,6 @@ impl App {
         let _ = draw_busy_status(message, self.config.show_fkey_bar);
         let result = op(self);
         if self.status.text == message {
-            self.status.text = previous_status;
-        }
-        result
-    }
-
-    pub fn run_with_progress<T, F>(&mut self, title: &str, op: F) -> Result<T>
-    where
-        F: FnOnce(&mut dyn FnMut(u8, &str)) -> Result<T>,
-    {
-        let previous_status = self.status.text.clone();
-        let has_fkey_bar = self.config.show_fkey_bar;
-
-        let mut report = |percent: u8, phase: &str| {
-            let pct = percent.min(100);
-            let bar = progress_bar(pct, 24);
-            let msg = format!("{} {} {:>3}% {}", title, bar, pct, phase);
-            self.status.text = msg.clone();
-            let _ = draw_busy_status(&msg, has_fkey_bar);
-        };
-
-        report(0, "Starting...");
-        let result = op(&mut report);
-        if self.status.text.starts_with(title) {
             self.status.text = previous_status;
         }
         result

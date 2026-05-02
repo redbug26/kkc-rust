@@ -60,17 +60,6 @@ pub(super) fn draw_busy_status(message: &str, has_fkey_bar: bool) -> Result<()> 
     Ok(())
 }
 
-pub(super) fn progress_bar(percent: u8, width: usize) -> String {
-    let p = percent.min(100) as usize;
-    let filled = (p * width) / 100;
-    let mut bar = String::with_capacity(width + 2);
-    bar.push('[');
-    bar.extend(std::iter::repeat('#').take(filled));
-    bar.extend(std::iter::repeat('-').take(width.saturating_sub(filled)));
-    bar.push(']');
-    bar
-}
-
 pub(super) fn spawn_remote_connect_task(profile: RemoteProfile, show_hidden: bool) -> RemoteConnectTask {
     let (tx, rx) = mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));

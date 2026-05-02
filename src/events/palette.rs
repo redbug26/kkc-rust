@@ -2,7 +2,7 @@
 
 use super::fx_shortcut;
 use super::menu::execute_menu_action;
-use crate::app::{App, AppMode, PALETTE_DATA, PALETTE_SEP, PluginsState};
+use crate::app::{App, AppMode, PALETTE_DATA, PALETTE_SEP};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -113,6 +113,11 @@ pub(super) fn handle_store_install_palette(app: &mut App, key: KeyEvent) -> Resu
         }
     };
 
+    if state.progress.is_some() {
+        app.mode = AppMode::StoreInstallPalette(state);
+        return Ok(false);
+    }
+
     match key.code {
         KeyCode::Esc => {
             app.mode = AppMode::Browse;
@@ -157,40 +162,19 @@ pub(super) fn handle_store_install_palette(app: &mut App, key: KeyEvent) -> Resu
                 .and_then(|idx| state.items.get(*idx))
                 .cloned();
             if let Some(item) = selected {
+                if matches!(item.item_kind, crate::plugins::StoreItemKind::Application) {
+                    app.notify("Application updates are handled by the system package manager");
+                    app.mode = AppMode::StoreInstallPalette(state);
+                    return Ok(false);
+                }
                 if !state.has_update(&item) {
                     app.notify("Selected plugin is already up to date");
                     app.mode = AppMode::StoreInstallPalette(state);
                     return Ok(false);
                 }
                 let index_path = state.index_path.clone();
-                app.mode = AppMode::Browse;
-                match app.run_with_progress("Updating plugin from store", |report| {
-                    crate::plugins::install_plugin_from_store_with_progress(
-                        &index_path,
-                        &item.id,
-                        report,
-                    )
-                }) {
-                    Ok(installed_name) => {
-                        app.notify(format!("Plugin updated: {}", installed_name));
-                        app.reload_panels();
-                        let mut plugins = PluginsState::load();
-                        if let Some(pos) = plugins.plugins.iter().position(|p| {
-                            p.dir
-                                .file_name()
-                                .and_then(|name| name.to_str())
-                                .map(|name| name == installed_name)
-                                .unwrap_or(false)
-                        }) {
-                            plugins.cursor = pos;
-                        }
-                        app.mode = AppMode::Plugins(plugins);
-                    }
-                    Err(e) => {
-                        app.notify(format!("Store update error: {}", e));
-                        app.mode = AppMode::Plugins(PluginsState::load());
-                    }
-                }
+                state.index_path = index_path;
+                app.start_store_install(state, item, "Updating plugin from store".to_string());
                 return Ok(false);
             }
         }
@@ -203,34 +187,15 @@ pub(super) fn handle_store_install_palette(app: &mut App, key: KeyEvent) -> Resu
                 .cloned();
             if let Some(item) = selected {
                 let index_path = state.index_path.clone();
-                app.mode = AppMode::Browse;
-                match app.run_with_progress("Installing plugin from store", |report| {
-                    crate::plugins::install_plugin_from_store_with_progress(
-                        &index_path,
-                        &item.id,
-                        report,
-                    )
-                }) {
-                    Ok(installed_name) => {
-                        app.notify(format!("Plugin installed: {}", installed_name));
-                        app.reload_panels();
-                        let mut plugins = PluginsState::load();
-                        if let Some(pos) = plugins.plugins.iter().position(|p| {
-                            p.dir
-                                .file_name()
-                                .and_then(|name| name.to_str())
-                                .map(|name| name == installed_name)
-                                .unwrap_or(false)
-                        }) {
-                            plugins.cursor = pos;
-                        }
-                        app.mode = AppMode::Plugins(plugins);
-                    }
-                    Err(e) => {
-                        app.notify(format!("Store install error: {}", e));
-                        app.mode = AppMode::Plugins(PluginsState::load());
-                    }
-                }
+                let is_application =
+                    matches!(item.item_kind, crate::plugins::StoreItemKind::Application);
+                let title = if is_application {
+                    "Installing application from store"
+                } else {
+                    "Installing plugin from store"
+                };
+                state.index_path = index_path;
+                app.start_store_install(state, item, title.to_string());
                 return Ok(false);
             }
         }

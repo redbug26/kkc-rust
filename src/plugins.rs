@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Cursor, Read, Seek};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::rc::Rc;
 use std::sync::{OnceLock, RwLock};
 use zip::ZipArchive;
@@ -41,8 +42,12 @@ struct StoreIndex {
     generated_at: Option<String>,
     source_repo: Option<String>,
     plugins_count: Option<usize>,
+    applications_count: Option<usize>,
     tag: Option<String>,
+    #[serde(default)]
     plugins: Vec<StorePluginDescriptor>,
+    #[serde(default)]
+    applications: Vec<StoreApplicationDescriptor>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -67,12 +72,59 @@ struct StoreLocation {
 }
 
 #[derive(Debug, Clone)]
+pub enum StoreItemKind {
+    Plugin,
+    Application,
+}
+
+#[derive(Debug, Deserialize)]
+struct StoreApplicationDescriptor {
+    id: String,
+    name: Option<String>,
+    version: Option<String>,
+    category: Option<String>,
+    #[serde(rename = "type")]
+    app_type: Option<String>,
+    description: Option<String>,
+    #[serde(default)]
+    mime_types: Vec<String>,
+    #[serde(default)]
+    install: Vec<StoreApplicationInstall>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StoreApplicationInstall {
+    os: StoreInstallOs,
+    method: String,
+    package: Option<String>,
+    #[serde(rename = "crate")]
+    crate_name: Option<String>,
+    command: Option<String>,
+    url: Option<String>,
+    bin: Option<String>,
+    #[serde(default)]
+    args: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum StoreInstallOs {
+    One(String),
+    Many(Vec<String>),
+}
+
+#[derive(Debug, Clone)]
 pub struct StorePluginInfo {
     pub id: String,
     pub name: String,
     pub version: String,
     pub plugin_type: String,
     pub description: String,
+    pub item_kind: StoreItemKind,
+    pub install_method: Option<String>,
+    pub install_bin: Option<String>,
+    pub install_methods: Vec<String>,
+    pub mime_types: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -80,6 +132,7 @@ pub struct StoreIndexInfo {
     pub generated_at: Option<String>,
     pub source_repo: Option<String>,
     pub plugins_count: Option<usize>,
+    pub applications_count: Option<usize>,
     pub tag: Option<String>,
 }
 
@@ -474,6 +527,7 @@ pub fn list_store_plugins_with_info(
         generated_at: index.generated_at.clone(),
         source_repo: index.source_repo.clone(),
         plugins_count: index.plugins_count,
+        applications_count: index.applications_count,
         tag: index.tag.clone(),
     };
     let mut out = index
@@ -485,8 +539,44 @@ pub fn list_store_plugins_with_info(
             version: p.version.unwrap_or_else(|| "?".to_string()),
             plugin_type: p.plugin_type.unwrap_or_else(|| "other".to_string()),
             description: p.description.unwrap_or_default(),
+            item_kind: StoreItemKind::Plugin,
+            install_method: None,
+            install_bin: None,
+            install_methods: Vec::new(),
+            mime_types: Vec::new(),
         })
         .collect::<Vec<_>>();
+    out.extend(index.applications.into_iter().map(|app| {
+        let compatible_install = app
+            .install
+            .iter()
+            .find(|method| install_os_matches(&method.os));
+        StorePluginInfo {
+            id: app.id,
+            name: app
+                .name
+                .unwrap_or_else(|| "Unnamed application".to_string()),
+            version: app.version.unwrap_or_else(|| "?".to_string()),
+            plugin_type: app
+                .app_type
+                .or(app.category)
+                .unwrap_or_else(|| "application".to_string()),
+            description: app.description.unwrap_or_default(),
+            item_kind: StoreItemKind::Application,
+            install_method: compatible_install.map(store_install_method_summary),
+            install_bin: compatible_install.and_then(|method| method.bin.clone()),
+            install_methods: app
+                .install
+                .iter()
+                .map(store_install_method_summary)
+                .collect(),
+            mime_types: app
+                .mime_types
+                .into_iter()
+                .map(|mime| mime.to_ascii_lowercase())
+                .collect(),
+        }
+    }));
     out.sort_by(|a, b| a.id.cmp(&b.id));
     Ok((out, info))
 }
@@ -512,42 +602,74 @@ where
     F: FnMut(u8, &str),
 {
     progress(5, "Preparing installation...");
-    let plugins_dir = ensure_plugins_dir()?;
-    let installed_dir =
-        install_plugin_from_store_into(index_path, plugin_id, &plugins_dir, &mut progress)?;
-    progress(90, "Reloading plugin registry...");
-    let registry = load_plugins()?;
-    if let Some(lock) = PLUGINS.get() {
-        *lock
-            .write()
-            .map_err(|_| anyhow!("Plugin registry lock poisoned"))? = registry;
-    } else {
-        PLUGINS
-            .set(RwLock::new(registry))
-            .map_err(|_| anyhow!("Plugin registry already initialized"))?;
+    match install_store_item_from_store(index_path, plugin_id, &mut progress)? {
+        StoreInstallResult::Plugin(installed_dir) => {
+            progress(90, "Reloading plugin registry...");
+            let registry = load_plugins()?;
+            if let Some(lock) = PLUGINS.get() {
+                *lock
+                    .write()
+                    .map_err(|_| anyhow!("Plugin registry lock poisoned"))? = registry;
+            } else {
+                PLUGINS
+                    .set(RwLock::new(registry))
+                    .map_err(|_| anyhow!("Plugin registry already initialized"))?;
+            }
+            progress(100, "Installation complete");
+            Ok(installed_dir
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("plugin")
+                .to_string())
+        }
+        StoreInstallResult::Application(name) => {
+            progress(100, "Installation complete");
+            Ok(name)
+        }
     }
-    progress(100, "Installation complete");
-    Ok(installed_dir
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("plugin")
-        .to_string())
 }
 
-fn install_plugin_from_store_into(
+enum StoreInstallResult {
+    Plugin(PathBuf),
+    Application(String),
+}
+
+fn install_store_item_from_store(
     index_path: &Path,
-    plugin_id: &str,
-    plugins_dir: &Path,
+    item_id: &str,
     progress: &mut dyn FnMut(u8, &str),
-) -> Result<PathBuf> {
+) -> Result<StoreInstallResult> {
     progress(12, "Reading store index...");
     let (index, source) = read_store_index(index_path)?;
 
-    let descriptor = index
-        .plugins
-        .iter()
-        .find(|p| p.id == plugin_id)
-        .ok_or_else(|| anyhow!("Plugin '{}' not found in store index", plugin_id))?;
+    if let Some(descriptor) = index.plugins.iter().find(|p| p.id == item_id) {
+        let plugins_dir = ensure_plugins_dir()?;
+        return install_plugin_from_store_descriptor(
+            index_path,
+            &source,
+            descriptor,
+            &plugins_dir,
+            progress,
+        )
+        .map(StoreInstallResult::Plugin);
+    }
+
+    if let Some(descriptor) = index.applications.iter().find(|app| app.id == item_id) {
+        return install_application_from_store_descriptor(descriptor, progress)
+            .map(StoreInstallResult::Application);
+    }
+
+    bail!("Store item '{}' not found in store index", item_id);
+}
+
+fn install_plugin_from_store_descriptor(
+    index_path: &Path,
+    source: &StoreIndexSource,
+    descriptor: &StorePluginDescriptor,
+    plugins_dir: &Path,
+    progress: &mut dyn FnMut(u8, &str),
+) -> Result<PathBuf> {
+    let plugin_id = &descriptor.id;
 
     let install_name = plugin_bundle_name(Path::new(plugin_id));
     if plugin_name_is_bundled(&install_name) {
@@ -653,6 +775,399 @@ fn install_plugin_from_store_into(
         )
     })?;
     Ok(install_dir)
+}
+
+fn install_application_from_store_descriptor(
+    descriptor: &StoreApplicationDescriptor,
+    progress: &mut dyn FnMut(u8, &str),
+) -> Result<String> {
+    progress(20, "Selecting application install method...");
+    let install = descriptor
+        .install
+        .iter()
+        .find(|method| install_os_matches(&method.os))
+        .ok_or_else(|| {
+            anyhow!(
+                "Store application '{}' has no install method for this OS ({}). Available methods: {}",
+                descriptor.id,
+                current_store_os_labels().join(", "),
+                store_install_methods_summary(&descriptor.install)
+            )
+        })?;
+
+    let selected = store_install_method_summary(install);
+    progress(28, &format!("Selected install method: {}", selected));
+    progress(35, &format!("Running {}", install_command_preview(install)));
+    run_application_install_command(&descriptor.id, install)?;
+
+    if let Some(bin) = install.bin.as_deref() {
+        progress(85, "Checking installed binary...");
+        if !command_exists(bin) {
+            bail!(
+                "Store application '{}' installed with '{}', but expected binary '{}' was not found in PATH",
+                descriptor.id,
+                install.method,
+                bin
+            );
+        }
+    }
+
+    Ok(descriptor
+        .name
+        .clone()
+        .unwrap_or_else(|| descriptor.id.clone()))
+}
+
+fn run_application_install_command(app_id: &str, install: &StoreApplicationInstall) -> Result<()> {
+    match install.method.as_str() {
+        "cargo" => {
+            let package = install
+                .crate_name
+                .as_deref()
+                .or(install.package.as_deref())
+                .ok_or_else(|| {
+                    anyhow!(
+                        "Store application '{}' cargo install is missing crate/package",
+                        app_id
+                    )
+                })?;
+            run_install_command(app_id, "cargo", &["install", package], &install.args)
+        }
+        "brew" => run_package_install_command(app_id, install, "brew", &["install"]),
+        "apt" => {
+            let cmd = if command_exists("apt-get") {
+                "apt-get"
+            } else {
+                "apt"
+            };
+            if command_exists(cmd) {
+                if !is_unix_root() && command_exists("sudo") {
+                    run_package_install_command(app_id, install, "sudo", &[cmd, "install", "-y"])
+                } else {
+                    run_package_install_command(app_id, install, cmd, &["install", "-y"])
+                }
+            } else {
+                bail!(
+                    "Install method 'apt' for '{}' is not available on PATH",
+                    app_id
+                );
+            }
+        }
+        "dnf" => {
+            if !is_unix_root() && command_exists("sudo") {
+                run_package_install_command(app_id, install, "sudo", &["dnf", "install", "-y"])
+            } else {
+                run_package_install_command(app_id, install, "dnf", &["install", "-y"])
+            }
+        }
+        "pacman" => {
+            if !is_unix_root() && command_exists("sudo") {
+                run_package_install_command(
+                    app_id,
+                    install,
+                    "sudo",
+                    &["pacman", "-S", "--noconfirm"],
+                )
+            } else {
+                run_package_install_command(app_id, install, "pacman", &["-S", "--noconfirm"])
+            }
+        }
+        "winget" => run_package_install_command(app_id, install, "winget", &["install"]),
+        "scoop" => run_package_install_command(app_id, install, "scoop", &["install"]),
+        "script" => {
+            let command = install.command.as_deref().ok_or_else(|| {
+                anyhow!(
+                    "Store application '{}' script install is missing command",
+                    app_id
+                )
+            })?;
+            run_shell_install_command(app_id, command, &install.args)
+        }
+        "manual" => {
+            let detail = install
+                .command
+                .as_deref()
+                .or(install.url.as_deref())
+                .unwrap_or("no manual instruction provided");
+            bail!(
+                "Store application '{}' requires manual installation: {}",
+                app_id,
+                detail
+            );
+        }
+        other => bail!(
+            "Unsupported install method '{}' for store application '{}'",
+            other,
+            app_id
+        ),
+    }
+}
+
+fn store_install_methods_summary(methods: &[StoreApplicationInstall]) -> String {
+    if methods.is_empty() {
+        return "none".to_string();
+    }
+    methods
+        .iter()
+        .map(store_install_method_summary)
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+fn store_install_method_summary(install: &StoreApplicationInstall) -> String {
+    let os = install.os.values().join("/");
+    let mut parts = vec![format!("{} [{}]", install.method, os)];
+    if let Some(package) = install.package.as_deref() {
+        parts.push(format!("package {package}"));
+    }
+    if let Some(crate_name) = install.crate_name.as_deref() {
+        parts.push(format!("crate {crate_name}"));
+    }
+    if let Some(bin) = install.bin.as_deref() {
+        parts.push(format!("bin {bin}"));
+    }
+    if let Some(url) = install.url.as_deref() {
+        parts.push(url.to_string());
+    }
+    if let Some(command) = install.command.as_deref() {
+        parts.push(command.to_string());
+    }
+    parts.join("  ")
+}
+
+fn install_command_preview(install: &StoreApplicationInstall) -> String {
+    match install.method.as_str() {
+        "cargo" => install
+            .crate_name
+            .as_deref()
+            .or(install.package.as_deref())
+            .map(|package| format!("cargo install {package}{}", install_args_preview(&install.args)))
+            .unwrap_or_else(|| "cargo install <missing crate>".to_string()),
+        "brew" => package_command_preview("brew install", install),
+        "apt" => package_command_preview("apt install -y", install),
+        "dnf" => package_command_preview("dnf install -y", install),
+        "pacman" => package_command_preview("pacman -S --noconfirm", install),
+        "winget" => package_command_preview("winget install", install),
+        "scoop" => package_command_preview("scoop install", install),
+        "script" => install
+            .command
+            .as_deref()
+            .map(|command| format!("{command}{}", install_args_preview(&install.args)))
+            .unwrap_or_else(|| "<missing script command>".to_string()),
+        "manual" => install
+            .command
+            .as_deref()
+            .or(install.url.as_deref())
+            .unwrap_or("<missing manual instruction>")
+            .to_string(),
+        other => format!("{other} <unsupported>"),
+    }
+}
+
+fn package_command_preview(prefix: &str, install: &StoreApplicationInstall) -> String {
+    install
+        .package
+        .as_deref()
+        .map(|package| format!("{prefix} {package}{}", install_args_preview(&install.args)))
+        .unwrap_or_else(|| format!("{prefix} <missing package>"))
+}
+
+fn install_args_preview(args: &[String]) -> String {
+    if args.is_empty() {
+        String::new()
+    } else {
+        format!(" {}", args.join(" "))
+    }
+}
+
+fn run_package_install_command(
+    app_id: &str,
+    install: &StoreApplicationInstall,
+    program: &str,
+    base_args: &[&str],
+) -> Result<()> {
+    let package = install.package.as_deref().ok_or_else(|| {
+        anyhow!(
+            "Store application '{}' {} install is missing package",
+            app_id,
+            install.method
+        )
+    })?;
+    run_install_command(
+        app_id,
+        program,
+        base_args,
+        &[vec![package.to_string()], install.args.clone()].concat(),
+    )
+}
+
+fn run_install_command(
+    app_id: &str,
+    program: &str,
+    base_args: &[&str],
+    extra_args: &[String],
+) -> Result<()> {
+    if !command_exists(program) {
+        bail!(
+            "Install command '{}' for store application '{}' is not available on PATH",
+            program,
+            app_id
+        );
+    }
+    let mut command = Command::new(program);
+    command.args(base_args).args(extra_args);
+    let output = command
+        .output()
+        .with_context(|| format!("Running {} for store application '{}'", program, app_id))?;
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    bail!(
+        "Install command '{}' for store application '{}' failed with {}: {}{}{}",
+        program,
+        app_id,
+        output.status,
+        stderr.trim(),
+        if stderr.trim().is_empty() || stdout.trim().is_empty() {
+            ""
+        } else {
+            "\n"
+        },
+        stdout.trim()
+    );
+}
+
+fn run_shell_install_command(app_id: &str, command: &str, args: &[String]) -> Result<()> {
+    let command_line = if args.is_empty() {
+        command.to_string()
+    } else {
+        format!(
+            "{} {}",
+            command,
+            args.iter()
+                .map(|arg| shell_escape(arg))
+                .collect::<Vec<_>>()
+                .join(" ")
+        )
+    };
+    if cfg!(windows) {
+        run_install_command(app_id, "cmd", &["/C", &command_line], &[])
+    } else {
+        run_install_command(app_id, "sh", &["-c", &command_line], &[])
+    }
+}
+
+fn shell_escape(value: &str) -> String {
+    if value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '/' | ':'))
+    {
+        value.to_string()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
+}
+
+fn install_os_matches(os: &StoreInstallOs) -> bool {
+    let labels = current_store_os_labels();
+    os.values().iter().any(|value| {
+        labels
+            .iter()
+            .any(|label| label == &normalize_store_os(value))
+    })
+}
+
+impl StoreInstallOs {
+    fn values(&self) -> Vec<&str> {
+        match self {
+            StoreInstallOs::One(value) => vec![value.as_str()],
+            StoreInstallOs::Many(values) => values.iter().map(String::as_str).collect(),
+        }
+    }
+}
+
+fn current_store_os_labels() -> Vec<String> {
+    let mut labels = vec![normalize_store_os(std::env::consts::OS)];
+    if cfg!(target_os = "linux") {
+        labels.push("linux".to_string());
+        labels.extend(linux_distribution_ids());
+    }
+    labels.sort();
+    labels.dedup();
+    labels
+}
+
+fn linux_distribution_ids() -> Vec<String> {
+    let Ok(raw) = fs::read_to_string("/etc/os-release") else {
+        return Vec::new();
+    };
+    raw.lines()
+        .filter_map(|line| {
+            let (key, value) = line.split_once('=')?;
+            matches!(key, "ID" | "ID_LIKE").then_some(value)
+        })
+        .flat_map(|value| {
+            value
+                .trim_matches('"')
+                .split_whitespace()
+                .map(normalize_store_os)
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+fn normalize_store_os(value: &str) -> String {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "darwin" | "mac" | "macosx" | "osx" => "macos".to_string(),
+        "win" | "windows" => "windows".to_string(),
+        other => other.to_string(),
+    }
+}
+
+pub fn store_application_binary_is_installed(bin: &str) -> bool {
+    command_exists(bin)
+}
+
+fn command_exists(program: &str) -> bool {
+    if program.contains(std::path::MAIN_SEPARATOR) {
+        return Path::new(program).is_file();
+    }
+
+    let Some(paths) = std::env::var_os("PATH") else {
+        return false;
+    };
+    let extensions = if cfg!(windows) {
+        std::env::var_os("PATHEXT")
+            .map(|value| {
+                value
+                    .to_string_lossy()
+                    .split(';')
+                    .map(|ext| ext.to_string())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_else(|| vec![".EXE".to_string(), ".BAT".to_string(), ".CMD".to_string()])
+    } else {
+        vec![String::new()]
+    };
+
+    std::env::split_paths(&paths).any(|dir| {
+        extensions
+            .iter()
+            .any(|ext| dir.join(format!("{program}{ext}")).is_file())
+    })
+}
+
+#[cfg(target_family = "unix")]
+fn is_unix_root() -> bool {
+    unsafe { libc::geteuid() == 0 }
+}
+
+#[cfg(not(target_family = "unix"))]
+fn is_unix_root() -> bool {
+    false
 }
 
 fn read_store_index(index_path: &Path) -> Result<(StoreIndex, StoreIndexSource)> {
@@ -773,10 +1288,29 @@ fn fetch_url_text(url: &str) -> Result<String> {
 }
 
 fn fetch_url_bytes(url: &str) -> Result<Vec<u8>> {
-    let response = ureq::get(url)
-        .set("User-Agent", "kkc-plugin-store")
-        .call()
-        .with_context(|| format!("HTTP GET failed for {}", url))?;
+    let response = match ureq::get(url).set("User-Agent", "kkc-plugin-store").call() {
+        Ok(response) => response,
+        Err(ureq::Error::Status(code, response)) => {
+            let body = response.into_string().unwrap_or_else(|_| String::new());
+            if body.trim().is_empty() {
+                bail!("HTTP GET failed for {}: status {}", url, code);
+            }
+            bail!(
+                "HTTP GET failed for {}: status {}: {}",
+                url,
+                code,
+                body.trim()
+            );
+        }
+        Err(err) => {
+            return fetch_url_bytes_with_curl(url).with_context(|| {
+                format!(
+                    "HTTP GET failed for {} with ureq ({}) and curl fallback",
+                    url, err
+                )
+            });
+        }
+    };
 
     let mut reader = response.into_reader();
     let mut buf = Vec::new();
@@ -784,6 +1318,28 @@ fn fetch_url_bytes(url: &str) -> Result<Vec<u8>> {
         .read_to_end(&mut buf)
         .with_context(|| format!("Reading HTTP response from {}", url))?;
     Ok(buf)
+}
+
+fn fetch_url_bytes_with_curl(url: &str) -> Result<Vec<u8>> {
+    let output = Command::new("curl")
+        .args([
+            "-L",
+            "--fail",
+            "--silent",
+            "--show-error",
+            "--user-agent",
+            "kkc-plugin-store",
+            url,
+        ])
+        .output()
+        .context("Running curl fallback")?;
+
+    if output.status.success() {
+        Ok(output.stdout)
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("curl exited with {}: {}", output.status, stderr.trim());
+    }
 }
 
 fn extract_repo_path_from_zip(zip_bytes: &[u8], repo_path: &str, temp_dir: &Path) -> Result<()> {
@@ -2191,6 +2747,75 @@ mod tests {
             .flat_map(|line| line.iter().map(|span| span.text.as_str()))
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    #[test]
+    fn store_index_lists_plugins_and_applications() {
+        let index_path =
+            std::env::temp_dir().join(format!("kkc-store-index-{}.json", std::process::id()));
+        fs::write(
+            &index_path,
+            r#"{
+  "schema_version": 1,
+  "generated_at": "2026-04-29T18:22:35.350023+00:00",
+  "plugins_count": 1,
+  "applications_count": 1,
+  "plugins": [
+    {
+      "id": "json-viewer",
+      "name": "JSON Viewer",
+      "version": "1.2.0",
+      "type": "viewer",
+      "description": "JSON viewer",
+      "location": { "kind": "local", "path": "plugins/json/assets" }
+    }
+  ],
+  "applications": [
+    {
+      "id": "bat",
+      "name": "bat",
+      "version": "0.25.0",
+      "description": "Syntax-highlighting text viewer.",
+      "category": "viewer",
+      "type": "external_viewer",
+      "mime_types": ["text/plain", "application/json"],
+      "install": [
+        { "os": ["macos", "linux", "windows"], "method": "cargo", "crate": "bat", "bin": "bat" }
+      ]
+    }
+  ],
+  "tag": "0.0.8"
+}"#,
+        )
+        .expect("write store index");
+
+        let (items, info) = list_store_plugins_with_info(&index_path).expect("read index");
+        assert_eq!(info.plugins_count, Some(1));
+        assert_eq!(info.applications_count, Some(1));
+        assert_eq!(items.len(), 2);
+
+        let app = items.iter().find(|item| item.id == "bat").expect("bat app");
+        assert!(matches!(app.item_kind, StoreItemKind::Application));
+        assert_eq!(app.plugin_type, "external_viewer");
+        assert_eq!(
+            app.install_method.as_deref(),
+            Some("cargo [macos/linux/windows]  crate bat  bin bat")
+        );
+        assert_eq!(app.install_bin.as_deref(), Some("bat"));
+        assert_eq!(app.mime_types, vec!["text/plain", "application/json"]);
+        assert_eq!(
+            app.install_methods,
+            vec!["cargo [macos/linux/windows]  crate bat  bin bat"]
+        );
+
+        let plugin = items
+            .iter()
+            .find(|item| item.id == "json-viewer")
+            .expect("json plugin");
+        assert!(matches!(plugin.item_kind, StoreItemKind::Plugin));
+        assert_eq!(plugin.plugin_type, "viewer");
+
+        let _ = fs::remove_file(&index_path);
     }
 
     #[test]

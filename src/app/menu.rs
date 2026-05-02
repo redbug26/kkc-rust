@@ -102,6 +102,14 @@ pub struct ViewerPluginPaletteState {
 }
 
 #[derive(Debug, Clone)]
+pub struct StoreInstallProgress {
+    pub title: String,
+    pub item_name: String,
+    pub percent: u8,
+    pub phase: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct StoreInstallPaletteState {
     pub index_path: PathBuf,
     pub index_info: crate::plugins::StoreIndexInfo,
@@ -109,6 +117,7 @@ pub struct StoreInstallPaletteState {
     pub installed_versions: HashMap<String, String>,
     pub query: String,
     pub match_pos: usize,
+    pub progress: Option<StoreInstallProgress>,
 }
 
 impl StoreInstallPaletteState {
@@ -144,13 +153,29 @@ impl StoreInstallPaletteState {
             installed_versions,
             query: String::new(),
             match_pos: 0,
+            progress: None,
         })
     }
 
     pub fn index_version_label(&self) -> String {
         let tag = self.index_info.tag.as_deref().unwrap_or("?");
-        let count = self.index_info.plugins_count.unwrap_or(self.items.len());
-        let mut parts = vec![format!("Index {tag}"), format!("plugins {count}")];
+        let count = self.index_info.plugins_count.unwrap_or_else(|| {
+            self.items
+                .iter()
+                .filter(|item| matches!(item.item_kind, crate::plugins::StoreItemKind::Plugin))
+                .count()
+        });
+        let app_count = self.index_info.applications_count.unwrap_or_else(|| {
+            self.items
+                .iter()
+                .filter(|item| matches!(item.item_kind, crate::plugins::StoreItemKind::Application))
+                .count()
+        });
+        let mut parts = vec![
+            format!("Index {tag}"),
+            format!("plugins {count}"),
+            format!("apps {app_count}"),
+        ];
         if let Some(generated_at) = self.index_info.generated_at.as_deref() {
             parts.push(format!(
                 "generated {}",
@@ -168,15 +193,28 @@ impl StoreInstallPaletteState {
     }
 
     pub fn installed_version_for(&self, item: &crate::plugins::StorePluginInfo) -> Option<&str> {
+        if matches!(item.item_kind, crate::plugins::StoreItemKind::Application) {
+            return None;
+        }
         let dir = self.install_dir_name_for(item);
         self.installed_versions.get(&dir).map(|s| s.as_str())
     }
 
     pub fn is_installed(&self, item: &crate::plugins::StorePluginInfo) -> bool {
+        if matches!(item.item_kind, crate::plugins::StoreItemKind::Application) {
+            return item
+                .install_bin
+                .as_deref()
+                .map(crate::plugins::store_application_binary_is_installed)
+                .unwrap_or(false);
+        }
         self.installed_version_for(item).is_some()
     }
 
     pub fn has_update(&self, item: &crate::plugins::StorePluginInfo) -> bool {
+        if matches!(item.item_kind, crate::plugins::StoreItemKind::Application) {
+            return false;
+        }
         self.installed_version_for(item)
             .map(|v| v != item.version)
             .unwrap_or(false)
@@ -204,8 +242,17 @@ impl StoreInstallPaletteState {
 
         for (idx, item) in self.items.iter().enumerate() {
             let searchable = format!(
-                "{} {} {} {} {}",
-                item.id, item.name, item.plugin_type, item.version, item.description
+                "{} {} {} {} {} {} {}",
+                item.id,
+                item.name,
+                item.plugin_type,
+                item.version,
+                item.description,
+                match item.item_kind {
+                    crate::plugins::StoreItemKind::Plugin => "plugin",
+                    crate::plugins::StoreItemKind::Application => "application app",
+                },
+                item.install_method.as_deref().unwrap_or_default(),
             );
             let lowered = searchable.to_lowercase();
             if !rest.iter().all(|token| lowered.contains(token.as_str())) {
