@@ -152,6 +152,7 @@ pub struct PluginRegistry {
     archive_plugins: Vec<ArchivePlugin>,
     viewer_plugins: Vec<ViewerPlugin>,
     action_plugins: Vec<ActionPlugin>,
+    remote_rust_plugins: Vec<crate::remote_plugins::RemoteRustPluginInfo>,
 }
 
 #[derive(Debug, Clone)]
@@ -705,6 +706,10 @@ fn install_plugin_from_store_descriptor(
                     plugin_id
                 )
             })?;
+            let rel = rel.trim_start_matches('/');
+            if rel.is_empty() {
+                bail!("Store local plugin '{}' has an empty location.path", plugin_id);
+            }
             if let Some(store_root) = source.local_root.as_ref() {
                 progress(45, "Copying plugin files...");
                 let src_dir = store_root.join(rel);
@@ -759,10 +764,10 @@ fn install_plugin_from_store_descriptor(
         }
     }
 
-    if !temp_dir.join("plugin.lua").is_file() {
+    if !temp_dir.join("plugin.lua").is_file() && !is_remote_rust_plugin_dir(&temp_dir)? {
         let _ = fs::remove_dir_all(&temp_dir);
         bail!(
-            "Installed store plugin '{}' does not contain plugin.lua at its root",
+            "Installed store plugin '{}' does not contain plugin.lua or a valid remote-rust plugin.toml at its root",
             plugin_id
         );
     }
@@ -947,7 +952,12 @@ fn install_command_preview(install: &StoreApplicationInstall) -> String {
             .crate_name
             .as_deref()
             .or(install.package.as_deref())
-            .map(|package| format!("cargo install {package}{}", install_args_preview(&install.args)))
+            .map(|package| {
+                format!(
+                    "cargo install {package}{}",
+                    install_args_preview(&install.args)
+                )
+            })
             .unwrap_or_else(|| "cargo install <missing crate>".to_string()),
         "brew" => package_command_preview("brew install", install),
         "apt" => package_command_preview("apt install -y", install),
@@ -1227,7 +1237,9 @@ pub fn remove_store_application(id: &str) -> Result<bool> {
     Ok(changed)
 }
 
-pub fn detect_installed_store_applications(items: &[StorePluginInfo]) -> Result<Vec<StorePluginInfo>> {
+pub fn detect_installed_store_applications(
+    items: &[StorePluginInfo],
+) -> Result<Vec<StorePluginInfo>> {
     let mut remembered = load_store_applications()?;
     let mut changed = false;
     let mut detected = Vec::new();
@@ -1273,7 +1285,9 @@ pub fn detect_installed_store_applications(items: &[StorePluginInfo]) -> Result<
     Ok(detected)
 }
 
-pub fn missing_remembered_store_applications(items: &[StorePluginInfo]) -> Result<Vec<StorePluginInfo>> {
+pub fn missing_remembered_store_applications(
+    items: &[StorePluginInfo],
+) -> Result<Vec<StorePluginInfo>> {
     let remembered = load_store_applications()?;
     let mut missing = Vec::new();
     for stored in remembered {
@@ -1615,6 +1629,13 @@ fn load_plugins() -> Result<PluginRegistry> {
     let mut archive_plugins = Vec::new();
     let mut viewer_plugins = Vec::new();
     let mut action_plugins = Vec::new();
+    let remote_rust_plugins = crate::remote_plugins::discover_remote_rust_plugins(&plugins_dir)
+        .unwrap_or_else(|err| {
+            crate::viewer::debug_log(&format!(
+                "startup: native remote plugin discovery failed: {err}"
+            ));
+            Vec::new()
+        });
     let scripts_start = std::time::Instant::now();
     let scripts = plugin_scripts(&plugins_dir)?;
     crate::viewer::debug_log(&format!(
@@ -1675,16 +1696,18 @@ fn load_plugins() -> Result<PluginRegistry> {
     }
 
     crate::viewer::debug_log(&format!(
-        "startup: load_plugins completed in {:.3} ms (archive={}, viewer={}, action={})",
+        "startup: load_plugins completed in {:.3} ms (archive={}, viewer={}, action={}, remote-rust={})",
         load_start.elapsed().as_secs_f64() * 1000.0,
         archive_plugins.len(),
         viewer_plugins.len(),
-        action_plugins.len()
+        action_plugins.len(),
+        remote_rust_plugins.len()
     ));
     Ok(PluginRegistry {
         archive_plugins,
         viewer_plugins,
         action_plugins,
+        remote_rust_plugins,
     })
 }
 
@@ -1787,6 +1810,7 @@ fn extract_plugin_bundle(path: &Path, plugins_dir: &Path) -> Result<PathBuf> {
     fs::create_dir_all(&temp_dir).with_context(|| format!("Creating {}", temp_dir.display()))?;
 
     let mut has_plugin_lua = false;
+    let mut has_plugin_toml = false;
     for idx in 0..archive.len() {
         let mut file = archive.by_index(idx)?;
         let Some(mut enclosed_name) = file.enclosed_name() else {
@@ -1817,6 +1841,9 @@ fn extract_plugin_bundle(path: &Path, plugins_dir: &Path) -> Result<PathBuf> {
         if enclosed_name == Path::new("plugin.lua") {
             has_plugin_lua = true;
         }
+        if enclosed_name == Path::new("plugin.toml") {
+            has_plugin_toml = true;
+        }
         if let Some(parent) = output.parent() {
             fs::create_dir_all(parent).with_context(|| format!("Creating {}", parent.display()))?;
         }
@@ -1825,9 +1852,13 @@ fn extract_plugin_bundle(path: &Path, plugins_dir: &Path) -> Result<PathBuf> {
         io::copy(&mut file, &mut out).with_context(|| format!("Extracting {}", file.name()))?;
     }
 
-    if !has_plugin_lua {
+    if !has_plugin_lua && !has_plugin_toml {
         let _ = fs::remove_dir_all(&temp_dir);
-        bail!("Plugin bundle does not contain plugin.lua at its root");
+        bail!("Plugin bundle does not contain plugin.lua or plugin.toml at its root");
+    }
+    if !has_plugin_lua && !is_remote_rust_plugin_dir(&temp_dir)? {
+        let _ = fs::remove_dir_all(&temp_dir);
+        bail!("Plugin bundle contains plugin.toml but is not a valid remote-rust plugin");
     }
 
     if install_dir.exists() {
@@ -1921,6 +1952,39 @@ fn plugin_scripts(plugins_dir: &Path) -> Result<Vec<PathBuf>> {
     }
     scripts.sort();
     Ok(scripts)
+}
+
+fn is_remote_rust_plugin_dir(dir: &Path) -> Result<bool> {
+    #[derive(Deserialize)]
+    struct Manifest {
+        plugin: ManifestPlugin,
+        remote: Option<ManifestRemote>,
+    }
+    #[derive(Deserialize)]
+    struct ManifestPlugin {
+        #[serde(rename = "type")]
+        plugin_type: String,
+    }
+    #[derive(Deserialize)]
+    struct ManifestRemote {
+        library: String,
+    }
+
+    let manifest_path = dir.join("plugin.toml");
+    if !manifest_path.is_file() {
+        return Ok(false);
+    }
+    let text = fs::read_to_string(&manifest_path)
+        .with_context(|| format!("Reading {}", manifest_path.display()))?;
+    let manifest: Manifest =
+        toml::from_str(&text).with_context(|| format!("Parsing {}", manifest_path.display()))?;
+    if manifest.plugin.plugin_type != "remote-rust" {
+        return Ok(false);
+    }
+    let Some(remote) = manifest.remote else {
+        bail!("remote-rust plugin is missing [remote]");
+    };
+    Ok(!remote.library.trim().is_empty())
 }
 
 #[cfg(test)]
@@ -2192,6 +2256,14 @@ impl PluginRegistry {
             description: plugin.description.clone(),
             extensions: Vec::new(),
             dir: plugin.plugin_dir.clone(),
+        }));
+        plugins.extend(self.remote_rust_plugins.iter().map(|plugin| PluginInfo {
+            name: plugin.name.clone(),
+            version: plugin.version.clone(),
+            kind: "Remote Rust".into(),
+            description: plugin.description.clone(),
+            extensions: vec![plugin.scheme.clone()],
+            dir: plugin.dir.clone(),
         }));
         plugins
     }

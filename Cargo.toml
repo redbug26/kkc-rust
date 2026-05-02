@@ -29,6 +29,8 @@ zip = { version = "8.5.1", default-features = false, features = ["deflate-flate2
 ureq = { version = "2.10", default-features = false, features = ["native-tls"] }
 pavao = { version = "0.2", optional = true }
 libc = "0.2"
+abi_stable = "0.11.3"
+kkc-plugin-api = { path = "crates/kkc-plugin-api" }
 
 [features]
 smb = ["dep:pavao"]

@@ -1422,7 +1422,10 @@ impl App {
             s.filtered_indices()
                 .get(s.match_pos)
                 .and_then(|idx| s.items.get(*idx))
-                .filter(|p| p.source == RemoteSource::UserToml)
+                .filter(|p| {
+                    p.source == RemoteSource::UserToml
+                        && matches!(p.kind, RemoteKind::Sftp(_) | RemoteKind::Smb(_) | RemoteKind::RemotePlugin(_))
+                })
                 .cloned()
         } else {
             None
@@ -1430,7 +1433,7 @@ impl App {
         if let Some(profile) = profile {
             self.mode = AppMode::RemoteEdit(RemoteEditState::from_profile(&profile));
         } else {
-            self.notify("Only user-defined (toml) connections can be edited");
+            self.notify("Only user-defined connections can be edited");
         }
     }
 

@@ -23,6 +23,7 @@ pub enum RemoteSource {
 pub enum RemoteProtocol {
     Sftp,
     Smb,
+    RemotePlugin,
 }
 
 #[derive(Debug, Clone)]
@@ -36,6 +37,7 @@ pub struct RemoteProfile {
 pub enum RemoteKind {
     Sftp(SftpProfile),
     Smb(SmbProfile),
+    RemotePlugin(RemotePluginProfile),
 }
 
 #[derive(Debug, Clone)]
@@ -57,12 +59,21 @@ pub struct SmbProfile {
     pub path: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct RemotePluginProfile {
+    pub plugin_id: String,
+    pub scheme: String,
+    pub config_json: String,
+    pub path: Option<String>,
+}
+
 impl RemoteProtocol {
     /// Lowercase short name ("sftp", "smb").
     pub fn name(self) -> &'static str {
         match self {
             RemoteProtocol::Sftp => "sftp",
             RemoteProtocol::Smb => "smb",
+            RemoteProtocol::RemotePlugin => "plugin",
         }
     }
 
@@ -71,6 +82,7 @@ impl RemoteProtocol {
         match self {
             RemoteProtocol::Sftp => "SFTP",
             RemoteProtocol::Smb => "SMB",
+            RemoteProtocol::RemotePlugin => "PLUGIN",
         }
     }
 
@@ -79,6 +91,7 @@ impl RemoteProtocol {
         match self {
             RemoteProtocol::Sftp => (121, 214, 255),
             RemoteProtocol::Smb => (255, 165, 80),
+            RemoteProtocol::RemotePlugin => (141, 222, 150),
         }
     }
 }
@@ -88,6 +101,7 @@ impl RemoteProfile {
         match self.kind {
             RemoteKind::Sftp(_) => RemoteProtocol::Sftp,
             RemoteKind::Smb(_) => RemoteProtocol::Smb,
+            RemoteKind::RemotePlugin(_) => RemoteProtocol::RemotePlugin,
         }
     }
 
@@ -95,6 +109,9 @@ impl RemoteProfile {
         match &self.kind {
             RemoteKind::Sftp(sftp) => sftp.host.clone().unwrap_or_else(|| self.name.clone()),
             RemoteKind::Smb(smb) => smb.host.clone(),
+            RemoteKind::RemotePlugin(plugin) => {
+                format!("{} ({})", plugin.plugin_id, plugin.scheme)
+            }
         }
     }
 }
@@ -122,6 +139,8 @@ struct ConnectionStore {
     sftp: Vec<SftpProfileToml>,
     #[serde(default)]
     smb: Vec<smb_impl::SmbProfileToml>,
+    #[serde(default)]
+    remote_plugin: Vec<RemotePluginProfileToml>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -137,6 +156,18 @@ struct SftpProfileToml {
     path: Option<String>,
     #[serde(default)]
     identity_file: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RemotePluginProfileToml {
+    name: String,
+    plugin_id: String,
+    #[serde(default)]
+    scheme: Option<String>,
+    #[serde(default)]
+    config_json: Option<String>,
+    #[serde(default)]
+    path: Option<String>,
 }
 
 pub fn connections_path() -> Result<PathBuf> {
@@ -219,6 +250,23 @@ pub fn save_profile(profile: &RemoteProfile, old_name: Option<&str>) -> Result<(
                 path: smb.path.clone(),
             });
         }
+        RemoteKind::RemotePlugin(plugin) => {
+            if let Some(old) = old_name {
+                store
+                    .remote_plugin
+                    .retain(|p| !p.name.eq_ignore_ascii_case(old));
+            }
+            store
+                .remote_plugin
+                .retain(|p| !p.name.eq_ignore_ascii_case(&profile.name));
+            store.remote_plugin.push(RemotePluginProfileToml {
+                name: profile.name.clone(),
+                plugin_id: plugin.plugin_id.clone(),
+                scheme: Some(plugin.scheme.clone()),
+                config_json: Some(plugin.config_json.clone()),
+                path: plugin.path.clone(),
+            });
+        }
     }
 
     let text = toml::to_string_pretty(&store).context("Serialising connections")?;
@@ -230,6 +278,7 @@ pub fn resolve_initial_dir(profile: &RemoteProfile) -> Result<String> {
     let cwd = match &profile.kind {
         RemoteKind::Sftp(sftp) => resolve_sftp_initial_dir(profile, sftp),
         RemoteKind::Smb(smb) => Ok(smb.path.clone().unwrap_or_else(|| "/".into())),
+        RemoteKind::RemotePlugin(plugin) => Ok(plugin.path.clone().unwrap_or_else(|| "/".into())),
     }?;
     Ok(normalize_remote_cwd(profile, &cwd))
 }
@@ -246,6 +295,15 @@ pub fn normalize_remote_cwd(profile: &RemoteProfile, cwd: &str) -> String {
             }
         }
         RemoteProtocol::Smb => {
+            if cwd.trim().is_empty() {
+                "/".into()
+            } else if cwd == "/" {
+                "/".into()
+            } else {
+                cwd.trim_end_matches('/').to_string()
+            }
+        }
+        RemoteProtocol::RemotePlugin => {
             if cwd.trim().is_empty() {
                 "/".into()
             } else if cwd == "/" {
@@ -281,6 +339,7 @@ where
     let entries = match &profile.kind {
         RemoteKind::Sftp(_) => list_sftp_dir(profile, &cwd, show_hidden)?,
         RemoteKind::Smb(_) => smb_impl::list_smb_dir(profile, &cwd, show_hidden)?,
+        RemoteKind::RemotePlugin(_) => remote_plugin_list_dir(profile, &cwd, show_hidden)?,
     };
     if cancel.load(Ordering::Relaxed) {
         bail!("Aborted");
@@ -305,6 +364,13 @@ pub fn display_path(profile: &RemoteProfile, cwd: &str) -> String {
                 format!("smb://{}{}", profile.name, cwd)
             }
         }
+        RemoteProtocol::RemotePlugin => {
+            if let RemoteKind::RemotePlugin(plugin) = &profile.kind {
+                format!("{}://{}{}", plugin.scheme, profile.name, cwd)
+            } else {
+                format!("plugin://{}{}", profile.name, cwd)
+            }
+        }
     }
 }
 
@@ -312,6 +378,7 @@ pub fn list_dir(profile: &RemoteProfile, cwd: &str, show_hidden: bool) -> Result
     match &profile.kind {
         RemoteKind::Sftp(_) => list_sftp_dir(profile, cwd, show_hidden),
         RemoteKind::Smb(_) => smb_impl::list_smb_dir(profile, cwd, show_hidden),
+        RemoteKind::RemotePlugin(_) => remote_plugin_list_dir(profile, cwd, show_hidden),
     }
 }
 
@@ -339,6 +406,9 @@ pub fn download_into_dir(
         RemoteKind::Smb(_) => {
             smb_impl::download_smb_into_dir(profile, remote_path, local_dir, recursive)
         }
+        RemoteKind::RemotePlugin(_) => {
+            remote_plugin_download_into_dir(profile, remote_path, local_dir, recursive)
+        }
     }
 }
 
@@ -351,6 +421,9 @@ pub fn download_bulk_into_dir(
         RemoteKind::Sftp(_) => download_sftp_bulk_into_dir(profile, remote_path, local_dir),
         RemoteKind::Smb(_) => {
             smb_impl::download_smb_into_dir(profile, remote_path, local_dir, true)
+        }
+        RemoteKind::RemotePlugin(_) => {
+            remote_plugin_download_into_dir(profile, remote_path, local_dir, true)
         }
     }
 }
@@ -366,6 +439,9 @@ pub fn upload_into_dir(
         RemoteKind::Smb(_) => {
             smb_impl::upload_smb_into_dir(profile, local_path, remote_dir, recursive)
         }
+        RemoteKind::RemotePlugin(_) => {
+            remote_plugin_upload_into_dir(profile, local_path, remote_dir, recursive)
+        }
     }
 }
 
@@ -377,6 +453,9 @@ pub fn upload_bulk_into_dir(
     match &profile.kind {
         RemoteKind::Sftp(_) => upload_sftp_bulk_into_dir(profile, local_path, remote_dir),
         RemoteKind::Smb(_) => smb_impl::upload_smb_into_dir(profile, local_path, remote_dir, true),
+        RemoteKind::RemotePlugin(_) => {
+            remote_plugin_upload_into_dir(profile, local_path, remote_dir, true)
+        }
     }
 }
 
@@ -394,6 +473,24 @@ pub fn rename_path(profile: &RemoteProfile, old_path: &str, new_path: &str) -> R
             Ok(())
         }
         RemoteKind::Smb(smb) => smb_impl::smb_rename(smb, old_path, new_path),
+        RemoteKind::RemotePlugin(_) => {
+            let local_temp = std::env::temp_dir();
+            let downloaded = remote_plugin_download_into_dir(profile, old_path, &local_temp, false)?;
+            let target_parent = Path::new(new_path)
+                .parent()
+                .unwrap_or_else(|| Path::new("/"))
+                .to_string_lossy()
+                .into_owned();
+            let uploaded = remote_plugin_upload_into_dir(profile, &downloaded, &target_parent, false)?;
+            if normalize_remote_cwd(profile, &uploaded) != normalize_remote_cwd(profile, new_path) {
+                return Err(anyhow::anyhow!(
+                    "remote plugin rename fallback uploaded '{}' instead of '{}'",
+                    uploaded,
+                    new_path
+                ));
+            }
+            remote_plugin_delete_path(profile, old_path, false)
+        }
     }
 }
 
@@ -404,6 +501,7 @@ pub fn make_dir(profile: &RemoteProfile, remote_path: &str) -> Result<()> {
             Ok(())
         }
         RemoteKind::Smb(smb) => smb_impl::smb_mkdir(smb, remote_path),
+        RemoteKind::RemotePlugin(_) => remote_plugin_make_dir(profile, remote_path),
     }
 }
 
@@ -427,6 +525,7 @@ pub fn delete_path(profile: &RemoteProfile, remote_path: &str, is_dir: bool) -> 
                 smb_impl::smb_delete_file(smb, remote_path)
             }
         }
+        RemoteKind::RemotePlugin(_) => remote_plugin_delete_path(profile, remote_path, is_dir),
     }
 }
 
@@ -455,6 +554,7 @@ pub fn remote_stats(
     match &profile.kind {
         RemoteKind::Sftp(_) => remote_sftp_stats(profile, remote_path, is_dir),
         RemoteKind::Smb(_) => smb_impl::remote_smb_stats(profile, remote_path, is_dir),
+        RemoteKind::RemotePlugin(_) => remote_plugin_stats(profile, remote_path, is_dir),
     }
 }
 
@@ -475,6 +575,9 @@ where
         RemoteKind::Sftp(_) => scan_sftp_stats(profile, remote_path, is_dir, progress, cancel),
         RemoteKind::Smb(_) => {
             smb_impl::scan_smb_stats(profile, remote_path, is_dir, progress, cancel)
+        }
+        RemoteKind::RemotePlugin(_) => {
+            remote_plugin_scan_stats(profile, remote_path, is_dir, progress, cancel)
         }
     }
 }
@@ -500,6 +603,14 @@ where
             recursive,
             progress,
         ),
+        RemoteKind::RemotePlugin(_) => {
+            let path = remote_plugin_download_into_dir(profile, remote_path, local_dir, recursive)?;
+            let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            if !progress(remote_path, size) {
+                bail!("Aborted");
+            }
+            Ok(path)
+        }
     }
 }
 
@@ -520,7 +631,223 @@ where
         RemoteKind::Smb(_) => {
             smb_impl::upload_smb_with_progress(profile, local_path, remote_dir, recursive, progress)
         }
+        RemoteKind::RemotePlugin(_) => {
+            let uploaded = remote_plugin_upload_into_dir(profile, local_path, remote_dir, recursive)?;
+            let size = fs::metadata(local_path).map(|m| m.len()).unwrap_or(0);
+            if !progress(&uploaded, size) {
+                bail!("Aborted");
+            }
+            Ok(uploaded)
+        }
     }
+}
+
+fn remote_plugin_profile(profile: &RemoteProfile) -> Result<&RemotePluginProfile> {
+    let RemoteKind::RemotePlugin(plugin) = &profile.kind else {
+        bail!("Profile '{}' is not a remote plugin profile", profile.name);
+    };
+    Ok(plugin)
+}
+
+fn remote_plugin_module(profile: &RemoteProfile) -> Result<kkc_plugin_api::RemotePluginModRef> {
+    let plugin = remote_plugin_profile(profile)?;
+    crate::remote_plugins::load_remote_plugin(&plugin.plugin_id)
+}
+
+fn remote_plugin_error(err: abi_stable::std_types::RString) -> anyhow::Error {
+    anyhow::anyhow!(err.to_string())
+}
+
+fn remote_plugin_list_dir(
+    profile: &RemoteProfile,
+    cwd: &str,
+    show_hidden: bool,
+) -> Result<Vec<RemoteEntry>> {
+    let plugin = remote_plugin_profile(profile)?;
+    let module = remote_plugin_module(profile)?;
+    let call = module.list_dir()(plugin.config_json.as_str().into(), cwd.into(), show_hidden);
+    let entries = match call {
+        abi_stable::std_types::RResult::ROk(entries) => entries,
+        abi_stable::std_types::RResult::RErr(err) => return Err(remote_plugin_error(err)),
+    };
+
+    let mut out = entries
+        .into_iter()
+        .map(|entry| {
+            let modified = if entry.modified_unix > 0 {
+                Local.timestamp_opt(entry.modified_unix, 0).single()
+            } else {
+                None
+            };
+            RemoteEntry {
+                name: entry.name.to_string(),
+                path: normalize_remote_cwd(profile, entry.path.as_str()),
+                is_dir: entry.is_dir,
+                is_symlink: entry.is_symlink,
+                size: entry.size,
+                modified,
+                mode: entry.mode,
+            }
+        })
+        .collect::<Vec<_>>();
+    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(out)
+}
+
+fn remote_plugin_download_into_dir(
+    profile: &RemoteProfile,
+    remote_path: &str,
+    local_dir: &Path,
+    recursive: bool,
+) -> Result<PathBuf> {
+    let plugin = remote_plugin_profile(profile)?;
+    let module = remote_plugin_module(profile)?;
+    let local_dir_string = local_dir.to_string_lossy();
+    let call = module.download_into_dir()(
+        plugin.config_json.as_str().into(),
+        remote_path.into(),
+        local_dir_string.as_ref().into(),
+        recursive,
+    );
+    let local_path = match call {
+        abi_stable::std_types::RResult::ROk(path) => path.to_string(),
+        abi_stable::std_types::RResult::RErr(err) => return Err(remote_plugin_error(err)),
+    };
+    Ok(PathBuf::from(local_path))
+}
+
+fn remote_plugin_upload_into_dir(
+    profile: &RemoteProfile,
+    local_path: &Path,
+    remote_dir: &str,
+    recursive: bool,
+) -> Result<String> {
+    let plugin = remote_plugin_profile(profile)?;
+    let module = remote_plugin_module(profile)?;
+    let local_string = local_path.to_string_lossy();
+    let call = module.upload_into_dir()(
+        plugin.config_json.as_str().into(),
+        local_string.as_ref().into(),
+        remote_dir.into(),
+        recursive,
+    );
+    match call {
+        abi_stable::std_types::RResult::ROk(path) => Ok(normalize_remote_cwd(profile, path.as_str())),
+        abi_stable::std_types::RResult::RErr(err) => Err(remote_plugin_error(err)),
+    }
+}
+
+fn remote_plugin_delete_path(
+    profile: &RemoteProfile,
+    remote_path: &str,
+    is_dir: bool,
+) -> Result<()> {
+    let plugin = remote_plugin_profile(profile)?;
+    let module = remote_plugin_module(profile)?;
+    let call = module.delete_path()(plugin.config_json.as_str().into(), remote_path.into(), is_dir);
+    match call {
+        abi_stable::std_types::RResult::ROk(()) => Ok(()),
+        abi_stable::std_types::RResult::RErr(err) => Err(remote_plugin_error(err)),
+    }
+}
+
+fn remote_plugin_make_dir(profile: &RemoteProfile, remote_path: &str) -> Result<()> {
+    let plugin = remote_plugin_profile(profile)?;
+    let module = remote_plugin_module(profile)?;
+    let call = module.make_dir()(plugin.config_json.as_str().into(), remote_path.into());
+    match call {
+        abi_stable::std_types::RResult::ROk(()) => Ok(()),
+        abi_stable::std_types::RResult::RErr(err) => Err(remote_plugin_error(err)),
+    }
+}
+
+fn remote_plugin_stats(profile: &RemoteProfile, remote_path: &str, is_dir: bool) -> Result<RemoteStats> {
+    if !is_dir {
+        let parent = Path::new(remote_path).parent().unwrap_or(Path::new("/"));
+        let file_name = Path::new(remote_path)
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        let entries = remote_plugin_list_dir(profile, &parent.to_string_lossy(), true)?;
+        let size = entries
+            .into_iter()
+            .find(|e| e.name == file_name)
+            .map(|e| e.size)
+            .unwrap_or(0);
+        return Ok(RemoteStats {
+            files: 1,
+            bytes: size,
+        });
+    }
+    remote_plugin_dir_stats_recursive(profile, remote_path)
+}
+
+fn remote_plugin_dir_stats_recursive(profile: &RemoteProfile, remote_path: &str) -> Result<RemoteStats> {
+    let mut stats = RemoteStats::default();
+    for child in remote_plugin_list_dir(profile, remote_path, true)? {
+        if child.is_dir {
+            let sub = remote_plugin_dir_stats_recursive(profile, &child.path)?;
+            stats.files += sub.files;
+            stats.bytes += sub.bytes;
+        } else {
+            stats.files += 1;
+            stats.bytes += child.size;
+        }
+    }
+    Ok(stats)
+}
+
+fn remote_plugin_scan_stats<F>(
+    profile: &RemoteProfile,
+    remote_path: &str,
+    is_dir: bool,
+    progress: &mut F,
+    cancel: &Arc<AtomicBool>,
+) -> Result<RemoteStats>
+where
+    F: FnMut(RemoteStats),
+{
+    if cancel.load(Ordering::Relaxed) {
+        bail!("Aborted");
+    }
+    if !is_dir {
+        let stats = remote_plugin_stats(profile, remote_path, false)?;
+        progress(stats);
+        return Ok(stats);
+    }
+    remote_plugin_scan_dir_recursive(profile, remote_path, progress, cancel)
+}
+
+fn remote_plugin_scan_dir_recursive<F>(
+    profile: &RemoteProfile,
+    remote_path: &str,
+    progress: &mut F,
+    cancel: &Arc<AtomicBool>,
+) -> Result<RemoteStats>
+where
+    F: FnMut(RemoteStats),
+{
+    let mut stats = RemoteStats::default();
+    for child in remote_plugin_list_dir(profile, remote_path, true)? {
+        if cancel.load(Ordering::Relaxed) {
+            bail!("Aborted");
+        }
+        if child.is_dir {
+            let sub = remote_plugin_scan_dir_recursive(profile, &child.path, progress, cancel)?;
+            stats.files += sub.files;
+            stats.bytes += sub.bytes;
+        } else {
+            let delta = RemoteStats {
+                files: 1,
+                bytes: child.size,
+            };
+            stats.files += delta.files;
+            stats.bytes += delta.bytes;
+            progress(delta);
+        }
+    }
+    Ok(stats)
 }
 
 fn load_saved_profiles() -> Result<Vec<RemoteProfile>> {
@@ -554,6 +881,23 @@ fn load_saved_profiles() -> Result<Vec<RemoteProfile>> {
             share: p.share,
             path: p.path,
         }),
+    }));
+    out.extend(store.remote_plugin.into_iter().map(|p| {
+        let scheme = p.scheme.unwrap_or_else(|| p.plugin_id.clone());
+        let config_json = p
+            .config_json
+            .filter(|cfg| !cfg.trim().is_empty())
+            .unwrap_or_else(|| "{}".to_string());
+        RemoteProfile {
+            name: p.name,
+            source: RemoteSource::UserToml,
+            kind: RemoteKind::RemotePlugin(RemotePluginProfile {
+                plugin_id: p.plugin_id,
+                scheme,
+                config_json,
+                path: p.path,
+            }),
+        }
     }));
     Ok(out)
 }

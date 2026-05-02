@@ -4,18 +4,20 @@ use super::*;
 pub enum RemoteEditKind {
     Sftp,
     Smb,
+    Dropbox,
 }
 
 impl RemoteEditKind {
     /// All protocol choices in menu order.
     pub fn all() -> &'static [Self] {
-        &[Self::Sftp, Self::Smb]
+        &[Self::Sftp, Self::Smb, Self::Dropbox]
     }
 
     pub fn name(self) -> &'static str {
         match self {
             Self::Sftp => "SFTP",
             Self::Smb => "SMB",
+            Self::Dropbox => "Dropbox",
         }
     }
 
@@ -24,6 +26,7 @@ impl RemoteEditKind {
         match self {
             Self::Sftp => (121, 214, 255),
             Self::Smb => (255, 165, 80),
+            Self::Dropbox => (141, 222, 150),
         }
     }
 
@@ -31,6 +34,7 @@ impl RemoteEditKind {
         match self {
             Self::Sftp => " Add SFTP Server ",
             Self::Smb => " Add SMB Server ",
+            Self::Dropbox => " Add Dropbox Server ",
         }
     }
 
@@ -38,6 +42,7 @@ impl RemoteEditKind {
         match self {
             Self::Sftp => ["Name", "Host", "User", "Port", "Path", "Identity"],
             Self::Smb => ["Name", "Host", "User", "Workgroup", "Share", "Password"],
+            Self::Dropbox => ["Name", "Access token", "Path", "", "", ""],
         }
     }
 
@@ -45,6 +50,7 @@ impl RemoteEditKind {
         match self {
             Self::Sftp => "SFTP name is required",
             Self::Smb => "SMB name and host are required",
+            Self::Dropbox => "Dropbox name and access token are required",
         }
     }
 }
@@ -79,6 +85,14 @@ impl RemoteEditState {
                 String::new(),
                 "22".into(),
                 "~".into(),
+                String::new(),
+            ],
+            RemoteEditKind::Dropbox => [
+                "Dropbox".into(),
+                String::new(),
+                "/".into(),
+                String::new(),
+                String::new(),
                 String::new(),
             ],
             _ => Default::default(),
@@ -118,6 +132,23 @@ impl RemoteEditState {
                     smb.password.clone().unwrap_or_default(),
                 ],
             ),
+            RemoteKind::RemotePlugin(plugin) => {
+                let token = serde_json::from_str::<serde_json::Value>(&plugin.config_json)
+                    .ok()
+                    .and_then(|json| json.get("access_token").and_then(serde_json::Value::as_str).map(str::to_string))
+                    .unwrap_or_default();
+                (
+                    RemoteEditKind::Dropbox,
+                    [
+                        profile.name.clone(),
+                        token,
+                        plugin.path.clone().unwrap_or_else(|| "/".to_string()),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                    ],
+                )
+            }
         };
         Self {
             kind,
@@ -178,6 +209,27 @@ impl RemoteEditState {
                         share: trim_opt(&self.fields[Self::PATH]),
                         password: trim_opt(&self.fields[Self::SECRET]),
                         path: None,
+                    }),
+                }
+            }
+            RemoteEditKind::Dropbox => {
+                let token = self.fields[Self::HOST].trim();
+                if token.is_empty() {
+                    return None;
+                }
+                let path = trim_opt(&self.fields[Self::USER]);
+                let config_json = format!(
+                    "{{\"access_token\":\"{}\"}}",
+                    token.replace('\\', "\\\\").replace('"', "\\\"")
+                );
+                RemoteProfile {
+                    name: name.to_string(),
+                    source: RemoteSource::UserToml,
+                    kind: RemoteKind::RemotePlugin(crate::remote::RemotePluginProfile {
+                        plugin_id: "dropbox".to_string(),
+                        scheme: "dropbox".to_string(),
+                        config_json,
+                        path,
                     }),
                 }
             }

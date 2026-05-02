@@ -1,0 +1,9 @@
+[package]
+name = "kkc-plugin-api"
+version = "0.1.0"
+edition = "2024"
+description = "Stable ABI shared by kkc and native Rust plugins"
+license = "MIT"
+
+[dependencies]
+abi_stable = "0.11.3"

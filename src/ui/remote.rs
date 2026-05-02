@@ -1,5 +1,6 @@
 use super::*;
 use super::bookmarks::highlight_tokens;
+use crate::remote::RemoteKind;
 
 pub(super) fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, area: Rect) {
     let width = 76u16.min(area.width.saturating_sub(4));
@@ -126,7 +127,10 @@ pub(super) fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, a
                 let item = &state.items[*item_idx];
                 let protocol = item.protocol();
                 let (r, g, b) = protocol.color_rgb();
-                let proto = protocol.name();
+                let proto = match &item.kind {
+                    RemoteKind::RemotePlugin(plugin) => plugin.scheme.as_str(),
+                    _ => protocol.name(),
+                };
                 let proto_style = Style::default().fg(Color::Rgb(r, g, b)).bg(CLR_MENU_DD_BG);
                 let (source, badge_style) = match item.source {
                     RemoteSource::SshConfig => (

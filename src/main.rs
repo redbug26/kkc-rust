@@ -14,6 +14,7 @@ mod idf;
 mod panel;
 mod plugins;
 mod remote;
+mod remote_plugins;
 mod search;
 mod terminal;
 mod tree_mode;
