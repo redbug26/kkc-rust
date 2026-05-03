@@ -259,7 +259,7 @@ pub fn render(f: &mut Frame, app: &App) {
         app.left_panel_tab_index(),
         app.left_panel_tab_count(),
     );
-    render_center_buttons(f, panel_chunks[1]);
+    render_center_buttons(f, app, panel_chunks[1]);
     render_panel_or_file_id(
         f,
         app,
@@ -796,7 +796,7 @@ pub(crate) fn fkey_slots(app: &App) -> Vec<FkeySlot> {
                 .as_deref()
                 == Some(shortcut.as_str())
         }) {
-            labels[n - 1].label = fkey_label(entry.label);
+            labels[n - 1].label = entry.shortname.to_string();
         }
     }
     if labels[1].label.is_empty() {
@@ -826,23 +826,6 @@ pub(crate) fn fkey_number_at_column(app: &App, area_x: u16, column: u16) -> Opti
 
 fn render_fkey_bar(f: &mut Frame, app: &App, area: Rect) {
     render_shortcut_bar(f, area, &fkey_items(app), default_shortcut_bar_style());
-}
-
-fn fkey_label(label: &str) -> String {
-    let label = label
-        .trim_end_matches('.')
-        .trim_end_matches("...")
-        .trim_end_matches('…');
-    match label {
-        "Create directory" => "MDir".to_string(),
-        "View file" => "View".to_string(),
-        "Edit file" => "Edit".to_string(),
-        "Copy to" => "Copy".to_string(),
-        "Move to" => "Move".to_string(),
-        "Delete" => "Delete".to_string(),
-        "Quit" => "Quit".to_string(),
-        other => truncate_str(other, 16).trim_end().to_string(),
-    }
 }
 
 // ---------------------------------------------------------------------------

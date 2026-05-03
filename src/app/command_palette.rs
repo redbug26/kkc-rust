@@ -14,6 +14,8 @@ pub struct PaletteEntry {
     pub category: &'static str,
     /// Human-readable label shown in the middle column.
     pub label: &'static str,
+    /// Compact label for F-key bar and center buttons.
+    pub shortname: &'static str,
     /// Pre-formatted keyboard shortcut shown in the right column, if any.
     pub shortcut: Option<&'static str>,
     /// Raw Rust identifier (shown in dim parens) – useful for future i18n keys.
@@ -31,6 +33,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Interface",
         label: "Switch panel",
+        shortname: "Switch",
         shortcut: Some("Tab"),
         fn_name: "switch_panel",
         action: MenuAction::SwitchPanel,
@@ -38,6 +41,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Interface",
         label: "Open menu",
+        shortname: "Menu",
         shortcut: Some("F2"),
         fn_name: "open_menu",
         action: MenuAction::OpenMenu,
@@ -45,6 +49,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Interface",
         label: "Command palette",
+        shortname: "CmdPal",
         shortcut: Some("Ctrl+P"),
         fn_name: "command_palette",
         action: MenuAction::OpenCommandPalette,
@@ -52,6 +57,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Interface",
         label: "Plugin actions",
+        shortname: "Actions",
         shortcut: Some("Ctrl+A"),
         fn_name: "plugin_actions",
         action: MenuAction::OpenActionPalette,
@@ -60,6 +66,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "File",
         label: "View file",
+        shortname: "View",
         shortcut: Some("F3"),
         fn_name: "view_file",
         action: MenuAction::ViewFile,
@@ -67,6 +74,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "File",
         label: "Edit file",
+        shortname: "Edit",
         shortcut: Some("F4"),
         fn_name: "edit_file",
         action: MenuAction::EditFile,
@@ -74,6 +82,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "File",
         label: "Copy to…",
+        shortname: "Copy",
         shortcut: Some("F5"),
         fn_name: "copy_file",
         action: MenuAction::CopyFile,
@@ -81,6 +90,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "File",
         label: "Move to…",
+        shortname: "Move",
         shortcut: Some("F6"),
         fn_name: "move_file",
         action: MenuAction::MoveFile,
@@ -88,6 +98,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "File",
         label: "Create directory",
+        shortname: "MDir",
         shortcut: Some("F7"),
         fn_name: "mkdir",
         action: MenuAction::MkDir,
@@ -95,6 +106,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "File",
         label: "Rename",
+        shortname: "Rename",
         shortcut: Some("Shift+F6"),
         fn_name: "rename_file",
         action: MenuAction::RenameFile,
@@ -102,6 +114,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "File",
         label: "Delete",
+        shortname: "Delete",
         shortcut: Some("F8"),
         fn_name: "delete_file",
         action: MenuAction::DeleteFile,
@@ -109,6 +122,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "File",
         label: "Quit",
+        shortname: "Quit",
         shortcut: Some("F10"),
         fn_name: "quit",
         action: MenuAction::Quit,
@@ -119,6 +133,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "File",
         label: "Download cloud file(s)",
+        shortname: "Download",
         shortcut: None,
         fn_name: "download_cloud_file",
         action: MenuAction::DownloadCloudFile,
@@ -127,6 +142,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Panel",
         label: "Swap panels",
+        shortname: "Swap",
         shortcut: None,
         fn_name: "swap_panels",
         action: MenuAction::SwapPanels,
@@ -134,6 +150,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Panel",
         label: "Sort by name",
+        shortname: "Name",
         shortcut: Some("Ctrl+F1"),
         fn_name: "sort_name",
         action: MenuAction::SortName,
@@ -141,6 +158,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Panel",
         label: "Sort by extension",
+        shortname: "Ext",
         shortcut: Some("Ctrl+F2"),
         fn_name: "sort_extension",
         action: MenuAction::SortExtension,
@@ -148,6 +166,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Panel",
         label: "Sort by date",
+        shortname: "Date",
         shortcut: Some("Ctrl+F3"),
         fn_name: "sort_date",
         action: MenuAction::SortDate,
@@ -155,6 +174,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Panel",
         label: "Sort by size",
+        shortname: "Size",
         shortcut: Some("Ctrl+F4"),
         fn_name: "sort_size",
         action: MenuAction::SortSize,
@@ -162,6 +182,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Panel",
         label: "Unsorted",
+        shortname: "Unsorted",
         shortcut: Some("Ctrl+F5"),
         fn_name: "sort_unsorted",
         action: MenuAction::SortUnsorted,
@@ -169,6 +190,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Panel",
         label: "Toggle hidden files",
+        shortname: "Hidden",
         shortcut: Some("Ctrl+H"),
         fn_name: "toggle_hidden",
         action: MenuAction::ToggleHidden,
@@ -176,6 +198,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Panel",
         label: "Reload",
+        shortname: "Reload",
         shortcut: Some("Ctrl+R"),
         fn_name: "reload",
         action: MenuAction::Reload,
@@ -184,6 +207,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Disk",
         label: "Go to path…",
+        shortname: "GoPath",
         shortcut: None,
         fn_name: "goto_path",
         action: MenuAction::GoToPath,
@@ -192,6 +216,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Select",
         label: "Select pattern…",
+        shortname: "Select",
         shortcut: Some("+"),
         fn_name: "select_pattern",
         action: MenuAction::SelectPattern,
@@ -199,6 +224,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Select",
         label: "Deselect pattern…",
+        shortname: "Deselect",
         shortcut: Some("-"),
         fn_name: "deselect_pattern",
         action: MenuAction::DeselectPattern,
@@ -206,6 +232,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Select",
         label: "Invert selection",
+        shortname: "Invert",
         shortcut: Some("*"),
         fn_name: "invert_selection",
         action: MenuAction::InvertSelection,
@@ -214,6 +241,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Tools",
         label: "Search files…",
+        shortname: "Search",
         shortcut: None,
         fn_name: "search_files",
         action: MenuAction::SearchFiles,
@@ -221,6 +249,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Tools",
         label: "Tree view…",
+        shortname: "Tree",
         shortcut: None,
         fn_name: "tree_view",
         action: MenuAction::TreeView,
@@ -228,6 +257,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Tools",
         label: "Install plugin from store…",
+        shortname: "Store",
         shortcut: None,
         fn_name: "install_plugin_from_store",
         action: MenuAction::InstallPluginFromStore,
@@ -235,6 +265,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Tools",
         label: "Remote connect…",
+        shortname: "Remote",
         shortcut: Some("Ctrl+F"),
         fn_name: "remote_connect",
         action: MenuAction::RemoteConnect,
@@ -242,6 +273,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Tools",
         label: "File Info preview",
+        shortname: "Info",
         shortcut: None,
         fn_name: "file_preview_info",
         action: MenuAction::FileIdPreview,
@@ -249,6 +281,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Tools",
         label: "Bookmarks",
+        shortname: "QuickDir",
         shortcut: Some("Ctrl+D"),
         fn_name: "dir_bookmarks",
         action: MenuAction::DirBookmarks,
@@ -257,6 +290,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Options",
         label: "Setup…",
+        shortname: "Setup",
         shortcut: None,
         fn_name: "setup",
         action: MenuAction::Setup,
@@ -264,6 +298,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Options",
         label: "Shortcuts...",
+        shortname: "Shortcuts",
         shortcut: None,
         fn_name: "shortcuts",
         action: MenuAction::Shortcuts,
@@ -271,6 +306,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Options",
         label: "Plugins…",
+        shortname: "Plugins",
         shortcut: None,
         fn_name: "plugins",
         action: MenuAction::Plugins,
@@ -278,6 +314,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Options",
         label: "Associations…",
+        shortname: "Assoc",
         shortcut: None,
         fn_name: "associations",
         action: MenuAction::Associations,
@@ -285,6 +322,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Options",
         label: "Toggle F-key bar",
+        shortname: "FBar",
         shortcut: None,
         fn_name: "toggle_fkey_bar",
         action: MenuAction::ToggleFBar,
@@ -292,6 +330,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Options",
         label: "Save config",
+        shortname: "SaveCfg",
         shortcut: None,
         fn_name: "save_config",
         action: MenuAction::SaveConfig,
@@ -300,6 +339,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Help",
         label: "Help",
+        shortname: "Help",
         shortcut: Some("F1"),
         fn_name: "help",
         action: MenuAction::Help,
@@ -307,6 +347,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Help",
         label: "About KKC",
+        shortname: "About",
         shortcut: None,
         fn_name: "about",
         action: MenuAction::About,
@@ -315,6 +356,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Tabs",
         label: "New tab",
+        shortname: "NewTab",
         shortcut: Some("Ctrl+T"),
         fn_name: "new_tab",
         action: MenuAction::NewTab,
@@ -322,6 +364,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Tabs",
         label: "Close tab",
+        shortname: "CloseTab",
         shortcut: Some("Ctrl+W"),
         fn_name: "close_tab",
         action: MenuAction::CloseTab,
@@ -329,6 +372,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Tabs",
         label: "Next tab",
+        shortname: "NextTab",
         shortcut: Some("Ctrl+N"),
         fn_name: "next_tab",
         action: MenuAction::NextTab,
@@ -336,6 +380,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Tools",
         label: "Open terminal",
+        shortname: "Terminal",
         shortcut: Some("Ctrl+U"),
         fn_name: "open_terminal",
         action: MenuAction::OpenTerminal,
@@ -343,6 +388,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Tools",
         label: "Capture GIF frame",
+        shortname: "GIF",
         shortcut: Some("Ctrl+B"),
         fn_name: "capture_gif",
         action: MenuAction::CaptureGif,
@@ -350,6 +396,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "Tools",
         label: "Toggle debug log",
+        shortname: "DebugLog",
         shortcut: None,
         fn_name: "debug_log",
         action: MenuAction::DebugLog,
@@ -358,6 +405,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "File",
         label: "Open in OS",
+        shortname: "OpenOS",
         shortcut: None,
         fn_name: "open_in_os",
         action: MenuAction::OpenInOs,
@@ -365,6 +413,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "File",
         label: "Open folder in OS",
+        shortname: "OpenDir",
         shortcut: None,
         fn_name: "open_folder_in_os",
         action: MenuAction::OpenFolderInOs,
@@ -372,6 +421,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     PaletteEntry {
         category: "File",
         label: "Quick Preview",
+        shortname: "Preview",
         shortcut: None,
         fn_name: "quick_preview",
         action: MenuAction::QuickPreview,
@@ -383,6 +433,14 @@ pub fn palette_label_for_action(action: MenuAction) -> &'static str {
         .iter()
         .find(|entry| entry.action == action)
         .map(|entry| entry.label)
+        .unwrap_or("")
+}
+
+pub fn palette_shortname_for_action(action: MenuAction) -> &'static str {
+    PALETTE_DATA
+        .iter()
+        .find(|entry| entry.action == action)
+        .map(|entry| entry.shortname)
         .unwrap_or("")
 }
 
@@ -405,9 +463,10 @@ pub const PALETTE_SEP: usize = usize::MAX;
 
 fn entry_matches(e: &PaletteEntry, q: &str) -> bool {
     format!(
-        "{} {} {} {}",
+        "{} {} {} {} {}",
         e.category,
         e.label,
+        e.shortname,
         e.fn_name,
         e.shortcut.unwrap_or("")
     )

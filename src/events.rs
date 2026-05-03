@@ -994,21 +994,9 @@ fn handle_mouse_browse(app: &mut App, mouse: MouseEvent) -> Result<bool> {
             }
 
             if point_in_rect(mouse.column, mouse.row, layout.center)
-                && let Some(label) = center_button_hit(layout.center, mouse.column, mouse.row)
+                && let Some(action) = center_button_hit(app, layout.center, mouse.column, mouse.row)
             {
-                match label.as_str() {
-                    "Swap" => return menu::execute_menu_action(app, MenuAction::SwapPanels),
-                    "QuickDir" => {
-                        return menu::execute_menu_action(app, MenuAction::DirBookmarks);
-                    }
-                    "Select" => {
-                        return menu::execute_menu_action(app, MenuAction::SelectPattern);
-                    }
-                    "Info" => {
-                        return menu::execute_menu_action(app, MenuAction::FileIdPreview);
-                    }
-                    _ => {}
-                }
+                return menu::execute_menu_action(app, action);
             }
         }
         MouseEventKind::Down(MouseButton::Right) => {
@@ -1342,22 +1330,16 @@ fn panel_list_hit(
     (idx < panel.entries.len()).then_some((idx, list_area.height as usize))
 }
 
-fn center_button_hit(area: Rect, column: u16, row: u16) -> Option<String> {
+fn center_button_hit(app: &App, area: Rect, column: u16, row: u16) -> Option<MenuAction> {
     if area.height == 0 || area.width < 9 {
         return None;
     }
 
-    let mut labels = vec![
-        "ChgDrive".to_string(),
-        "Swap".to_string(),
-        "Go Trash".to_string(),
-        "QuickDir".to_string(),
-        "Select".to_string(),
-        "Info".to_string(),
-        chrono::Local::now().format("%H:%M:%S").to_string(),
-    ];
+    let mut actions = app.center_buttons.clone();
+    let clock_index = actions.len();
+    actions.push(MenuAction::Separator);
 
-    let button_count = labels.len() as u16;
+    let button_count = actions.len() as u16;
     let button_h = if area.height >= button_count * 3 {
         3
     } else if area.height >= button_count * 2 {
@@ -1366,15 +1348,17 @@ fn center_button_hit(area: Rect, column: u16, row: u16) -> Option<String> {
         1
     };
     let total_button_h = button_count * button_h;
+    let mut skipped = 0usize;
     if total_button_h > area.height {
         let skip = (total_button_h - area.height) as usize;
-        if skip >= labels.len() {
+        if skip >= actions.len() {
             return None;
         }
-        labels.drain(0..skip);
+        skipped = skip;
+        actions.drain(0..skip);
     }
 
-    let button_count = labels.len() as u16;
+    let button_count = actions.len() as u16;
     let total_button_h = button_count * button_h;
     let gaps = button_count.saturating_add(1);
     let free = area.height.saturating_sub(total_button_h);
@@ -1382,9 +1366,10 @@ fn center_button_hit(area: Rect, column: u16, row: u16) -> Option<String> {
     let extra_gap = free % gaps.max(1);
 
     let mut y = area.y + base_gap;
-    for (idx, label) in labels.into_iter().enumerate() {
-        if idx < extra_gap as usize {
-            y += 1;
+    for (idx, action) in actions.into_iter().enumerate() {
+        let is_clock = skipped + idx == clock_index;
+        if is_clock {
+            y += extra_gap;
         }
         let slot = Rect {
             x: area.x,
@@ -1393,11 +1378,12 @@ fn center_button_hit(area: Rect, column: u16, row: u16) -> Option<String> {
             height: button_h.min(area.bottom().saturating_sub(y)),
         };
         if point_in_rect(column, row, slot) {
-            return Some(label);
+            let original_idx = skipped + idx;
+            return (original_idx != clock_index).then_some(action);
         }
-        y = y.saturating_add(button_h).saturating_add(base_gap);
-        if idx + 1 < button_count as usize && idx + 1 < extra_gap as usize {
-            y += 1;
+        y = y.saturating_add(button_h);
+        if idx + 1 < button_count as usize {
+            y = y.saturating_add(base_gap);
         }
     }
     None

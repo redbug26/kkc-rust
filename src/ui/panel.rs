@@ -58,7 +58,7 @@ fn render_quick_preview(
     super::render_viewer(f, viewer, false, None, area, false, active, Some(&label));
 }
 
-pub(super) fn render_center_buttons(f: &mut Frame, area: Rect) {
+pub(super) fn render_center_buttons(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(
         Block::default().style(Style::default().bg(CLR_APP_BG)),
         area,
@@ -68,15 +68,12 @@ pub(super) fn render_center_buttons(f: &mut Frame, area: Rect) {
         return;
     }
 
-    let mut labels = vec![
-        "ChgDrive".to_string(),
-        "Swap".to_string(),
-        "Go Trash".to_string(),
-        "QuickDir".to_string(),
-        "Select".to_string(),
-        "Info".to_string(),
-        Local::now().format("%H:%M:%S").to_string(),
-    ];
+    let mut labels: Vec<String> = app
+        .center_buttons
+        .iter()
+        .map(|action| crate::app::center_button_label(*action).to_string())
+        .collect();
+    labels.push(Local::now().format("%H:%M:%S").to_string());
 
     let button_count = labels.len() as u16;
     let button_h = if area.height >= button_count * 3 {
@@ -104,8 +101,9 @@ pub(super) fn render_center_buttons(f: &mut Frame, area: Rect) {
 
     let mut y = area.y + base_gap;
     for (idx, label) in labels.iter().enumerate() {
-        if idx < extra_gap as usize {
-            y += 1;
+        let is_clock = idx + 1 == button_count as usize;
+        if is_clock {
+            y += extra_gap;
         }
         let slot = Rect {
             x: area.x,
@@ -114,9 +112,9 @@ pub(super) fn render_center_buttons(f: &mut Frame, area: Rect) {
             height: button_h.min(area.bottom().saturating_sub(y)),
         };
         render_menu_button(f, slot, label);
-        y = y.saturating_add(button_h).saturating_add(base_gap);
-        if idx + 1 < button_count as usize && idx + 1 < extra_gap as usize {
-            y += 1;
+        y = y.saturating_add(button_h);
+        if idx + 1 < button_count as usize {
+            y = y.saturating_add(base_gap);
         }
     }
 }

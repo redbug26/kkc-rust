@@ -8,6 +8,7 @@ mod shortcuts;
 
 pub use self::command_palette::{
     CommandPaletteState, PALETTE_DATA, PALETTE_SEP, palette_label_for_action,
+    palette_shortname_for_action,
 };
 pub use self::dialogs::{
     ConfirmAction, ConfirmDialog, InputAction, InputDialog, RemoteDeleteTarget, SearchState,
@@ -788,6 +789,25 @@ pub struct App {
     pub quick_preview_forced_mode: Option<ViewMode>,
     /// Recently-used command palette entries (fn_name values), most-recent first.
     pub palette_recent: Vec<String>,
+    /// Center-column buttons shown between the two panels.
+    pub center_buttons: Vec<MenuAction>,
+}
+
+pub fn default_center_button_actions() -> Vec<MenuAction> {
+    vec![
+        MenuAction::ViewFile,
+        MenuAction::EditFile,
+        MenuAction::OpenMenu,
+        MenuAction::SwapPanels,
+        MenuAction::RemoteConnect,
+        MenuAction::DirBookmarks,
+        MenuAction::SelectPattern,
+        MenuAction::FileIdPreview,
+    ]
+}
+
+pub fn center_button_label(action: MenuAction) -> &'static str {
+    palette_shortname_for_action(action)
 }
 
 impl App {
@@ -910,6 +930,7 @@ impl App {
             quick_preview_active: false,
             quick_preview_forced_mode: None,
             palette_recent,
+            center_buttons: default_center_button_actions(),
         };
 
         match app.config.panel_view_type {
