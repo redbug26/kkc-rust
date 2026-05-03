@@ -39,6 +39,14 @@ pub fn config_path() -> Result<PathBuf> {
     Ok(dir.join("config.toml"))
 }
 
+/// Returns the path to the persisted runtime state file, creating parent dirs if needed.
+pub fn state_path() -> Result<PathBuf> {
+    let dirs = project_dirs()?;
+    let dir = dirs.preference_dir();
+    fs::create_dir_all(dir)?;
+    Ok(dir.join("state.toml"))
+}
+
 /// Returns the path to the data directory, creating it if needed.
 #[allow(dead_code)]
 pub fn data_dir() -> Result<PathBuf> {
@@ -180,6 +188,36 @@ impl PanelConfig {
             show_hidden: self.show_hidden,
             cursor_name: None,
             selected_names: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedState {
+    #[serde(default)]
+    left: PanelConfig,
+    #[serde(default)]
+    right: PanelConfig,
+    #[serde(default)]
+    dir_history: Vec<PathBuf>,
+    #[serde(default, deserialize_with = "deserialize_palette_recent")]
+    palette_recent: Vec<String>,
+    #[serde(default)]
+    panel_view_type: PanelViewType,
+    #[serde(default)]
+    active_panel: ActivePanelSide,
+}
+
+impl Default for PersistedState {
+    fn default() -> Self {
+        let defaults = Config::default();
+        Self {
+            left: defaults.left,
+            right: defaults.right,
+            dir_history: defaults.dir_history,
+            palette_recent: defaults.palette_recent,
+            panel_view_type: defaults.panel_view_type,
+            active_panel: defaults.active_panel,
         }
     }
 }
@@ -464,6 +502,17 @@ impl Config {
                 }
             }
 
+            // Runtime state now lives in state.toml. If it exists, it wins.
+            // If it does not exist, values parsed from config.toml are kept
+            // (backward compatibility with older single-file configs).
+            if let Some(state) = load_state_file()? {
+                apply_state_to_config(&mut cfg, state);
+            } else {
+                // One-shot migration: old installs had runtime state in
+                // config.toml. Persist it immediately into state.toml.
+                write_state_file(&state_from_config(&cfg))?;
+            }
+
             Ok(cfg)
         } else {
             Ok(Self::default())
@@ -476,6 +525,9 @@ impl Config {
         let out = self.to_toml_string()?;
 
         fs::write(&path, out).with_context(|| format!("Writing config: {}", path.display()))?;
+
+        let state = state_from_config(self);
+        write_state_file(&state)?;
         Ok(())
     }
 
@@ -501,27 +553,6 @@ impl Config {
         out.push_str(&format!("color_by_type = {}\n", self.color_by_type));
         out.push_str(&format!("show_cloud_icons = {}\n", self.show_cloud_icons));
         out.push_str(&format!("show_file_icons = {}\n", self.show_file_icons));
-        out.push_str(&format!(
-            "panel_view_type = {}\n",
-            toml::Value::String(
-                match self.panel_view_type {
-                    PanelViewType::Normal => "normal",
-                    PanelViewType::FilePreviewInfo => "file_preview_info",
-                    PanelViewType::QuickPreview => "quick_preview",
-                }
-                .to_string()
-            )
-        ));
-        out.push_str(&format!(
-            "active_panel = {}\n",
-            toml::Value::String(
-                match self.active_panel {
-                    ActivePanelSide::Left => "left",
-                    ActivePanelSide::Right => "right",
-                }
-                .to_string()
-            )
-        ));
         out.push('\n');
 
         // ─── Viewer ───────────────────────────────────────────────────────
@@ -552,24 +583,16 @@ impl Config {
         out.push_str(&format!("debug_log = {}\n", self.debug_log));
         out.push('\n');
 
-        // Panels, history, bookmarks and file associations (via serde)
+        // Preferences tail (runtime state is written to state.toml)
         #[derive(serde::Serialize)]
         struct ConfigTail<'a> {
-            left: &'a PanelConfig,
-            right: &'a PanelConfig,
-            dir_history: &'a Vec<PathBuf>,
             bookmarks: &'a Vec<PathBuf>,
             file_assoc: &'a Vec<FileAssoc>,
-            palette_recent: &'a Vec<String>,
             shortcut_overrides: &'a Vec<ShortcutOverride>,
         }
         let tail = toml::to_string_pretty(&ConfigTail {
-            left: &self.left,
-            right: &self.right,
-            dir_history: &self.dir_history,
             bookmarks: &self.bookmarks,
             file_assoc: &self.file_assoc,
-            palette_recent: &self.palette_recent,
             shortcut_overrides: &self.shortcut_overrides,
         })
         .context("Serialising panels config")?;
@@ -628,6 +651,57 @@ impl Config {
         self.file_assoc.retain(|assoc| !assoc.openers.is_empty());
         changed || self.file_assoc.len() != before
     }
+}
+
+fn state_from_config(cfg: &Config) -> PersistedState {
+    PersistedState {
+        left: cfg.left.clone(),
+        right: cfg.right.clone(),
+        dir_history: cfg.dir_history.clone(),
+        palette_recent: cfg.palette_recent.clone(),
+        panel_view_type: cfg.panel_view_type,
+        active_panel: cfg.active_panel,
+    }
+}
+
+fn apply_state_to_config(cfg: &mut Config, state: PersistedState) {
+    cfg.left = state.left;
+    cfg.right = state.right;
+    cfg.dir_history = state.dir_history;
+    cfg.palette_recent = state.palette_recent;
+    cfg.panel_view_type = state.panel_view_type;
+    cfg.active_panel = state.active_panel;
+}
+
+fn load_state_file() -> Result<Option<PersistedState>> {
+    let path = state_path()?;
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let text = fs::read_to_string(&path)
+        .with_context(|| format!("Reading state: {}", path.display()))?;
+    let state: PersistedState = match toml::from_str(&text) {
+        Ok(state) => state,
+        Err(parse_err) => {
+            let backup = backup_invalid_config(&path).with_context(|| {
+                format!("Parsing state and backing it up: {}", path.display())
+            })?;
+            return Err(anyhow::anyhow!(
+                "Parsing state: {} ({parse_err}). Invalid file moved to {}",
+                path.display(),
+                backup.display()
+            ));
+        }
+    };
+    Ok(Some(state))
+}
+
+fn write_state_file(state: &PersistedState) -> Result<()> {
+    let path = state_path()?;
+    let state_toml = toml::to_string_pretty(state).context("Serialising state config")?;
+    fs::write(&path, state_toml).with_context(|| format!("Writing state: {}", path.display()))?;
+    Ok(())
 }
 
 fn backup_invalid_config(path: &Path) -> Result<PathBuf> {
@@ -699,7 +773,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn saved_config_toml_roundtrips_core_state() {
+    fn saved_config_toml_roundtrips_preferences() {
         let mut cfg = Config::default();
         cfg.confirm_exit = false;
         cfg.confirm_delete = false;
@@ -711,8 +785,6 @@ mod tests {
         cfg.color_by_type = false;
         cfg.show_cloud_icons = false;
         cfg.show_file_icons = false;
-        cfg.panel_view_type = PanelViewType::QuickPreview;
-        cfg.active_panel = ActivePanelSide::Right;
         cfg.viewer.word_wrap = false;
         cfg.viewer.tab_width = 8;
         cfg.viewer.default_zoom = false;
@@ -720,39 +792,11 @@ mod tests {
         cfg.pager = "less -R".into();
         cfg.dir_history_max = 64;
         cfg.debug_log = true;
-        cfg.dir_history = vec![PathBuf::from("/tmp"), PathBuf::from("/var")];
         cfg.bookmarks = vec![PathBuf::from("/Users/test")];
-        cfg.palette_recent = vec!["copy".into(), "save_config".into()];
         cfg.file_assoc = vec![FileAssoc {
             mime_type: "text/plain".into(),
             openers: vec!["vim %f".into()],
         }];
-        cfg.left = PanelConfig {
-            path: PathBuf::from("/left/current"),
-            remote_name: None,
-            remote_path: None,
-            sort: SortMode::Date,
-            show_hidden: true,
-            active_tab: 1,
-            tabs: vec![
-                PanelTabConfig {
-                    path: PathBuf::from("/left/one"),
-                    sort: SortMode::Name,
-                    show_hidden: false,
-                    cursor_name: Some("one.txt".into()),
-                    selected_names: vec!["selected.bin".into()],
-                    ..PanelTabConfig::default()
-                },
-                PanelTabConfig {
-                    path: PathBuf::from("/left/two"),
-                    sort: SortMode::Size,
-                    show_hidden: true,
-                    cursor_name: Some("two.txt".into()),
-                    selected_names: Vec::new(),
-                    ..PanelTabConfig::default()
-                },
-            ],
-        };
 
         let text = cfg.to_toml_string().expect("serialize config");
         let parsed: Config = toml::from_str(&text).expect("parse saved config");
@@ -762,30 +806,23 @@ mod tests {
         assert!(!parsed.show_cloud_icons);
         assert!(!parsed.show_file_icons);
         assert_eq!(parsed.screensaver_idle_minutes, 42);
-        assert_eq!(parsed.panel_view_type, PanelViewType::QuickPreview);
-        assert_eq!(parsed.active_panel, ActivePanelSide::Right);
         assert!(!parsed.viewer.word_wrap);
         assert_eq!(parsed.viewer.tab_width, 8);
         assert_eq!(parsed.editor, "vim");
         assert_eq!(parsed.dir_history_max, 64);
-        assert_eq!(
-            parsed.dir_history,
-            vec![PathBuf::from("/tmp"), PathBuf::from("/var")]
-        );
-        assert_eq!(parsed.palette_recent, vec!["copy", "save_config"]);
         assert_eq!(parsed.file_assoc[0].mime_type, "text/plain");
         assert_eq!(parsed.file_assoc[0].openers, vec!["vim %f"]);
-        assert_eq!(parsed.left.active_tab, 1);
-        assert_eq!(parsed.left.tabs.len(), 2);
-        assert_eq!(parsed.left.tabs[1].path, PathBuf::from("/left/two"));
-        assert_eq!(parsed.left.tabs[0].cursor_name.as_deref(), Some("one.txt"));
-        assert_eq!(parsed.left.tabs[0].selected_names, vec!["selected.bin"]);
     }
 
     #[test]
-    fn partial_panel_config_uses_home_defaults() {
-        let cfg: Config = toml::from_str(
+    fn state_toml_roundtrips_runtime_state() {
+        let state: PersistedState = toml::from_str(
             r#"
+    dir_history = ["/tmp", "/var"]
+    palette_recent = ["copy", "save_config"]
+    panel_view_type = "quick_preview"
+    active_panel = "right"
+
 [left]
 sort = "size"
 
@@ -793,12 +830,16 @@ sort = "size"
 sort = "date"
 "#,
         )
-        .expect("partial config should parse");
+    .expect("state should parse");
 
-        assert_eq!(cfg.left.sort, SortMode::Size);
-        assert_eq!(cfg.left.path, dirs_home());
-        assert_eq!(cfg.left.tabs.len(), 1);
-        assert_eq!(cfg.left.tabs[0].path, dirs_home());
-        assert_eq!(cfg.left.tabs[0].sort, SortMode::Date);
+    assert_eq!(state.left.sort, SortMode::Size);
+    assert_eq!(state.left.path, dirs_home());
+    assert_eq!(state.left.tabs.len(), 1);
+    assert_eq!(state.left.tabs[0].path, dirs_home());
+    assert_eq!(state.left.tabs[0].sort, SortMode::Date);
+    assert_eq!(state.dir_history, vec![PathBuf::from("/tmp"), PathBuf::from("/var")]);
+    assert_eq!(state.palette_recent, vec!["copy", "save_config"]);
+    assert_eq!(state.panel_view_type, PanelViewType::QuickPreview);
+    assert_eq!(state.active_panel, ActivePanelSide::Right);
     }
 }
