@@ -395,6 +395,14 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     },
     PaletteEntry {
         category: "Tools",
+        label: "Matrix screensaver",
+        shortname: "Matrix",
+        shortcut: None,
+        fn_name: "matrix_screensaver",
+        action: MenuAction::MatrixScreensaver,
+    },
+    PaletteEntry {
+        category: "Tools",
         label: "Toggle debug log",
         shortname: "DebugLog",
         shortcut: None,

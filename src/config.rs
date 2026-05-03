@@ -267,6 +267,10 @@ pub struct Config {
     /// '+' key also selects directories.
     #[serde(default)]
     pub select_dirs: bool,
+    /// Idle timeout in minutes before launching the Matrix screensaver.
+    /// Set to 0 to disable auto screensaver.
+    #[serde(default = "screensaver_idle_minutes_default")]
+    pub screensaver_idle_minutes: u64,
     /// Color-code files by type category.
     #[serde(default = "t")]
     pub color_by_type: bool,
@@ -349,6 +353,7 @@ impl Default for Config {
             auto_reload: true,
             insert_moves_down: true,
             select_dirs: false,
+            screensaver_idle_minutes: screensaver_idle_minutes_default(),
             color_by_type: true,
             show_cloud_icons: true,
             show_file_icons: false,
@@ -484,6 +489,10 @@ impl Config {
         out.push_str(&format!("auto_reload = {}\n", self.auto_reload));
         out.push_str(&format!("insert_moves_down = {}\n", self.insert_moves_down));
         out.push_str(&format!("select_dirs = {}\n", self.select_dirs));
+        out.push_str(&format!(
+            "screensaver_idle_minutes = {}\n",
+            self.screensaver_idle_minutes
+        ));
         out.push('\n');
 
         // ─── Display ──────────────────────────────────────────────────────
@@ -681,6 +690,10 @@ fn default_bookmarks() -> Vec<PathBuf> {
     vec![dirs_home()]
 }
 
+const fn screensaver_idle_minutes_default() -> u64 {
+    15
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -693,6 +706,7 @@ mod tests {
         cfg.auto_reload = false;
         cfg.insert_moves_down = false;
         cfg.select_dirs = true;
+        cfg.screensaver_idle_minutes = 42;
         cfg.show_fkey_bar = false;
         cfg.color_by_type = false;
         cfg.show_cloud_icons = false;
@@ -747,6 +761,7 @@ mod tests {
         assert!(parsed.select_dirs);
         assert!(!parsed.show_cloud_icons);
         assert!(!parsed.show_file_icons);
+        assert_eq!(parsed.screensaver_idle_minutes, 42);
         assert_eq!(parsed.panel_view_type, PanelViewType::QuickPreview);
         assert_eq!(parsed.active_panel, ActivePanelSide::Right);
         assert!(!parsed.viewer.word_wrap);

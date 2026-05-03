@@ -11,6 +11,7 @@ mod file_types;
 mod gif_recorder;
 mod help;
 mod idf;
+mod matrix_screensaver;
 mod panel;
 mod plugins;
 mod remote;
@@ -83,9 +84,26 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
     let mut last_kitty_image: Option<(PathBuf, ratatui::layout::Rect, bool)> = None;
     let mut first_draw_logged = false;
     let mut startup_ready_logged = false;
+    let mut last_user_activity = Instant::now();
 
     loop {
         app.poll_background_tasks();
+
+        if app.config.screensaver_idle_minutes > 0
+            && !matches!(
+                app.mode,
+                AppMode::MatrixScreensaver(_)
+                    | AppMode::Terminal
+                    | AppMode::Input(_)
+                    | AppMode::CopyProgress(_)
+                    | AppMode::RemoteConnecting(_)
+            )
+        {
+            let timeout = Duration::from_secs(app.config.screensaver_idle_minutes * 60);
+            if last_user_activity.elapsed() >= timeout {
+                app.mode = AppMode::MatrixScreensaver(app::MatrixScreensaverState::new());
+            }
+        }
 
         // Draw (clamp_scroll first)
         {
@@ -95,6 +113,10 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
 
             app.left.clamp_scroll(visible_rows.max(1));
             app.right.clamp_scroll(visible_rows.max(1));
+
+            if let AppMode::MatrixScreensaver(ref mut state) = app.mode {
+                state.step(area.width as usize, area.height as usize);
+            }
         }
 
         // After spawning an external program the alternate screen is blank and
@@ -212,6 +234,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
         // Poll for input (~60 fps)
         if event::poll(Duration::from_millis(16))? {
             let ev = event::read()?;
+            last_user_activity = Instant::now();
             match events::handle_event(&mut app, ev) {
                 Ok(true) => break,
                 Ok(false) => {}

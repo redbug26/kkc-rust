@@ -70,6 +70,7 @@ pub enum MenuAction {
     NextTab,
     OpenTerminal,
     CaptureGif,
+    MatrixScreensaver,
     OpenInOs,
     OpenFolderInOs,
     QuickPreview,

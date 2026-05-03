@@ -177,6 +177,10 @@ pub fn render(f: &mut Frame, app: &App) {
     );
 
     match &app.mode {
+        AppMode::MatrixScreensaver(state) => {
+            crate::matrix_screensaver::render(f, state, f.area());
+            return;
+        }
         AppMode::Viewer(v) => {
             render_viewer(f, v, false, None, f.area(), true, true, None);
             return;

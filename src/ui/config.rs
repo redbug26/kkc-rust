@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
     const W: u16 = 62;
-    const H: u16 = 14;
+    const H: u16 = 17;
     let x = area.x + (area.width.saturating_sub(W)) / 2;
     let y = area.y + (area.height.saturating_sub(H)) / 2;
     let popup = clamp_rect(
@@ -177,14 +177,23 @@ pub(super) fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
             render_config_checkbox(f, content, 2, "Debug log", 12, cs.debug_log, cs.cursor);
         }
         ConfigState::TAB_EXTERNAL => {
-            render_config_field(f, content, 0, "Editor", 13, cs.editor.as_str(), cs.cursor);
-            render_config_field(f, content, 3, "Pager", 14, cs.pager.as_str(), cs.cursor);
             render_config_field(
                 f,
                 content,
-                6,
+                0,
+                "Screensaver (min)",
+                13,
+                cs.screensaver_idle_minutes.as_str(),
+                cs.cursor,
+            );
+            render_config_field(f, content, 3, "Editor", 14, cs.editor.as_str(), cs.cursor);
+            render_config_field(f, content, 6, "Pager", 15, cs.pager.as_str(), cs.cursor);
+            render_config_field(
+                f,
+                content,
+                9,
                 "History max",
-                15,
+                16,
                 cs.dir_history_max.as_str(),
                 cs.cursor,
             );

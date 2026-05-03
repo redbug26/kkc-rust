@@ -25,6 +25,7 @@ pub use self::menu::{
 use self::panel_tabs::{PanelTabs, panel_config_for_save, restore_panel_side};
 pub use self::remote_edit::{RemoteEditKind, RemoteEditState};
 pub use self::shortcuts::{ShortcutPanelState, normalize_shortcut, shortcut_from_key_event};
+pub use crate::matrix_screensaver::MatrixScreensaverState;
 use crate::about::AboutState;
 use crate::config::{ActivePanelSide, Config, PanelConfig, PanelViewType, SortMode};
 use crate::copy::{
@@ -148,6 +149,8 @@ pub enum AppMode {
     Terminal,
     /// About / credits dialog (animated).
     About(AboutState),
+    /// Fullscreen Matrix-style digital rain. Exits on any key/mouse event.
+    MatrixScreensaver(MatrixScreensaverState),
 }
 
 // ---------------------------------------------------------------------------
@@ -304,6 +307,7 @@ pub struct ConfigState {
     pub default_zoom: bool,
     pub debug_log: bool,
     // text fields
+    pub screensaver_idle_minutes: String,
     pub editor: String,
     pub pager: String,
     pub dir_history_max: String,
@@ -334,6 +338,7 @@ impl ConfigState {
             word_wrap: cfg.viewer.word_wrap,
             default_zoom: cfg.viewer.default_zoom,
             debug_log: cfg.debug_log,
+            screensaver_idle_minutes: cfg.screensaver_idle_minutes.to_string(),
             editor: cfg.editor.clone(),
             pager: cfg.pager.clone(),
             dir_history_max: cfg.dir_history_max.to_string(),
@@ -358,6 +363,9 @@ impl ConfigState {
         cfg.viewer.word_wrap = self.word_wrap;
         cfg.viewer.default_zoom = self.default_zoom;
         cfg.debug_log = self.debug_log;
+        if let Ok(n) = self.screensaver_idle_minutes.trim().parse::<u64>() {
+            cfg.screensaver_idle_minutes = n;
+        }
         if !self.editor.trim().is_empty() {
             cfg.editor = self.editor.trim().to_owned();
         }
@@ -372,14 +380,14 @@ impl ConfigState {
     }
 
     pub const NUM_CHECKBOXES: usize = 13; // 5 behaviour + 5 display + 3 viewer
-    pub const NUM_TOTAL: usize = 18; // 13 + 3 text + OK + Cancel
+    pub const NUM_TOTAL: usize = 19; // 13 + 4 text + OK + Cancel
 
     pub fn ok_cursor() -> usize {
-        Self::NUM_CHECKBOXES + 3
+        Self::NUM_CHECKBOXES + 4
     }
 
     pub fn cancel_cursor() -> usize {
-        Self::NUM_CHECKBOXES + 4
+        Self::NUM_CHECKBOXES + 5
     }
 
     pub fn tab_range(tab: usize) -> std::ops::RangeInclusive<usize> {
@@ -387,7 +395,7 @@ impl ConfigState {
             Self::TAB_BEHAVIOUR => 0..=4,
             Self::TAB_DISPLAY => 5..=9,
             Self::TAB_VIEWER => 10..=12,
-            Self::TAB_EXTERNAL => 13..=15,
+            Self::TAB_EXTERNAL => 13..=16,
             _ => 0..=4,
         }
     }
@@ -405,7 +413,7 @@ impl ConfigState {
             0..=4 => Self::TAB_BEHAVIOUR,
             5..=9 => Self::TAB_DISPLAY,
             10..=12 => Self::TAB_VIEWER,
-            13..=15 => Self::TAB_EXTERNAL,
+            13..=16 => Self::TAB_EXTERNAL,
             _ => Self::TAB_BEHAVIOUR,
         }
     }

@@ -351,6 +351,9 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
         MenuAction::CaptureGif => {
             app.capture_gif = true;
         }
+        MenuAction::MatrixScreensaver => {
+            app.mode = AppMode::MatrixScreensaver(crate::app::MatrixScreensaverState::new());
+        }
         MenuAction::OpenInOs => {
             if let Some(entry) = app.active_panel().current_entry().cloned() {
                 if let Err(e) = open::that(&entry.path) {

@@ -120,6 +120,10 @@ pub fn handle_event(app: &mut App, event: Event) -> Result<bool> {
             }
 
             match &app.mode {
+                AppMode::MatrixScreensaver(_) => {
+                    app.mode = AppMode::Browse;
+                    return Ok(false);
+                }
                 AppMode::Help(_) => return handle_help(app, key),
                 AppMode::Viewer(_) => return handle_viewer(app, key),
                 AppMode::ViewerSearching(_) => return handle_viewer_searching(app, key),
@@ -174,6 +178,10 @@ struct MainMouseLayout {
 fn handle_mouse(app: &mut App, mouse: MouseEvent) -> Result<bool> {
     match &app.mode {
         AppMode::Browse => handle_mouse_browse(app, mouse),
+        AppMode::MatrixScreensaver(_) => {
+            app.mode = AppMode::Browse;
+            Ok(false)
+        }
         AppMode::Viewer(_) => handle_mouse_viewer(app, mouse),
         AppMode::RemoteConnect(_) => handle_mouse_remote_connect(app, mouse),
         AppMode::Menu(_) => handle_mouse_menu(app, mouse),
@@ -3800,7 +3808,7 @@ fn handle_config(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(false);
     };
 
-    let total = ConfigState::NUM_TOTAL; // booleans + 3 text + OK + Cancel
+    let total = ConfigState::NUM_TOTAL; // booleans + 4 text + OK + Cancel
     let ok_idx = ConfigState::ok_cursor();
     let cancel_idx = ConfigState::cancel_cursor();
 
@@ -3911,7 +3919,7 @@ fn handle_config(app: &mut App, key: KeyEvent) -> Result<bool> {
                 11 => cs.default_zoom = !cs.default_zoom,
                 12 => cs.debug_log = !cs.debug_log,
                 // text fields: Enter moves focus to next
-                13 | 14 | 15 => {
+                13 | 14 | 15 | 16 => {
                     if let AppMode::Config(ref mut cs) = app.mode {
                         if cs.cursor + 1 < total {
                             cs.cursor += 1;
@@ -3956,9 +3964,10 @@ fn handle_config(app: &mut App, key: KeyEvent) -> Result<bool> {
         KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
             if let AppMode::Config(ref mut cs) = app.mode {
                 match cs.cursor {
-                    13 => cs.editor.push(ch),
-                    14 => cs.pager.push(ch),
-                    15 => cs.dir_history_max.push(ch),
+                    13 => cs.screensaver_idle_minutes.push(ch),
+                    14 => cs.editor.push(ch),
+                    15 => cs.pager.push(ch),
+                    16 => cs.dir_history_max.push(ch),
                     _ => {}
                 }
             }
@@ -3967,12 +3976,15 @@ fn handle_config(app: &mut App, key: KeyEvent) -> Result<bool> {
             if let AppMode::Config(ref mut cs) = app.mode {
                 match cs.cursor {
                     13 => {
-                        cs.editor.pop();
+                        cs.screensaver_idle_minutes.pop();
                     }
                     14 => {
-                        cs.pager.pop();
+                        cs.editor.pop();
                     }
                     15 => {
+                        cs.pager.pop();
+                    }
+                    16 => {
                         cs.dir_history_max.pop();
                     }
                     _ => {}
