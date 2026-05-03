@@ -414,6 +414,7 @@ pub(super) fn render_viewer(
         f.render_widget(
             Paragraph::new(items)
                 .wrap(Wrap { trim: false })
+                .scroll((v.wrap_visual_offset() as u16, 0))
                 .style(Style::default().bg(Color::Black)),
             inner,
         );

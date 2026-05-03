@@ -8,6 +8,7 @@ use image::{ImageFormat, ImageReader};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use ratatui::widgets::{Paragraph, Wrap};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::env;
@@ -102,6 +103,7 @@ pub struct Viewer {
     pub viewer_plugin: Option<String>,
     pub plugin_state: HashMap<String, String>,
     pub wrap: bool,
+    wrap_row_offset: usize,
     pub search: String,
     pub matches: Vec<usize>,
     pub match_pos: usize,
@@ -244,6 +246,7 @@ impl Viewer {
             viewer_plugin: None,
             plugin_state: HashMap::new(),
             wrap,
+            wrap_row_offset: 0,
             search: String::new(),
             matches: Vec::new(),
             match_pos: 0,
@@ -310,6 +313,7 @@ impl Viewer {
             viewer_plugin: None,
             plugin_state: HashMap::new(),
             wrap,
+            wrap_row_offset: 0,
             search: String::new(),
             matches: Vec::new(),
             match_pos: 0,
@@ -564,6 +568,7 @@ impl Viewer {
     pub fn toggle_wrap(&mut self) {
         if matches!(self.mode, ViewMode::Text | ViewMode::Ansi) {
             self.wrap = !self.wrap;
+            self.wrap_row_offset = 0;
         }
         self.clear_mouse_selection();
     }
@@ -710,25 +715,118 @@ impl Viewer {
     }
 
     pub fn scroll_up(&mut self) {
+        self.wrap_row_offset = 0;
         self.scroll = self.scroll.saturating_sub(1);
     }
 
     pub fn scroll_down(&mut self) {
+        self.wrap_row_offset = 0;
         if self.scroll + 1 < self.line_count() {
             self.scroll += 1;
         }
     }
 
+    pub fn scroll_up_visual(&mut self, text_width: usize) {
+        if !self.wrap
+            || self.viewer_plugin.is_some()
+            || !matches!(self.mode, ViewMode::Text | ViewMode::Ansi)
+            || text_width == 0
+        {
+            self.scroll_up();
+            return;
+        }
+
+        if self.wrap_row_offset > 0 {
+            self.wrap_row_offset -= 1;
+            return;
+        }
+
+        if self.scroll > 0 {
+            self.scroll -= 1;
+            let rows = self.wrapped_rows_for_line(self.scroll, text_width);
+            self.wrap_row_offset = rows.saturating_sub(1);
+        }
+    }
+
+    pub fn scroll_down_visual(&mut self, text_width: usize) {
+        if !self.wrap
+            || self.viewer_plugin.is_some()
+            || !matches!(self.mode, ViewMode::Text | ViewMode::Ansi)
+            || text_width == 0
+        {
+            self.scroll_down();
+            return;
+        }
+
+        let rows = self.wrapped_rows_for_line(self.scroll, text_width);
+        if self.wrap_row_offset + 1 < rows {
+            self.wrap_row_offset += 1;
+            return;
+        }
+
+        self.wrap_row_offset = 0;
+        if self.scroll + 1 < self.line_count() {
+            self.scroll += 1;
+        }
+    }
+
+    pub fn wrap_visual_offset(&self) -> usize {
+        self.wrap_row_offset
+    }
+
     pub fn page_up(&mut self, height: usize) {
+        self.wrap_row_offset = 0;
         self.scroll = self.scroll.saturating_sub(height);
     }
 
     pub fn page_down(&mut self, height: usize) {
+        self.wrap_row_offset = 0;
         let max = self.line_count().saturating_sub(height.max(1));
         self.scroll = (self.scroll + height).min(max);
     }
 
+    pub fn page_up_visual(&mut self, visual_rows: usize, text_width: usize) {
+        if !self.wrap
+            || self.viewer_plugin.is_some()
+            || !matches!(self.mode, ViewMode::Text | ViewMode::Ansi)
+            || text_width == 0
+        {
+            self.page_up(visual_rows);
+            return;
+        }
+
+        for _ in 0..visual_rows.max(1) {
+            let before_scroll = self.scroll;
+            let before_offset = self.wrap_row_offset;
+            self.scroll_up_visual(text_width);
+            if self.scroll == before_scroll && self.wrap_row_offset == before_offset {
+                break;
+            }
+        }
+    }
+
+    pub fn page_down_visual(&mut self, visual_rows: usize, text_width: usize) {
+        if !self.wrap
+            || self.viewer_plugin.is_some()
+            || !matches!(self.mode, ViewMode::Text | ViewMode::Ansi)
+            || text_width == 0
+        {
+            self.page_down(visual_rows);
+            return;
+        }
+
+        for _ in 0..visual_rows.max(1) {
+            let before_scroll = self.scroll;
+            let before_offset = self.wrap_row_offset;
+            self.scroll_down_visual(text_width);
+            if self.scroll == before_scroll && self.wrap_row_offset == before_offset {
+                break;
+            }
+        }
+    }
+
     pub fn goto_start(&mut self) {
+        self.wrap_row_offset = 0;
         self.scroll = 0;
     }
 
@@ -746,6 +844,7 @@ impl Viewer {
     }
 
     pub fn goto_end(&mut self, height: usize) {
+        self.wrap_row_offset = 0;
         self.scroll = self.line_count().saturating_sub(height.max(1));
     }
 
@@ -783,6 +882,7 @@ impl Viewer {
 
     /// Jump to a 0-based line index, clamped to the valid range.
     pub fn goto_line(&mut self, line: usize) {
+        self.wrap_row_offset = 0;
         self.scroll = line.min(self.line_count().saturating_sub(1));
     }
 
@@ -819,6 +919,7 @@ impl Viewer {
     pub fn search_set(&mut self, s: &str) {
         self.search = s.to_string();
         self.rebuild_matches();
+        self.wrap_row_offset = 0;
         if !self.matches.is_empty() {
             self.match_pos = 0;
             self.scroll = self.matches[0];
@@ -829,6 +930,7 @@ impl Viewer {
         if self.matches.is_empty() {
             return;
         }
+        self.wrap_row_offset = 0;
         self.match_pos = (self.match_pos + 1) % self.matches.len();
         self.scroll = self.matches[self.match_pos];
     }
@@ -837,6 +939,7 @@ impl Viewer {
         if self.matches.is_empty() {
             return;
         }
+        self.wrap_row_offset = 0;
         self.match_pos = self
             .match_pos
             .checked_sub(1)
@@ -1246,6 +1349,32 @@ impl Viewer {
             let shifted = slice_visible(line, self.hscroll, width);
             pad_visible(&shifted, width)
         }
+    }
+
+    fn wrapped_rows_for_line(&self, idx: usize, text_width: usize) -> usize {
+        if text_width == 0 {
+            return 1;
+        }
+
+        let ln_width = self.line_number_width();
+        let wrap_width = text_width + ln_width;
+        if wrap_width == 0 {
+            return 1;
+        }
+
+        let line = self.plain_line_at(idx);
+        let rendered = if ln_width > 0 {
+            let digits = self.line_count().max(1).ilog10() as usize + 1;
+            let num_str = format!("{:>width$}\u{2502} ", idx + 1, width = digits);
+            Line::from(vec![Span::raw(num_str), Span::raw(line)])
+        } else {
+            Line::from(Span::raw(line))
+        };
+
+        Paragraph::new(vec![rendered])
+            .wrap(Wrap { trim: false })
+            .line_count(wrap_width as u16)
+            .max(1)
     }
 
     fn render_plugin_lines(

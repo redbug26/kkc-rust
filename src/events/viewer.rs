@@ -161,6 +161,8 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
     };
 
     let page_size = viewer_page_size(v);
+    let display_rows = viewer_display_rows();
+    let text_width = viewer_text_width(v);
 
     if key.modifiers.contains(KeyModifiers::CONTROL) {
         match key.code {
@@ -168,10 +170,10 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
             KeyCode::Right => v.scroll_right(40),
             KeyCode::Home => v.scroll_left_max(),
             _ => match key.code {
-                KeyCode::Up => v.scroll_up(),
-                KeyCode::Down => v.scroll_down(),
-                KeyCode::PageUp => v.page_up(page_size),
-                KeyCode::PageDown => v.page_down(page_size),
+                KeyCode::Up => v.scroll_up_visual(text_width),
+                KeyCode::Down => v.scroll_down_visual(text_width),
+                KeyCode::PageUp => v.page_up_visual(display_rows, text_width),
+                KeyCode::PageDown => v.page_down_visual(display_rows, text_width),
                 KeyCode::End => v.goto_end(page_size),
                 KeyCode::Char('n') => v.search_next(),
                 KeyCode::Char('N') => v.search_prev(),
@@ -186,10 +188,10 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
             return Ok(false);
         }
         match key.code {
-            KeyCode::Up => v.scroll_up(),
-            KeyCode::Down => v.scroll_down(),
-            KeyCode::PageUp => v.page_up(page_size),
-            KeyCode::PageDown | KeyCode::Char(' ') => v.page_down(page_size),
+            KeyCode::Up => v.scroll_up_visual(text_width),
+            KeyCode::Down => v.scroll_down_visual(text_width),
+            KeyCode::PageUp => v.page_up_visual(display_rows, text_width),
+            KeyCode::PageDown | KeyCode::Char(' ') => v.page_down_visual(display_rows, text_width),
             KeyCode::Home => v.goto_start(),
             KeyCode::End => v.goto_end(page_size),
             KeyCode::Left => v.scroll_left(8),
@@ -223,11 +225,11 @@ pub(super) fn handle_mouse_viewer(app: &mut App, mouse: MouseEvent) -> Result<bo
     match mouse.kind {
         MouseEventKind::ScrollUp => {
             viewer.clear_mouse_selection();
-            viewer.scroll_up();
+            viewer.scroll_up_visual(text_width);
         }
         MouseEventKind::ScrollDown => {
             viewer.clear_mouse_selection();
-            viewer.scroll_down();
+            viewer.scroll_down_visual(text_width);
         }
         MouseEventKind::Down(MouseButton::Left) => {
             if point_in_rect(mouse.column, mouse.row, inner)
