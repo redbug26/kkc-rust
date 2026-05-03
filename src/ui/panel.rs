@@ -706,7 +706,7 @@ fn render_menu_button(f: &mut Frame, area: Rect, label: &str) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(CLR_PANEL_BORDER))
-        .border_type(BorderType::Thick)
+        .border_type(BorderType::Rounded)
         .style(Style::default().bg(CLR_BUTTON_BG));
     let inner = block.inner(area);
     safe_render_widget(f, block, area);

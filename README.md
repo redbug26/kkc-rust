@@ -33,6 +33,7 @@ Nearly three decades later, this Rust rewrite brings KKC back — same spirit, m
 ## Features
 
 - **Dual-panel interface** — classic commander-style layout with synchronized navigation
+- **Center action buttons** — middle column actions are MenuAction-driven and consistently labeled
 - **Internal viewer** — browse text files, syntax-highlighted source code, images (Kitty protocol), archives
 - **Archive support** — browse ZIP, LHA/LZH, Amstrad DSK, Commodore D64 disk images as directories
 - **Remote connections** — SFTP file browsing and IMAP email browsing
@@ -125,7 +126,7 @@ cargo build --release
 | `Ctrl+R` | Reload panels |
 | `Ctrl+D` | Directory bookmarks |
 | `Ctrl+F` | Connect to remote (SFTP / IMAP) |
-| `Ctrl+U` | Drop to terminal
+| `Ctrl+U` | Drop to terminal |
 
 ### Viewer shortcuts
 
@@ -133,6 +134,7 @@ cargo build --release
 |-----|--------|
 | `↑` / `↓` / `PgUp` / `PgDn` | Scroll |
 | `g` | Open goto dropdown (`g`, `e`, `s`, `n`, `p`) |
+| `g` → `e` | Goto last line (anchored at bottom of viewport) |
 | `/` | Search in document |
 | `n` | Next search match |
 | `F4` | Change viewer mode / plugin |

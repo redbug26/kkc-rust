@@ -803,6 +803,7 @@ pub fn default_center_button_actions() -> Vec<MenuAction> {
         MenuAction::DirBookmarks,
         MenuAction::SelectPattern,
         MenuAction::FileIdPreview,
+        MenuAction::QuickPreview
     ]
 }
 
