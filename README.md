@@ -126,7 +126,17 @@ cargo build --release
 | `Ctrl+R` | Reload panels |
 | `Ctrl+D` | Directory bookmarks |
 | `Ctrl+F` | Connect to remote (SFTP / IMAP) |
+| `Alt+F7` | Search files |
 | `Ctrl+U` | Drop to terminal |
+
+### File search
+
+Open the search dialog with **`Alt+F7`**. Enter a pattern in the "Name:" field:
+
+- Use `*` for wildcard, `?` for single char (glob syntax)
+- Separate multiple patterns with `;` to search for any of them: `*.rs;*.lua;*.md`
+- Optional content search to filter by file contents
+- Search backend: **Spotlight** (macOS), **Locate** (system), or **Walk** (directory scan)
 
 ### Viewer shortcuts
 

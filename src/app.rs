@@ -2813,64 +2813,127 @@ impl App {
         state.dirs_visited = 0;
         state.running = true;
 
-        let query = SearchQuery {
-            pattern: if state.query.is_empty() || state.query == "*" {
-                "*".into()
-            } else {
-                state.query.clone()
-            },
-            content: if state.content_query.is_empty() {
-                None
-            } else {
-                Some(state.content_query.clone())
-            },
-            start,
-            follow_links: state.follow_links,
+        // Parse multiple patterns separated by ';'
+        let patterns: Vec<String> = if state.query.is_empty() || state.query == "*" {
+            vec!["*".into()]
+        } else {
+            state
+                .query
+                .split(';')
+                .map(|p| p.trim().to_string())
+                .filter(|p| !p.is_empty())
+                .collect()
         };
 
+        let content = if state.content_query.is_empty() {
+            None
+        } else {
+            Some(state.content_query.clone())
+        };
+
+        let follow_links = state.follow_links;
         let backend = state.backend;
         let (tx, rx) = std::sync::mpsc::channel::<SearchResult>();
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel_clone = Arc::clone(&cancel);
 
-        match backend {
-            SearchBackend::Walk => {
-                std::thread::spawn(move || {
-                    let _ = search(&query, |r| {
-                        if cancel_clone.load(Ordering::Relaxed) {
-                            return false;
-                        }
-                        tx.send(r.clone()).is_ok()
+        // If multiple patterns, search each and combine (deduplicate)
+        if patterns.len() == 1 {
+            // Single pattern: direct search
+            let query = SearchQuery {
+                pattern: patterns[0].clone(),
+                content: content.clone(),
+                start: start.clone(),
+                follow_links,
+            };
+
+            match backend {
+                SearchBackend::Walk => {
+                    std::thread::spawn(move || {
+                        let _ = search(&query, |r| {
+                            if cancel_clone.load(Ordering::Relaxed) {
+                                return false;
+                            }
+                            tx.send(r.clone()).is_ok()
+                        });
                     });
-                    // tx drops here → Disconnected signals completion to poller
-                });
+                }
+                SearchBackend::Spotlight => {
+                    std::thread::spawn(move || {
+                        let results = search_spotlight(&query, 1000);
+                        for r in results {
+                            if cancel_clone.load(Ordering::Relaxed) {
+                                break;
+                            }
+                            if tx.send(r).is_err() {
+                                break;
+                            }
+                        }
+                    });
+                }
+                SearchBackend::Locate => {
+                    std::thread::spawn(move || {
+                        let results = search_locate(&query, 1000);
+                        for r in results {
+                            if cancel_clone.load(Ordering::Relaxed) {
+                                break;
+                            }
+                            if tx.send(r).is_err() {
+                                break;
+                            }
+                        }
+                    });
+                }
             }
-            SearchBackend::Spotlight => {
-                std::thread::spawn(move || {
-                    let results = search_spotlight(&query, 1000);
+        } else {
+            // Multiple patterns: combine results and deduplicate
+            std::thread::spawn(move || {
+                use std::collections::HashSet;
+
+                let mut seen_paths = HashSet::new();
+
+                for pattern in patterns {
+                    if cancel_clone.load(Ordering::Relaxed) {
+                        break;
+                    }
+
+                    let query = SearchQuery {
+                        pattern,
+                        content: content.clone(),
+                        start: start.clone(),
+                        follow_links,
+                    };
+
+                    let results = match backend {
+                        SearchBackend::Walk => {
+                            let mut acc = Vec::new();
+                            let _ = search(&query, |r| {
+                                if cancel_clone.load(Ordering::Relaxed) {
+                                    return false;
+                                }
+                                acc.push(r.clone());
+                                true
+                            });
+                            acc
+                        }
+                        SearchBackend::Spotlight => search_spotlight(&query, 1000),
+                        SearchBackend::Locate => search_locate(&query, 1000),
+                    };
+
                     for r in results {
                         if cancel_clone.load(Ordering::Relaxed) {
                             break;
                         }
-                        if tx.send(r).is_err() {
-                            break;
+                        let path_str = r.path.to_string_lossy().to_string();
+                        if !seen_paths.contains(&path_str) {
+                            seen_paths.insert(path_str);
+                            if tx.send(r).is_err() {
+                                return;
+                            }
                         }
                     }
-                });
-            }
-            SearchBackend::Locate => {
-                std::thread::spawn(move || {
-                    let results = search_locate(&query, 1000);
-                    for r in results {
-                        if cancel_clone.load(Ordering::Relaxed) {
-                            break;
-                        }
-                        if tx.send(r).is_err() {
-                            break;
-                        }
-                    }
-                });
-            }
+                }
+            });
         }
 
         state.search_rx = Some(rx);

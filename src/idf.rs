@@ -925,6 +925,7 @@ fn zip_mime_type(data: &[u8], ext: &str) -> Option<&'static str> {
         "odt" => Some("application/vnd.oasis.opendocument.text"),
         "ods" => Some("application/vnd.oasis.opendocument.spreadsheet"),
         "odp" => Some("application/vnd.oasis.opendocument.presentation"),
+        "epub" => Some("application/epub+zip"),
         _ => None,
     }
 }
