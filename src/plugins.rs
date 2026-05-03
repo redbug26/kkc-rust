@@ -92,7 +92,16 @@ struct StoreApplicationDescriptor {
     #[serde(default)]
     wait_for_key_after_exit: bool,
     #[serde(default)]
+    args: Option<StoreApplicationArgs>,
+    #[serde(default)]
     install: Vec<StoreApplicationInstall>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum StoreApplicationArgs {
+    List(Vec<String>),
+    String(String),
 }
 
 #[derive(Debug, Deserialize)]
@@ -129,6 +138,7 @@ pub struct StorePluginInfo {
     pub install_methods: Vec<String>,
     pub mime_types: Vec<String>,
     pub wait_for_key_after_exit: bool,
+    pub launch_args: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -601,6 +611,7 @@ pub fn list_store_plugins_with_info(
             install_methods: Vec::new(),
             mime_types: Vec::new(),
             wait_for_key_after_exit: false,
+            launch_args: None,
         })
         .collect::<Vec<_>>();
     out.extend(index.applications.into_iter().map(|app| {
@@ -633,6 +644,7 @@ pub fn list_store_plugins_with_info(
                 .map(|mime| mime.to_ascii_lowercase())
                 .collect(),
             wait_for_key_after_exit: app.wait_for_key_after_exit,
+            launch_args: app.args.as_ref().map(store_application_args_to_command_string),
         }
     }));
     out.sort_by(|a, b| a.id.cmp(&b.id));
@@ -1064,6 +1076,17 @@ fn install_args_preview(args: &[String]) -> String {
     }
 }
 
+fn store_application_args_to_command_string(args: &StoreApplicationArgs) -> String {
+    match args {
+        StoreApplicationArgs::String(value) => value.clone(),
+        StoreApplicationArgs::List(items) => items
+            .iter()
+            .map(|item| shell_escape(item))
+            .collect::<Vec<_>>()
+            .join(" "),
+    }
+}
+
 fn run_package_install_command(
     app_id: &str,
     install: &StoreApplicationInstall,
@@ -1229,6 +1252,8 @@ pub struct StoredApplication {
     pub mime_types: Vec<String>,
     #[serde(default)]
     pub wait_for_key_after_exit: bool,
+    #[serde(default)]
+    pub launch_args: Option<String>,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -1280,6 +1305,7 @@ pub fn remember_store_application(item: &StorePluginInfo) -> Result<bool> {
         bin: bin.to_string(),
         mime_types: item.mime_types.clone(),
         wait_for_key_after_exit: item.wait_for_key_after_exit,
+        launch_args: item.launch_args.clone(),
     };
     let mut changed = false;
     if let Some(existing) = apps.iter_mut().find(|app| app.id == item.id) {
@@ -1288,6 +1314,7 @@ pub fn remember_store_application(item: &StorePluginInfo) -> Result<bool> {
             || existing.mime_types != stored.mime_types
             || existing.name != stored.name
             || existing.wait_for_key_after_exit != stored.wait_for_key_after_exit
+            || existing.launch_args != stored.launch_args
         {
             *existing = stored;
             changed = true;
@@ -1338,6 +1365,7 @@ pub fn detect_installed_store_applications(
             bin: bin.to_string(),
             mime_types: item.mime_types.clone(),
             wait_for_key_after_exit: item.wait_for_key_after_exit,
+            launch_args: item.launch_args.clone(),
         };
         if let Some(existing) = remembered.iter_mut().find(|app| app.id == item.id) {
             if existing.bin != stored.bin
@@ -1345,6 +1373,7 @@ pub fn detect_installed_store_applications(
                 || existing.mime_types != stored.mime_types
                 || existing.name != stored.name
                 || existing.wait_for_key_after_exit != stored.wait_for_key_after_exit
+                || existing.launch_args != stored.launch_args
             {
                 *existing = stored;
                 changed = true;
@@ -1385,20 +1414,77 @@ pub fn missing_remembered_store_applications(
                 install_methods: Vec::new(),
                 mime_types: stored.mime_types,
                 wait_for_key_after_exit: stored.wait_for_key_after_exit,
+                launch_args: stored.launch_args,
             });
         }
     }
     Ok(missing)
 }
 
-pub fn store_application_waits_after_command(command: &str) -> bool {
-    let Some(program) = command.split_whitespace().next() else {
-        return false;
+pub fn store_application_launch_args_for_command(command: &str) -> Option<Option<String>> {
+    let Some(program) = first_command_token(command) else {
+        return None;
     };
-    let program_name = Path::new(program)
+    let program_name = Path::new(&program)
         .file_name()
         .and_then(|name| name.to_str())
-        .unwrap_or(program);
+        .unwrap_or(program.as_str());
+
+    load_store_applications()
+        .ok()
+        .and_then(|apps| {
+            apps.into_iter().find_map(|app| {
+                let bin_name = Path::new(&app.bin)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or(app.bin.as_str());
+                if app.bin == program || bin_name == program_name {
+                    Some(app.launch_args)
+                } else {
+                    None
+                }
+            })
+        })
+}
+
+fn first_command_token(command: &str) -> Option<String> {
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+    let mut out = String::new();
+
+    for ch in command.chars() {
+        if escaped {
+            out.push(ch);
+            escaped = false;
+            continue;
+        }
+
+        match ch {
+            '\\' if in_double => escaped = true,
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            c if c.is_whitespace() && !in_single && !in_double => {
+                if out.is_empty() {
+                    continue;
+                }
+                break;
+            }
+            _ => out.push(ch),
+        }
+    }
+
+    if out.is_empty() { None } else { Some(out) }
+}
+
+pub fn store_application_waits_after_command(command: &str) -> bool {
+    let Some(program) = first_command_token(command) else {
+        return false;
+    };
+    let program_name = Path::new(&program)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(program.as_str());
 
     load_store_applications()
         .map(|apps| {
@@ -3234,7 +3320,7 @@ mod tests {
   "schema_version": 1,
   "generated_at": "2026-04-29T18:22:35.350023+00:00",
   "plugins_count": 1,
-  "applications_count": 1,
+    "applications_count": 2,
   "plugins": [
     {
       "id": "json-viewer",
@@ -3254,10 +3340,24 @@ mod tests {
       "category": "viewer",
       "type": "external_viewer",
       "mime_types": ["text/plain", "application/json"],
-      "wait_for_key_after_exit": true,
+            "wait_for_key_after_exit": true,
+            "args": ["--style=plain", "%f"],
       "install": [
         { "os": ["macos", "linux", "windows"], "method": "cargo", "crate": "bat", "bin": "bat" }
       ]
+        },
+        {
+            "id": "hexyl",
+            "name": "hexyl",
+            "version": "0.14.0",
+            "description": "Hex viewer",
+            "category": "viewer",
+            "type": "external_viewer",
+            "mime_types": ["application/octet-stream"],
+            "args": "--plain \"%f\" --name '%n'",
+            "install": [
+                { "os": ["macos", "linux", "windows"], "method": "cargo", "crate": "hexyl", "bin": "hexyl" }
+            ]
     }
   ],
   "tag": "0.0.8"
@@ -3267,8 +3367,8 @@ mod tests {
 
         let (items, info) = list_store_plugins_with_info(&index_path).expect("read index");
         assert_eq!(info.plugins_count, Some(1));
-        assert_eq!(info.applications_count, Some(1));
-        assert_eq!(items.len(), 2);
+                assert_eq!(info.applications_count, Some(2));
+                assert_eq!(items.len(), 3);
 
         let app = items.iter().find(|item| item.id == "bat").expect("bat app");
         assert!(matches!(app.item_kind, StoreItemKind::Application));
@@ -3280,9 +3380,20 @@ mod tests {
         assert_eq!(app.install_bin.as_deref(), Some("bat"));
         assert_eq!(app.mime_types, vec!["text/plain", "application/json"]);
         assert!(app.wait_for_key_after_exit);
+        assert_eq!(app.launch_args.as_deref(), Some("'--style=plain' '%f'"));
         assert_eq!(
             app.install_methods,
             vec!["cargo [macos/linux/windows]  crate bat  bin bat"]
+        );
+
+        let hexyl = items
+            .iter()
+            .find(|item| item.id == "hexyl")
+            .expect("hexyl app");
+        assert!(matches!(hexyl.item_kind, StoreItemKind::Application));
+        assert_eq!(
+            hexyl.launch_args.as_deref(),
+            Some("--plain \"%f\" --name '%n'")
         );
 
         let plugin = items

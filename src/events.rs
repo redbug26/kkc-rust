@@ -2410,12 +2410,20 @@ fn handle_enter(app: &mut App) -> Result<()> {
             .unwrap_or_else(|| "application/octet-stream".to_string());
         let openers = app.config.openers_for_mime(&mime_type).to_vec();
         let mut actions = Vec::new();
-        actions.push(OpenerActionItem {
-            category: "System",
-            label: "Open with system".to_string(),
-            detail: "Default application".to_string(),
-            kind: OpenerActionKind::System,
-        });
+        for opener in openers {
+            let arg_info = match crate::plugins::store_application_launch_args_for_command(&opener)
+            {
+                Some(Some(args)) if args.trim().is_empty() => "args: (none)".to_string(),
+                Some(Some(args)) => format!("args: {}", args),
+                _ => "args: auto %f".to_string(),
+            };
+            actions.push(OpenerActionItem {
+                category: "Associations",
+                label: opener.clone(),
+                detail: format!("{}  |  {}", mime_type, arg_info),
+                kind: OpenerActionKind::Association { command: opener },
+            });
+        }
         if supports_archive_navigation(&launch_path) {
             actions.push(OpenerActionItem {
                 category: "Archive",
@@ -2424,14 +2432,12 @@ fn handle_enter(app: &mut App) -> Result<()> {
                 kind: OpenerActionKind::Archive,
             });
         }
-        for opener in openers {
-            actions.push(OpenerActionItem {
-                category: "Associations",
-                label: opener.clone(),
-                detail: mime_type.clone(),
-                kind: OpenerActionKind::Association { command: opener },
-            });
-        }
+        actions.push(OpenerActionItem {
+            category: "System",
+            label: "Open with system".to_string(),
+            detail: "Default application".to_string(),
+            kind: OpenerActionKind::System,
+        });
 
         if actions.len() == 1 {
             execute_opener_action(app, actions.remove(0), &launch_path)?;
@@ -2470,28 +2476,39 @@ fn execute_opener_action(
     Ok(())
 }
 
-/// Spawn an external command with the given file path.
-/// `%f` in command is replaced by the path; otherwise path is appended.
+/// Spawn an external command with the selected file context.
+/// Supports placeholders in arguments (`%f`, `%n`, `%d`, `%e`, `%b`, `%%`).
 fn launch_external(app: &mut App, command: &str, path: &std::path::Path) -> Result<()> {
     let wait_for_key = crate::plugins::store_application_waits_after_command(command);
-    let path_str = path.to_string_lossy();
-    let args: Vec<String> = if command.contains("%f") {
-        // Split on whitespace, replace %f token
-        command
-            .split_whitespace()
-            .map(|t| {
-                if t == "%f" {
-                    path_str.to_string()
-                } else {
-                    t.to_string()
+    let parsed = split_command_args(command);
+    if parsed.is_empty() {
+        app.notify("Empty opener command");
+        return Ok(());
+    }
+
+    let mut args = Vec::with_capacity(parsed.len() + 4);
+    args.push(parsed[0].clone());
+
+    match crate::plugins::store_application_launch_args_for_command(command) {
+        // Store app with explicit launch args: these replace the historical auto `%f` behavior.
+        Some(Some(store_args)) => {
+            for token in split_command_args(&store_args) {
+                args.push(expand_opener_placeholders(&token, path));
+            }
+        }
+        _ => {
+            let mut has_file_placeholder = false;
+            for token in parsed.into_iter().skip(1) {
+                if token.contains("%f") {
+                    has_file_placeholder = true;
                 }
-            })
-            .collect()
-    } else {
-        let mut v: Vec<String> = command.split_whitespace().map(|t| t.to_string()).collect();
-        v.push(path_str.to_string());
-        v
-    };
+                args.push(expand_opener_placeholders(&token, path));
+            }
+            if !has_file_placeholder {
+                args.push(path.to_string_lossy().into_owned());
+            }
+        }
+    }
 
     if args.is_empty() {
         app.notify("Empty opener command");
@@ -2520,6 +2537,85 @@ fn launch_external(app: &mut App, command: &str, path: &std::path::Path) -> Resu
     app.needs_clear = true;
     app.reload_panels();
     Ok(())
+}
+
+fn split_command_args(input: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+
+    for ch in input.chars() {
+        if escaped {
+            current.push(ch);
+            escaped = false;
+            continue;
+        }
+
+        match ch {
+            '\\' if in_double => escaped = true,
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            c if c.is_whitespace() && !in_single && !in_double => {
+                if !current.is_empty() {
+                    args.push(std::mem::take(&mut current));
+                }
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    if !current.is_empty() {
+        args.push(current);
+    }
+    args
+}
+
+fn expand_opener_placeholders(token: &str, path: &std::path::Path) -> String {
+    let full = path.to_string_lossy().into_owned();
+    let name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_string();
+    let dir = path
+        .parent()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_string();
+    let base = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_string();
+
+    let mut out = String::with_capacity(token.len() + 16);
+    let mut chars = token.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '%' {
+            out.push(ch);
+            continue;
+        }
+        match chars.next() {
+            Some('f') => out.push_str(&full),
+            Some('n') => out.push_str(&name),
+            Some('d') => out.push_str(&dir),
+            Some('e') => out.push_str(&ext),
+            Some('b') => out.push_str(&base),
+            Some('%') => out.push('%'),
+            Some(other) => {
+                out.push('%');
+                out.push(other);
+            }
+            None => out.push('%'),
+        }
+    }
+    out
 }
 
 fn wait_for_key_after_external() -> Result<()> {
