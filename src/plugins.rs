@@ -752,37 +752,35 @@ fn install_plugin_from_store_descriptor(
         }
         "github" => {
             progress(25, "Resolving plugin source...");
-            let repo = descriptor.location.repo.as_deref().ok_or_else(|| {
-                anyhow!(
-                    "Store github plugin '{}' is missing location.repo",
-                    plugin_id
-                )
-            })?;
-            let repo_path = descriptor
-                .location
-                .path
-                .as_deref()
-                .ok_or_else(|| anyhow!(
-                    "Store github plugin '{}' is missing location.path (asset_url is not supported yet)",
-                    plugin_id
-                ))?;
-            let repo_path = repo_path.trim_start_matches('/');
-            if repo_path.is_empty() {
-                bail!("Store github plugin '{}' has an empty location.path", plugin_id);
+            if let Some(asset_url_template) = descriptor.location.asset_url.as_deref() {
+                let asset_url = resolve_plugin_asset_url(asset_url_template, descriptor)?;
+                progress(38, "Downloading plugin binary asset...");
+                let archive_bytes = fetch_url_bytes(&asset_url)
+                    .with_context(|| format!("Downloading plugin asset {}", asset_url))?;
+                progress(58, "Extracting plugin binary asset...");
+                extract_plugin_asset_archive(&asset_url, &archive_bytes, &temp_dir)?;
+            } else {
+                let repo = descriptor.location.repo.as_deref().ok_or_else(|| {
+                    anyhow!(
+                        "Store github plugin '{}' is missing location.repo",
+                        plugin_id
+                    )
+                })?;
+                let repo_path = descriptor.location.path.as_deref().ok_or_else(|| {
+                    anyhow!("Store github plugin '{}' is missing location.path", plugin_id)
+                })?;
+                let repo_path = repo_path.trim_start_matches('/');
+                if repo_path.is_empty() {
+                    bail!("Store github plugin '{}' has an empty location.path", plugin_id);
+                }
+                let git_ref = descriptor
+                    .location
+                    .git_ref
+                    .as_deref()
+                    .or(source.github_ref.as_deref())
+                    .unwrap_or("main");
+                copy_github_plugin_path_to_temp(repo, git_ref, repo_path, &temp_dir, progress)?;
             }
-            if descriptor.location.asset_url.is_some() {
-                bail!(
-                    "Store github plugin '{}' uses asset_url, which is not supported yet",
-                    plugin_id
-                );
-            }
-            let git_ref = descriptor
-                .location
-                .git_ref
-                .as_deref()
-                .or(source.github_ref.as_deref())
-                .unwrap_or("main");
-            copy_github_plugin_path_to_temp(repo, git_ref, repo_path, &temp_dir, progress)?;
         }
         other => {
             bail!(
@@ -1168,6 +1166,14 @@ fn normalize_store_os(value: &str) -> String {
     match value.trim().to_ascii_lowercase().as_str() {
         "darwin" | "mac" | "macosx" | "osx" => "macos".to_string(),
         "win" | "windows" => "windows".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn normalize_store_arch(value: &str) -> String {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "x86_64" | "amd64" => "x86_64".to_string(),
+        "aarch64" | "arm64" => "arm64".to_string(),
         other => other.to_string(),
     }
 }
@@ -1578,6 +1584,87 @@ fn fetch_url_bytes_with_curl(url: &str) -> Result<Vec<u8>> {
         let stderr = String::from_utf8_lossy(&output.stderr);
         bail!("curl exited with {}: {}", output.status, stderr.trim());
     }
+}
+
+fn resolve_plugin_asset_url(template: &str, descriptor: &StorePluginDescriptor) -> Result<String> {
+    let version = descriptor
+        .version
+        .as_deref()
+        .filter(|v| !v.trim().is_empty())
+        .ok_or_else(|| {
+            anyhow!(
+                "Store plugin '{}' is missing plugin.version required for asset_url",
+                descriptor.id
+            )
+        })?;
+    let os = normalize_store_os(std::env::consts::OS);
+    let arch = normalize_store_arch(std::env::consts::ARCH);
+    let tag = format!("v{}", version);
+
+    Ok(template
+        .replace("{version}", version)
+        .replace("{tag}", &tag)
+        .replace("{os}", &os)
+        .replace("{arch}", &arch))
+}
+
+fn extract_plugin_asset_archive(url: &str, bytes: &[u8], temp_dir: &Path) -> Result<()> {
+    if !url.to_ascii_lowercase().ends_with(".zip") {
+        bail!(
+            "Unsupported plugin asset format for '{}': only .zip archives are supported",
+            url
+        );
+    }
+    extract_zip_to_temp(bytes, temp_dir)
+}
+
+fn extract_zip_to_temp(zip_bytes: &[u8], temp_dir: &Path) -> Result<()> {
+    fs::create_dir_all(temp_dir).with_context(|| format!("Creating {}", temp_dir.display()))?;
+
+    let mut copied_any = false;
+    let cursor = Cursor::new(zip_bytes);
+    let mut archive = ZipArchive::new(cursor).context("Opening plugin asset zip archive")?;
+    for i in 0..archive.len() {
+        let mut entry = archive
+            .by_index(i)
+            .with_context(|| format!("Reading zip entry #{}", i))?;
+
+        let Some(enclosed_name) = entry.enclosed_name().map(PathBuf::from) else {
+            bail!("Plugin asset zip contains an unsafe path: {}", entry.name());
+        };
+        if enclosed_name.as_os_str().is_empty() {
+            continue;
+        }
+
+        let output = temp_dir.join(&enclosed_name);
+        if !output.starts_with(temp_dir) {
+            bail!(
+                "Plugin asset zip path escapes install directory: {}",
+                entry.name()
+            );
+        }
+
+        if entry.is_dir() {
+            fs::create_dir_all(&output)
+                .with_context(|| format!("Creating {}", output.display()))?;
+            continue;
+        }
+
+        if let Some(parent) = output.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("Creating {}", parent.display()))?;
+        }
+        let mut out = fs::File::create(&output)
+            .with_context(|| format!("Creating {}", output.display()))?;
+        io::copy(&mut entry, &mut out)
+            .with_context(|| format!("Extracting {} to {}", entry.name(), output.display()))?;
+        copied_any = true;
+    }
+
+    if !copied_any {
+        bail!("Plugin asset zip archive is empty");
+    }
+    Ok(())
 }
 
 fn extract_repo_path_from_zip(zip_bytes: &[u8], repo_path: &str, temp_dir: &Path) -> Result<()> {
