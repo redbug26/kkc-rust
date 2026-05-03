@@ -711,7 +711,13 @@ fn remote_plugin_profile(profile: &RemoteProfile) -> Result<&RemotePluginProfile
 
 fn remote_plugin_module(profile: &RemoteProfile) -> Result<kkc_plugin_api::RemotePluginModRef> {
     let plugin = remote_plugin_profile(profile)?;
-    crate::remote_plugins::load_remote_plugin(&plugin.plugin_id)
+    let module = crate::remote_plugins::load_remote_plugin(&plugin.plugin_id)?;
+    module.set_debug_log()(remote_plugin_debug_log as usize);
+    Ok(module)
+}
+
+extern "C" fn remote_plugin_debug_log(message: abi_stable::std_types::RString) {
+    crate::viewer::debug_log(&format!("remote-plugin: {}", message));
 }
 
 fn remote_plugin_error(err: abi_stable::std_types::RString) -> anyhow::Error {

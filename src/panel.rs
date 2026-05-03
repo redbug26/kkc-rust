@@ -162,8 +162,9 @@ impl Panel {
             })
         };
         self.sort_entries(&mut entries);
+        entries.insert(0, self.remote_disconnect_entry());
         if let Some(pe) = parent_entry {
-            entries.insert(0, pe);
+            entries.insert(1, pe);
         }
         let _ = profile;
         entries
@@ -241,8 +242,9 @@ impl Panel {
 
         let parent_entry = self.parent_entry();
         self.sort_entries(&mut entries);
+        entries.insert(0, self.remote_disconnect_entry());
         if let Some(pe) = parent_entry {
-            entries.insert(0, pe);
+            entries.insert(1, pe);
         }
 
         let old_name = self.entries.get(self.cursor).map(|e| e.name.clone());
@@ -289,6 +291,22 @@ impl Panel {
             cloud_only: false,
             file_icon: crate::file_icons::icon_for_entry("..", true),
         })
+    }
+
+    fn remote_disconnect_entry(&self) -> Entry {
+        Entry {
+            name: "[disconnect]".into(),
+            path: self.fallback_local_path.clone(),
+            is_dir: true,
+            is_symlink: false,
+            size: 0,
+            modified: None,
+            category: FileCategory::Directory,
+            selected: false,
+            mode: 0o755,
+            cloud_only: false,
+            file_icon: crate::file_icons::icon_for_entry("..", true),
+        }
     }
 
     fn sort_entries(&self, entries: &mut Vec<Entry>) {
@@ -435,9 +453,13 @@ impl Panel {
     // -----------------------------------------------------------------------
 
     pub fn enter_dir(&mut self, path: PathBuf) -> Result<()> {
+        crate::viewer::debug_log(&format!("[Panel::enter_dir] path={}, is_remote={}", path.display(), self.remote.is_some()));
         if self.remote.is_some() {
             if let Some(mount) = self.remote.as_mut() {
-                mount.cwd = normalize_remote_cwd(&mount.profile, &path.to_string_lossy());
+                let path_str = path.to_string_lossy();
+                crate::viewer::debug_log(&format!("[Panel::enter_dir] remote: path_str={}, cwd_before={}", path_str, mount.cwd));
+                mount.cwd = normalize_remote_cwd(&mount.profile, &path_str);
+                crate::viewer::debug_log(&format!("[Panel::enter_dir] remote: cwd_after={}", mount.cwd));
                 self.path = PathBuf::from(&mount.cwd);
             } else {
                 self.path = path;
@@ -618,6 +640,12 @@ impl Panel {
 
     pub fn disconnect(&mut self) {
         self.clear_remote_mount();
+        self.path = self.fallback_local_path.clone();
+        self.cursor = 0;
+        self.scroll = 0;
+        self.quicksearch.clear();
+        self.entries.clear();
+        let _ = self.reload();
     }
 
     // -----------------------------------------------------------------------
@@ -768,6 +796,7 @@ impl Drop for Panel {
 impl Panel {
     fn entry_from_remote(&self, _cwd: &str, entry: RemoteEntry) -> Entry {
         let path = PathBuf::from(&entry.path);
+        crate::viewer::debug_log(&format!("[entry_from_remote] name={}, path={}", entry.name, entry.path));
         let category = FileCategory::from_entry(entry.is_dir, entry.is_symlink, &entry.name);
         Entry {
             name: entry.name,

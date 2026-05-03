@@ -1341,12 +1341,8 @@ impl App {
     }
 
     pub fn enter_dir(&mut self, path: PathBuf) -> Result<()> {
+        crate::viewer::debug_log(&format!("[enter_dir] path={}, is_remote={}", path.display(), self.active_panel().is_remote_view()));
         self.push_dir_history(path.clone());
-        if self.active_panel().is_remote_view() && path.is_dir() {
-            // Local path selected while on a remote panel — disconnect first.
-            self.active_panel_mut().disconnect();
-            return self.active_panel_mut().enter_dir(path);
-        }
         if self.active_panel().is_remote_view() {
             self.run_with_busy("Remote: changing directory...", |app| {
                 app.active_panel_mut().enter_dir(path)

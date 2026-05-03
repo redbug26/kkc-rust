@@ -766,6 +766,10 @@ fn install_plugin_from_store_descriptor(
                     "Store github plugin '{}' is missing location.path (asset_url is not supported yet)",
                     plugin_id
                 ))?;
+            let repo_path = repo_path.trim_start_matches('/');
+            if repo_path.is_empty() {
+                bail!("Store github plugin '{}' has an empty location.path", plugin_id);
+            }
             if descriptor.location.asset_url.is_some() {
                 bail!(
                     "Store github plugin '{}' uses asset_url, which is not supported yet",

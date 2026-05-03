@@ -290,6 +290,7 @@ fn render_panel_entries(
         .skip(panel.scroll)
         .take(list_height)
         .map(|(idx, entry)| {
+            let is_disconnect_entry = entry.name == "[disconnect]";
             let is_cursor = active && idx == panel.cursor;
             let fg = if is_cursor {
                 CLR_CURSOR_FG
@@ -312,9 +313,9 @@ fn render_panel_entries(
                 Style::default().fg(fg)
             };
 
-            let display_name = if show_file_icons && entry.is_dir {
+            let display_name = if show_file_icons && entry.is_dir && !is_disconnect_entry {
                 format!("{} {}", entry.file_icon.unwrap_or("\u{e5ff}"), entry.name)
-            } else if entry.is_dir && entry.name != ".." {
+            } else if entry.is_dir && entry.name != ".." && !is_disconnect_entry {
                 format!("/{}", entry.name)
             } else {
                 format!(" {}", entry.name)
@@ -332,6 +333,8 @@ fn render_panel_entries(
 
             let size_str = if entry.name == ".." {
                 format!("{:>width$}", "↑ up-dir ↑", width = size_w)
+            } else if is_disconnect_entry {
+                truncate_str(&format!("{:^width$}", "action", width = size_w), size_w)
             } else if entry.is_dir {
                 format!("{:>width$}", "⌦sub--dir⌫", width = size_w)
             } else {

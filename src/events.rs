@@ -374,7 +374,10 @@ fn handle_enter(app: &mut App) -> Result<()> {
         None => return Ok(()),
     };
 
-    if entry.name == ".." {
+    if entry.name == "[disconnect]" && app.active_panel().is_remote_view() {
+        app.active_panel_mut().disconnect();
+        // app.active_panel_mut().goto_root()?;
+    } else if entry.name == ".." {
         app.go_parent()?;
     } else if entry.is_dir {
         app.enter_dir(entry.path.clone())?;
@@ -1459,9 +1462,16 @@ fn handle_dir_bookmarks(app: &mut App, key: KeyEvent) -> Result<bool> {
                                 profiles.into_iter().find(|pr| pr.name == profile_name)
                             {
                                 app.start_remote_connect_with_cwd(profile, target_cwd);
+                            } else {
+                                app.notify(format!("Remote profile not found: {}", profile_name));
                             }
                         } else if p.is_dir() {
+                            if app.active_panel().is_remote_view() {
+                                app.active_panel_mut().disconnect();
+                            }
                             app.enter_dir(p)?;
+                        } else {
+                            app.notify(format!("Bookmark path is not a directory: {}", p.display()));
                         }
                     }
                 }

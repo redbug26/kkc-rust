@@ -6,7 +6,7 @@ use abi_stable::{
     std_types::{RResult, RStr, RString, RVec},
 };
 
-pub const KKC_REMOTE_PLUGIN_API_VERSION: u32 = 1;
+pub const KKC_REMOTE_PLUGIN_API_VERSION: u32 = 2;
 
 pub type RemotePluginResult<T> = RResult<T, RString>;
 
@@ -91,6 +91,7 @@ pub struct RemotePluginMod {
         remote_path: RStr<'_>,
         is_dir: bool,
     ) -> RemotePluginResult<()>,
+    pub set_debug_log: extern "C" fn(callback: usize),
     #[sabi(last_prefix_field)]
     pub make_dir: extern "C" fn(config_json: RStr<'_>, remote_path: RStr<'_>) -> RemotePluginResult<()>,
 }
