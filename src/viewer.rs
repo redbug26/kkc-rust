@@ -1183,7 +1183,9 @@ impl Viewer {
         }
         self.matches = if matches!(self.mode, ViewMode::Hex) {
             self.rebuild_hex_matches()
-        } else if let Some(lines) = self.plugin_document_plain_lines(self.plugin_document_width()) {
+        } else if let Some(lines) =
+            self.plugin_document_plain_lines(self.cached_plugin_document_width())
+        {
             let needle = self.search.to_lowercase();
             lines
                 .iter()
@@ -1271,11 +1273,19 @@ impl Viewer {
         if let Some(cache) = self.plugin_document_cache.borrow().as_ref() {
             return Some(cache.lines.len());
         }
-        self.ensure_plugin_document_cache(self.plugin_document_width())?;
+        self.ensure_plugin_document_cache(self.cached_plugin_document_width())?;
         self.plugin_document_cache
             .borrow()
             .as_ref()
             .map(|cache| cache.lines.len())
+    }
+
+    fn cached_plugin_document_width(&self) -> usize {
+        self.plugin_document_cache
+            .borrow()
+            .as_ref()
+            .map(|cache| cache.key.width)
+            .unwrap_or_else(|| self.plugin_document_width())
     }
 
     fn plugin_document_width(&self) -> usize {
