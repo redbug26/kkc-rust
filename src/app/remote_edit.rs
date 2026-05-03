@@ -1,58 +1,91 @@
 use super::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RemoteEditKind {
     Sftp,
     Smb,
-    Dropbox,
+    RemotePlugin {
+        plugin_id: String,
+        display_name: String,
+        scheme: String,
+    },
 }
 
 impl RemoteEditKind {
     /// All protocol choices in menu order.
-    pub fn all() -> &'static [Self] {
-        &[Self::Sftp, Self::Smb, Self::Dropbox]
+    pub fn all() -> Vec<Self> {
+        let mut out = vec![Self::Sftp, Self::Smb];
+        let mut remote_plugins = discover_remote_plugin_choices();
+        remote_plugins.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
+        out.extend(
+            remote_plugins
+                .into_iter()
+                .map(|(plugin_id, display_name, scheme)| Self::RemotePlugin {
+                    plugin_id,
+                    display_name,
+                    scheme,
+                }),
+        );
+        out
     }
 
-    pub fn name(self) -> &'static str {
+    pub fn name(&self) -> String {
         match self {
-            Self::Sftp => "SFTP",
-            Self::Smb => "SMB",
-            Self::Dropbox => "Dropbox",
+            Self::Sftp => "SFTP".to_string(),
+            Self::Smb => "SMB".to_string(),
+            Self::RemotePlugin { display_name, .. } => display_name.clone(),
         }
     }
 
     /// UI accent colour (R, G, B).
-    pub fn color_rgb(self) -> (u8, u8, u8) {
+    pub fn color_rgb(&self) -> (u8, u8, u8) {
         match self {
             Self::Sftp => (121, 214, 255),
             Self::Smb => (255, 165, 80),
-            Self::Dropbox => (141, 222, 150),
+            Self::RemotePlugin { .. } => (141, 222, 150),
         }
     }
 
-    pub fn title(self) -> &'static str {
+    pub fn title(&self) -> String {
         match self {
-            Self::Sftp => " Add SFTP Server ",
-            Self::Smb => " Add SMB Server ",
-            Self::Dropbox => " Add Dropbox Server ",
+            Self::Sftp => " Add SFTP Server ".to_string(),
+            Self::Smb => " Add SMB Server ".to_string(),
+            Self::RemotePlugin { display_name, .. } => {
+                format!(" Add {} Connection ", display_name)
+            }
         }
     }
 
-    pub fn field_labels(self) -> [&'static str; 6] {
+    pub fn field_labels(&self) -> [&'static str; 6] {
         match self {
             Self::Sftp => ["Name", "Host", "User", "Port", "Path", "Identity"],
             Self::Smb => ["Name", "Host", "User", "Workgroup", "Share", "Password"],
-            Self::Dropbox => ["Name", "Access token", "Path", "", "", ""],
+            Self::RemotePlugin { .. } => [
+                "Name",
+                "Config JSON",
+                "Path",
+                "Auth input",
+                "",
+                "",
+            ],
         }
     }
 
-    pub fn validation_message(self) -> &'static str {
+    pub fn validation_message(&self) -> &'static str {
         match self {
             Self::Sftp => "SFTP name is required",
             Self::Smb => "SMB name and host are required",
-            Self::Dropbox => "Dropbox name and access token are required",
+            Self::RemotePlugin { .. } => "Remote plugin name and valid config JSON are required",
         }
     }
+
+    pub fn plugin_id(&self) -> Option<&str> {
+        match self {
+            Self::RemotePlugin { plugin_id, .. } => Some(plugin_id.as_str()),
+            _ => None,
+        }
+    }
+
 }
 
 #[derive(Debug, Clone)]
@@ -65,6 +98,10 @@ pub struct RemoteEditState {
     pub edit_original_name: Option<String>,
     /// Fetched share list for SMB connections (populated on F5), with cursor.
     pub share_picker: Option<(Vec<String>, usize)>,
+    /// Session returned by remote plugin auth_start, consumed by auth_complete.
+    pub plugin_auth_session_json: Option<String>,
+    /// Authentication shortcuts are only available when creating from F7:Add.
+    pub plugin_auth_enabled: bool,
 }
 
 impl RemoteEditState {
@@ -78,7 +115,7 @@ impl RemoteEditState {
     pub const CANCEL: usize = 7;
 
     pub fn new(kind: RemoteEditKind) -> Self {
-        let fields = match kind {
+        let fields = match &kind {
             RemoteEditKind::Sftp => [
                 String::new(),
                 String::new(),
@@ -87,9 +124,9 @@ impl RemoteEditState {
                 "~".into(),
                 String::new(),
             ],
-            RemoteEditKind::Dropbox => [
-                "Dropbox".into(),
-                String::new(),
+            RemoteEditKind::RemotePlugin { display_name, .. } => [
+                display_name.clone(),
+                "{}".into(),
                 "/".into(),
                 String::new(),
                 String::new(),
@@ -105,6 +142,8 @@ impl RemoteEditState {
             input_cursor,
             edit_original_name: None,
             share_picker: None,
+            plugin_auth_session_json: None,
+            plugin_auth_enabled: true,
         }
     }
 
@@ -133,15 +172,20 @@ impl RemoteEditState {
                 ],
             ),
             RemoteKind::RemotePlugin(plugin) => {
-                let token = serde_json::from_str::<serde_json::Value>(&plugin.config_json)
-                    .ok()
-                    .and_then(|json| json.get("access_token").and_then(serde_json::Value::as_str).map(str::to_string))
-                    .unwrap_or_default();
+                let display_name = discover_remote_plugin_choices()
+                    .into_iter()
+                    .find(|(id, _, _)| *id == plugin.plugin_id)
+                    .map(|(_, name, _)| name)
+                    .unwrap_or_else(|| plugin.plugin_id.clone());
                 (
-                    RemoteEditKind::Dropbox,
+                    RemoteEditKind::RemotePlugin {
+                        plugin_id: plugin.plugin_id.clone(),
+                        display_name,
+                        scheme: plugin.scheme.clone(),
+                    },
                     [
                         profile.name.clone(),
-                        token,
+                        plugin.config_json.clone(),
                         plugin.path.clone().unwrap_or_else(|| "/".to_string()),
                         String::new(),
                         String::new(),
@@ -157,6 +201,8 @@ impl RemoteEditState {
             cursor: 0,
             edit_original_name: Some(profile.name.clone()),
             share_picker: None,
+            plugin_auth_session_json: None,
+            plugin_auth_enabled: false,
         }
     }
 
@@ -182,7 +228,7 @@ impl RemoteEditState {
         } else {
             self.fields[Self::PORT].trim().parse::<u16>().ok()
         };
-        Some(match self.kind {
+        Some(match &self.kind {
             RemoteEditKind::Sftp => RemoteProfile {
                 name: name.to_string(),
                 source: RemoteSource::UserToml,
@@ -212,29 +258,61 @@ impl RemoteEditState {
                     }),
                 }
             }
-            RemoteEditKind::Dropbox => {
-                let token = self.fields[Self::HOST].trim();
-                if token.is_empty() {
+            RemoteEditKind::RemotePlugin { plugin_id, scheme, .. } => {
+                let config_json = self.fields[Self::HOST].trim();
+                if config_json.is_empty() {
+                    return None;
+                }
+                if serde_json::from_str::<serde_json::Value>(config_json).is_err() {
                     return None;
                 }
                 let path = trim_opt(&self.fields[Self::USER]);
-                let config_json = format!(
-                    "{{\"access_token\":\"{}\"}}",
-                    token.replace('\\', "\\\\").replace('"', "\\\"")
-                );
                 RemoteProfile {
                     name: name.to_string(),
                     source: RemoteSource::UserToml,
                     kind: RemoteKind::RemotePlugin(crate::remote::RemotePluginProfile {
-                        plugin_id: "dropbox".to_string(),
-                        scheme: "dropbox".to_string(),
-                        config_json,
+                        plugin_id: plugin_id.clone(),
+                        scheme: scheme.clone(),
+                        config_json: config_json.to_string(),
                         path,
                     }),
                 }
             }
         })
     }
+
+    pub fn is_remote_plugin(&self) -> bool {
+        matches!(&self.kind, RemoteEditKind::RemotePlugin { .. })
+    }
+
+    pub fn plugin_config_json(&self) -> Option<&str> {
+        if self.is_remote_plugin() {
+            Some(self.fields[Self::HOST].trim())
+        } else {
+            None
+        }
+    }
+
+    pub fn plugin_auth_input(&self) -> Option<&str> {
+        if self.is_remote_plugin() {
+            Some(self.fields[Self::PORT].trim())
+        } else {
+            None
+        }
+    }
+}
+
+fn discover_remote_plugin_choices() -> Vec<(String, String, String)> {
+    let Ok(plugins_dir) = crate::plugins::plugins_dir() else {
+        return Vec::new();
+    };
+    let manifests = crate::remote_plugins::discover_remote_rust_plugin_manifests(&plugins_dir)
+        .unwrap_or_default();
+
+    manifests
+        .into_iter()
+        .map(|manifest| (manifest.id.clone(), manifest.name, manifest.id))
+        .collect()
 }
 
 

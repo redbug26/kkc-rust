@@ -232,8 +232,12 @@ pub(super) fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, a
     );
 }
 
-pub(super) fn render_remote_add_menu(f: &mut Frame, cursor: usize, area: Rect) {
-    let choices = RemoteEditKind::all();
+pub(super) fn render_remote_add_menu(
+    f: &mut Frame,
+    choices: &[RemoteEditKind],
+    cursor: usize,
+    area: Rect,
+) {
     let width: u16 = 22;
     let height: u16 = (choices.len() as u16) + 4; // border(2) + title row + items + hint
     let popup = clamp_rect(
@@ -379,7 +383,12 @@ pub(super) fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: R
         Span::styled(" [ Cancel ] ", cancel_style),
     ]));
     lines.push(Line::default());
-    let hint_text = if matches!(state.kind, crate::app::RemoteEditKind::Smb)
+    let hint_text = if state.plugin_auth_enabled
+        && state.is_remote_plugin()
+        && state.cursor == RemoteEditState::PORT
+    {
+        " Tab:Next  F5:Auth start  F6:Auth complete  Esc:Cancel "
+    } else if matches!(&state.kind, crate::app::RemoteEditKind::Smb)
         && state.cursor == RemoteEditState::PATH
         && state.share_picker.is_none()
     {

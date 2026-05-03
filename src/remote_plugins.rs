@@ -1,4 +1,4 @@
-use abi_stable::library::RootModule;
+use abi_stable::library::lib_header_from_path;
 use anyhow::{Context, Result, anyhow};
 use kkc_plugin_api::{KKC_REMOTE_PLUGIN_API_VERSION, RemotePluginModRef};
 use serde::Deserialize;
@@ -20,6 +20,8 @@ pub struct RemoteRustPluginInfo {
 pub struct RemoteRustPluginManifestInfo {
     pub id: String,
     pub name: String,
+    pub version: String,
+    pub description: String,
     pub dir: PathBuf,
 }
 
@@ -58,7 +60,17 @@ pub fn discover_remote_rust_plugins(plugins_dir: &Path) -> Result<Vec<RemoteRust
             ));
             continue;
         };
-        let module = match RemotePluginModRef::load_from_file(&library_path) {
+        crate::viewer::debug_log(&format!(
+            "startup: loading native remote plugin '{}' from {}",
+            manifest.plugin.id,
+            library_path.display()
+        ));
+        // Use lib_header_from_path + init_root_module instead of load_from_file.
+        // load_from_file caches in a process-global static (one per RootModule type),
+        // so loading a second plugin of the same type would reuse the first one.
+        let module = match lib_header_from_path(&library_path)
+            .and_then(|h| h.init_root_module::<RemotePluginModRef>())
+        {
             Ok(module) => module,
             Err(err) => {
                 crate::viewer::debug_log(&format!(
@@ -79,8 +91,8 @@ pub fn discover_remote_rust_plugins(plugins_dir: &Path) -> Result<Vec<RemoteRust
         let metadata = module.metadata()();
         if metadata.id.as_str() != manifest.plugin.id {
             crate::viewer::debug_log(&format!(
-                "Remote plugin '{}' exported id '{}'",
-                manifest.plugin.id, metadata.id
+                "Remote plugin '{}' exported id '{}' (loaded from {})",
+                manifest.plugin.id, metadata.id, library_path.display()
             ));
             continue;
         }
@@ -118,11 +130,45 @@ pub fn discover_remote_rust_plugin_manifests(
         plugins.push(RemoteRustPluginManifestInfo {
             id: manifest.plugin.id,
             name: manifest.plugin.name,
+            version: manifest.plugin.version,
+            description: manifest.plugin.description,
             dir: path,
         });
     }
     plugins.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(plugins)
+}
+
+pub fn debug_log_remote_plugin_library_status(plugin_dir: &Path) -> Result<()> {
+    let manifest_path = plugin_dir.join("plugin.toml");
+    if !manifest_path.is_file() {
+        return Ok(());
+    }
+    let manifest = read_manifest(&manifest_path)?;
+    if manifest.plugin.plugin_type != "remote-rust" {
+        return Ok(());
+    }
+
+    let configured = manifest.remote.library.clone();
+    let candidates = candidate_remote_library_paths(plugin_dir, &configured);
+    if let Some(found) = candidates.iter().find(|p| p.is_file()) {
+        crate::viewer::debug_log(&format!(
+            "remote-plugin-install: '{}' library resolved at {}",
+            manifest.plugin.id,
+            found.display()
+        ));
+    } else {
+        let searched = candidates
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        crate::viewer::debug_log(&format!(
+            "remote-plugin-install: '{}' installed but library '{}' was not found (searched: {})",
+            manifest.plugin.id, configured, searched
+        ));
+    }
+    Ok(())
 }
 
 #[allow(dead_code)]
@@ -138,7 +184,8 @@ pub fn load_remote_plugin(plugin_id: &str) -> Result<RemotePluginModRef> {
                     &manifest.remote.library,
                 ));
             };
-            return RemotePluginModRef::load_from_file(&library_path)
+            return lib_header_from_path(&library_path)
+                .and_then(|h| h.init_root_module::<RemotePluginModRef>())
                 .with_context(|| format!("Loading native remote plugin '{}'", plugin_id));
         }
     }

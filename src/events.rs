@@ -47,6 +47,65 @@ pub(crate) fn fx_shortcut(key: KeyEvent) -> Option<u8> {
     }
 }
 
+fn remote_plugin_auth_start_feedback(auth_session: &str) -> (String, Vec<String>) {
+    let fallback = "Plugin auth started. Complete authentication, then press F6".to_string();
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(auth_session) else {
+        return (fallback, Vec::new());
+    };
+    let field = |name: &str| {
+        value
+            .get(name)
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+    };
+    let auth_type = field("type");
+    let instructions = field("instructions");
+    let message = field("message");
+    let auth_url = field("verification_uri_complete")
+        .or_else(|| field("verification_uri"))
+        .or_else(|| field("auth_url"));
+    let user_code = field("user_code");
+
+    let mut details = Vec::new();
+    if let Some(line) = instructions {
+        details.push(line.to_string());
+    }
+    if let Some(line) = message
+        && details.iter().all(|existing| existing != line)
+    {
+        details.push(line.to_string());
+    }
+    if let Some(url) = auth_url {
+        details.push(format!("Open: {url}"));
+    }
+    if let Some(code) = user_code {
+        details.push(format!("Code: {code}"));
+    }
+
+    let status = match (auth_type, auth_url, user_code) {
+        (Some("device_code"), Some(url), Some(code)) => {
+            format!("Open {url}, enter code {code}, finish sign-in, then press F6")
+        }
+        (Some("device_code"), Some(url), None) => {
+            format!("Open {url}, finish sign-in, then press F6")
+        }
+        (Some("authorization_code_pkce"), Some(url), _) => {
+            format!("Open {url}, paste the returned code/value here, then press F6")
+        }
+        (_, Some(url), Some(code)) => {
+            format!("Open {url}, use code {code}, then press F6")
+        }
+        (_, Some(url), None) => format!("Open {url}, then press F6"),
+        _ => instructions
+            .or(message)
+            .map(ToOwned::to_owned)
+            .unwrap_or(fallback),
+    };
+
+    (status, details)
+}
+
 pub fn handle_event(app: &mut App, event: Event) -> Result<bool> {
     let Event::Key(key) = event else {
         return Ok(false);
@@ -2158,7 +2217,7 @@ fn handle_remote_add_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
         }
         KeyCode::Enter => {
             if let AppMode::RemoteAddMenu(cursor) = app.mode {
-                if let Some(&kind) = choices.get(cursor) {
+                if let Some(kind) = choices.get(cursor).cloned() {
                     app.mode = AppMode::RemoteEdit(crate::app::RemoteEditState::new(kind));
                 }
             }
@@ -2218,9 +2277,91 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(false);
     }
 
+    // ── F5/F6: remote plugin authentication via ABI ───────────────────────
+    if s.plugin_auth_enabled && s.is_remote_plugin() {
+        if fn_key == Some(5) {
+            let Some(plugin_id) = s.kind.plugin_id().map(str::to_string) else {
+                return Ok(false);
+            };
+            let config_json = s.plugin_config_json().unwrap_or("{}");
+            crate::viewer::debug_log(&format!(
+                "remote-plugin-auth: start requested for '{}'",
+                plugin_id
+            ));
+            if serde_json::from_str::<serde_json::Value>(config_json).is_err() {
+                app.set_status("Config JSON must be valid before starting auth");
+                crate::viewer::debug_log(&format!(
+                    "remote-plugin-auth: start rejected for '{}': invalid config json",
+                    plugin_id
+                ));
+                return Ok(false);
+            }
+            match crate::remote::remote_plugin_auth_start(&plugin_id, config_json) {
+                Ok(auth_session) => {
+                    let (status, details) = remote_plugin_auth_start_feedback(&auth_session);
+                    for line in details {
+                        crate::viewer::debug_log(&format!("remote-plugin-auth: {}", line));
+                    }
+                    s.plugin_auth_session_json = Some(auth_session);
+                    s.cursor = crate::app::RemoteEditState::PORT;
+                    s.sync_cursor();
+                    app.set_status(status);
+                }
+                Err(e) => {
+                    crate::viewer::debug_log(&format!(
+                        "remote-plugin-auth: start failed for '{}': {}",
+                        plugin_id, e
+                    ));
+                    app.set_status(format!("Plugin auth start failed: {}", e));
+                }
+            }
+            return Ok(false);
+        }
+        if fn_key == Some(6) {
+            let Some(plugin_id) = s.kind.plugin_id().map(str::to_string) else {
+                return Ok(false);
+            };
+            let Some(auth_session) = s.plugin_auth_session_json.clone() else {
+                app.set_status("Start plugin auth first with F5");
+                return Ok(false);
+            };
+            let config_json = s.plugin_config_json().unwrap_or("{}");
+            let input = s.plugin_auth_input().unwrap_or("");
+            crate::viewer::debug_log(&format!(
+                "remote-plugin-auth: complete requested for '{}'",
+                plugin_id
+            ));
+            match crate::remote::remote_plugin_auth_complete(
+                &plugin_id,
+                config_json,
+                &auth_session,
+                input,
+            ) {
+                Ok(updated_config_json) => {
+                    if serde_json::from_str::<serde_json::Value>(&updated_config_json).is_err() {
+                        app.set_status("Plugin auth returned invalid config JSON");
+                        return Ok(false);
+                    }
+                    s.fields[crate::app::RemoteEditState::HOST] = updated_config_json;
+                    s.fields[crate::app::RemoteEditState::PORT].clear();
+                    s.plugin_auth_session_json = None;
+                    app.set_status("Plugin auth completed");
+                }
+                Err(e) => {
+                    crate::viewer::debug_log(&format!(
+                        "remote-plugin-auth: complete failed for '{}': {}",
+                        plugin_id, e
+                    ));
+                    app.set_status(format!("Plugin auth complete failed: {}", e));
+                }
+            }
+            return Ok(false);
+        }
+    }
+
     // ── F5: fetch SMB share list ──────────────────────────────────────────
     if fn_key == Some(5)
-        && matches!(s.kind, crate::app::RemoteEditKind::Smb)
+        && matches!(&s.kind, crate::app::RemoteEditKind::Smb)
         && s.cursor == crate::app::RemoteEditState::PATH
     {
         let host = s.fields[crate::app::RemoteEditState::HOST]
@@ -2325,6 +2466,9 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
                 if let Some(value) = s.current_value_mut() {
                     value.insert(pos, ch);
                     s.input_cursor += ch.len_utf8();
+                    if s.is_remote_plugin() && s.cursor == crate::app::RemoteEditState::HOST {
+                        s.plugin_auth_session_json = None;
+                    }
                 }
             }
         }

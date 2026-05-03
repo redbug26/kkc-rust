@@ -310,10 +310,36 @@ pub fn plugins_dir() -> Result<PathBuf> {
 }
 
 pub fn plugin_infos() -> Vec<PluginInfo> {
-    PLUGINS
+    let mut plugins = PLUGINS
         .get()
         .and_then(|registry| registry.read().ok().map(|registry| registry.plugin_infos()))
-        .unwrap_or_default()
+        .unwrap_or_default();
+
+    if let Ok(plugins_dir) = ensure_plugins_dir() {
+        let existing_remote_dirs = plugins
+            .iter()
+            .filter(|item| item.kind == "Remote Rust")
+            .map(|item| item.dir.clone())
+            .collect::<std::collections::HashSet<_>>();
+
+        for manifest in crate::remote_plugins::discover_remote_rust_plugin_manifests(&plugins_dir)
+            .unwrap_or_default()
+        {
+            if existing_remote_dirs.contains(&manifest.dir) {
+                continue;
+            }
+            plugins.push(PluginInfo {
+                name: manifest.name,
+                version: manifest.version,
+                kind: "Remote Rust".into(),
+                description: format!("{} (library not loaded)", manifest.description),
+                extensions: vec![manifest.id.clone()],
+                dir: manifest.dir,
+            });
+        }
+    }
+
+    plugins
 }
 
 pub fn installed_plugin_versions_by_dir() -> HashMap<String, String> {
@@ -812,6 +838,14 @@ fn install_plugin_from_store_descriptor(
             install_dir.display()
         )
     })?;
+
+    // Log binary resolution status for remote-rust plugins installed from store.
+    if let Err(err) = crate::remote_plugins::debug_log_remote_plugin_library_status(&install_dir) {
+        crate::viewer::debug_log(&format!(
+            "remote-plugin-install: failed to inspect '{}': {err}",
+            install_dir.display()
+        ));
+    }
     Ok(install_dir)
 }
 
@@ -1745,13 +1779,39 @@ fn load_plugins() -> Result<PluginRegistry> {
     let mut archive_plugins = Vec::new();
     let mut viewer_plugins = Vec::new();
     let mut action_plugins = Vec::new();
-    let remote_rust_plugins = crate::remote_plugins::discover_remote_rust_plugins(&plugins_dir)
+    let remote_rust_manifests =
+        crate::remote_plugins::discover_remote_rust_plugin_manifests(&plugins_dir)
+            .unwrap_or_else(|err| {
+                crate::viewer::debug_log(&format!(
+                    "startup: native remote plugin manifest discovery failed: {err}"
+                ));
+                Vec::new()
+            });
+    let mut remote_rust_plugins = crate::remote_plugins::discover_remote_rust_plugins(&plugins_dir)
         .unwrap_or_else(|err| {
             crate::viewer::debug_log(&format!(
                 "startup: native remote plugin discovery failed: {err}"
             ));
             Vec::new()
         });
+    let loaded_by_id = remote_rust_plugins
+        .iter()
+        .map(|plugin| plugin.id.clone())
+        .collect::<std::collections::HashSet<_>>();
+    for manifest in remote_rust_manifests {
+        if loaded_by_id.contains(&manifest.id) {
+            continue;
+        }
+        remote_rust_plugins.push(crate::remote_plugins::RemoteRustPluginInfo {
+            id: manifest.id.clone(),
+            name: manifest.name,
+            version: manifest.version,
+            description: format!("{} (library not loaded)", manifest.description),
+            scheme: manifest.id,
+            dir: manifest.dir,
+        });
+    }
+    remote_rust_plugins.sort_by(|a, b| a.id.cmp(&b.id));
     let scripts_start = std::time::Instant::now();
     let scripts = plugin_scripts(&plugins_dir)?;
     crate::viewer::debug_log(&format!(

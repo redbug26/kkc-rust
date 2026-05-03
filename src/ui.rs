@@ -297,7 +297,10 @@ pub fn render(f: &mut Frame, app: &App) {
         AppMode::AssocEditor(s) => render_assoc_editor(f, s, f.area()),
         AppMode::RemoteConnect(s) => render_remote_connect(f, s, f.area()),
         AppMode::RemoteEdit(s) => render_remote_edit(f, s, f.area()),
-        AppMode::RemoteAddMenu(cursor) => render_remote_add_menu(f, *cursor, f.area()),
+        AppMode::RemoteAddMenu(cursor) => {
+            let choices = RemoteEditKind::all();
+            render_remote_add_menu(f, &choices, *cursor, f.area())
+        }
         AppMode::RemoteConnecting(s) => render_remote_connecting(f, s, f.area()),
         AppMode::Menu(ms) => render_menu(f, app, ms, f.area()),
         AppMode::QuickSearch => {
