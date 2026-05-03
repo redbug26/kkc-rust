@@ -3557,7 +3557,11 @@ fn handle_dir_bookmarks(app: &mut App, key: KeyEvent) -> Result<bool> {
                 .cloned();
             match selected {
                 Some(BookmarkListItem::AddCurrentDir(_)) => {
-                    app.add_current_dir_bookmark();
+                    if app.add_current_dir_bookmark() {
+                        if let Err(e) = app.save_config() {
+                            app.set_status(format!("Save error: {}", e));
+                        }
+                    }
                 }
                 Some(BookmarkListItem::Existing(idx)) => {
                     let path = app.bookmarks.get(idx).cloned();
@@ -3591,20 +3595,8 @@ fn handle_dir_bookmarks(app: &mut App, key: KeyEvent) -> Result<bool> {
                 None => app.mode = AppMode::Browse,
             }
         }
-        KeyCode::Delete => {
-            if let Some(BookmarkListItem::Existing(idx)) = app
-                .filtered_bookmark_items()
-                .get(app.bookmark_match_pos)
-                .cloned()
-            {
-                if idx < app.bookmarks.len() {
-                    app.bookmarks.remove(idx);
-                    if app.bookmark_cursor >= app.bookmarks.len() && app.bookmark_cursor > 0 {
-                        app.bookmark_cursor -= 1;
-                    }
-                    app.sync_bookmark_cursor();
-                }
-            }
+        KeyCode::F(8) => {
+            delete_selected_bookmark(app);
         }
         KeyCode::Char(ch)
             if !key.modifiers.contains(KeyModifiers::CONTROL)
@@ -3616,6 +3608,24 @@ fn handle_dir_bookmarks(app: &mut App, key: KeyEvent) -> Result<bool> {
         _ => {}
     }
     Ok(false)
+}
+
+fn delete_selected_bookmark(app: &mut App) {
+    if let Some(BookmarkListItem::Existing(idx)) = app
+        .filtered_bookmark_items()
+        .get(app.bookmark_match_pos)
+        .cloned()
+        && idx < app.bookmarks.len()
+    {
+        app.bookmarks.remove(idx);
+        if app.bookmark_cursor >= app.bookmarks.len() && app.bookmark_cursor > 0 {
+            app.bookmark_cursor -= 1;
+        }
+        app.sync_bookmark_cursor();
+        if let Err(e) = app.save_config() {
+            app.set_status(format!("Save error: {}", e));
+        }
+    }
 }
 
 fn handle_plugins(app: &mut App, key: KeyEvent) -> Result<bool> {

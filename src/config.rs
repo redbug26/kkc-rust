@@ -507,10 +507,6 @@ impl Config {
             // (backward compatibility with older single-file configs).
             if let Some(state) = load_state_file()? {
                 apply_state_to_config(&mut cfg, state);
-            } else {
-                // One-shot migration: old installs had runtime state in
-                // config.toml. Persist it immediately into state.toml.
-                write_state_file(&state_from_config(&cfg))?;
             }
 
             Ok(cfg)
@@ -519,13 +515,18 @@ impl Config {
         }
     }
 
-    /// Persist config to disk with organised sections.
+    /// Persist preferences to config.toml.
     pub fn save(&self) -> Result<()> {
         let path = config_path()?;
         let out = self.to_toml_string()?;
 
         fs::write(&path, out).with_context(|| format!("Writing config: {}", path.display()))?;
 
+        Ok(())
+    }
+
+    /// Persist runtime state to state.toml.
+    pub fn save_state(&self) -> Result<()> {
         let state = state_from_config(self);
         write_state_file(&state)?;
         Ok(())

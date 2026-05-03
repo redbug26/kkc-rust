@@ -1172,13 +1172,16 @@ impl App {
         }
     }
 
-    pub fn add_current_dir_bookmark(&mut self) {
+    pub fn add_current_dir_bookmark(&mut self) -> bool {
         let cur = self.current_bookmark_candidate();
         if !self.bookmarks.contains(&cur) {
             self.bookmarks.push(cur);
             self.bookmark_cursor = self.bookmarks.len() - 1;
             self.bookmark_match_pos = 0;
             self.sync_bookmark_cursor();
+            true
+        } else {
+            false
         }
     }
 
@@ -2968,10 +2971,23 @@ impl App {
 
     pub fn save_config(&mut self) -> Result<()> {
         self.normalize_shortcut_overrides();
+        self.config.bookmarks = self.bookmarks.clone();
+        match self.config.save() {
+            Ok(()) => {
+                crate::viewer::debug_log("config: config.toml saved");
+                Ok(())
+            }
+            Err(e) => {
+                crate::viewer::debug_log(&format!("config: config.toml save failed: {e}"));
+                Err(e)
+            }
+        }
+    }
+
+    pub fn save_state(&mut self) -> Result<()> {
         self.config.left = panel_config_for_save(&self.left, &self.left_tabs);
         self.config.right = panel_config_for_save(&self.right, &self.right_tabs);
         self.config.dir_history = self.dir_history.iter().cloned().collect();
-        self.config.bookmarks = self.bookmarks.clone();
         self.config.palette_recent = self.palette_recent.clone();
         self.config.active_panel = match self.active {
             ActivePanel::Left => ActivePanelSide::Left,
@@ -2991,7 +3007,7 @@ impl App {
             &self.terminal.history,
             &self.terminal.output[start..],
         );
-        self.config.save()
+        self.config.save_state()
     }
 }
 

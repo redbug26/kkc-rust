@@ -312,6 +312,9 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
         }
         MenuAction::ToggleFBar => {
             app.config.show_fkey_bar = !app.config.show_fkey_bar;
+            if let Err(e) = app.save_config() {
+                app.set_status(format!("Save error: {}", e));
+            }
         }
         MenuAction::Setup => {
             let cs = ConfigState::from_config(&app.config);

@@ -1916,14 +1916,14 @@ fn load_plugins() -> Result<PluginRegistry> {
         let script_start = std::time::Instant::now();
         let (registered, registered_viewers, registered_actions) = inspect_plugins(&script_path)
             .with_context(|| format!("Loading plugin {}", script_path.display()))?;
-        crate::viewer::debug_log(&format!(
-            "startup: inspected plugin {} in {:.3} ms (archive={}, viewer={}, action={})",
-            script_path.display(),
-            script_start.elapsed().as_secs_f64() * 1000.0,
-            registered.len(),
-            registered_viewers.len(),
-            registered_actions.len()
-        ));
+        // crate::viewer::debug_log(&format!(
+        //     "startup: inspected plugin {} in {:.3} ms (archive={}, viewer={}, action={})",
+        //     script_path.display(),
+        //     script_start.elapsed().as_secs_f64() * 1000.0,
+        //     registered.len(),
+        //     registered_viewers.len(),
+        //     registered_actions.len()
+        // ));
         let plugin_dir = script_path
             .parent()
             .map(Path::to_path_buf)

@@ -245,7 +245,11 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
         }
     }
 
-    app.save_config().ok();
+    // Preferences are saved on change; runtime state is saved on shutdown.
+    match app.save_state() {
+        Ok(()) => viewer::debug_log("shutdown: runtime state saved"),
+        Err(e) => viewer::debug_log(&format!("shutdown: runtime state save failed: {e}")),
+    }
     Ok(())
 }
 

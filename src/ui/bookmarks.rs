@@ -11,8 +11,8 @@ pub(crate) fn dir_bookmarks_shortcuts() -> Vec<FooterShortcut> {
             key: KeyCode::Enter,
         },
         FooterShortcut {
-            label: " \u{232B} :Remove",
-            key: KeyCode::Delete,
+            label: "F8:Remove",
+            key: KeyCode::F(8),
         },
         FooterShortcut {
             label: " \u{238B} :Cancel",
