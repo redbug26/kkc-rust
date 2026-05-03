@@ -208,6 +208,10 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
 }
 
 pub(super) fn handle_mouse_viewer(app: &mut App, mouse: MouseEvent) -> Result<bool> {
+    if let Some(key) = viewer_footer_click_to_key(app, mouse) {
+        return handle_viewer(app, key);
+    }
+
     let AppMode::Viewer(ref mut viewer) = app.mode else {
         return Ok(false);
     };
@@ -259,6 +263,21 @@ pub(super) fn handle_mouse_viewer(app: &mut App, mouse: MouseEvent) -> Result<bo
     }
 
     Ok(false)
+}
+
+fn viewer_footer_click_to_key(app: &App, mouse: MouseEvent) -> Option<KeyEvent> {
+    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        return None;
+    }
+    let AppMode::Viewer(viewer) = &app.mode else {
+        return None;
+    };
+    let (_, height) = crossterm::terminal::size().ok()?;
+    if mouse.row != height.saturating_sub(1) {
+        return None;
+    }
+    let shortcuts = crate::ui::viewer_footer_shortcuts(viewer);
+    crate::ui::footer_shortcut_key_at_column(&shortcuts, 0, mouse.column).map(KeyEvent::from)
 }
 
 fn viewer_mouse_text_layout(viewer: &Viewer) -> Option<(Rect, usize, usize)> {

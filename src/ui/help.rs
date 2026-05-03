@@ -1,5 +1,60 @@
 use super::*;
 
+pub(crate) fn help_shortcuts(view: &crate::help::HelpView) -> Vec<FooterShortcut> {
+    match view {
+        HelpView::Index { .. } => vec![
+            FooterShortcut {
+                label: "\u{238B}:Close",
+                key: KeyCode::Esc,
+            },
+            FooterShortcut {
+                label: "F10:Close",
+                key: KeyCode::F(10),
+            },
+            FooterShortcut {
+                label: "\u{23ce}:Open",
+                key: KeyCode::Enter,
+            },
+        ],
+        HelpView::Topics { .. } => vec![
+            FooterShortcut {
+                label: "\u{238B}:Close",
+                key: KeyCode::Esc,
+            },
+            FooterShortcut {
+                label: "Backspace:Back",
+                key: KeyCode::Backspace,
+            },
+            FooterShortcut {
+                label: "\u{23ce}:Open",
+                key: KeyCode::Enter,
+            },
+        ],
+        HelpView::Page { .. } => vec![
+            FooterShortcut {
+                label: "\u{238B}:Close",
+                key: KeyCode::Esc,
+            },
+            FooterShortcut {
+                label: "Backspace:Back",
+                key: KeyCode::Backspace,
+            },
+            FooterShortcut {
+                label: "PgUpPgDn:Scroll",
+                key: KeyCode::Null,
+            },
+            FooterShortcut {
+                label: "\u{21E5}:NextLink",
+                key: KeyCode::Tab,
+            },
+            FooterShortcut {
+                label: "\u{23ce}:Open",
+                key: KeyCode::Enter,
+            },
+        ],
+    }
+}
+
 pub(super) fn render_help(f: &mut Frame, state: &crate::help::HelpState, area: Rect) {
     let popup = clamp_rect(
         area,
@@ -88,12 +143,8 @@ pub(super) fn render_help_with_title(f: &mut Frame, popup: Rect, title: &str, st
                 })
                 .collect();
             safe_render_widget(f, List::new(items), body);
-            safe_render_widget(
-                f,
-                Paragraph::new(" Esc/F10:Close  Enter:Open topic group ")
-                    .style(Style::default().fg(Color::DarkGray)),
-                footer,
-            );
+            let items = footer_shortcut_items(&help_shortcuts(&state.view));
+            render_shortcut_bar(f, footer, &items, secondary_shortcut_bar_style());
         }
         HelpView::Topics { section, cursor } => {
             let items: Vec<ListItem> = state.system.sections[section]
@@ -116,12 +167,8 @@ pub(super) fn render_help_with_title(f: &mut Frame, popup: Rect, title: &str, st
                 })
                 .collect();
             safe_render_widget(f, List::new(items), body);
-            safe_render_widget(
-                f,
-                Paragraph::new(" Esc:Close  Backspace:Back  Enter:Open page ")
-                    .style(Style::default().fg(Color::DarkGray)),
-                footer,
-            );
+            let items = footer_shortcut_items(&help_shortcuts(&state.view));
+            render_shortcut_bar(f, footer, &items, secondary_shortcut_bar_style());
         }
         HelpView::Page {
             topic,
@@ -137,12 +184,8 @@ pub(super) fn render_help_with_title(f: &mut Frame, popup: Rect, title: &str, st
                     .wrap(Wrap { trim: false }),
                 body,
             );
-            safe_render_widget(
-                f,
-                Paragraph::new(" Esc:Close  Backspace:Back  Up/Down/PgUp/PgDn:Scroll  Tab:Next link  Enter:Open ")
-                    .style(Style::default().fg(Color::DarkGray)),
-                footer,
-            );
+            let items = footer_shortcut_items(&help_shortcuts(&state.view));
+            render_shortcut_bar(f, footer, &items, secondary_shortcut_bar_style());
         }
     }
 }

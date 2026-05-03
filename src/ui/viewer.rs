@@ -1,5 +1,67 @@
 use super::*;
 
+pub(crate) fn viewer_footer_shortcuts(v: &Viewer) -> Vec<FooterShortcut> {
+    if v.is_image_mode() && crate::viewer::kitty_graphics_supported() {
+        vec![
+            FooterShortcut {
+                label: "F10:Close",
+                key: KeyCode::F(10),
+            },
+            FooterShortcut {
+                label: "F4:Mode",
+                key: KeyCode::F(4),
+            },
+            FooterShortcut {
+                label: "F5:Zoom",
+                key: KeyCode::F(5),
+            },
+        ]
+    } else {
+        vec![
+            FooterShortcut {
+                label: "F10:Close",
+                key: KeyCode::F(10),
+            },
+            FooterShortcut {
+                label: "F2:Wrap",
+                key: KeyCode::F(2),
+            },
+            FooterShortcut {
+                label: "F3:LnFeed",
+                key: KeyCode::F(3),
+            },
+            FooterShortcut {
+                label: "F4:Mode",
+                key: KeyCode::F(4),
+            },
+            FooterShortcut {
+                label: "F5:Zoom",
+                key: KeyCode::F(5),
+            },
+            FooterShortcut {
+                label: "F6:Prepro",
+                key: KeyCode::F(6),
+            },
+            FooterShortcut {
+                label: "F7:Search",
+                key: KeyCode::F(7),
+            },
+            FooterShortcut {
+                label: "F8:Enc",
+                key: KeyCode::F(8),
+            },
+            FooterShortcut {
+                label: "F9:Syntax",
+                key: KeyCode::F(9),
+            },
+            FooterShortcut {
+                label: "g:Goto",
+                key: KeyCode::Char('g'),
+            },
+        ]
+    }
+}
+
 pub(crate) fn viewer_area(v: &Viewer, area: Rect) -> Rect {
     // Plugin document views always use the full area (like zoomed) so that
     // (a) no stale file-manager content bleeds through the margins, and
@@ -268,9 +330,9 @@ pub(super) fn render_viewer(
             inner,
         );
         if show_footer {
-            let help = Paragraph::new(" F10:Close  F4:Mode  F5:Zoom ")
-                .style(Style::default().fg(Color::Black).bg(Color::Cyan));
-            f.render_widget(help, footer_area);
+            let shortcuts = viewer_footer_shortcuts(v);
+            let items = footer_shortcut_items(&shortcuts);
+            render_shortcut_bar(f, footer_area, &items, default_shortcut_bar_style());
         }
         return;
     }
@@ -395,9 +457,9 @@ pub(super) fn render_viewer(
             .min(footer_area.x + footer_area.width - 1);
         safe_set_cursor_position(f, cx, footer_area.y);
     } else if show_footer {
-        let help = Paragraph::new(" F10:Close  F2:Wrap  F3:LnFeed  F4:Mode  F5:Zoom  F6:Prepro  F7:Search  F8:Enc  F9:Syntax  g:Goto ")
-            .style(Style::default().fg(Color::Black).bg(Color::Cyan));
-        f.render_widget(help, footer_area);
+        let shortcuts = viewer_footer_shortcuts(v);
+        let items = footer_shortcut_items(&shortcuts);
+        render_shortcut_bar(f, footer_area, &items, default_shortcut_bar_style());
     }
 }
 

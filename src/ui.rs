@@ -18,27 +18,39 @@ use self::bookmarks::{
     render_dir_bookmarks, render_quicksearch_palette, render_store_install_palette,
     render_viewer_plugin_palette,
 };
+pub(crate) use self::bookmarks::dir_bookmarks_shortcuts;
+pub(crate) use self::bookmarks::{store_detect_shortcuts, store_install_shortcuts};
 use self::config::render_config;
 use self::confirm::{render_confirm, render_input};
 use self::copy::{render_copy_dialog, render_copy_progress};
 use self::help::render_help;
+pub(crate) use self::help::help_shortcuts;
 use self::remote::{
     render_remote_add_menu, render_remote_connect, render_remote_connecting, render_remote_edit,
 };
+pub(crate) use self::remote::{
+    remote_add_menu_shortcuts, remote_connect_shortcuts, remote_connecting_shortcuts,
+    remote_edit_shortcuts,
+};
 use self::search::render_search;
+pub(crate) use self::search::search_panel_shortcuts;
 use self::shortcuts::render_shortcut_panel;
 use self::terminal::render_terminal;
 use self::tree_view::render_tree_view;
 pub use self::viewer::{kitty_image_area, kitty_image_area_quick_preview};
 pub(crate) use self::viewer::viewer_area;
+pub(crate) use self::viewer::viewer_footer_shortcuts;
 use self::viewer::{
     menu_dropdown_line, mnemonics_for_labels, render_viewer, render_viewer_goto,
     render_viewer_menu,
 };
 
 use self::command_palette::render_command_palette;
+pub(crate) use self::command_palette::command_palette_shortcuts;
 use self::panel::{render_center_buttons, render_panel_or_file_id};
 use self::plugins::render_plugins;
+pub(crate) use self::plugins::plugins_shortcuts;
+pub(crate) use self::shortcuts::shortcut_panel_shortcuts;
 use crate::app::{
     ActionPaletteState, ActivePanel, App, AppMode, AssocEditorState, BookmarkListItem, ConfigState,
     ConfirmAction, ConfirmDialog, InputDialog, MENU_DATA, MENU_HEADERS, MenuAction, MenuState,
@@ -57,6 +69,7 @@ use crate::remote::RemoteSource;
 use crate::tree_mode::TreeViewState;
 use crate::viewer::{ViewMode, Viewer};
 use chrono::{DateTime, Local};
+use crossterm::event::KeyCode;
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -633,12 +646,146 @@ pub(crate) fn status_line_for_copy(app: &App) -> String {
     )
 }
 
+pub(crate) struct FooterShortcut {
+    pub label: &'static str,
+    pub key: KeyCode,
+}
+
+pub(crate) struct FkeySlot {
+    pub number: u8,
+    pub label: String,
+}
+
+pub(crate) struct ShortcutBarItem {
+    pub key: String,
+    pub label: String,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct ShortcutBarStyle {
+    pub key_fg: Color,
+    pub key_bg: Color,
+    pub label_fg: Color,
+    pub label_bg: Color,
+    pub bar_bg: Color,
+    pub sep_fg: Color,
+}
+
+fn default_shortcut_bar_style() -> ShortcutBarStyle {
+    ShortcutBarStyle {
+        key_fg: CLR_FKEY_NUM,
+        key_bg: CLR_FKEY_NUM_BG,
+        label_fg: CLR_FKEY_LABEL,
+        label_bg: CLR_FKEY_BG,
+        bar_bg: CLR_FKEY_BG,
+        sep_fg: Color::Rgb(152, 130, 102),
+    }
+}
+
+fn secondary_shortcut_bar_style() -> ShortcutBarStyle {
+    ShortcutBarStyle {
+        key_fg: Color::Rgb(230, 238, 255),
+        key_bg: Color::Rgb(52, 73, 110),
+        label_fg: Color::Rgb(198, 212, 238),
+        label_bg: Color::Rgb(30, 36, 52),
+        bar_bg: Color::Rgb(22, 26, 40),
+        sep_fg: Color::Rgb(88, 104, 136),
+    }
+}
+
+fn shortcut_bar_item_width(item: &ShortcutBarItem) -> usize {
+    // [key] + label + trailing separator space
+    UnicodeWidthStr::width(item.key.as_str())
+        + UnicodeWidthStr::width(item.label.as_str())
+        + 4
+}
+
+pub(crate) fn shortcut_bar_item_index_at_column(
+    items: &[ShortcutBarItem],
+    area_x: u16,
+    column: u16,
+) -> Option<usize> {
+    if column < area_x {
+        return None;
+    }
+    let rel_col = column.saturating_sub(area_x) as usize;
+    let mut x = 0usize;
+    for (idx, item) in items.iter().enumerate() {
+        let width = shortcut_bar_item_width(item);
+        if rel_col >= x && rel_col < x + width {
+            return Some(idx);
+        }
+        x += width;
+    }
+    None
+}
+
+pub(crate) fn render_shortcut_bar(
+    f: &mut Frame,
+    area: Rect,
+    items: &[ShortcutBarItem],
+    style: ShortcutBarStyle,
+) {
+    let mut spans = Vec::new();
+    for (idx, item) in items.iter().enumerate() {
+        spans.push(Span::styled(
+            format!(" {} ", item.key),
+            Style::default().fg(style.key_fg).bg(style.key_bg),
+        ));
+        spans.push(Span::styled(
+            format!(":{} ", item.label),
+            Style::default().fg(style.label_fg).bg(style.label_bg),
+        ));
+        if idx + 1 < items.len() {
+            spans.push(Span::styled(" ", Style::default().fg(style.sep_fg).bg(style.bar_bg)));
+        }
+    }
+    f.render_widget(
+        Paragraph::new(Line::from(spans)).style(Style::default().bg(style.bar_bg)),
+        area,
+    );
+}
+
+pub(crate) fn footer_shortcut_items(shortcuts: &[FooterShortcut]) -> Vec<ShortcutBarItem> {
+    shortcuts
+        .iter()
+        .map(|shortcut| {
+            if let Some((key, label)) = shortcut.label.split_once(':') {
+                ShortcutBarItem {
+                    key: key.to_string(),
+                    label: label.to_string(),
+                }
+            } else {
+                ShortcutBarItem {
+                    key: shortcut.label.to_string(),
+                    label: String::new(),
+                }
+            }
+        })
+        .collect()
+}
+
+pub(crate) fn footer_shortcut_key_at_column(
+    shortcuts: &[FooterShortcut],
+    area_x: u16,
+    column: u16,
+) -> Option<KeyCode> {
+    let items = footer_shortcut_items(shortcuts);
+    let idx = shortcut_bar_item_index_at_column(&items, area_x, column)?;
+    shortcuts.get(idx).map(|shortcut| shortcut.key.clone())
+}
+
 // ---------------------------------------------------------------------------
 // Function key bar
 // ---------------------------------------------------------------------------
 
-pub(crate) fn fkey_slots(app: &App) -> Vec<(u8, String)> {
-    let mut labels: Vec<(u8, String)> = (1..=10).map(|n| (n as u8, String::new())).collect();
+pub(crate) fn fkey_slots(app: &App) -> Vec<FkeySlot> {
+    let mut labels: Vec<FkeySlot> = (1..=10)
+        .map(|n| FkeySlot {
+            number: n as u8,
+            label: String::new(),
+        })
+        .collect();
 
     for n in 1..=10 {
         let shortcut = format!("F{}", n);
@@ -647,35 +794,41 @@ pub(crate) fn fkey_slots(app: &App) -> Vec<(u8, String)> {
                 .as_deref()
                 == Some(shortcut.as_str())
         }) {
-            labels[n - 1].1 = fkey_label(entry.label);
+            labels[n - 1].label = fkey_label(entry.label);
         }
     }
-    if labels[1].1.is_empty() {
-        labels[1].1 = "Menu".to_string();
+    if labels[1].label.is_empty() {
+        labels[1].label = "Menu".to_string();
     }
 
     labels
 }
 
+pub(crate) fn fkey_items(app: &App) -> Vec<ShortcutBarItem> {
+    fkey_slots(app)
+        .into_iter()
+        .map(|slot| ShortcutBarItem {
+            key: format!("F{}", slot.number),
+            label: slot.label,
+        })
+        .collect()
+}
+
+pub(crate) fn fkey_number_at_column(app: &App, area_x: u16, column: u16) -> Option<u8> {
+    let slots = fkey_slots(app);
+    let items: Vec<ShortcutBarItem> = slots
+        .iter()
+        .map(|slot| ShortcutBarItem {
+            key: slot.number.to_string(),
+            label: slot.label.clone(),
+        })
+        .collect();
+    let idx = shortcut_bar_item_index_at_column(&items, area_x, column)?;
+    slots.get(idx).map(|slot| slot.number)
+}
+
 fn render_fkey_bar(f: &mut Frame, app: &App, area: Rect) {
-    let labels = fkey_slots(app);
-
-    let mut spans = Vec::new();
-    for (num, label) in labels {
-        spans.push(Span::styled(
-            num.to_string(),
-            Style::default().fg(CLR_FKEY_NUM).bg(CLR_FKEY_NUM_BG),
-        ));
-        spans.push(Span::styled(
-            format!("{} ", label),
-            Style::default().fg(CLR_FKEY_LABEL).bg(CLR_FKEY_BG),
-        ));
-    }
-
-    f.render_widget(
-        Paragraph::new(Line::from(spans)).style(Style::default().bg(CLR_FKEY_BG)),
-        area,
-    );
+    render_shortcut_bar(f, area, &fkey_items(app), default_shortcut_bar_style());
 }
 
 fn fkey_label(label: &str) -> String {

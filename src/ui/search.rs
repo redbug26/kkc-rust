@@ -1,5 +1,86 @@
 use super::*;
 
+pub(crate) fn search_panel_shortcuts(state: &SearchState) -> Vec<FooterShortcut> {
+    if state.input_field == 3 {
+        vec![
+            FooterShortcut {
+                label: "\u{23ce}:GoToFile",
+                key: KeyCode::Enter,
+            },
+            FooterShortcut {
+                label: "UpDown:Navigate",
+                key: KeyCode::Null,
+            },
+            FooterShortcut {
+                label: "PgUpPgDn:Navigate",
+                key: KeyCode::Null,
+            },
+            FooterShortcut {
+                label: "\u{21E5}:Fields",
+                key: KeyCode::Tab,
+            },
+            FooterShortcut {
+                label: "F5:Backend",
+                key: KeyCode::F(5),
+            },
+            FooterShortcut {
+                label: "\u{238B}:Close",
+                key: KeyCode::Esc,
+            },
+        ]
+    } else if state.input_field == 2 {
+        vec![
+            FooterShortcut {
+                label: "\u{23ce}:Search",
+                key: KeyCode::Enter,
+            },
+            FooterShortcut {
+                label: "\u{21E5}:SwitchField",
+                key: KeyCode::Tab,
+            },
+            FooterShortcut {
+                label: "\u{232B}:ResetDir",
+                key: KeyCode::Delete,
+            },
+            FooterShortcut {
+                label: "F5:Backend",
+                key: KeyCode::F(5),
+            },
+            FooterShortcut {
+                label: "\u{238B}:Close",
+                key: KeyCode::Esc,
+            },
+        ]
+    } else {
+        vec![
+            FooterShortcut {
+                label: "\u{23ce}:Search",
+                key: KeyCode::Enter,
+            },
+            FooterShortcut {
+                label: "\u{21E5}:SwitchField",
+                key: KeyCode::Tab,
+            },
+            FooterShortcut {
+                label: "Down:Results",
+                key: KeyCode::Down,
+            },
+            FooterShortcut {
+                label: "F5:Backend",
+                key: KeyCode::F(5),
+            },
+            FooterShortcut {
+                label: "\u{232B}:Reset",
+                key: KeyCode::Delete,
+            },
+            FooterShortcut {
+                label: "\u{238B}:Close",
+                key: KeyCode::Esc,
+            },
+        ]
+    }
+}
+
 pub(super) fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
     // --- popup geometry ---------------------------------------------------
     let width = 100u16.min(area.width.saturating_sub(2));
@@ -357,23 +438,7 @@ pub(super) fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
     }
 
     // --- hint bar ---------------------------------------------------------
-    let hint = match state.input_field {
-        3 => {
-            " \u{23ce}:Go to file   \u{2191}\u{2193} PgUp PgDn:Navigate   Tab:Fields   F5:Backend   Esc:Close "
-        }
-        2 => " \u{23ce}:Search   Tab:Switch field   Del:Reset dir   F5:Backend   Esc:Close ",
-        _ => {
-            " \u{23ce}:Search   Tab:Switch field   \u{2193}:Results   F5:Backend   Del:Reset   Esc:Close "
-        }
-    };
-    safe_render_widget(
-        f,
-        Paragraph::new(Span::styled(
-            hint,
-            Style::default().fg(Color::Rgb(100, 110, 140)),
-        ))
-        .style(Style::default().bg(Color::Rgb(24, 24, 32))),
-        hint_area,
-    );
+    let items = footer_shortcut_items(&search_panel_shortcuts(state));
+    render_shortcut_bar(f, hint_area, &items, secondary_shortcut_bar_style());
 }
 

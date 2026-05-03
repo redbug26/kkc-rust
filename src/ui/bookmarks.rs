@@ -1,5 +1,93 @@
 use super::*;
 
+pub(crate) fn dir_bookmarks_shortcuts() -> Vec<FooterShortcut> {
+    vec![
+        FooterShortcut {
+            label: "🔤:Filter",
+            key: KeyCode::Null,
+        },
+        FooterShortcut {
+            label: "\u{23ce}:OpenAdd",
+            key: KeyCode::Enter,
+        },
+        FooterShortcut {
+            label: "\u{232B}:Remove",
+            key: KeyCode::Delete,
+        },
+        FooterShortcut {
+            label: "\u{238B}:Cancel",
+            key: KeyCode::Esc,
+        },
+    ]
+}
+
+pub(crate) fn store_install_shortcuts(state: &StoreInstallPaletteState) -> Vec<FooterShortcut> {
+    if state.detect.is_some() {
+        vec![
+            FooterShortcut {
+                label: "Space:Toggle",
+                key: KeyCode::Char(' '),
+            },
+            FooterShortcut {
+                label: "LeftRight:Toggle",
+                key: KeyCode::Right,
+            },
+            FooterShortcut {
+                label: "\u{23ce}:Apply",
+                key: KeyCode::Enter,
+            },
+            FooterShortcut {
+                label: "\u{238B}:Cancel",
+                key: KeyCode::Esc,
+            },
+        ]
+    } else {
+        vec![
+            FooterShortcut {
+                label: "\u{23ce}:Install",
+                key: KeyCode::Enter,
+            },
+            FooterShortcut {
+                label: "Ctrl+D:Detect",
+                key: KeyCode::Char('d'),
+            },
+            FooterShortcut {
+                label: "Ctrl+U:Update",
+                key: KeyCode::Char('u'),
+            },
+            FooterShortcut {
+                label: "Ctrl+R:Refresh",
+                key: KeyCode::Char('r'),
+            },
+            FooterShortcut {
+                label: "\u{238B}:Close",
+                key: KeyCode::Esc,
+            },
+        ]
+    }
+}
+
+pub(crate) fn store_detect_shortcuts() -> Vec<FooterShortcut> {
+    vec![
+        FooterShortcut {
+            label: "Space:Toggle",
+            key: KeyCode::Char(' '),
+        },
+        FooterShortcut {
+            label: "LeftRight:Toggle",
+            key: KeyCode::Right,
+        },
+        FooterShortcut {
+            label: "\u{23ce}:Apply",
+            key: KeyCode::Enter,
+        },
+        FooterShortcut {
+            label: "\u{238B}:Cancel",
+            key: KeyCode::Esc,
+        },
+    ]
+}
+
 pub(super) fn render_dir_bookmarks(f: &mut Frame, app: &App, area: Rect) {
     let list_h = app.bookmarks.len().max(3) as u16;
     // 2 border + input + separator + hint + list
@@ -185,27 +273,8 @@ pub(super) fn render_dir_bookmarks(f: &mut Frame, app: &App, area: Rect) {
         list_area,
     );
 
-    // Hint
-    let key_style = Style::default()
-        .fg(CLR_HEADER_FG)
-        .bg(CLR_MENU_DD_BG)
-        .add_modifier(Modifier::BOLD);
-    let txt_style = Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG);
-    safe_render_widget(
-        f,
-        Paragraph::new(Line::from(vec![
-            Span::styled(" Type", key_style),
-            Span::styled(":Filter  ", txt_style),
-            Span::styled(" Enter", key_style),
-            Span::styled(":Open/Add  ", txt_style),
-            Span::styled("Del", key_style),
-            Span::styled(":Remove  ", txt_style),
-            Span::styled("Esc", key_style),
-            Span::styled(":Cancel", txt_style),
-        ]))
-        .style(Style::default().bg(CLR_MENU_DD_BG)),
-        hint_area,
-    );
+    let hint_items = footer_shortcut_items(&dir_bookmarks_shortcuts());
+    render_shortcut_bar(f, hint_area, &hint_items, default_shortcut_bar_style());
 }
 
 // ---------------------------------------------------------------------------
@@ -752,24 +821,14 @@ pub(super) fn render_store_install_palette(
             height: 1,
         },
     );
-    safe_render_widget(
-        f,
-        Paragraph::new(
-            "  [ Enter Install ]  [ Ctrl+D Detect ]  [ Ctrl+U Update ]  [ Ctrl+R Refresh ]  [ Esc Close ]",
-        )
-        .style(
-            Style::default()
-                .fg(Color::Rgb(255, 252, 226))
-                .bg(CLR_BUTTON_BG)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Rect {
-            x: inner.x,
-            y: button_y,
-            width: inner.width,
-            height: 1,
-        },
-    );
+    let hint_area = Rect {
+        x: inner.x,
+        y: button_y,
+        width: inner.width,
+        height: 1,
+    };
+    let hint_items = footer_shortcut_items(&store_install_shortcuts(state));
+    render_shortcut_bar(f, hint_area, &hint_items, secondary_shortcut_bar_style());
 
     if let Some(detect) = state.detect.as_ref() {
         render_store_detect_dialog(f, detect, inner);
@@ -1280,17 +1339,14 @@ fn render_store_detect_dialog(
         }
     }
 
-    safe_render_widget(
-        f,
-        Paragraph::new("  [ Enter Apply ]  [ Esc Cancel ]")
-            .style(Style::default().fg(CLR_BUTTON_FG).bg(CLR_BUTTON_BG)),
-        Rect {
-            x: inner.x,
-            y: inner.y + inner.height.saturating_sub(1),
-            width: inner.width,
-            height: 1,
-        },
-    );
+    let hint_area = Rect {
+        x: inner.x,
+        y: inner.y + inner.height.saturating_sub(1),
+        width: inner.width,
+        height: 1,
+    };
+    let hint_items = footer_shortcut_items(&store_detect_shortcuts());
+    render_shortcut_bar(f, hint_area, &hint_items, secondary_shortcut_bar_style());
 }
 
 // ---------------------------------------------------------------------------

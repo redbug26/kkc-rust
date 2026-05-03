@@ -6,6 +6,27 @@ const CLR_SHORTCUT: Color = Color::Rgb(100, 195, 220);
 const CLR_FN_NAME: Color = Color::Rgb(90, 90, 90);
 const CLR_MARKER: Color = Color::Rgb(255, 220, 80);
 
+pub(crate) fn shortcut_panel_shortcuts() -> Vec<FooterShortcut> {
+    vec![
+        FooterShortcut {
+            label: "\u{23ce}:Set",
+            key: KeyCode::Enter,
+        },
+        FooterShortcut {
+            label: "\u{232B}:Clear",
+            key: KeyCode::Delete,
+        },
+        FooterShortcut {
+            label: "R:Default",
+            key: KeyCode::Char('r'),
+        },
+        FooterShortcut {
+            label: "\u{238B}:Close",
+            key: KeyCode::Esc,
+        },
+    ]
+}
+
 pub(super) fn render_shortcut_panel(
     f: &mut Frame,
     app: &App,
@@ -151,15 +172,12 @@ pub(super) fn render_shortcut_panel(
         );
     }
 
-    let hint = " Enter Set  Delete Clear  R Default  Esc Close ";
-    safe_render_widget(
-        f,
-        Paragraph::new(hint).style(Style::default().fg(CLR_BUTTON_FG).bg(CLR_BUTTON_BG)),
-        Rect {
-            x: inner.x,
-            y: inner.y + inner.height.saturating_sub(1),
-            width: inner.width,
-            height: 1,
-        },
-    );
+    let hint_area = Rect {
+        x: inner.x,
+        y: inner.y + inner.height.saturating_sub(1),
+        width: inner.width,
+        height: 1,
+    };
+    let hint_items = footer_shortcut_items(&shortcut_panel_shortcuts());
+    render_shortcut_bar(f, hint_area, &hint_items, default_shortcut_bar_style());
 }

@@ -12,6 +12,23 @@ const CLR_RECENT_STAR: Color = Color::Rgb(255, 190, 60);
 // Width reserved for right-aligned shortcut column (e.g. "Ctrl+F1" = 7 + padding)
 const SHORT_W: usize = 11;
 
+pub(crate) fn command_palette_shortcuts() -> Vec<FooterShortcut> {
+    vec![
+        FooterShortcut {
+            label: "\u{23ce}:Run",
+            key: KeyCode::Enter,
+        },
+        FooterShortcut {
+            label: "UpDown:Navigate",
+            key: KeyCode::Null,
+        },
+        FooterShortcut {
+            label: "\u{238B}:Close",
+            key: KeyCode::Esc,
+        },
+    ]
+}
+
 pub(super) fn render_command_palette(
     f: &mut Frame,
     app: &App,
@@ -232,16 +249,12 @@ pub(super) fn render_command_palette(
     }
 
     // ── Hint bar ──────────────────────────────────────────────────────────
-    let hint_y = inner.y + inner.height.saturating_sub(1);
-    safe_render_widget(
-        f,
-        Paragraph::new("  \u{23ce} Run   Esc Close ")
-            .style(Style::default().fg(CLR_BUTTON_FG).bg(CLR_BUTTON_BG)),
-        Rect {
-            x: inner.x,
-            y: hint_y,
-            width: inner.width,
-            height: 1,
-        },
-    );
+    let hint_area = Rect {
+        x: inner.x,
+        y: inner.y + inner.height.saturating_sub(1),
+        width: inner.width,
+        height: 1,
+    };
+    let hint_items = footer_shortcut_items(&command_palette_shortcuts());
+    render_shortcut_bar(f, hint_area, &hint_items, secondary_shortcut_bar_style());
 }

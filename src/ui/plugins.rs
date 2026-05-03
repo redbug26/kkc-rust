@@ -1,5 +1,26 @@
 use super::*;
 
+pub(crate) fn plugins_shortcuts() -> Vec<FooterShortcut> {
+    vec![
+        FooterShortcut {
+            label: "\u{23ce}:OpenDir",
+            key: KeyCode::Enter,
+        },
+        FooterShortcut {
+            label: "Ctrl+S:Store",
+            key: KeyCode::Char('s'),
+        },
+        FooterShortcut {
+            label: "\u{232B}:Remove",
+            key: KeyCode::Delete,
+        },
+        FooterShortcut {
+            label: "\u{238B}:Close",
+            key: KeyCode::Esc,
+        },
+    ]
+}
+
 pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
     let matches = s.filtered_indices();
     let total = matches.len();
@@ -132,22 +153,14 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
             height: 1,
         },
     );
-    safe_render_widget(
-        f,
-        Paragraph::new("  [ Enter Open Dir ]  [ Ctrl+S Store ]  [ Del Remove ]  [ Esc Close ]")
-            .style(
-                Style::default()
-                    .fg(Color::Rgb(255, 252, 226))
-                    .bg(CLR_BUTTON_BG)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        Rect {
-            x: inner.x,
-            y: button_y,
-            width: inner.width,
-            height: 1,
-        },
-    );
+    let hint_area = Rect {
+        x: inner.x,
+        y: button_y,
+        width: inner.width,
+        height: 1,
+    };
+    let hint_items = footer_shortcut_items(&plugins_shortcuts());
+    render_shortcut_bar(f, hint_area, &hint_items, default_shortcut_bar_style());
 
     // ── Body area (between dir separator and footer separator) ──────────
     let body_y = inner.y + 4;

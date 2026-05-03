@@ -2,6 +2,126 @@ use super::*;
 use super::bookmarks::highlight_tokens;
 use crate::remote::RemoteKind;
 
+pub(crate) fn remote_connect_shortcuts() -> Vec<FooterShortcut> {
+    vec![
+        FooterShortcut {
+            label: "🔤:Filter",
+            key: KeyCode::Null,
+        },
+        FooterShortcut {
+            label: "\u{23ce}:Connect",
+            key: KeyCode::Enter,
+        },
+        FooterShortcut {
+            label: "\u{21E5}:SSH",
+            key: KeyCode::Tab,
+        },
+        FooterShortcut {
+            label: "F6:Edit",
+            key: KeyCode::F(6),
+        },
+        FooterShortcut {
+            label: "F7:Add",
+            key: KeyCode::F(7),
+        },
+        FooterShortcut {
+            label: "\u{238B}:Cancel",
+            key: KeyCode::Esc,
+        },
+    ]
+}
+
+pub(crate) fn remote_add_menu_shortcuts() -> Vec<FooterShortcut> {
+    vec![
+        FooterShortcut {
+            label: "UpDown:Select",
+            key: KeyCode::Null,
+        },
+        FooterShortcut {
+            label: "\u{23ce}:OK",
+            key: KeyCode::Enter,
+        },
+        FooterShortcut {
+            label: "\u{238B}:Cancel",
+            key: KeyCode::Esc,
+        },
+    ]
+}
+
+pub(crate) fn remote_edit_shortcuts(state: &RemoteEditState) -> Vec<FooterShortcut> {
+    if state.plugin_auth_enabled && state.is_remote_plugin() && state.cursor == RemoteEditState::PORT
+    {
+        vec![
+            FooterShortcut {
+                label: "\u{21E5}:Next",
+                key: KeyCode::Tab,
+            },
+            FooterShortcut {
+                label: "F5:AuthStart",
+                key: KeyCode::F(5),
+            },
+            FooterShortcut {
+                label: "F6:AuthDone",
+                key: KeyCode::F(6),
+            },
+            FooterShortcut {
+                label: "\u{238B}:Cancel",
+                key: KeyCode::Esc,
+            },
+        ]
+    } else if matches!(&state.kind, crate::app::RemoteEditKind::Smb)
+        && state.cursor == RemoteEditState::PATH
+        && state.share_picker.is_none()
+    {
+        vec![
+            FooterShortcut {
+                label: "\u{21E5}:Next",
+                key: KeyCode::Tab,
+            },
+            FooterShortcut {
+                label: "F5:Shares",
+                key: KeyCode::F(5),
+            },
+            FooterShortcut {
+                label: "\u{238B}:Cancel",
+                key: KeyCode::Esc,
+            },
+        ]
+    } else {
+        vec![
+            FooterShortcut {
+                label: "\u{21E5}:Next",
+                key: KeyCode::Tab,
+            },
+            FooterShortcut {
+                label: "\u{23ce}:Select",
+                key: KeyCode::Enter,
+            },
+            FooterShortcut {
+                label: "\u{238B}:Cancel",
+                key: KeyCode::Esc,
+            },
+        ]
+    }
+}
+
+pub(crate) fn remote_connecting_shortcuts() -> Vec<FooterShortcut> {
+    vec![
+        FooterShortcut {
+            label: "\u{238B}:Abort",
+            key: KeyCode::Esc,
+        },
+        FooterShortcut {
+            label: "\u{23ce}:Abort",
+            key: KeyCode::Enter,
+        },
+        FooterShortcut {
+            label: "F10:Abort",
+            key: KeyCode::F(10),
+        },
+    ]
+}
+
 pub(super) fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, area: Rect) {
     let width = 76u16.min(area.width.saturating_sub(4));
     let height = 20u16.min(area.height.saturating_sub(2)).max(10);
@@ -224,12 +344,8 @@ pub(super) fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, a
             .collect()
     };
     safe_render_widget(f, List::new(items), list_area);
-    safe_render_widget(
-        f,
-        Paragraph::new(" Type:Filter  Enter:Connect  Tab:SSH  F6:Edit  F7:Add  Esc:Cancel ")
-            .style(Style::default().fg(CLR_BUTTON_FG).bg(CLR_STATUS_BG)),
-        hint_area,
-    );
+    let hint_items = footer_shortcut_items(&remote_connect_shortcuts());
+    render_shortcut_bar(f, hint_area, &hint_items, secondary_shortcut_bar_style());
 }
 
 pub(super) fn render_remote_add_menu(
@@ -297,12 +413,8 @@ pub(super) fn render_remote_add_menu(
         width: inner.width,
         height: 1,
     };
-    safe_render_widget(
-        f,
-        Paragraph::new(" ↑↓:Select  Enter:OK  Esc ")
-            .style(Style::default().fg(CLR_BUTTON_FG).bg(CLR_STATUS_BG)),
-        hint_row,
-    );
+    let hint_items = footer_shortcut_items(&remote_add_menu_shortcuts());
+    render_shortcut_bar(f, hint_row, &hint_items, secondary_shortcut_bar_style());
 }
 
 pub(super) fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: Rect) {
@@ -383,28 +495,20 @@ pub(super) fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: R
         Span::styled(" [ Cancel ] ", cancel_style),
     ]));
     lines.push(Line::default());
-    let hint_text = if state.plugin_auth_enabled
-        && state.is_remote_plugin()
-        && state.cursor == RemoteEditState::PORT
-    {
-        " Tab:Next  F5:Auth start  F6:Auth complete  Esc:Cancel "
-    } else if matches!(&state.kind, crate::app::RemoteEditKind::Smb)
-        && state.cursor == RemoteEditState::PATH
-        && state.share_picker.is_none()
-    {
-        " Tab:Next  F5:Browse shares  Esc:Cancel "
-    } else {
-        " Tab/Shift-Tab:Next  Enter:Select  Esc:Cancel "
-    };
-    lines.push(Line::from(Span::styled(
-        hint_text,
-        Style::default().fg(CLR_UNKNOWN).bg(CLR_MENU_DD_BG),
-    )));
+    lines.push(Line::default());
     safe_render_widget(
         f,
         Paragraph::new(lines).style(Style::default().bg(CLR_MENU_DD_BG)),
         inner,
     );
+    let hint_row = Rect {
+        x: inner.x,
+        y: inner.y + labels.len() as u16 + 3,
+        width: inner.width,
+        height: 1,
+    };
+    let hint_items = footer_shortcut_items(&remote_edit_shortcuts(state));
+    render_shortcut_bar(f, hint_row, &hint_items, secondary_shortcut_bar_style());
     if state.cursor < 6 {
         let cursor_x =
             (inner.x + 9 + state.input_cursor as u16).min(inner.x + inner.width.saturating_sub(2));
@@ -529,15 +633,20 @@ pub(super) fn render_remote_connecting(f: &mut Frame, state: &RemoteConnectingSt
             Style::default().fg(CLR_HEADER_FG).bg(CLR_MENU_DD_BG),
         )),
         Line::default(),
-        Line::from(Span::styled(
-            " Esc/Enter/F10:Abort ",
-            Style::default().fg(CLR_UNKNOWN).bg(CLR_MENU_DD_BG),
-        )),
+        Line::default(),
     ];
     f.render_widget(
         Paragraph::new(lines).style(Style::default().bg(CLR_MENU_DD_BG)),
         inner,
     );
+    let hint_row = Rect {
+        x: inner.x,
+        y: inner.y + inner.height.saturating_sub(1),
+        width: inner.width,
+        height: 1,
+    };
+    let hint_items = footer_shortcut_items(&remote_connecting_shortcuts());
+    render_shortcut_bar(f, hint_row, &hint_items, secondary_shortcut_bar_style());
 }
 
 // ---------------------------------------------------------------------------

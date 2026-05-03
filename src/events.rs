@@ -180,6 +180,14 @@ fn handle_mouse(app: &mut App, mouse: MouseEvent) -> Result<bool> {
         AppMode::CopyDialog(_) => handle_mouse_copy_dialog(app, mouse),
         AppMode::RemoteAddMenu(_) => handle_mouse_remote_add_menu(app, mouse),
         AppMode::RemoteEdit(_) => handle_mouse_remote_edit(app, mouse),
+        AppMode::RemoteConnecting(_) => handle_mouse_remote_connecting(app, mouse),
+        AppMode::DirBookmarks => handle_mouse_dir_bookmarks(app, mouse),
+        AppMode::Plugins(_) => handle_mouse_plugins(app, mouse),
+        AppMode::ShortcutPanel(_) => handle_mouse_shortcut_panel(app, mouse),
+        AppMode::CommandPalette(_) => handle_mouse_command_palette(app, mouse),
+        AppMode::Help(_) => handle_mouse_help(app, mouse),
+        AppMode::SearchPanel(_) => handle_mouse_search_panel(app, mouse),
+        AppMode::StoreInstallPalette(_) => handle_mouse_store_install_palette(app, mouse),
         _ => Ok(false),
     }
 }
@@ -231,20 +239,13 @@ fn handle_mouse_remote_connect(app: &mut App, mouse: MouseEvent) -> Result<bool>
             }
 
             if point_in_rect(mouse.column, mouse.row, hint_area)
-                && let Some(hit) = remote_connect_hint_hit(hint_area, mouse.column)
+                && let Some(key) = crate::ui::footer_shortcut_key_at_column(
+                    &crate::ui::remote_connect_shortcuts(),
+                    hint_area.x,
+                    mouse.column,
+                )
             {
-                match hit {
-                    RemoteConnectHintHit::Ssh => {
-                        launch_ssh_for_profile(app)?;
-                    }
-                    RemoteConnectHintHit::Edit => {
-                        app.open_remote_edit();
-                    }
-                    RemoteConnectHintHit::Add => {
-                        app.open_remote_add_menu();
-                    }
-                }
-                return Ok(false);
+                return handle_remote_connect(app, KeyEvent::from(key));
             }
         }
         MouseEventKind::ScrollUp => {
@@ -276,11 +277,26 @@ fn handle_mouse_remote_add_menu(app: &mut App, mouse: MouseEvent) -> Result<bool
     }
     let choices = RemoteEditKind::all();
     let (popup, inner) = remote_add_menu_rect(area, choices.len());
+    let hint_row = Rect {
+        x: inner.x,
+        y: inner.y + choices.len() as u16,
+        width: inner.width,
+        height: 1,
+    };
 
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
             if !point_in_rect(mouse.column, mouse.row, popup) {
                 return Ok(false);
+            }
+            if point_in_rect(mouse.column, mouse.row, hint_row)
+                && let Some(key) = crate::ui::footer_shortcut_key_at_column(
+                    &crate::ui::remote_add_menu_shortcuts(),
+                    hint_row.x,
+                    mouse.column,
+                )
+            {
+                return handle_remote_add_menu(app, KeyEvent::from(key));
             }
             if mouse.row >= inner.y && mouse.row < inner.y + choices.len() as u16 {
                 let idx = (mouse.row - inner.y) as usize;
@@ -372,6 +388,7 @@ fn handle_mouse_remote_edit(app: &mut App, mouse: MouseEvent) -> Result<bool> {
         }
 
         let button_y = inner.y + labels.len() as u16 + 1;
+        let hint_y = inner.y + labels.len() as u16 + 3;
         if mouse.row == button_y {
             let save_rect = Rect {
                 x: inner.x,
@@ -393,6 +410,15 @@ fn handle_mouse_remote_edit(app: &mut App, mouse: MouseEvent) -> Result<bool> {
                 action = ClickAction::Cancel;
             }
         }
+
+        if mouse.row == hint_y {
+            let shortcuts = crate::ui::remote_edit_shortcuts(s);
+            if let Some(key) =
+                crate::ui::footer_shortcut_key_at_column(&shortcuts, inner.x, mouse.column)
+            {
+                return handle_remote_edit(app, KeyEvent::from(key));
+            }
+        }
     }
 
     match action {
@@ -400,6 +426,516 @@ fn handle_mouse_remote_edit(app: &mut App, mouse: MouseEvent) -> Result<bool> {
         ClickAction::Cancel => handle_remote_edit(app, KeyEvent::from(KeyCode::Enter)),
         ClickAction::None => Ok(false),
     }
+}
+
+fn handle_mouse_dir_bookmarks(app: &mut App, mouse: MouseEvent) -> Result<bool> {
+    let Some(area) = terminal_rect() else {
+        return Ok(false);
+    };
+    if handle_status_copy_click(app, mouse, area) {
+        return Ok(false);
+    }
+
+    let (_popup, _inner, list_area, hint_area) = dir_bookmarks_rect(area, app.bookmarks.len());
+
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            if point_in_rect(mouse.column, mouse.row, hint_area)
+                && let Some(key) = crate::ui::footer_shortcut_key_at_column(
+                    &crate::ui::dir_bookmarks_shortcuts(),
+                    hint_area.x,
+                    mouse.column,
+                )
+                && key != KeyCode::Null
+            {
+                return handle_dir_bookmarks(app, KeyEvent::from(key));
+            }
+
+            if point_in_rect(mouse.column, mouse.row, list_area) {
+                let row = (mouse.row - list_area.y) as usize;
+                let rows = list_area.height as usize;
+                let scroll = if app.bookmark_match_pos >= rows && rows > 0 {
+                    app.bookmark_match_pos - rows + 1
+                } else {
+                    0
+                };
+                let clicked = scroll + row;
+                let total = app.filtered_bookmark_items().len();
+                if total > 0 {
+                    let same = app.bookmark_match_pos == clicked;
+                    app.bookmark_match_pos = clicked.min(total.saturating_sub(1));
+                    if same {
+                        return handle_dir_bookmarks(app, KeyEvent::from(KeyCode::Enter));
+                    }
+                }
+            }
+        }
+        MouseEventKind::ScrollUp => {
+            if point_in_rect(mouse.column, mouse.row, list_area) {
+                app.move_prev_bookmark();
+            }
+        }
+        MouseEventKind::ScrollDown => {
+            if point_in_rect(mouse.column, mouse.row, list_area) {
+                app.move_next_bookmark();
+            }
+        }
+        _ => {}
+    }
+
+    Ok(false)
+}
+
+fn handle_mouse_shortcut_panel(app: &mut App, mouse: MouseEvent) -> Result<bool> {
+    let Some(area) = terminal_rect() else {
+        return Ok(false);
+    };
+    if handle_status_copy_click(app, mouse, area) {
+        return Ok(false);
+    }
+
+    let AppMode::ShortcutPanel(state) = &app.mode else {
+        return Ok(false);
+    };
+    let (_popup, _inner, list_area, hint_area) = shortcut_panel_rect(area, state.filtered_indices().len());
+
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            if point_in_rect(mouse.column, mouse.row, hint_area)
+                && let Some(key) = crate::ui::footer_shortcut_key_at_column(
+                    &crate::ui::shortcut_panel_shortcuts(),
+                    hint_area.x,
+                    mouse.column,
+                )
+            {
+                return handle_shortcut_panel(app, KeyEvent::from(key));
+            }
+
+            if point_in_rect(mouse.column, mouse.row, list_area) {
+                let row = (mouse.row - list_area.y) as usize;
+                let list_h = list_area.height as usize;
+                let current = if let AppMode::ShortcutPanel(s) = &app.mode {
+                    s.cursor
+                } else {
+                    0
+                };
+                let scroll = if current >= list_h {
+                    current - list_h + 1
+                } else {
+                    0
+                };
+                let clicked = scroll + row;
+                if let AppMode::ShortcutPanel(ref mut s) = app.mode {
+                    let total = s.filtered_indices().len();
+                    if total > 0 {
+                        let same = s.cursor == clicked;
+                        s.cursor = clicked.min(total.saturating_sub(1));
+                        if same {
+                            return handle_shortcut_panel(app, KeyEvent::from(KeyCode::Enter));
+                        }
+                    }
+                }
+            }
+        }
+        MouseEventKind::ScrollUp => {
+            if point_in_rect(mouse.column, mouse.row, list_area) {
+                return handle_shortcut_panel(app, KeyEvent::from(KeyCode::Up));
+            }
+        }
+        MouseEventKind::ScrollDown => {
+            if point_in_rect(mouse.column, mouse.row, list_area) {
+                return handle_shortcut_panel(app, KeyEvent::from(KeyCode::Down));
+            }
+        }
+        _ => {}
+    }
+
+    Ok(false)
+}
+
+fn handle_mouse_plugins(app: &mut App, mouse: MouseEvent) -> Result<bool> {
+    let Some(area) = terminal_rect() else {
+        return Ok(false);
+    };
+    if handle_status_copy_click(app, mouse, area) {
+        return Ok(false);
+    }
+
+    let AppMode::Plugins(state) = &app.mode else {
+        return Ok(false);
+    };
+    let (_popup, _inner, left_list, hint_area) = plugins_rect(area, state);
+
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            if point_in_rect(mouse.column, mouse.row, hint_area)
+                && let Some(key) = crate::ui::footer_shortcut_key_at_column(
+                    &crate::ui::plugins_shortcuts(),
+                    hint_area.x,
+                    mouse.column,
+                )
+            {
+                if key == KeyCode::Char('s') {
+                    return handle_plugins(
+                        app,
+                        KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL),
+                    );
+                }
+                return handle_plugins(app, KeyEvent::from(key));
+            }
+
+            if point_in_rect(mouse.column, mouse.row, left_list) {
+                let row = (mouse.row - left_list.y) as usize;
+                let list_h = left_list.height as usize;
+                let current = if let AppMode::Plugins(s) = &app.mode {
+                    s.cursor
+                } else {
+                    0
+                };
+                let scroll = if current < list_h {
+                    0
+                } else {
+                    current.saturating_sub(list_h.saturating_sub(1))
+                };
+                let clicked = scroll + row;
+                if let AppMode::Plugins(ref mut s) = app.mode {
+                    let total = s.filtered_indices().len();
+                    if total > 0 {
+                        let same = s.cursor == clicked;
+                        s.cursor = clicked.min(total.saturating_sub(1));
+                        if same {
+                            return handle_plugins(app, KeyEvent::from(KeyCode::Enter));
+                        }
+                    }
+                }
+            }
+        }
+        MouseEventKind::ScrollUp => {
+            if point_in_rect(mouse.column, mouse.row, left_list) {
+                return handle_plugins(app, KeyEvent::from(KeyCode::Up));
+            }
+        }
+        MouseEventKind::ScrollDown => {
+            if point_in_rect(mouse.column, mouse.row, left_list) {
+                return handle_plugins(app, KeyEvent::from(KeyCode::Down));
+            }
+        }
+        _ => {}
+    }
+
+    Ok(false)
+}
+
+fn handle_mouse_command_palette(app: &mut App, mouse: MouseEvent) -> Result<bool> {
+    let Some(area) = terminal_rect() else {
+        return Ok(false);
+    };
+    if handle_status_copy_click(app, mouse, area) {
+        return Ok(false);
+    }
+
+    let item_count = if let AppMode::CommandPalette(s) = &app.mode {
+        s.filtered_indices().len()
+    } else {
+        0
+    };
+    let (_popup, _inner, list_area, hint_area) = command_palette_rect(area, item_count);
+
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            if point_in_rect(mouse.column, mouse.row, hint_area)
+                && let Some(key) = crate::ui::footer_shortcut_key_at_column(
+                    &crate::ui::command_palette_shortcuts(),
+                    hint_area.x,
+                    mouse.column,
+                )
+                && key != KeyCode::Null
+            {
+                return handle_command_palette(app, KeyEvent::from(key));
+            }
+
+            if point_in_rect(mouse.column, mouse.row, list_area)
+                && let AppMode::CommandPalette(ref mut s) = app.mode
+            {
+                let row = (mouse.row - list_area.y) as usize;
+                let list_h = list_area.height as usize;
+                let scroll = if s.match_pos >= list_h {
+                    s.match_pos - list_h + 1
+                } else {
+                    0
+                };
+                let clicked = scroll + row;
+                let indices = s.filtered_indices();
+                if clicked < indices.len() && indices[clicked] != crate::app::PALETTE_SEP {
+                    let same = s.match_pos == clicked;
+                    s.match_pos = clicked;
+                    if same {
+                        return handle_command_palette(app, KeyEvent::from(KeyCode::Enter));
+                    }
+                }
+            }
+        }
+        MouseEventKind::ScrollUp => {
+            if point_in_rect(mouse.column, mouse.row, list_area) {
+                return handle_command_palette(app, KeyEvent::from(KeyCode::Up));
+            }
+        }
+        MouseEventKind::ScrollDown => {
+            if point_in_rect(mouse.column, mouse.row, list_area) {
+                return handle_command_palette(app, KeyEvent::from(KeyCode::Down));
+            }
+        }
+        _ => {}
+    }
+
+    Ok(false)
+}
+
+fn handle_mouse_help(app: &mut App, mouse: MouseEvent) -> Result<bool> {
+    let Some(area) = terminal_rect() else {
+        return Ok(false);
+    };
+    if handle_status_copy_click(app, mouse, area) {
+        return Ok(false);
+    }
+    let (_popup, _inner, body, footer) = help_rect(area);
+
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            if point_in_rect(mouse.column, mouse.row, footer)
+                && let AppMode::Help(state) = &app.mode
+                && let Some(key) = crate::ui::footer_shortcut_key_at_column(
+                    &crate::ui::help_shortcuts(&state.view),
+                    footer.x,
+                    mouse.column,
+                )
+                && key != KeyCode::Null
+            {
+                return handle_help(app, KeyEvent::from(key));
+            }
+
+            if point_in_rect(mouse.column, mouse.row, body)
+                && let AppMode::Help(ref mut state) = app.mode
+            {
+                match state.view {
+                    crate::help::HelpView::Index { ref mut cursor } => {
+                        let row = (mouse.row - body.y) as usize;
+                        if row < state.system.sections.len() {
+                            let same = *cursor == row;
+                            *cursor = row;
+                            if same {
+                                return handle_help(app, KeyEvent::from(KeyCode::Enter));
+                            }
+                        }
+                    }
+                    crate::help::HelpView::Topics {
+                        section,
+                        ref mut cursor,
+                    } => {
+                        let row = (mouse.row - body.y) as usize;
+                        let len = state.system.sections[section].topics.len();
+                        if row < len {
+                            let same = *cursor == row;
+                            *cursor = row;
+                            if same {
+                                return handle_help(app, KeyEvent::from(KeyCode::Enter));
+                            }
+                        }
+                    }
+                    crate::help::HelpView::Page { .. } => {}
+                }
+            }
+        }
+        MouseEventKind::ScrollUp => {
+            if point_in_rect(mouse.column, mouse.row, body) {
+                return handle_help(app, KeyEvent::from(KeyCode::Up));
+            }
+        }
+        MouseEventKind::ScrollDown => {
+            if point_in_rect(mouse.column, mouse.row, body) {
+                return handle_help(app, KeyEvent::from(KeyCode::Down));
+            }
+        }
+        _ => {}
+    }
+
+    Ok(false)
+}
+
+fn handle_mouse_search_panel(app: &mut App, mouse: MouseEvent) -> Result<bool> {
+    let Some(area) = terminal_rect() else {
+        return Ok(false);
+    };
+    if handle_status_copy_click(app, mouse, area) {
+        return Ok(false);
+    }
+
+    let (_popup, inner, results_list, hint_area) = search_panel_rect(area);
+
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            if point_in_rect(mouse.column, mouse.row, hint_area)
+                && let AppMode::SearchPanel(state) = &app.mode
+                && let Some(key) = crate::ui::footer_shortcut_key_at_column(
+                    &crate::ui::search_panel_shortcuts(state),
+                    hint_area.x,
+                    mouse.column,
+                )
+                && key != KeyCode::Null
+            {
+                return handle_search(app, KeyEvent::from(key));
+            }
+
+            if mouse.row >= inner.y + 1 && mouse.row <= inner.y + 3
+                && let AppMode::SearchPanel(ref mut s) = app.mode
+            {
+                s.input_field = (mouse.row - (inner.y + 1)) as usize;
+                return Ok(false);
+            }
+
+            if point_in_rect(mouse.column, mouse.row, results_list)
+                && let AppMode::SearchPanel(ref mut s) = app.mode
+                && !s.results.is_empty()
+            {
+                let row = (mouse.row - results_list.y) as usize;
+                let clicked = s.scroll + row;
+                let same = s.input_field == 3 && s.cursor == clicked;
+                s.input_field = 3;
+                s.cursor = clicked.min(s.results.len().saturating_sub(1));
+                if same {
+                    return handle_search(app, KeyEvent::from(KeyCode::Enter));
+                }
+            }
+        }
+        MouseEventKind::ScrollUp => {
+            if point_in_rect(mouse.column, mouse.row, results_list) {
+                return handle_search(app, KeyEvent::from(KeyCode::Up));
+            }
+        }
+        MouseEventKind::ScrollDown => {
+            if point_in_rect(mouse.column, mouse.row, results_list) {
+                return handle_search(app, KeyEvent::from(KeyCode::Down));
+            }
+        }
+        _ => {}
+    }
+
+    Ok(false)
+}
+
+fn handle_mouse_store_install_palette(app: &mut App, mouse: MouseEvent) -> Result<bool> {
+    let Some(area) = terminal_rect() else {
+        return Ok(false);
+    };
+    if handle_status_copy_click(app, mouse, area) {
+        return Ok(false);
+    }
+
+    let AppMode::StoreInstallPalette(state) = &app.mode else {
+        return Ok(false);
+    };
+
+    if state.detect.is_some() {
+        let (_popup, _inner, list_area, hint_area) = store_detect_rect(area);
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                if point_in_rect(mouse.column, mouse.row, hint_area)
+                    && let Some(key) = crate::ui::footer_shortcut_key_at_column(
+                        &crate::ui::store_detect_shortcuts(),
+                        hint_area.x,
+                        mouse.column,
+                    )
+                {
+                    return handle_store_install_palette(app, KeyEvent::from(key));
+                }
+
+                if point_in_rect(mouse.column, mouse.row, list_area)
+                    && let AppMode::StoreInstallPalette(ref mut s) = app.mode
+                    && let Some(detect) = &mut s.detect
+                {
+                    let row = (mouse.row - list_area.y) as usize;
+                    let list_h = list_area.height as usize;
+                    let start = if detect.cursor >= list_h {
+                        detect.cursor.saturating_sub(list_h.saturating_sub(1))
+                    } else {
+                        0
+                    };
+                    let clicked = start + row;
+                    if clicked < detect.items.len() {
+                        detect.cursor = clicked;
+                    }
+                }
+            }
+            MouseEventKind::ScrollUp => {
+                if point_in_rect(mouse.column, mouse.row, list_area) {
+                    return handle_store_install_palette(app, KeyEvent::from(KeyCode::Up));
+                }
+            }
+            MouseEventKind::ScrollDown => {
+                if point_in_rect(mouse.column, mouse.row, list_area) {
+                    return handle_store_install_palette(app, KeyEvent::from(KeyCode::Down));
+                }
+            }
+            _ => {}
+        }
+        return Ok(false);
+    }
+
+    let (_popup, _inner, left_list, hint_area) = store_install_rect(area, state);
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            if point_in_rect(mouse.column, mouse.row, hint_area)
+                && let AppMode::StoreInstallPalette(s) = &app.mode
+                && let Some(key) = crate::ui::footer_shortcut_key_at_column(
+                    &crate::ui::store_install_shortcuts(s),
+                    hint_area.x,
+                    mouse.column,
+                )
+            {
+                if matches!(key, KeyCode::Char('d') | KeyCode::Char('u') | KeyCode::Char('r')) {
+                    return handle_store_install_palette(
+                        app,
+                        KeyEvent::new(key, KeyModifiers::CONTROL),
+                    );
+                }
+                return handle_store_install_palette(app, KeyEvent::from(key));
+            }
+
+            if point_in_rect(mouse.column, mouse.row, left_list)
+                && let AppMode::StoreInstallPalette(ref mut s) = app.mode
+            {
+                let row = (mouse.row - left_list.y) as usize;
+                let list_h = left_list.height as usize;
+                let total = s.filtered_indices().len();
+                if total > 0 {
+                    let scroll = if s.match_pos < list_h {
+                        0
+                    } else {
+                        s.match_pos.saturating_sub(list_h.saturating_sub(1))
+                    };
+                    let clicked = scroll + row;
+                    let same = s.match_pos == clicked;
+                    s.match_pos = clicked.min(total.saturating_sub(1));
+                    if same {
+                        return handle_store_install_palette(app, KeyEvent::from(KeyCode::Enter));
+                    }
+                }
+            }
+        }
+        MouseEventKind::ScrollUp => {
+            if point_in_rect(mouse.column, mouse.row, left_list) {
+                return handle_store_install_palette(app, KeyEvent::from(KeyCode::Up));
+            }
+        }
+        MouseEventKind::ScrollDown => {
+            if point_in_rect(mouse.column, mouse.row, left_list) {
+                return handle_store_install_palette(app, KeyEvent::from(KeyCode::Down));
+            }
+        }
+        _ => {}
+    }
+
+    Ok(false)
 }
 
 fn handle_mouse_browse(app: &mut App, mouse: MouseEvent) -> Result<bool> {
@@ -421,7 +957,7 @@ fn handle_mouse_browse(app: &mut App, mouse: MouseEvent) -> Result<bool> {
 
             if let Some(fkey_area) = layout.fkey
                 && point_in_rect(mouse.column, mouse.row, fkey_area)
-                && let Some(fnum) = fkey_number_hit(app, fkey_area, mouse.column)
+                && let Some(fnum) = crate::ui::fkey_number_at_column(app, fkey_area.x, mouse.column)
                 && let Some(action) = fkey_action_for_number(app, fnum)
             {
                 app.set_status(format!(
@@ -733,28 +1269,6 @@ fn main_mouse_layout(app: &App, area: Rect) -> MainMouseLayout {
             None
         },
     }
-}
-
-fn fkey_number_hit(app: &App, area: Rect, column: u16) -> Option<u8> {
-    let slots = crate::ui::fkey_slots(app);
-    let mut x = area.x;
-    for (n, label) in slots {
-        let width = 1 + label.len() as u16 + 1;
-        let rect = Rect {
-            x,
-            y: area.y,
-            width,
-            height: area.height.max(1),
-        };
-        if point_in_rect(column, area.y, rect) {
-            return Some(n);
-        }
-        x = x.saturating_add(width);
-        if x >= area.right() {
-            break;
-        }
-    }
-    None
 }
 
 fn fkey_action_for_number(app: &App, n: u8) -> Option<MenuAction> {
@@ -1125,6 +1639,355 @@ fn remote_connect_rect(area: Rect) -> (Rect, Rect, Rect, Rect) {
     (popup, inner, list_area, hint_area)
 }
 
+fn help_rect(area: Rect) -> (Rect, Rect, Rect, Rect) {
+    let popup = clamp_rect_local(
+        area,
+        Rect {
+            x: area.x + 1,
+            y: area.y + 1,
+            width: area.width.saturating_sub(2),
+            height: area.height.saturating_sub(2),
+        },
+    );
+    let inner = inset_rect(popup, 1, 1);
+    let body = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: inner.width,
+        height: inner.height.saturating_sub(1),
+    };
+    let footer = Rect {
+        x: inner.x,
+        y: inner.y + inner.height.saturating_sub(1),
+        width: inner.width,
+        height: 1,
+    };
+    (popup, inner, body, footer)
+}
+
+fn search_panel_rect(area: Rect) -> (Rect, Rect, Rect, Rect) {
+    let width = 100u16.min(area.width.saturating_sub(2));
+    let height = (area.height * 4 / 5).clamp(18, area.height.saturating_sub(2));
+    let popup = clamp_rect_local(
+        area,
+        Rect {
+            x: area.x + area.width.saturating_sub(width) / 2,
+            y: area.y + area.height.saturating_sub(height) / 2,
+            width,
+            height,
+        },
+    );
+    let inner = inset_rect(popup, 1, 1);
+    let input_h = 5u16.min(inner.height);
+    let results_area = Rect {
+        x: inner.x,
+        y: inner.y + input_h,
+        width: inner.width,
+        height: inner.height.saturating_sub(input_h + 1),
+    };
+    let results_body = Rect {
+        x: results_area.x,
+        y: results_area.y + 1,
+        width: results_area.width,
+        height: results_area.height.saturating_sub(1),
+    };
+    let result_inner = Rect {
+        x: results_body.x,
+        y: results_body.y + 1,
+        width: results_body.width,
+        height: results_body.height.saturating_sub(1),
+    };
+    let hint_area = Rect {
+        x: inner.x,
+        y: inner.y + inner.height.saturating_sub(1),
+        width: inner.width,
+        height: 1,
+    };
+    (popup, inner, result_inner, hint_area)
+}
+
+fn command_palette_rect(area: Rect, item_count: usize) -> (Rect, Rect, Rect, Rect) {
+    let w = area.width.saturating_sub(4).min(72).max(54);
+    let visible = (item_count as u16).min(18).max(3);
+    let h = (visible + 5).min(area.height.saturating_sub(3)).max(8);
+    let popup = clamp_rect_local(
+        area,
+        Rect {
+            x: area.x + (area.width.saturating_sub(w)) / 2,
+            y: area.y + 2,
+            width: w,
+            height: h,
+        },
+    );
+    let inner = inset_rect(popup, 1, 1);
+    let list_h = inner.height.saturating_sub(3);
+    let list_area = Rect {
+        x: inner.x,
+        y: inner.y + 2,
+        width: inner.width,
+        height: list_h,
+    };
+    let hint_area = Rect {
+        x: inner.x,
+        y: inner.y + inner.height.saturating_sub(1),
+        width: inner.width,
+        height: 1,
+    };
+    (popup, inner, list_area, hint_area)
+}
+
+fn store_install_rect(
+    area: Rect,
+    state: &crate::app::StoreInstallPaletteState,
+) -> (Rect, Rect, Rect, Rect) {
+    let w: u16 = area.width.saturating_sub(4).min(140).max(90);
+    let h: u16 = area.height.saturating_sub(4).min(30).max(22);
+    let popup = clamp_rect_local(
+        area,
+        Rect {
+            x: area.x + (area.width.saturating_sub(w)) / 2,
+            y: area.y + (area.height.saturating_sub(h)) / 2,
+            width: w,
+            height: h,
+        },
+    );
+    let inner = inset_rect(popup, 1, 1);
+    let button_y = inner.y + inner.height.saturating_sub(1);
+    let footer_sep_y = button_y.saturating_sub(1);
+    let body_y = inner.y + 3;
+    let body_h = footer_sep_y.saturating_sub(body_y);
+    let body = Rect {
+        x: inner.x,
+        y: body_y,
+        width: inner.width,
+        height: body_h,
+    };
+    let max_name = state
+        .items
+        .iter()
+        .map(|p| p.name.len() + 18)
+        .max()
+        .unwrap_or(8);
+    let left_w = ((max_name + 4) as u16)
+        .clamp(36, 64)
+        .min(body.width.saturating_sub(30));
+    let left_area = Rect {
+        x: body.x,
+        y: body.y,
+        width: left_w,
+        height: body.height,
+    };
+    let left_list = Rect {
+        x: left_area.x,
+        y: left_area.y + 1,
+        width: left_area.width,
+        height: left_area.height.saturating_sub(1),
+    };
+    let hint_area = Rect {
+        x: inner.x,
+        y: button_y,
+        width: inner.width,
+        height: 1,
+    };
+    (popup, inner, left_list, hint_area)
+}
+
+fn store_detect_rect(area: Rect) -> (Rect, Rect, Rect, Rect) {
+    let w: u16 = area.width.saturating_sub(4).min(140).max(90);
+    let h: u16 = area.height.saturating_sub(4).min(30).max(22);
+    let store_popup = clamp_rect_local(
+        area,
+        Rect {
+            x: area.x + (area.width.saturating_sub(w)) / 2,
+            y: area.y + (area.height.saturating_sub(h)) / 2,
+            width: w,
+            height: h,
+        },
+    );
+    let store_inner = inset_rect(store_popup, 1, 1);
+    let width = store_inner.width.saturating_sub(4).min(104).max(56);
+    let height = store_inner.height.saturating_sub(4).min(18).max(10);
+    let popup = Rect {
+        x: store_inner.x + store_inner.width.saturating_sub(width) / 2,
+        y: store_inner.y + store_inner.height.saturating_sub(height) / 2,
+        width,
+        height,
+    };
+    let inner = inset_rect(popup, 1, 1);
+    let list = Rect {
+        x: inner.x,
+        y: inner.y + 3,
+        width: inner.width,
+        height: inner.height.saturating_sub(5),
+    };
+    let hint = Rect {
+        x: inner.x,
+        y: inner.y + inner.height.saturating_sub(1),
+        width: inner.width,
+        height: 1,
+    };
+    (popup, inner, list, hint)
+}
+
+fn dir_bookmarks_rect(area: Rect, bookmark_count: usize) -> (Rect, Rect, Rect, Rect) {
+    let list_h = bookmark_count.max(3) as u16;
+    let height = (list_h + 5).min(area.height.saturating_sub(4)).max(8);
+    let width = 64u16.min(area.width.saturating_sub(4));
+    let popup = clamp_rect_local(
+        area,
+        Rect {
+            x: (area.width.saturating_sub(width)) / 2 + area.x,
+            y: (area.height.saturating_sub(height)) / 2 + area.y,
+            width,
+            height,
+        },
+    );
+    let inner = inset_rect(popup, 1, 1);
+    let list_area = Rect {
+        x: inner.x,
+        y: inner.y + 2,
+        width: inner.width,
+        height: inner.height.saturating_sub(3),
+    };
+    let hint_area = Rect {
+        x: inner.x,
+        y: inner.y + inner.height.saturating_sub(1),
+        width: inner.width,
+        height: 1,
+    };
+    (popup, inner, list_area, hint_area)
+}
+
+fn shortcut_panel_rect(area: Rect, total: usize) -> (Rect, Rect, Rect, Rect) {
+    let w = area.width.saturating_sub(4).min(86).max(58);
+    let visible = (total as u16).min(20).max(4);
+    let h = (visible + 5).min(area.height.saturating_sub(3)).max(9);
+    let popup = clamp_rect_local(
+        area,
+        Rect {
+            x: area.x + area.width.saturating_sub(w) / 2,
+            y: area.y + 2,
+            width: w,
+            height: h,
+        },
+    );
+    let inner = inset_rect(popup, 1, 1);
+    let list_area = Rect {
+        x: inner.x,
+        y: inner.y + 2,
+        width: inner.width,
+        height: inner.height.saturating_sub(3),
+    };
+    let hint_area = Rect {
+        x: inner.x,
+        y: inner.y + inner.height.saturating_sub(1),
+        width: inner.width,
+        height: 1,
+    };
+    (popup, inner, list_area, hint_area)
+}
+
+fn plugins_rect(area: Rect, s: &crate::app::PluginsState) -> (Rect, Rect, Rect, Rect) {
+    let w: u16 = area.width.saturating_sub(4).min(130).max(80);
+    let h: u16 = area.height.saturating_sub(4).min(28).max(20);
+    let popup = clamp_rect_local(
+        area,
+        Rect {
+            x: area.x + (area.width.saturating_sub(w)) / 2,
+            y: area.y + (area.height.saturating_sub(h)) / 2,
+            width: w,
+            height: h,
+        },
+    );
+    let inner = inset_rect(popup, 1, 1);
+    let button_y = inner.y + inner.height.saturating_sub(1);
+    let footer_sep_y = button_y.saturating_sub(1);
+    let body_y = inner.y + 4;
+    let body_h = footer_sep_y.saturating_sub(body_y);
+    let body = Rect {
+        x: inner.x,
+        y: body_y,
+        width: inner.width,
+        height: body_h,
+    };
+    let max_name = s
+        .plugins
+        .iter()
+        .map(|p| {
+            let src = crate::plugins::plugin_source_label(&p.dir, &s.plugins_dir);
+            p.name.len() + src.len() + 6
+        })
+        .max()
+        .unwrap_or(8);
+    let left_w = ((max_name + 4) as u16)
+        .clamp(32, 56)
+        .min(body.width.saturating_sub(28));
+    let left_area = Rect {
+        x: body.x,
+        y: body.y,
+        width: left_w,
+        height: body.height,
+    };
+    let left_list = Rect {
+        x: left_area.x,
+        y: left_area.y + 1,
+        width: left_area.width,
+        height: left_area.height.saturating_sub(1),
+    };
+    let hint_area = Rect {
+        x: inner.x,
+        y: button_y,
+        width: inner.width,
+        height: 1,
+    };
+    (popup, inner, left_list, hint_area)
+}
+
+fn remote_connecting_rect(area: Rect) -> (Rect, Rect, Rect) {
+    let width = 46u16.min(area.width.saturating_sub(4)).max(30);
+    let height = 7u16.min(area.height.saturating_sub(2)).max(6);
+    let popup = clamp_rect_local(
+        area,
+        Rect {
+            x: area.x + area.width.saturating_sub(width) / 2,
+            y: area.y + area.height.saturating_sub(height) / 2,
+            width,
+            height,
+        },
+    );
+    let inner = inset_rect(popup, 1, 1);
+    let hint = Rect {
+        x: inner.x,
+        y: inner.y + inner.height.saturating_sub(1),
+        width: inner.width,
+        height: 1,
+    };
+    (popup, inner, hint)
+}
+
+fn handle_mouse_remote_connecting(app: &mut App, mouse: MouseEvent) -> Result<bool> {
+    let Some(area) = terminal_rect() else {
+        return Ok(false);
+    };
+    if handle_status_copy_click(app, mouse, area) {
+        return Ok(false);
+    }
+    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        return Ok(false);
+    }
+    let (_popup, _inner, hint) = remote_connecting_rect(area);
+    if point_in_rect(mouse.column, mouse.row, hint)
+        && let Some(key) = crate::ui::footer_shortcut_key_at_column(
+            &crate::ui::remote_connecting_shortcuts(),
+            hint.x,
+            mouse.column,
+        )
+    {
+        return handle_remote_connecting(app, KeyEvent::from(key));
+    }
+    Ok(false)
+}
+
 fn handle_status_copy_click(app: &mut App, mouse: MouseEvent, area: Rect) -> bool {
     if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
         return false;
@@ -1139,34 +2002,6 @@ fn handle_status_copy_click(app: &mut App, mouse: MouseEvent, area: Rect) -> boo
         Err(err) => app.set_status(format!("Clipboard error: {}", err)),
     }
     true
-}
-
-enum RemoteConnectHintHit {
-    Ssh,
-    Edit,
-    Add,
-}
-
-fn remote_connect_hint_hit(hint_area: Rect, column: u16) -> Option<RemoteConnectHintHit> {
-    const HINT: &str = " Type:Filter  Enter:Connect  Tab:SSH  F6:Edit  F7:Add  Esc:Cancel ";
-    let col = column.saturating_sub(hint_area.x) as usize;
-
-    let in_token = |token: &str| {
-        HINT.find(token)
-            .map(|start| col >= start && col < start + token.len())
-            .unwrap_or(false)
-    };
-
-    if in_token("Tab:SSH") {
-        return Some(RemoteConnectHintHit::Ssh);
-    }
-    if in_token("F6:Edit") {
-        return Some(RemoteConnectHintHit::Edit);
-    }
-    if in_token("F7:Add") {
-        return Some(RemoteConnectHintHit::Add);
-    }
-    None
 }
 
 fn clamp_rect_local(area: Rect, rect: Rect) -> Rect {
