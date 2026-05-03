@@ -854,67 +854,72 @@ fn format_from_mime_type(mime_type: &str) -> Option<&'static str> {
 }
 
 fn zip_mime_type(data: &[u8], ext: &str) -> Option<&'static str> {
-    let mut archive = ZipArchive::new(Cursor::new(data)).ok()?;
-    let mut has_content_types = false;
-    let mut has_word = false;
-    let mut has_excel = false;
-    let mut has_powerpoint = false;
-    let mut has_macro_word = false;
-    let mut has_macro_excel = false;
-    let mut has_macro_powerpoint = false;
-    let mut odf_mime = None;
+    if let Ok(mut archive) = ZipArchive::new(Cursor::new(data)) {
+        let mut has_content_types = false;
+        let mut has_word = false;
+        let mut has_excel = false;
+        let mut has_powerpoint = false;
+        let mut has_macro_word = false;
+        let mut has_macro_excel = false;
+        let mut has_macro_powerpoint = false;
+        let mut odf_mime = None;
 
-    for idx in 0..archive.len().min(256) {
-        let Ok(mut file) = archive.by_index(idx) else {
-            continue;
-        };
-        let name = file.name().to_ascii_lowercase();
-        match name.as_str() {
-            "[content_types].xml" => has_content_types = true,
-            "word/document.xml" => has_word = true,
-            "xl/workbook.xml" => has_excel = true,
-            "ppt/presentation.xml" => has_powerpoint = true,
-            "word/vbaproject.bin" => has_macro_word = true,
-            "xl/vbaproject.bin" => has_macro_excel = true,
-            "ppt/vbaproject.bin" => has_macro_powerpoint = true,
-            "mimetype" => {
-                use std::io::Read;
-                let mut value = String::new();
-                if file.read_to_string(&mut value).is_ok() {
-                    odf_mime = Some(value.trim().to_string());
+        for idx in 0..archive.len().min(256) {
+            let Ok(mut file) = archive.by_index(idx) else {
+                continue;
+            };
+            let name = file.name().to_ascii_lowercase();
+            match name.as_str() {
+                "[content_types].xml" => has_content_types = true,
+                "word/document.xml" => has_word = true,
+                "xl/workbook.xml" => has_excel = true,
+                "ppt/presentation.xml" => has_powerpoint = true,
+                "word/vbaproject.bin" => has_macro_word = true,
+                "xl/vbaproject.bin" => has_macro_excel = true,
+                "ppt/vbaproject.bin" => has_macro_powerpoint = true,
+                "mimetype" => {
+                    use std::io::Read;
+                    let mut value = String::new();
+                    if file.read_to_string(&mut value).is_ok() {
+                        odf_mime = Some(value.trim().to_string());
+                    }
                 }
+                _ => {}
             }
-            _ => {}
+        }
+
+        if let Some(mime) = odf_mime.as_deref().and_then(open_document_mime_type) {
+            return Some(mime);
+        }
+        if has_content_types {
+            if has_word {
+                return Some(if has_macro_word || ext == "docm" {
+                    "application/vnd.ms-word.document.macroEnabled.12"
+                } else {
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                });
+            }
+            if has_excel {
+                return Some(if has_macro_excel || ext == "xlsm" {
+                    "application/vnd.ms-excel.sheet.macroEnabled.12"
+                } else {
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                });
+            }
+            if has_powerpoint {
+                return Some(if has_macro_powerpoint || ext == "pptm" {
+                    "application/vnd.ms-powerpoint.presentation.macroEnabled.12"
+                } else {
+                    "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                });
+            }
         }
     }
 
-    if let Some(mime) = odf_mime.as_deref().and_then(open_document_mime_type) {
-        return Some(mime);
-    }
-    if has_content_types {
-        if has_word {
-            return Some(if has_macro_word || ext == "docm" {
-                "application/vnd.ms-word.document.macroEnabled.12"
-            } else {
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            });
-        }
-        if has_excel {
-            return Some(if has_macro_excel || ext == "xlsm" {
-                "application/vnd.ms-excel.sheet.macroEnabled.12"
-            } else {
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            });
-        }
-        if has_powerpoint {
-            return Some(if has_macro_powerpoint || ext == "pptm" {
-                "application/vnd.ms-powerpoint.presentation.macroEnabled.12"
-            } else {
-                "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-            });
-        }
-    }
+    zip_mime_type_from_ext(ext)
+}
 
+fn zip_mime_type_from_ext(ext: &str) -> Option<&'static str> {
     match ext {
         "docx" => Some("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
         "xlsx" => Some("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
@@ -2388,6 +2393,42 @@ mod tests {
             .expect("zip should be detected");
         assert_eq!(info.mime_type, "application/zip");
         assert_eq!(info.format, "ZIP archive");
+        assert_eq!(info.kind, IdfKind::Archive);
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn epub_zip_keeps_epub_mime_when_probe_is_truncated() {
+        let path = std::env::temp_dir().join(format!("kkc-idf-{}.epub", std::process::id()));
+        {
+            let file = fs::File::create(&path).expect("create epub");
+            let mut zip = zip::ZipWriter::new(file);
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+            zip.start_file("mimetype", options).expect("mimetype");
+            zip.write_all(b"application/epub+zip")
+                .expect("write mimetype");
+            zip.start_file("META-INF/container.xml", options)
+                .expect("container xml");
+            zip.write_all(
+                br#"<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#,
+            )
+            .expect("write container");
+            zip.start_file("OEBPS/content.opf", options)
+                .expect("content opf");
+            zip.write_all(br#"<package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata/></package>"#)
+                .expect("write opf");
+            zip.start_file("OEBPS/payload.bin", options)
+                .expect("payload");
+            zip.write_all(&vec![0x5a; 80 * 1024]).expect("write payload");
+            zip.finish().expect("finish epub");
+        }
+
+        let info = probe_file(&path)
+            .expect("probe should not fail")
+            .expect("epub should be detected");
+        assert_eq!(info.mime_type, "application/epub+zip");
         assert_eq!(info.kind, IdfKind::Archive);
 
         let _ = fs::remove_file(path);
