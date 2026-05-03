@@ -298,7 +298,7 @@ impl Viewer {
             fs::read(path).with_context(|| format!("Reading {}", path.display()))?
         };
         let line_feed = LineFeedMode::Mixed;
-        let encoding = EncodingMode::Cp437;
+        let encoding = EncodingMode::Plain;
         let image = detect_image_info(path, &raw);
         let mode = detect_mode(path, &raw);
         let mut viewer = Self {

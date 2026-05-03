@@ -57,11 +57,7 @@ pub(super) fn text_lines(
     let lines = split_line_bytes(&processed, line_feed)
         .into_iter()
         .map(|bytes| {
-            bytes
-                .into_iter()
-                .map(|b| byte_to_display_char(b, encoding))
-                .collect::<String>()
-                .replace('\t', "    ")
+            decode_line_bytes(&bytes, encoding)
         })
         .collect::<Vec<_>>();
     if lines.is_empty() {
@@ -233,12 +229,75 @@ fn byte_to_display_char(b: u8, encoding: EncodingMode) -> char {
     }
 }
 
+fn decode_line_bytes(bytes: &[u8], encoding: EncodingMode) -> String {
+    match encoding {
+        EncodingMode::Plain => {
+            let mut out = String::new();
+            for ch in String::from_utf8_lossy(bytes).chars() {
+                match ch {
+                    '\t' => out.push_str("    "),
+                    ch if ch.is_control() => out.push(' '),
+                    _ => out.push(ch),
+                }
+            }
+            out
+        }
+        EncodingMode::Cp437 => bytes
+            .iter()
+            .map(|&b| byte_to_display_char(b, encoding))
+            .collect::<String>()
+            .replace('\t', "    "),
+    }
+}
+
+fn decode_utf8_char_at(data: &[u8], start: usize) -> (char, usize) {
+    let first = data[start];
+    if first.is_ascii() {
+        let ch = first as char;
+        return if ch.is_control() { (' ', 1) } else { (ch, 1) };
+    }
+
+    let width = if (first & 0b1110_0000) == 0b1100_0000 {
+        2
+    } else if (first & 0b1111_0000) == 0b1110_0000 {
+        3
+    } else if (first & 0b1111_1000) == 0b1111_0000 {
+        4
+    } else {
+        1
+    };
+
+    if width == 1 || start + width > data.len() {
+        return ('\u{FFFD}', 1);
+    }
+
+    if data[start + 1..start + width]
+        .iter()
+        .any(|b| (b & 0b1100_0000) != 0b1000_0000)
+    {
+        return ('\u{FFFD}', 1);
+    }
+
+    match std::str::from_utf8(&data[start..start + width]) {
+        Ok(s) => {
+            let ch = s.chars().next().unwrap_or('\u{FFFD}');
+            if ch.is_control() {
+                (' ', width)
+            } else {
+                (ch, width)
+            }
+        }
+        Err(_) => ('\u{FFFD}', 1),
+    }
+}
+
 fn ansi_to_text(data: &[u8], line_feed: LineFeedMode, encoding: EncodingMode) -> Vec<String> {
     let mut lines = vec![String::new()];
     let mut row = 0usize;
     let mut col = 0usize;
     let mut i = 0usize;
     while i < data.len() {
+        let mut step = 1usize;
         let b = data[i];
         if b == 0x1b && i + 1 < data.len() && data[i + 1] == b'[' {
             i += 2;
@@ -318,12 +377,19 @@ fn ansi_to_text(data: &[u8], line_feed: LineFeedMode, encoding: EncodingMode) ->
                 }
             }
             _ => {
-                let ch = byte_to_display_char(b, encoding);
+                let ch = match encoding {
+                    EncodingMode::Plain => {
+                        let (ch, consumed) = decode_utf8_char_at(data, i);
+                        step = consumed;
+                        ch
+                    }
+                    EncodingMode::Cp437 => byte_to_display_char(b, encoding),
+                };
                 put_char(&mut lines, row, col, ch);
                 col += 1;
             }
         }
-        i += 1;
+        i += step;
     }
     lines.into_iter().map(|l| l.replace('\t', "    ")).collect()
 }
@@ -401,3 +467,22 @@ const CP437: [char; 256] = [
     'õ', 'Õ', 'µ', 'þ', 'Þ', 'Ú', 'Û', 'Ù', 'ý', 'Ý', '¯', '´', '≡', '±', '‗', '¾', '¶', '§', '÷',
     '¸', '°', '¨', '·', '¹', '³', '²', '■', ' ',
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn text_lines_plain_keeps_utf8_chars() {
+        let input = "caf\u{00e9}\n\u{4f60}\u{597d}".as_bytes();
+        let lines = text_lines(input, LineFeedMode::UnixLf, &[], EncodingMode::Plain);
+        assert_eq!(lines, vec!["caf\u{00e9}".to_string(), "\u{4f60}\u{597d}".to_string()]);
+    }
+
+    #[test]
+    fn ansi_lines_plain_keeps_utf8_chars() {
+        let input = "\u{00e9}cho".as_bytes();
+        let lines = ansi_lines(input, LineFeedMode::UnixLf, &[], EncodingMode::Plain);
+        assert_eq!(lines, vec!["\u{00e9}cho".to_string()]);
+    }
+}
