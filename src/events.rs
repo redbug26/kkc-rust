@@ -2411,16 +2411,25 @@ fn handle_enter(app: &mut App) -> Result<()> {
         let openers = app.config.openers_for_mime(&mime_type).to_vec();
         let mut actions = Vec::new();
         for opener in openers {
-            let arg_info = match crate::plugins::store_application_launch_args_for_command(&opener)
-            {
-                Some(Some(args)) if args.trim().is_empty() => "args: (none)".to_string(),
-                Some(Some(args)) => format!("args: {}", args),
-                _ => "args: auto %f".to_string(),
-            };
+            let display_label =
+                match crate::plugins::store_application_launch_args_for_command(&opener) {
+                    Some(Some(args)) => {
+                        let program = split_command_args(&opener)
+                            .first()
+                            .cloned()
+                            .unwrap_or_else(|| opener.clone());
+                        if args.trim().is_empty() {
+                            program
+                        } else {
+                            format!("{} {}", program, args)
+                        }
+                    }
+                    _ => opener.clone(),
+                };
             actions.push(OpenerActionItem {
                 category: "Associations",
-                label: opener.clone(),
-                detail: format!("{}  |  {}", mime_type, arg_info),
+                label: display_label,
+                detail: mime_type.clone(),
                 kind: OpenerActionKind::Association { command: opener },
             });
         }
