@@ -60,7 +60,10 @@ pub(super) fn draw_busy_status(message: &str, has_fkey_bar: bool) -> Result<()> 
     Ok(())
 }
 
-pub(super) fn spawn_remote_connect_task(profile: RemoteProfile, show_hidden: bool) -> RemoteConnectTask {
+pub(super) fn spawn_remote_connect_task(
+    profile: RemoteProfile,
+    show_hidden: bool,
+) -> RemoteConnectTask {
     let (tx, rx) = mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));
     let cancel_bg = cancel.clone();

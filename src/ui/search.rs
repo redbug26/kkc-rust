@@ -441,4 +441,3 @@ pub(super) fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
     let items = footer_shortcut_items(&search_panel_shortcuts(state));
     render_shortcut_bar(f, hint_area, &items, secondary_shortcut_bar_style());
 }
-

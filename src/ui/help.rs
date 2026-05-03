@@ -81,7 +81,12 @@ pub(super) fn render_help(f: &mut Frame, state: &crate::help::HelpState, area: R
     render_help_with_title(f, popup, title, state);
 }
 
-pub(super) fn render_help_with_title(f: &mut Frame, popup: Rect, title: &str, state: &crate::help::HelpState) {
+pub(super) fn render_help_with_title(
+    f: &mut Frame,
+    popup: Rect,
+    title: &str,
+    state: &crate::help::HelpState,
+) {
     let block = Block::default()
         .title(format!(" {} ", title))
         .title_bottom(
@@ -193,4 +198,3 @@ pub(super) fn render_help_with_title(f: &mut Frame, popup: Rect, title: &str, st
 // ---------------------------------------------------------------------------
 // Utility
 // ---------------------------------------------------------------------------
-

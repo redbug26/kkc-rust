@@ -60,14 +60,7 @@ impl RemoteEditKind {
         match self {
             Self::Sftp => ["Name", "Host", "User", "Port", "Path", "Identity"],
             Self::Smb => ["Name", "Host", "User", "Workgroup", "Share", "Password"],
-            Self::RemotePlugin { .. } => [
-                "Name",
-                "Config JSON",
-                "Path",
-                "Auth input",
-                "",
-                "",
-            ],
+            Self::RemotePlugin { .. } => ["Name", "Config JSON", "Path", "Auth input", "", ""],
         }
     }
 
@@ -85,7 +78,6 @@ impl RemoteEditKind {
             _ => None,
         }
     }
-
 }
 
 #[derive(Debug, Clone)]
@@ -258,7 +250,9 @@ impl RemoteEditState {
                     }),
                 }
             }
-            RemoteEditKind::RemotePlugin { plugin_id, scheme, .. } => {
+            RemoteEditKind::RemotePlugin {
+                plugin_id, scheme, ..
+            } => {
                 let config_json = self.fields[Self::HOST].trim();
                 if config_json.is_empty() {
                     return None;
@@ -314,7 +308,6 @@ fn discover_remote_plugin_choices() -> Vec<(String, String, String)> {
         .map(|manifest| (manifest.id.clone(), manifest.name, manifest.id))
         .collect()
 }
-
 
 fn trim_opt(value: &str) -> Option<String> {
     let trimmed = value.trim();

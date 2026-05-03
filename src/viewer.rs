@@ -624,7 +624,8 @@ impl Viewer {
         text_width: usize,
         visible_rows: usize,
     ) -> Option<(String, String, String)> {
-        let (start_col, end_col) = self.selection_range_for_visible_row(row, text_width, visible_rows)?;
+        let (start_col, end_col) =
+            self.selection_range_for_visible_row(row, text_width, visible_rows)?;
         let display = self.visible_display_line(row, text_width)?;
         Some((
             slice_display_columns(&display, 0, start_col),
@@ -642,13 +643,19 @@ impl Viewer {
 
         let mut lines = Vec::new();
         for row in start.row..=end.row {
-            let Some((start_col, end_col)) = self.selection_range_for_visible_row(row, text_width, visible_rows) else {
+            let Some((start_col, end_col)) =
+                self.selection_range_for_visible_row(row, text_width, visible_rows)
+            else {
                 continue;
             };
             let Some(display) = self.visible_display_line(row, text_width) else {
                 continue;
             };
-            lines.push(slice_display_columns(&display, start_col, end_col).trim_end_matches(' ').to_string());
+            lines.push(
+                slice_display_columns(&display, start_col, end_col)
+                    .trim_end_matches(' ')
+                    .to_string(),
+            );
         }
         if lines.is_empty() {
             None
@@ -686,7 +693,11 @@ impl Viewer {
         }
 
         let start_col = if row == start.row { start.column } else { 0 };
-        let end_col = if row == end.row { end.column } else { text_width };
+        let end_col = if row == end.row {
+            end.column
+        } else {
+            text_width
+        };
         (start_col < end_col).then_some((start_col, end_col))
     }
 

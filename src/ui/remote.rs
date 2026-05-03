@@ -1,5 +1,5 @@
-use super::*;
 use super::bookmarks::highlight_tokens;
+use super::*;
 use crate::remote::RemoteKind;
 
 pub(crate) fn remote_connect_shortcuts() -> Vec<FooterShortcut> {
@@ -45,7 +45,9 @@ pub(crate) fn remote_add_menu_shortcuts() -> Vec<FooterShortcut> {
 }
 
 pub(crate) fn remote_edit_shortcuts(state: &RemoteEditState) -> Vec<FooterShortcut> {
-    if state.plugin_auth_enabled && state.is_remote_plugin() && state.cursor == RemoteEditState::PORT
+    if state.plugin_auth_enabled
+        && state.is_remote_plugin()
+        && state.cursor == RemoteEditState::PORT
     {
         vec![
             FooterShortcut {
@@ -649,4 +651,3 @@ pub(super) fn render_remote_connecting(f: &mut Frame, state: &RemoteConnectingSt
 // ---------------------------------------------------------------------------
 // Search panel
 // ---------------------------------------------------------------------------
-

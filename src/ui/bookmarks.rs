@@ -941,10 +941,9 @@ pub(super) fn render_store_install_palette(
         let selected = state.match_pos == match_row;
         let installed = state.is_installed(plugin);
         let has_update = state.has_update(plugin);
-        let has_compatible_method = !matches!(
-            plugin.item_kind,
-            crate::plugins::StoreItemKind::Application
-        ) || plugin.install_method.is_some();
+        let has_compatible_method =
+            !matches!(plugin.item_kind, crate::plugins::StoreItemKind::Application)
+                || plugin.install_method.is_some();
 
         let style = if selected {
             Style::default()
@@ -1085,7 +1084,10 @@ pub(super) fn render_store_install_palette(
     if let Some(v) = installed_version {
         push_kv("Installed :", v, &mut row);
     }
-    let compatible_method = plugin.install_method.as_deref().unwrap_or("None for this OS");
+    let compatible_method = plugin
+        .install_method
+        .as_deref()
+        .unwrap_or("None for this OS");
     if matches!(plugin.item_kind, crate::plugins::StoreItemKind::Application) {
         push_kv("Method :", compatible_method, &mut row);
     }
@@ -1192,8 +1194,16 @@ fn render_store_install_progress(
     };
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Rgb(160, 160, 160)).bg(Color::Black))
-        .style(Style::default().fg(Color::Rgb(230, 230, 230)).bg(Color::Black));
+        .border_style(
+            Style::default()
+                .fg(Color::Rgb(160, 160, 160))
+                .bg(Color::Black),
+        )
+        .style(
+            Style::default()
+                .fg(Color::Rgb(230, 230, 230))
+                .bg(Color::Black),
+        );
     let inner = block.inner(box_area);
     safe_render_widget(f, block, box_area);
 
@@ -1220,8 +1230,11 @@ fn render_store_install_progress(
         }
         safe_render_widget(
             f,
-            Paragraph::new(truncate_str(line, width))
-                .style(Style::default().fg(Color::Rgb(230, 230, 230)).bg(Color::Black)),
+            Paragraph::new(truncate_str(line, width)).style(
+                Style::default()
+                    .fg(Color::Rgb(230, 230, 230))
+                    .bg(Color::Black),
+            ),
             Rect {
                 x: inner.x,
                 y: inner.y + idx as u16,
@@ -1232,11 +1245,7 @@ fn render_store_install_progress(
     }
 }
 
-fn render_store_detect_dialog(
-    f: &mut Frame,
-    detect: &crate::app::StoreDetectState,
-    area: Rect,
-) {
+fn render_store_detect_dialog(f: &mut Frame, detect: &crate::app::StoreDetectState, area: Rect) {
     let width = area.width.saturating_sub(4).min(104).max(56);
     let height = area.height.saturating_sub(4).min(18).max(10);
     let popup = Rect {

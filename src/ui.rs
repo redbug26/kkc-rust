@@ -14,42 +14,41 @@ mod terminal;
 mod tree_view;
 mod viewer;
 use self::assoc::{render_action_palette, render_assoc_editor, render_opener};
+pub(crate) use self::bookmarks::dir_bookmarks_shortcuts;
 use self::bookmarks::{
     render_dir_bookmarks, render_quicksearch_palette, render_store_install_palette,
     render_viewer_plugin_palette,
 };
-pub(crate) use self::bookmarks::dir_bookmarks_shortcuts;
 pub(crate) use self::bookmarks::{store_detect_shortcuts, store_install_shortcuts};
 use self::config::render_config;
 use self::confirm::{render_confirm, render_input};
 use self::copy::{render_copy_dialog, render_copy_progress};
-use self::help::render_help;
 pub(crate) use self::help::help_shortcuts;
-use self::remote::{
-    render_remote_add_menu, render_remote_connect, render_remote_connecting, render_remote_edit,
-};
+use self::help::render_help;
 pub(crate) use self::remote::{
     remote_add_menu_shortcuts, remote_connect_shortcuts, remote_connecting_shortcuts,
     remote_edit_shortcuts,
+};
+use self::remote::{
+    render_remote_add_menu, render_remote_connect, render_remote_connecting, render_remote_edit,
 };
 use self::search::render_search;
 pub(crate) use self::search::search_panel_shortcuts;
 use self::shortcuts::render_shortcut_panel;
 use self::terminal::render_terminal;
 use self::tree_view::render_tree_view;
-pub use self::viewer::{kitty_image_area, kitty_image_area_quick_preview};
 pub(crate) use self::viewer::viewer_area;
 pub(crate) use self::viewer::viewer_footer_shortcuts;
+pub use self::viewer::{kitty_image_area, kitty_image_area_quick_preview};
 use self::viewer::{
-    menu_dropdown_line, mnemonics_for_labels, render_viewer, render_viewer_goto,
-    render_viewer_menu,
+    menu_dropdown_line, mnemonics_for_labels, render_viewer, render_viewer_goto, render_viewer_menu,
 };
 
-use self::command_palette::render_command_palette;
 pub(crate) use self::command_palette::command_palette_shortcuts;
+use self::command_palette::render_command_palette;
 use self::panel::{render_center_buttons, render_panel_or_file_id};
-use self::plugins::render_plugins;
 pub(crate) use self::plugins::plugins_shortcuts;
+use self::plugins::render_plugins;
 pub(crate) use self::shortcuts::shortcut_panel_shortcuts;
 use crate::app::{
     ActionPaletteState, ActivePanel, App, AppMode, AssocEditorState, BookmarkListItem, ConfigState,
@@ -506,9 +505,8 @@ fn render_menu(f: &mut Frame, app: &App, state: &MenuState, area: Rect) {
             };
             let label = menu_action_label(*action);
             let key_text = menu_action_shortcut(app, *action).unwrap_or_default();
-            let used = UnicodeWidthStr::width(label)
-                + UnicodeWidthStr::width(key_text.as_str())
-                + 2; // leading " " + trailing " "
+            let used =
+                UnicodeWidthStr::width(label) + UnicodeWidthStr::width(key_text.as_str()) + 2; // leading " " + trailing " "
             let pad = avail.saturating_sub(used);
             let line = menu_dropdown_line(
                 label,
@@ -697,9 +695,7 @@ fn shortcut_bar_item_width(item: &ShortcutBarItem) -> usize {
     // Rendered as: "{key}" + " {label} " + " " (separator, always counted to simplify)
     // = key_width + (label_width + 2) + 1 = key_width + label_width + 3
     // The last item has no separator, but the 1-col overshoot is harmless.
-    UnicodeWidthStr::width(item.key.as_str())
-        + UnicodeWidthStr::width(item.label.as_str())
-        + 3
+    UnicodeWidthStr::width(item.key.as_str()) + UnicodeWidthStr::width(item.label.as_str()) + 3
 }
 
 pub(crate) fn shortcut_bar_item_index_at_column(
@@ -739,7 +735,10 @@ pub(crate) fn render_shortcut_bar(
             Style::default().fg(style.label_fg).bg(style.label_bg),
         ));
         if idx + 1 < items.len() {
-            spans.push(Span::styled(" ", Style::default().fg(style.sep_fg).bg(style.bar_bg)));
+            spans.push(Span::styled(
+                " ",
+                Style::default().fg(style.sep_fg).bg(style.bar_bg),
+            ));
         }
     }
     f.render_widget(

@@ -183,7 +183,11 @@ impl TreeViewState {
         let query = self.query.trim().to_ascii_lowercase();
         if query.is_empty() {
             self.filtered = (0..self.entries.len()).collect();
-            self.display = self.filtered.iter().map(|&i| DisplayItem::Match(i)).collect();
+            self.display = self
+                .filtered
+                .iter()
+                .map(|&i| DisplayItem::Match(i))
+                .collect();
         } else {
             let tokens: Vec<&str> = query.split_whitespace().collect();
             let n = self.entries.len();
@@ -487,7 +491,10 @@ where
     }
 
     let children = read_children(dir, depth).unwrap_or_default();
-    let child_dir_count = children.iter().filter(|(_, _, _, is_symlink)| !*is_symlink).count();
+    let child_dir_count = children
+        .iter()
+        .filter(|(_, _, _, is_symlink)| !*is_symlink)
+        .count();
     let child_span = if child_dir_count > 0 {
         span / child_dir_count as f64
     } else {
@@ -736,7 +743,11 @@ fn load_cache_bin(root: &Path) -> Result<(Vec<TreeEntry>, String)> {
     for _ in 0..count {
         f.read_exact(&mut buf4)?;
         let parent_raw = u32::from_le_bytes(buf4);
-        let parent = if parent_raw == 0xFFFF_FFFF { None } else { Some(parent_raw) };
+        let parent = if parent_raw == 0xFFFF_FFFF {
+            None
+        } else {
+            Some(parent_raw)
+        };
         f.read_exact(&mut buf2)?;
         let name_len = u16::from_le_bytes(buf2) as usize;
         let mut name_bytes = vec![0u8; name_len];
@@ -755,8 +766,6 @@ fn bin_read_str(f: &mut impl std::io::Read) -> Result<String> {
     f.read_exact(&mut bytes)?;
     String::from_utf8(bytes).context("invalid UTF-8 in binary cache string")
 }
-
-
 
 fn enrich_entries(root: &Path, entries: &mut [TreeEntry]) {
     for entry in entries {
@@ -945,8 +954,16 @@ mod tests {
         })
         .expect("scan should succeed");
 
-        assert!(progress.iter().any(|(_, ratio)| (*ratio - 0.25).abs() < f64::EPSILON));
-        assert!(progress.iter().any(|(_, ratio)| (*ratio - 0.5).abs() < f64::EPSILON));
+        assert!(
+            progress
+                .iter()
+                .any(|(_, ratio)| (*ratio - 0.25).abs() < f64::EPSILON)
+        );
+        assert!(
+            progress
+                .iter()
+                .any(|(_, ratio)| (*ratio - 0.5).abs() < f64::EPSILON)
+        );
         assert!(
             progress
                 .iter()
@@ -960,11 +977,10 @@ mod tests {
     #[test]
     fn compact_cache_entry_drops_files() {
         let root = Path::new("/tmp/kkc-tree-root");
-        assert!(compact_entry_to_tree_entry(
-            root,
-            CompactTreeEntry("file.txt".to_string(), false)
-        )
-        .is_none());
+        assert!(
+            compact_entry_to_tree_entry(root, CompactTreeEntry("file.txt".to_string(), false))
+                .is_none()
+        );
     }
 
     #[test]
@@ -975,9 +991,7 @@ mod tests {
         fs::create_dir_all(&target).unwrap();
 
         let cancel = AtomicBool::new(false);
-        let entries = scan_tree(&root, &cancel, |_, _, _, _| {})
-            .unwrap()
-            .unwrap();
+        let entries = scan_tree(&root, &cancel, |_, _, _, _| {}).unwrap().unwrap();
 
         let mut state = TreeViewState::empty(root.clone());
         state.set_entries(entries, None);
@@ -990,17 +1004,27 @@ mod tests {
 
         // Display must contain context ancestors "a" and "b" plus the match.
         assert_eq!(state.display.len(), 3);
-        let names: Vec<&str> = state.display.iter().map(|item| {
-            let idx = match item { DisplayItem::Context(i) | DisplayItem::Match(i) => *i };
-            state.entries[idx].name.as_str()
-        }).collect();
+        let names: Vec<&str> = state
+            .display
+            .iter()
+            .map(|item| {
+                let idx = match item {
+                    DisplayItem::Context(i) | DisplayItem::Match(i) => *i,
+                };
+                state.entries[idx].name.as_str()
+            })
+            .collect();
         assert!(names.contains(&"a"));
         assert!(names.contains(&"b"));
         assert!(names.contains(&"myproj"));
 
         // Context items are not navigable (display contains exactly one Match).
         assert_eq!(
-            state.display.iter().filter(|i| matches!(i, DisplayItem::Match(_))).count(),
+            state
+                .display
+                .iter()
+                .filter(|i| matches!(i, DisplayItem::Match(_)))
+                .count(),
             1
         );
 

@@ -51,7 +51,8 @@ pub fn discover_remote_rust_plugins(plugins_dir: &Path) -> Result<Vec<RemoteRust
     let mut plugins = Vec::new();
     for manifest_info in manifests {
         let manifest = read_manifest(&manifest_info.dir.join("plugin.toml"))?;
-        let Some(library_path) = resolve_remote_library_path(&manifest_info.dir, &manifest.remote.library)
+        let Some(library_path) =
+            resolve_remote_library_path(&manifest_info.dir, &manifest.remote.library)
         else {
             crate::viewer::debug_log(&format!(
                 "startup: native remote plugin '{}' has no built library at {}",
@@ -92,7 +93,9 @@ pub fn discover_remote_rust_plugins(plugins_dir: &Path) -> Result<Vec<RemoteRust
         if metadata.id.as_str() != manifest.plugin.id {
             crate::viewer::debug_log(&format!(
                 "Remote plugin '{}' exported id '{}' (loaded from {})",
-                manifest.plugin.id, metadata.id, library_path.display()
+                manifest.plugin.id,
+                metadata.id,
+                library_path.display()
             ));
             continue;
         }
@@ -177,7 +180,9 @@ pub fn load_remote_plugin(plugin_id: &str) -> Result<RemotePluginModRef> {
     for manifest_info in discover_remote_rust_plugin_manifests(&plugins_dir)? {
         if manifest_info.id == plugin_id {
             let manifest = read_manifest(&manifest_info.dir.join("plugin.toml"))?;
-            let Some(library_path) = resolve_remote_library_path(&manifest_info.dir, &manifest.remote.library) else {
+            let Some(library_path) =
+                resolve_remote_library_path(&manifest_info.dir, &manifest.remote.library)
+            else {
                 return Err(not_found_error(
                     plugin_id,
                     &manifest_info.dir,
@@ -205,7 +210,10 @@ fn candidate_remote_library_paths(plugin_dir: &Path, configured_library: &str) -
     let configured = plugin_dir.join(configured_library);
     out.push(configured.clone());
 
-    let Some(file_name) = Path::new(configured_library).file_name().map(|s| s.to_os_string()) else {
+    let Some(file_name) = Path::new(configured_library)
+        .file_name()
+        .map(|s| s.to_os_string())
+    else {
         return out;
     };
     for profile in ["release", "debug"] {
@@ -237,7 +245,8 @@ fn not_found_error(plugin_id: &str, plugin_dir: &Path, configured_library: &str)
         .join(", ");
     anyhow!(
         "Native remote plugin '{}' is not installed or built (searched: {})",
-        plugin_id, tried
+        plugin_id,
+        tried
     )
 }
 

@@ -210,14 +210,17 @@ pub(super) fn render_tree_view(f: &mut Frame, state: &TreeViewState, area: Rect)
             };
             let connector = tree_connector(
                 entry.depth,
-                state.display_prefixes.get(disp_idx).map(Vec::as_slice).unwrap_or(&[]),
+                state
+                    .display_prefixes
+                    .get(disp_idx)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]),
                 state.display_is_last.get(disp_idx).copied().unwrap_or(true),
             );
             let icon = "\u{e5ff} ";
             let available = list_area.width.saturating_sub(2) as usize;
             let text = truncate_str(&format!("{connector}{icon}{}", entry.name), available);
-            let (connector_part, content_part) = if let Some(rest) = text.strip_prefix(&connector)
-            {
+            let (connector_part, content_part) = if let Some(rest) = text.strip_prefix(&connector) {
                 (connector.clone(), rest.to_string())
             } else {
                 (text, String::new())
@@ -272,4 +275,3 @@ fn tree_connector(depth: usize, prefix_flags: &[bool], is_last: bool) -> String 
 // ---------------------------------------------------------------------------
 // Directory history
 // ---------------------------------------------------------------------------
-

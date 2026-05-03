@@ -549,7 +549,12 @@ pub(super) fn render_viewer_goto(f: &mut Frame, state: &ViewerGotoState, area: R
     );
 }
 
-pub(super) fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, area: Rect) {
+pub(super) fn render_viewer_menu(
+    f: &mut Frame,
+    viewer: &Viewer,
+    menu: &ViewerMenuState,
+    area: Rect,
+) {
     let items: Vec<String> = match menu.kind {
         ViewerMenuKind::Mode => vec![
             "Text: as plain text",

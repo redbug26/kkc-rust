@@ -2421,7 +2421,8 @@ mod tests {
                 .expect("write opf");
             zip.start_file("OEBPS/payload.bin", options)
                 .expect("payload");
-            zip.write_all(&vec![0x5a; 80 * 1024]).expect("write payload");
+            zip.write_all(&vec![0x5a; 80 * 1024])
+                .expect("write payload");
             zip.finish().expect("finish epub");
         }
 

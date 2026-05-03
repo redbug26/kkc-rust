@@ -51,13 +51,9 @@ pub(super) fn render_opener(f: &mut Frame, s: &OpenerState, area: Rect, preferre
     } as u16;
     let max_h = area.height.saturating_sub(4).max(6);
     let h = (row_count + 5).min(24).min(max_h).max(6);
-    let place_in_panel = w <= preferred_area.width.saturating_sub(2)
-        && h <= preferred_area.height.saturating_sub(2);
-    let target = if place_in_panel {
-        preferred_area
-    } else {
-        area
-    };
+    let place_in_panel =
+        w <= preferred_area.width.saturating_sub(2) && h <= preferred_area.height.saturating_sub(2);
+    let target = if place_in_panel { preferred_area } else { area };
     let x = target.x + (target.width.saturating_sub(w)) / 2;
     let y = target.y + (target.height.saturating_sub(h)) / 2;
     let popup = clamp_rect(
@@ -113,15 +109,11 @@ pub(super) fn render_opener(f: &mut Frame, s: &OpenerState, area: Rect, preferre
     let input_row = Line::from(vec![
         Span::styled(
             truncate_str(&input_text, input_w),
-            Style::default()
-                .fg(CLR_QS_INPUT_FG)
-                .bg(CLR_QS_INPUT_BG),
+            Style::default().fg(CLR_QS_INPUT_FG).bg(CLR_QS_INPUT_BG),
         ),
         Span::styled(
             count_hint,
-            Style::default()
-                .fg(CLR_QS_MATCH_HI)
-                .bg(CLR_QS_INPUT_BG),
+            Style::default().fg(CLR_QS_MATCH_HI).bg(CLR_QS_INPUT_BG),
         ),
     ]);
     safe_render_widget(
@@ -137,8 +129,7 @@ pub(super) fn render_opener(f: &mut Frame, s: &OpenerState, area: Rect, preferre
 
     safe_render_widget(
         f,
-        Paragraph::new(hint)
-            .style(Style::default().fg(CLR_QS_LIST_FG).bg(CLR_QS_BG)),
+        Paragraph::new(hint).style(Style::default().fg(CLR_QS_LIST_FG).bg(CLR_QS_BG)),
         Rect {
             x: inner.x,
             y: inner.y + 1,
@@ -228,10 +219,7 @@ pub(super) fn render_opener(f: &mut Frame, s: &OpenerState, area: Rect, preferre
                 let icon = if selected { " > " } else { "   " };
                 let available = inner.width as usize;
                 let detail_w = max_detail_width.min(available.saturating_sub(8));
-                let label_w = available
-                    .saturating_sub(detail_w)
-                    .saturating_sub(5)
-                    .max(8);
+                let label_w = available.saturating_sub(detail_w).saturating_sub(5).max(8);
                 let text = format!(
                     "{}{} {}",
                     icon,

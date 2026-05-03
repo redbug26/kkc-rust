@@ -646,9 +646,7 @@ pub fn store_index_path() -> PathBuf {
     if let Some(url) = std::env::var_os("KKC_PLUGIN_STORE_URL") {
         return PathBuf::from(url);
     }
-    PathBuf::from(
-        "https://raw.githubusercontent.com/redbug26/kkc-store/main/dist/store-index.json",
-    )
+    PathBuf::from("https://raw.githubusercontent.com/redbug26/kkc-store/main/dist/store-index.json")
 }
 
 pub fn install_plugin_from_store_with_progress<F>(
@@ -759,7 +757,10 @@ fn install_plugin_from_store_descriptor(
             })?;
             let rel = rel.trim_start_matches('/');
             if rel.is_empty() {
-                bail!("Store local plugin '{}' has an empty location.path", plugin_id);
+                bail!(
+                    "Store local plugin '{}' has an empty location.path",
+                    plugin_id
+                );
             }
             if let Some(store_root) = source.local_root.as_ref() {
                 progress(45, "Copying plugin files...");
@@ -793,11 +794,17 @@ fn install_plugin_from_store_descriptor(
                     )
                 })?;
                 let repo_path = descriptor.location.path.as_deref().ok_or_else(|| {
-                    anyhow!("Store github plugin '{}' is missing location.path", plugin_id)
+                    anyhow!(
+                        "Store github plugin '{}' is missing location.path",
+                        plugin_id
+                    )
                 })?;
                 let repo_path = repo_path.trim_start_matches('/');
                 if repo_path.is_empty() {
-                    bail!("Store github plugin '{}' has an empty location.path", plugin_id);
+                    bail!(
+                        "Store github plugin '{}' has an empty location.path",
+                        plugin_id
+                    );
                 }
                 let git_ref = descriptor
                     .location
@@ -1685,11 +1692,10 @@ fn extract_zip_to_temp(zip_bytes: &[u8], temp_dir: &Path) -> Result<()> {
         }
 
         if let Some(parent) = output.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("Creating {}", parent.display()))?;
+            fs::create_dir_all(parent).with_context(|| format!("Creating {}", parent.display()))?;
         }
-        let mut out = fs::File::create(&output)
-            .with_context(|| format!("Creating {}", output.display()))?;
+        let mut out =
+            fs::File::create(&output).with_context(|| format!("Creating {}", output.display()))?;
         io::copy(&mut entry, &mut out)
             .with_context(|| format!("Extracting {} to {}", entry.name(), output.display()))?;
         copied_any = true;
@@ -1779,14 +1785,15 @@ fn load_plugins() -> Result<PluginRegistry> {
     let mut archive_plugins = Vec::new();
     let mut viewer_plugins = Vec::new();
     let mut action_plugins = Vec::new();
-    let remote_rust_manifests =
-        crate::remote_plugins::discover_remote_rust_plugin_manifests(&plugins_dir)
-            .unwrap_or_else(|err| {
-                crate::viewer::debug_log(&format!(
-                    "startup: native remote plugin manifest discovery failed: {err}"
-                ));
-                Vec::new()
-            });
+    let remote_rust_manifests = crate::remote_plugins::discover_remote_rust_plugin_manifests(
+        &plugins_dir,
+    )
+    .unwrap_or_else(|err| {
+        crate::viewer::debug_log(&format!(
+            "startup: native remote plugin manifest discovery failed: {err}"
+        ));
+        Vec::new()
+    });
     let mut remote_rust_plugins = crate::remote_plugins::discover_remote_rust_plugins(&plugins_dir)
         .unwrap_or_else(|err| {
             crate::viewer::debug_log(&format!(

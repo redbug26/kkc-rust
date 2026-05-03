@@ -18,8 +18,8 @@ use self::helpers::{
     spawn_remote_connect_task,
 };
 pub use self::menu::{
-    MENU_DATA, MENU_HEADERS, MenuAction, MenuEntry, MenuState, StoreInstallPaletteState,
-    StoreDetectChoice, StoreDetectItem, StoreDetectState, StoreInstallProgress, ViewerGotoState,
+    MENU_DATA, MENU_HEADERS, MenuAction, MenuEntry, MenuState, StoreDetectChoice, StoreDetectItem,
+    StoreDetectState, StoreInstallPaletteState, StoreInstallProgress, ViewerGotoState,
     ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,
 };
 use self::panel_tabs::{PanelTabs, panel_config_for_save, restore_panel_side};
@@ -471,8 +471,8 @@ impl OpenerState {
         let mut starts = Vec::new();
         let mut contains = Vec::new();
         for (idx, item) in self.items.iter().enumerate() {
-            let searchable = format!("{} {} {}", item.category, item.label, item.detail)
-                .to_ascii_lowercase();
+            let searchable =
+                format!("{} {} {}", item.category, item.label, item.detail).to_ascii_lowercase();
             if !rest.iter().all(|token| searchable.contains(token)) {
                 continue;
             }
@@ -803,7 +803,7 @@ pub fn default_center_button_actions() -> Vec<MenuAction> {
         MenuAction::DirBookmarks,
         MenuAction::SelectPattern,
         MenuAction::FileIdPreview,
-        MenuAction::QuickPreview
+        MenuAction::QuickPreview,
     ]
 }
 
@@ -1367,7 +1367,11 @@ impl App {
     }
 
     pub fn enter_dir(&mut self, path: PathBuf) -> Result<()> {
-        crate::viewer::debug_log(&format!("[enter_dir] path={}, is_remote={}", path.display(), self.active_panel().is_remote_view()));
+        crate::viewer::debug_log(&format!(
+            "[enter_dir] path={}, is_remote={}",
+            path.display(),
+            self.active_panel().is_remote_view()
+        ));
         self.push_dir_history(path.clone());
         if self.active_panel().is_remote_view() {
             self.run_with_busy("Remote: changing directory...", |app| {
@@ -1447,7 +1451,10 @@ impl App {
                 .and_then(|idx| s.items.get(*idx))
                 .filter(|p| {
                     matches!(p.source, RemoteSource::UserToml | RemoteSource::PluginAuto)
-                        && matches!(p.kind, RemoteKind::Sftp(_) | RemoteKind::Smb(_) | RemoteKind::RemotePlugin(_))
+                        && matches!(
+                            p.kind,
+                            RemoteKind::Sftp(_) | RemoteKind::Smb(_) | RemoteKind::RemotePlugin(_)
+                        )
                 })
                 .cloned()
         } else {
@@ -1788,8 +1795,8 @@ impl App {
             state.progress = None;
             state
         } else {
-            StoreInstallPaletteState::load(crate::plugins::store_index_path()).unwrap_or_else(|_| {
-                StoreInstallPaletteState {
+            StoreInstallPaletteState::load(crate::plugins::store_index_path()).unwrap_or_else(
+                |_| StoreInstallPaletteState {
                     index_path: crate::plugins::store_index_path(),
                     index_info: crate::plugins::StoreIndexInfo::default(),
                     items: Vec::new(),
@@ -1799,8 +1806,8 @@ impl App {
                     match_pos: 0,
                     progress: None,
                     detect: None,
-                }
-            })
+                },
+            )
         }
     }
 
@@ -1831,11 +1838,14 @@ impl App {
                     phase: phase.to_string(),
                 });
             };
-            let result =
-                crate::plugins::install_plugin_from_store_with_progress(&worker_index_path, &item_id, |p, phase| {
+            let result = crate::plugins::install_plugin_from_store_with_progress(
+                &worker_index_path,
+                &item_id,
+                |p, phase| {
                     report(p, phase);
-                })
-                .map_err(|err| err.to_string());
+                },
+            )
+            .map_err(|err| err.to_string());
             let _ = tx.send(StoreInstallMessage::Finished(result));
         });
 
@@ -1902,7 +1912,8 @@ impl App {
         if configured > 0 {
             self.notify(format!(
                 "Detected {} installed app(s); {} MIME association(s) updated",
-                detected.len(), configured
+                detected.len(),
+                configured
             ));
         }
         self.mode = AppMode::StoreInstallPalette(state);
@@ -1981,7 +1992,10 @@ impl App {
         state
     }
 
-    fn configure_application_associations(&mut self, item: &crate::plugins::StorePluginInfo) -> usize {
+    fn configure_application_associations(
+        &mut self,
+        item: &crate::plugins::StorePluginInfo,
+    ) -> usize {
         let Some(bin) = item.install_bin.as_deref() else {
             return 0;
         };

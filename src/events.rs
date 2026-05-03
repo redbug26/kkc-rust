@@ -7,8 +7,8 @@ use self::menu::handle_menu;
 use self::palette::{handle_command_palette, handle_store_install_palette};
 use self::shortcuts::handle_shortcut_panel;
 use self::viewer::{
-    handle_mouse_viewer, handle_viewer, handle_viewer_goto, handle_viewer_goto_line, handle_viewer_menu,
-    handle_viewer_plugin_palette, handle_viewer_searching,
+    handle_mouse_viewer, handle_viewer, handle_viewer_goto, handle_viewer_goto_line,
+    handle_viewer_menu, handle_viewer_plugin_palette, handle_viewer_searching,
 };
 use crate::app::{
     ActivePanel, App, AppMode, AssocEditorState, BookmarkListItem, ConfigState, ConfirmAction,
@@ -126,7 +126,9 @@ pub fn handle_event(app: &mut App, event: Event) -> Result<bool> {
                 AppMode::ViewerGotoLine(_, _) => return handle_viewer_goto_line(app, key),
                 AppMode::ViewerGoto(_, _) => return handle_viewer_goto(app, key),
                 AppMode::ViewerMenu(_, _) => return handle_viewer_menu(app, key),
-                AppMode::ViewerPluginPalette(_, _) => return handle_viewer_plugin_palette(app, key),
+                AppMode::ViewerPluginPalette(_, _) => {
+                    return handle_viewer_plugin_palette(app, key);
+                }
                 AppMode::Confirm(_) => return handle_confirm(app, key),
                 AppMode::Input(_) => return handle_input(app, key),
                 AppMode::CopyDialog(_) => return handle_copy_dialog(app, key),
@@ -205,32 +207,31 @@ fn handle_mouse_remote_connect(app: &mut App, mouse: MouseEvent) -> Result<bool>
         MouseEventKind::Down(MouseButton::Left) => {
             if point_in_rect(mouse.column, mouse.row, list_area) {
                 let row = (mouse.row - list_area.y) as usize;
-                let (clicked_match_idx, profile_opt) = if let AppMode::RemoteConnect(ref s) = app.mode {
-                    let rows = list_area.height as usize;
-                    let scroll = if s.match_pos >= rows && rows > 0 {
-                        s.match_pos - rows + 1
+                let (clicked_match_idx, profile_opt) =
+                    if let AppMode::RemoteConnect(ref s) = app.mode {
+                        let rows = list_area.height as usize;
+                        let scroll = if s.match_pos >= rows && rows > 0 {
+                            s.match_pos - rows + 1
+                        } else {
+                            0
+                        };
+                        let clicked = scroll + row;
+                        let profile = s
+                            .filtered_indices()
+                            .get(clicked)
+                            .and_then(|idx| s.items.get(*idx))
+                            .cloned();
+                        (Some(clicked), profile)
                     } else {
-                        0
+                        (None, None)
                     };
-                    let clicked = scroll + row;
-                    let profile = s
-                        .filtered_indices()
-                        .get(clicked)
-                        .and_then(|idx| s.items.get(*idx))
-                        .cloned();
-                    (Some(clicked), profile)
-                } else {
-                    (None, None)
-                };
 
                 if let Some(clicked) = clicked_match_idx
                     && let AppMode::RemoteConnect(ref mut s) = app.mode
                 {
                     let same = s.match_pos == clicked;
                     s.match_pos = clicked.min(s.filtered_indices().len().saturating_sub(1));
-                    if same
-                        && let Some(profile) = profile_opt
-                    {
+                    if same && let Some(profile) = profile_opt {
                         let return_state = s.clone();
                         app.start_remote_connect(profile, return_state);
                     }
@@ -301,7 +302,8 @@ fn handle_mouse_remote_add_menu(app: &mut App, mouse: MouseEvent) -> Result<bool
             if mouse.row >= inner.y && mouse.row < inner.y + choices.len() as u16 {
                 let idx = (mouse.row - inner.y) as usize;
                 if idx < choices.len() {
-                    app.mode = AppMode::RemoteEdit(crate::app::RemoteEditState::new(choices[idx].clone()));
+                    app.mode =
+                        AppMode::RemoteEdit(crate::app::RemoteEditState::new(choices[idx].clone()));
                 }
             }
         }
@@ -497,7 +499,8 @@ fn handle_mouse_shortcut_panel(app: &mut App, mouse: MouseEvent) -> Result<bool>
     let AppMode::ShortcutPanel(state) = &app.mode else {
         return Ok(false);
     };
-    let (_popup, _inner, list_area, hint_area) = shortcut_panel_rect(area, state.filtered_indices().len());
+    let (_popup, _inner, list_area, hint_area) =
+        shortcut_panel_rect(area, state.filtered_indices().len());
 
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
@@ -786,7 +789,8 @@ fn handle_mouse_search_panel(app: &mut App, mouse: MouseEvent) -> Result<bool> {
                 return handle_search(app, KeyEvent::from(key));
             }
 
-            if mouse.row >= inner.y + 1 && mouse.row <= inner.y + 3
+            if mouse.row >= inner.y + 1
+                && mouse.row <= inner.y + 3
                 && let AppMode::SearchPanel(ref mut s) = app.mode
             {
                 s.input_field = (mouse.row - (inner.y + 1)) as usize;
@@ -892,7 +896,10 @@ fn handle_mouse_store_install_palette(app: &mut App, mouse: MouseEvent) -> Resul
                     mouse.column,
                 )
             {
-                if matches!(key, KeyCode::Char('d') | KeyCode::Char('u') | KeyCode::Char('r')) {
+                if matches!(
+                    key,
+                    KeyCode::Char('d') | KeyCode::Char('u') | KeyCode::Char('r')
+                ) {
                     return handle_store_install_palette(
                         app,
                         KeyEvent::new(key, KeyModifiers::CONTROL),
@@ -968,7 +975,8 @@ fn handle_mouse_browse(app: &mut App, mouse: MouseEvent) -> Result<bool> {
                 return menu::execute_menu_action(app, action);
             }
 
-            if let Some((side, index, list_height)) = panel_hit(app, mouse.column, mouse.row, layout)
+            if let Some((side, index, list_height)) =
+                panel_hit(app, mouse.column, mouse.row, layout)
             {
                 let was_active = app.active == side;
                 let was_current = match side {
@@ -1000,7 +1008,8 @@ fn handle_mouse_browse(app: &mut App, mouse: MouseEvent) -> Result<bool> {
             }
         }
         MouseEventKind::Down(MouseButton::Right) => {
-            if let Some((side, index, list_height)) = panel_hit(app, mouse.column, mouse.row, layout)
+            if let Some((side, index, list_height)) =
+                panel_hit(app, mouse.column, mouse.row, layout)
             {
                 app.active = side;
                 let panel = match side {
@@ -1068,7 +1077,9 @@ fn handle_mouse_menu(app: &mut App, mouse: MouseEvent) -> Result<bool> {
         && mouse.row >= inner.y
     {
         let idx = (mouse.row - inner.y) as usize;
-        if idx < MENU_DATA[state.bar_pos].len() && MENU_DATA[state.bar_pos][idx] != MenuAction::Separator {
+        if idx < MENU_DATA[state.bar_pos].len()
+            && MENU_DATA[state.bar_pos][idx] != MenuAction::Separator
+        {
             if let AppMode::Menu(ref mut state) = app.mode {
                 state.item_pos = idx;
             }
@@ -1220,19 +1231,25 @@ fn handle_mouse_copy_dialog(app: &mut App, mouse: MouseEvent) -> Result<bool> {
 }
 
 fn terminal_rect() -> Option<Rect> {
-    crossterm::terminal::size().ok().map(|(width, height)| Rect {
-        x: 0,
-        y: 0,
-        width,
-        height,
-    })
+    crossterm::terminal::size()
+        .ok()
+        .map(|(width, height)| Rect {
+            x: 0,
+            y: 0,
+            width,
+            height,
+        })
 }
 
 fn main_mouse_layout(app: &App, area: Rect) -> MainMouseLayout {
     let main_vert = Layout::default()
         .direction(Direction::Vertical)
         .constraints(if app.config.show_fkey_bar {
-            vec![Constraint::Min(5), Constraint::Length(1), Constraint::Length(1)]
+            vec![
+                Constraint::Min(5),
+                Constraint::Length(1),
+                Constraint::Length(1),
+            ]
         } else {
             vec![Constraint::Min(5), Constraint::Length(1)]
         })
@@ -1421,7 +1438,9 @@ fn menu_dropdown_rect(app: &App, state: &MenuState, area: Rect) -> Option<(Rect,
     }
     let max_label = items
         .iter()
-        .map(|action| unicode_width::UnicodeWidthStr::width(crate::app::palette_label_for_action(*action)))
+        .map(|action| {
+            unicode_width::UnicodeWidthStr::width(crate::app::palette_label_for_action(*action))
+        })
         .max()
         .unwrap_or(6);
     let max_key = items
@@ -1487,8 +1506,18 @@ fn confirm_button_rects(dlg: &ConfirmDialog, area: Rect) -> (Rect, Option<Rect>)
             let btn_y = inner.y + 7;
             let btn_x = inner.x + inner.width.saturating_sub(26) / 2;
             (
-                Rect { x: btn_x, y: btn_y, width: 11, height: 1 },
-                Some(Rect { x: btn_x + 15, y: btn_y, width: 11, height: 1 }),
+                Rect {
+                    x: btn_x,
+                    y: btn_y,
+                    width: 11,
+                    height: 1,
+                },
+                Some(Rect {
+                    x: btn_x + 15,
+                    y: btn_y,
+                    width: 11,
+                    height: 1,
+                }),
             )
         }
         ConfirmAction::Delete(_) | ConfirmAction::DeleteRemote(_) => {
@@ -1502,8 +1531,18 @@ fn confirm_button_rects(dlg: &ConfirmDialog, area: Rect) -> (Rect, Option<Rect>)
             let btn_y = inner.y + 5;
             let btn_x = inner.x + inner.width.saturating_sub(30) / 2;
             (
-                Rect { x: btn_x, y: btn_y, width: 13, height: 1 },
-                Some(Rect { x: btn_x + 17, y: btn_y, width: 13, height: 1 }),
+                Rect {
+                    x: btn_x,
+                    y: btn_y,
+                    width: 13,
+                    height: 1,
+                },
+                Some(Rect {
+                    x: btn_x + 17,
+                    y: btn_y,
+                    width: 13,
+                    height: 1,
+                }),
             )
         }
     }
@@ -3429,7 +3468,10 @@ fn handle_dir_bookmarks(app: &mut App, key: KeyEvent) -> Result<bool> {
                             }
                             app.enter_dir(p)?;
                         } else {
-                            app.notify(format!("Bookmark path is not a directory: {}", p.display()));
+                            app.notify(format!(
+                                "Bookmark path is not a directory: {}",
+                                p.display()
+                            ));
                         }
                     }
                 }

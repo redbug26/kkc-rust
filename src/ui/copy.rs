@@ -269,4 +269,3 @@ fn progress_bar_string(width: usize, ratio: f64) -> String {
         (ratio.clamp(0.0, 1.0) * 100.0).round() as u64
     )
 }
-

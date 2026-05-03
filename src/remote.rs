@@ -218,16 +218,16 @@ fn load_auto_remote_plugin_profiles(existing: &[RemoteProfile]) -> Result<Vec<Re
         Ok(path) => path,
         Err(_) => return Ok(Vec::new()),
     };
-    let discovered = match crate::remote_plugins::discover_remote_rust_plugin_manifests(&plugins_dir)
-    {
-        Ok(items) => items,
-        Err(err) => {
-            crate::viewer::debug_log(&format!(
-                "remote: native plugin discovery skipped: {err}"
-            ));
-            return Ok(Vec::new());
-        }
-    };
+    let discovered =
+        match crate::remote_plugins::discover_remote_rust_plugin_manifests(&plugins_dir) {
+            Ok(items) => items,
+            Err(err) => {
+                crate::viewer::debug_log(&format!(
+                    "remote: native plugin discovery skipped: {err}"
+                ));
+                return Ok(Vec::new());
+            }
+        };
 
     let loaded_plugins = crate::remote_plugins::discover_remote_rust_plugins(&plugins_dir)
         .unwrap_or_default()
@@ -535,13 +535,15 @@ pub fn rename_path(profile: &RemoteProfile, old_path: &str, new_path: &str) -> R
         RemoteKind::Smb(smb) => smb_impl::smb_rename(smb, old_path, new_path),
         RemoteKind::RemotePlugin(_) => {
             let local_temp = std::env::temp_dir();
-            let downloaded = remote_plugin_download_into_dir(profile, old_path, &local_temp, false)?;
+            let downloaded =
+                remote_plugin_download_into_dir(profile, old_path, &local_temp, false)?;
             let target_parent = Path::new(new_path)
                 .parent()
                 .unwrap_or_else(|| Path::new("/"))
                 .to_string_lossy()
                 .into_owned();
-            let uploaded = remote_plugin_upload_into_dir(profile, &downloaded, &target_parent, false)?;
+            let uploaded =
+                remote_plugin_upload_into_dir(profile, &downloaded, &target_parent, false)?;
             if normalize_remote_cwd(profile, &uploaded) != normalize_remote_cwd(profile, new_path) {
                 return Err(anyhow::anyhow!(
                     "remote plugin rename fallback uploaded '{}' instead of '{}'",
@@ -692,7 +694,8 @@ where
             smb_impl::upload_smb_with_progress(profile, local_path, remote_dir, recursive, progress)
         }
         RemoteKind::RemotePlugin(_) => {
-            let uploaded = remote_plugin_upload_into_dir(profile, local_path, remote_dir, recursive)?;
+            let uploaded =
+                remote_plugin_upload_into_dir(profile, local_path, remote_dir, recursive)?;
             let size = fs::metadata(local_path).map(|m| m.len()).unwrap_or(0);
             if !progress(&uploaded, size) {
                 bail!("Aborted");
@@ -825,7 +828,9 @@ fn remote_plugin_upload_into_dir(
         recursive,
     );
     match call {
-        abi_stable::std_types::RResult::ROk(path) => Ok(normalize_remote_cwd(profile, path.as_str())),
+        abi_stable::std_types::RResult::ROk(path) => {
+            Ok(normalize_remote_cwd(profile, path.as_str()))
+        }
         abi_stable::std_types::RResult::RErr(err) => Err(remote_plugin_error(err)),
     }
 }
@@ -837,7 +842,11 @@ fn remote_plugin_delete_path(
 ) -> Result<()> {
     let plugin = remote_plugin_profile(profile)?;
     let module = remote_plugin_module(profile)?;
-    let call = module.delete_path()(plugin.config_json.as_str().into(), remote_path.into(), is_dir);
+    let call = module.delete_path()(
+        plugin.config_json.as_str().into(),
+        remote_path.into(),
+        is_dir,
+    );
     match call {
         abi_stable::std_types::RResult::ROk(()) => Ok(()),
         abi_stable::std_types::RResult::RErr(err) => Err(remote_plugin_error(err)),
@@ -854,7 +863,11 @@ fn remote_plugin_make_dir(profile: &RemoteProfile, remote_path: &str) -> Result<
     }
 }
 
-fn remote_plugin_stats(profile: &RemoteProfile, remote_path: &str, is_dir: bool) -> Result<RemoteStats> {
+fn remote_plugin_stats(
+    profile: &RemoteProfile,
+    remote_path: &str,
+    is_dir: bool,
+) -> Result<RemoteStats> {
     if !is_dir {
         let parent = Path::new(remote_path).parent().unwrap_or(Path::new("/"));
         let file_name = Path::new(remote_path)
@@ -876,7 +889,10 @@ fn remote_plugin_stats(profile: &RemoteProfile, remote_path: &str, is_dir: bool)
     remote_plugin_dir_stats_recursive(profile, remote_path)
 }
 
-fn remote_plugin_dir_stats_recursive(profile: &RemoteProfile, remote_path: &str) -> Result<RemoteStats> {
+fn remote_plugin_dir_stats_recursive(
+    profile: &RemoteProfile,
+    remote_path: &str,
+) -> Result<RemoteStats> {
     let mut stats = RemoteStats::default();
     for child in remote_plugin_list_dir(profile, remote_path, true)? {
         if child.is_dir {

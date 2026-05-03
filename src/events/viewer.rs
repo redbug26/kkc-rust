@@ -230,9 +230,14 @@ pub(super) fn handle_mouse_viewer(app: &mut App, mouse: MouseEvent) -> Result<bo
             viewer.scroll_down();
         }
         MouseEventKind::Down(MouseButton::Left) => {
-            if point_in_rect(mouse.column, mouse.row, inner) && viewer.supports_mouse_text_selection() {
+            if point_in_rect(mouse.column, mouse.row, inner)
+                && viewer.supports_mouse_text_selection()
+            {
                 let row = mouse.row.saturating_sub(inner.y) as usize;
-                let col = mouse.column.saturating_sub(inner.x + viewer.line_number_width() as u16) as usize;
+                let col = mouse
+                    .column
+                    .saturating_sub(inner.x + viewer.line_number_width() as u16)
+                    as usize;
                 viewer.start_mouse_selection(row, col, text_width, visible_rows);
             } else {
                 viewer.clear_mouse_selection();
@@ -307,7 +312,11 @@ fn viewer_mouse_text_layout(viewer: &Viewer) -> Option<(Rect, usize, usize)> {
     let ln_width = viewer.line_number_width();
     let text_width = inner.width.saturating_sub(ln_width as u16) as usize;
     let visible_rows = inner.height as usize;
-    (inner.width > 0 && inner.height > 0 && text_width > 0).then_some((inner, text_width, visible_rows))
+    (inner.width > 0 && inner.height > 0 && text_width > 0).then_some((
+        inner,
+        text_width,
+        visible_rows,
+    ))
 }
 
 fn point_in_rect(column: u16, row: u16, rect: Rect) -> bool {

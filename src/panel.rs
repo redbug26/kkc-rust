@@ -453,13 +453,23 @@ impl Panel {
     // -----------------------------------------------------------------------
 
     pub fn enter_dir(&mut self, path: PathBuf) -> Result<()> {
-        crate::viewer::debug_log(&format!("[Panel::enter_dir] path={}, is_remote={}", path.display(), self.remote.is_some()));
+        crate::viewer::debug_log(&format!(
+            "[Panel::enter_dir] path={}, is_remote={}",
+            path.display(),
+            self.remote.is_some()
+        ));
         if self.remote.is_some() {
             if let Some(mount) = self.remote.as_mut() {
                 let path_str = path.to_string_lossy();
-                crate::viewer::debug_log(&format!("[Panel::enter_dir] remote: path_str={}, cwd_before={}", path_str, mount.cwd));
+                crate::viewer::debug_log(&format!(
+                    "[Panel::enter_dir] remote: path_str={}, cwd_before={}",
+                    path_str, mount.cwd
+                ));
                 mount.cwd = normalize_remote_cwd(&mount.profile, &path_str);
-                crate::viewer::debug_log(&format!("[Panel::enter_dir] remote: cwd_after={}", mount.cwd));
+                crate::viewer::debug_log(&format!(
+                    "[Panel::enter_dir] remote: cwd_after={}",
+                    mount.cwd
+                ));
                 self.path = PathBuf::from(&mount.cwd);
             } else {
                 self.path = path;
@@ -796,7 +806,10 @@ impl Drop for Panel {
 impl Panel {
     fn entry_from_remote(&self, _cwd: &str, entry: RemoteEntry) -> Entry {
         let path = PathBuf::from(&entry.path);
-        crate::viewer::debug_log(&format!("[entry_from_remote] name={}, path={}", entry.name, entry.path));
+        crate::viewer::debug_log(&format!(
+            "[entry_from_remote] name={}, path={}",
+            entry.name, entry.path
+        ));
         let category = FileCategory::from_entry(entry.is_dir, entry.is_symlink, &entry.name);
         Entry {
             name: entry.name,

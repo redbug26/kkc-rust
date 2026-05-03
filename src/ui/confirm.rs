@@ -490,4 +490,3 @@ pub(super) fn render_input(f: &mut Frame, dlg: &InputDialog, area: Rect) {
         safe_set_cursor_position(f, cursor_x, cursor_y);
     }
 }
-

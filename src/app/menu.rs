@@ -167,12 +167,10 @@ impl StoreInstallPaletteState {
             .collect::<HashMap<_, _>>();
         let (mut items, index_info) = crate::plugins::list_store_plugins_with_info(&index_path)?;
         items.sort_by(|a, b| {
-            let a_update = {
-                store_item_has_update(a, &installed_versions, &installed_app_versions)
-            };
-            let b_update = {
-                store_item_has_update(b, &installed_versions, &installed_app_versions)
-            };
+            let a_update =
+                { store_item_has_update(a, &installed_versions, &installed_app_versions) };
+            let b_update =
+                { store_item_has_update(b, &installed_versions, &installed_app_versions) };
 
             b_update
                 .cmp(&a_update)
@@ -230,7 +228,10 @@ impl StoreInstallPaletteState {
 
     pub fn installed_version_for(&self, item: &crate::plugins::StorePluginInfo) -> Option<&str> {
         if matches!(item.item_kind, crate::plugins::StoreItemKind::Application) {
-            return self.installed_app_versions.get(&item.id).map(|s| s.as_str());
+            return self
+                .installed_app_versions
+                .get(&item.id)
+                .map(|s| s.as_str());
         }
         let dir = self.install_dir_name_for(item);
         self.installed_versions.get(&dir).map(|s| s.as_str())

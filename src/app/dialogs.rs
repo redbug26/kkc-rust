@@ -143,4 +143,3 @@ pub struct SearchState {
     /// Number of directories visited so far (for progress display).
     pub dirs_visited: usize,
 }
-
