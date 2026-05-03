@@ -1,8 +1,9 @@
 use anyhow::{Context, Result};
+use chrono::Local;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
@@ -374,8 +375,19 @@ impl Config {
         if path.exists() {
             let text = fs::read_to_string(&path)
                 .with_context(|| format!("Reading config: {}", path.display()))?;
-            let mut cfg: Self = toml::from_str(&text)
-                .with_context(|| format!("Parsing config: {}", path.display()))?;
+            let mut cfg: Self = match toml::from_str(&text) {
+                Ok(cfg) => cfg,
+                Err(parse_err) => {
+                    let backup = backup_invalid_config(&path).with_context(|| {
+                        format!("Parsing config and backing it up: {}", path.display())
+                    })?;
+                    return Err(anyhow::anyhow!(
+                        "Parsing config: {} ({parse_err}). Invalid file moved to {}",
+                        path.display(),
+                        backup.display()
+                    ));
+                }
+            };
 
             // Migration path for configs written during the sectioned-save
             // refactor where root keys were accidentally emitted under [viewer].
@@ -607,6 +619,34 @@ impl Config {
         self.file_assoc.retain(|assoc| !assoc.openers.is_empty());
         changed || self.file_assoc.len() != before
     }
+}
+
+fn backup_invalid_config(path: &Path) -> Result<PathBuf> {
+    let parent = path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("config.toml");
+    let ts = Local::now().format("%Y%m%d-%H%M%S").to_string();
+
+    let mut candidate = parent.join(format!("{file_name}.{ts}"));
+    let mut idx = 1usize;
+    while candidate.exists() {
+        candidate = parent.join(format!("{file_name}.{ts}.{idx}"));
+        idx += 1;
+    }
+
+    fs::rename(path, &candidate).with_context(|| {
+        format!(
+            "Renaming invalid config {} -> {}",
+            path.display(),
+            candidate.display()
+        )
+    })?;
+    Ok(candidate)
 }
 
 // ---------------------------------------------------------------------------

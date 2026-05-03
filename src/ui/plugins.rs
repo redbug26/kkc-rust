@@ -160,7 +160,7 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
         height: 1,
     };
     let hint_items = footer_shortcut_items(&plugins_shortcuts());
-    render_shortcut_bar(f, hint_area, &hint_items, default_shortcut_bar_style());
+    render_shortcut_bar(f, hint_area, &hint_items, secondary_shortcut_bar_style());
 
     // ── Body area (between dir separator and footer separator) ──────────
     let body_y = inner.y + 4;
