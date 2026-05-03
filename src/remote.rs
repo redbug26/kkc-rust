@@ -724,6 +724,33 @@ fn remote_plugin_error(err: abi_stable::std_types::RString) -> anyhow::Error {
     anyhow::anyhow!(err.to_string())
 }
 
+#[allow(dead_code)]
+pub fn remote_plugin_auth_start(plugin_id: &str, config_json: &str) -> Result<String> {
+    let module = crate::remote_plugins::load_remote_plugin(plugin_id)?;
+    module.set_debug_log()(remote_plugin_debug_log as usize);
+    let call = module.auth_start()(config_json.into());
+    match call {
+        abi_stable::std_types::RResult::ROk(session) => Ok(session.to_string()),
+        abi_stable::std_types::RResult::RErr(err) => Err(remote_plugin_error(err)),
+    }
+}
+
+#[allow(dead_code)]
+pub fn remote_plugin_auth_complete(
+    plugin_id: &str,
+    config_json: &str,
+    auth_session_json: &str,
+    input: &str,
+) -> Result<String> {
+    let module = crate::remote_plugins::load_remote_plugin(plugin_id)?;
+    module.set_debug_log()(remote_plugin_debug_log as usize);
+    let call = module.auth_complete()(config_json.into(), auth_session_json.into(), input.into());
+    match call {
+        abi_stable::std_types::RResult::ROk(config) => Ok(config.to_string()),
+        abi_stable::std_types::RResult::RErr(err) => Err(remote_plugin_error(err)),
+    }
+}
+
 fn remote_plugin_list_dir(
     profile: &RemoteProfile,
     cwd: &str,

@@ -6,7 +6,7 @@ use abi_stable::{
     std_types::{RResult, RStr, RString, RVec},
 };
 
-pub const KKC_REMOTE_PLUGIN_API_VERSION: u32 = 2;
+pub const KKC_REMOTE_PLUGIN_API_VERSION: u32 = 3;
 
 pub type RemotePluginResult<T> = RResult<T, RString>;
 
@@ -68,7 +68,8 @@ pub struct RemoteEntry {
 pub struct RemotePluginMod {
     pub api_version: extern "C" fn() -> u32,
     pub metadata: extern "C" fn() -> RemotePluginMetadata,
-    pub normalize_cwd: extern "C" fn(config_json: RStr<'_>, cwd: RStr<'_>) -> RemotePluginResult<RString>,
+    pub normalize_cwd:
+        extern "C" fn(config_json: RStr<'_>, cwd: RStr<'_>) -> RemotePluginResult<RString>,
     pub list_dir: extern "C" fn(
         config_json: RStr<'_>,
         cwd: RStr<'_>,
@@ -92,8 +93,15 @@ pub struct RemotePluginMod {
         is_dir: bool,
     ) -> RemotePluginResult<()>,
     pub set_debug_log: extern "C" fn(callback: usize),
+    pub make_dir:
+        extern "C" fn(config_json: RStr<'_>, remote_path: RStr<'_>) -> RemotePluginResult<()>,
+    pub auth_start: extern "C" fn(config_json: RStr<'_>) -> RemotePluginResult<RString>,
     #[sabi(last_prefix_field)]
-    pub make_dir: extern "C" fn(config_json: RStr<'_>, remote_path: RStr<'_>) -> RemotePluginResult<()>,
+    pub auth_complete: extern "C" fn(
+        config_json: RStr<'_>,
+        auth_session_json: RStr<'_>,
+        input: RStr<'_>,
+    ) -> RemotePluginResult<RString>,
 }
 
 impl RootModule for RemotePluginModRef {
