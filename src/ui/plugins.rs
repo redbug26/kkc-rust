@@ -3,7 +3,7 @@ use super::*;
 pub(crate) fn plugins_shortcuts() -> Vec<FooterShortcut> {
     vec![
         FooterShortcut {
-            label: "\u{23ce}:OpenDir",
+            label: " \u{23ce} :OpenDir",
             key: KeyCode::Enter,
         },
         FooterShortcut {
@@ -11,11 +11,11 @@ pub(crate) fn plugins_shortcuts() -> Vec<FooterShortcut> {
             key: KeyCode::Char('s'),
         },
         FooterShortcut {
-            label: "\u{232B}:Remove",
+            label: " \u{232B} :Remove",
             key: KeyCode::Delete,
         },
         FooterShortcut {
-            label: "\u{238B}:Close",
+            label: " \u{238B} :Close",
             key: KeyCode::Esc,
         },
     ]

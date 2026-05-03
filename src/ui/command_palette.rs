@@ -15,7 +15,7 @@ const SHORT_W: usize = 11;
 pub(crate) fn command_palette_shortcuts() -> Vec<FooterShortcut> {
     vec![
         FooterShortcut {
-            label: "\u{23ce}:Run",
+            label: " \u{23ce} :Run",
             key: KeyCode::Enter,
         },
         FooterShortcut {
@@ -23,7 +23,7 @@ pub(crate) fn command_palette_shortcuts() -> Vec<FooterShortcut> {
             key: KeyCode::Null,
         },
         FooterShortcut {
-            label: "\u{238B}:Close",
+            label: " \u{238B} :Close",
             key: KeyCode::Esc,
         },
     ]

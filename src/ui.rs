@@ -694,10 +694,12 @@ fn secondary_shortcut_bar_style() -> ShortcutBarStyle {
 }
 
 fn shortcut_bar_item_width(item: &ShortcutBarItem) -> usize {
-    // [key] + label + trailing separator space
+    // Rendered as: "{key}" + " {label} " + " " (separator, always counted to simplify)
+    // = key_width + (label_width + 2) + 1 = key_width + label_width + 3
+    // The last item has no separator, but the 1-col overshoot is harmless.
     UnicodeWidthStr::width(item.key.as_str())
         + UnicodeWidthStr::width(item.label.as_str())
-        + 4
+        + 3
 }
 
 pub(crate) fn shortcut_bar_item_index_at_column(
@@ -729,11 +731,11 @@ pub(crate) fn render_shortcut_bar(
     let mut spans = Vec::new();
     for (idx, item) in items.iter().enumerate() {
         spans.push(Span::styled(
-            format!(" {} ", item.key),
+            format!("{}", item.key),
             Style::default().fg(style.key_fg).bg(style.key_bg),
         ));
         spans.push(Span::styled(
-            format!(":{} ", item.label),
+            format!(" {} ", item.label),
             Style::default().fg(style.label_fg).bg(style.label_bg),
         ));
         if idx + 1 < items.len() {
@@ -816,13 +818,8 @@ pub(crate) fn fkey_items(app: &App) -> Vec<ShortcutBarItem> {
 
 pub(crate) fn fkey_number_at_column(app: &App, area_x: u16, column: u16) -> Option<u8> {
     let slots = fkey_slots(app);
-    let items: Vec<ShortcutBarItem> = slots
-        .iter()
-        .map(|slot| ShortcutBarItem {
-            key: slot.number.to_string(),
-            label: slot.label.clone(),
-        })
-        .collect();
+    // Use the same key strings as fkey_items / render_fkey_bar ("F1".."F10")
+    let items = fkey_items(app);
     let idx = shortcut_bar_item_index_at_column(&items, area_x, column)?;
     slots.get(idx).map(|slot| slot.number)
 }

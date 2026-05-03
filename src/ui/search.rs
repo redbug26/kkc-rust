@@ -4,7 +4,7 @@ pub(crate) fn search_panel_shortcuts(state: &SearchState) -> Vec<FooterShortcut>
     if state.input_field == 3 {
         vec![
             FooterShortcut {
-                label: "\u{23ce}:GoToFile",
+                label: " \u{23ce} :GoToFile",
                 key: KeyCode::Enter,
             },
             FooterShortcut {
@@ -16,7 +16,7 @@ pub(crate) fn search_panel_shortcuts(state: &SearchState) -> Vec<FooterShortcut>
                 key: KeyCode::Null,
             },
             FooterShortcut {
-                label: "\u{21E5}:Fields",
+                label: " \u{21E5} :Fields",
                 key: KeyCode::Tab,
             },
             FooterShortcut {
@@ -24,22 +24,22 @@ pub(crate) fn search_panel_shortcuts(state: &SearchState) -> Vec<FooterShortcut>
                 key: KeyCode::F(5),
             },
             FooterShortcut {
-                label: "\u{238B}:Close",
+                label: " \u{238B} :Close",
                 key: KeyCode::Esc,
             },
         ]
     } else if state.input_field == 2 {
         vec![
             FooterShortcut {
-                label: "\u{23ce}:Search",
+                label: " \u{23ce} :Search",
                 key: KeyCode::Enter,
             },
             FooterShortcut {
-                label: "\u{21E5}:SwitchField",
+                label: " \u{21E5} :SwitchField",
                 key: KeyCode::Tab,
             },
             FooterShortcut {
-                label: "\u{232B}:ResetDir",
+                label: " \u{232B} :ResetDir",
                 key: KeyCode::Delete,
             },
             FooterShortcut {
@@ -47,18 +47,18 @@ pub(crate) fn search_panel_shortcuts(state: &SearchState) -> Vec<FooterShortcut>
                 key: KeyCode::F(5),
             },
             FooterShortcut {
-                label: "\u{238B}:Close",
+                label: " \u{238B} :Close",
                 key: KeyCode::Esc,
             },
         ]
     } else {
         vec![
             FooterShortcut {
-                label: "\u{23ce}:Search",
+                label: " \u{23ce} :Search",
                 key: KeyCode::Enter,
             },
             FooterShortcut {
-                label: "\u{21E5}:SwitchField",
+                label: " \u{21E5} :SwitchField",
                 key: KeyCode::Tab,
             },
             FooterShortcut {
@@ -70,11 +70,11 @@ pub(crate) fn search_panel_shortcuts(state: &SearchState) -> Vec<FooterShortcut>
                 key: KeyCode::F(5),
             },
             FooterShortcut {
-                label: "\u{232B}:Reset",
+                label: " \u{232B} :Reset",
                 key: KeyCode::Delete,
             },
             FooterShortcut {
-                label: "\u{238B}:Close",
+                label: " \u{238B}:Close",
                 key: KeyCode::Esc,
             },
         ]

@@ -5,15 +5,15 @@ use crate::remote::RemoteKind;
 pub(crate) fn remote_connect_shortcuts() -> Vec<FooterShortcut> {
     vec![
         FooterShortcut {
-            label: "🔤:Filter",
+            label: "a..z:Filter",
             key: KeyCode::Null,
         },
         FooterShortcut {
-            label: "\u{23ce}:Connect",
+            label: " \u{23ce} :Connect",
             key: KeyCode::Enter,
         },
         FooterShortcut {
-            label: "\u{21E5}:SSH",
+            label: " \u{21E5} :SSH",
             key: KeyCode::Tab,
         },
         FooterShortcut {
@@ -25,7 +25,7 @@ pub(crate) fn remote_connect_shortcuts() -> Vec<FooterShortcut> {
             key: KeyCode::F(7),
         },
         FooterShortcut {
-            label: "\u{238B}:Cancel",
+            label: " \u{238B} :Cancel",
             key: KeyCode::Esc,
         },
     ]
@@ -34,15 +34,11 @@ pub(crate) fn remote_connect_shortcuts() -> Vec<FooterShortcut> {
 pub(crate) fn remote_add_menu_shortcuts() -> Vec<FooterShortcut> {
     vec![
         FooterShortcut {
-            label: "UpDown:Select",
-            key: KeyCode::Null,
-        },
-        FooterShortcut {
-            label: "\u{23ce}:OK",
+            label: " \u{23ce} :OK",
             key: KeyCode::Enter,
         },
         FooterShortcut {
-            label: "\u{238B}:Cancel",
+            label: " \u{238B} :Cancel",
             key: KeyCode::Esc,
         },
     ]
@@ -53,7 +49,7 @@ pub(crate) fn remote_edit_shortcuts(state: &RemoteEditState) -> Vec<FooterShortc
     {
         vec![
             FooterShortcut {
-                label: "\u{21E5}:Next",
+                label: " \u{21E5} :Next",
                 key: KeyCode::Tab,
             },
             FooterShortcut {
@@ -65,7 +61,7 @@ pub(crate) fn remote_edit_shortcuts(state: &RemoteEditState) -> Vec<FooterShortc
                 key: KeyCode::F(6),
             },
             FooterShortcut {
-                label: "\u{238B}:Cancel",
+                label: " \u{238B} :Cancel",
                 key: KeyCode::Esc,
             },
         ]
@@ -75,7 +71,7 @@ pub(crate) fn remote_edit_shortcuts(state: &RemoteEditState) -> Vec<FooterShortc
     {
         vec![
             FooterShortcut {
-                label: "\u{21E5}:Next",
+                label: " \u{21E5} :Next",
                 key: KeyCode::Tab,
             },
             FooterShortcut {
@@ -83,22 +79,22 @@ pub(crate) fn remote_edit_shortcuts(state: &RemoteEditState) -> Vec<FooterShortc
                 key: KeyCode::F(5),
             },
             FooterShortcut {
-                label: "\u{238B}:Cancel",
+                label: " \u{238B} :Cancel",
                 key: KeyCode::Esc,
             },
         ]
     } else {
         vec![
             FooterShortcut {
-                label: "\u{21E5}:Next",
+                label: " \u{21E5} :Next",
                 key: KeyCode::Tab,
             },
             FooterShortcut {
-                label: "\u{23ce}:Select",
+                label: " \u{23ce} :Select",
                 key: KeyCode::Enter,
             },
             FooterShortcut {
-                label: "\u{238B}:Cancel",
+                label: " \u{238B} :Cancel",
                 key: KeyCode::Esc,
             },
         ]
@@ -108,11 +104,11 @@ pub(crate) fn remote_edit_shortcuts(state: &RemoteEditState) -> Vec<FooterShortc
 pub(crate) fn remote_connecting_shortcuts() -> Vec<FooterShortcut> {
     vec![
         FooterShortcut {
-            label: "\u{238B}:Abort",
+            label: " \u{238B} :Abort",
             key: KeyCode::Esc,
         },
         FooterShortcut {
-            label: "\u{23ce}:Abort",
+            label: " \u{23ce} :Abort",
             key: KeyCode::Enter,
         },
         FooterShortcut {
@@ -310,6 +306,7 @@ pub(super) fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, a
                     alias_style.bg.unwrap_or(CLR_MENU_DD_BG),
                     CLR_QS_MATCH_HI_SEL,
                 );
+                let proto_text = truncate_str(proto, 8);
                 let host_text = truncate_str(&host, inner.width.saturating_sub(35) as usize);
                 let host_line = highlight_tokens(
                     &host_text,
@@ -326,7 +323,7 @@ pub(super) fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, a
                 spans.extend(alias_line.spans);
                 spans.extend([
                     Span::styled(" ", row_style),
-                    Span::styled(format!("{:^6}", proto), proto_style),
+                    Span::styled(format!("{:^8}", proto_text), proto_style),
                     Span::styled(" ", row_style),
                     Span::styled(format!("{:^6}", source), badge_style),
                     Span::styled("  ", row_style),

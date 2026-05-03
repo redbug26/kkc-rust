@@ -9,11 +9,11 @@ const CLR_MARKER: Color = Color::Rgb(255, 220, 80);
 pub(crate) fn shortcut_panel_shortcuts() -> Vec<FooterShortcut> {
     vec![
         FooterShortcut {
-            label: "\u{23ce}:Set",
+            label: " \u{23ce} :Set",
             key: KeyCode::Enter,
         },
         FooterShortcut {
-            label: "\u{232B}:Clear",
+            label: " \u{232B} :Clear",
             key: KeyCode::Delete,
         },
         FooterShortcut {
@@ -21,7 +21,7 @@ pub(crate) fn shortcut_panel_shortcuts() -> Vec<FooterShortcut> {
             key: KeyCode::Char('r'),
         },
         FooterShortcut {
-            label: "\u{238B}:Close",
+            label: " \u{238B} :Close",
             key: KeyCode::Esc,
         },
     ]
@@ -179,5 +179,5 @@ pub(super) fn render_shortcut_panel(
         height: 1,
     };
     let hint_items = footer_shortcut_items(&shortcut_panel_shortcuts());
-    render_shortcut_bar(f, hint_area, &hint_items, default_shortcut_bar_style());
+    render_shortcut_bar(f, hint_area, &hint_items, secondary_shortcut_bar_style());
 }

@@ -3,19 +3,19 @@ use super::*;
 pub(crate) fn dir_bookmarks_shortcuts() -> Vec<FooterShortcut> {
     vec![
         FooterShortcut {
-            label: "🔤:Filter",
+            label: "a..z:Filter",
             key: KeyCode::Null,
         },
         FooterShortcut {
-            label: "\u{23ce}:OpenAdd",
+            label: " \u{23ce} :OpenAdd",
             key: KeyCode::Enter,
         },
         FooterShortcut {
-            label: "\u{232B}:Remove",
+            label: " \u{232B} :Remove",
             key: KeyCode::Delete,
         },
         FooterShortcut {
-            label: "\u{238B}:Cancel",
+            label: " \u{238B} :Cancel",
             key: KeyCode::Esc,
         },
     ]
@@ -33,18 +33,18 @@ pub(crate) fn store_install_shortcuts(state: &StoreInstallPaletteState) -> Vec<F
                 key: KeyCode::Right,
             },
             FooterShortcut {
-                label: "\u{23ce}:Apply",
+                label: " \u{23ce} :Apply",
                 key: KeyCode::Enter,
             },
             FooterShortcut {
-                label: "\u{238B}:Cancel",
+                label: " \u{238B} :Cancel",
                 key: KeyCode::Esc,
             },
         ]
     } else {
         vec![
             FooterShortcut {
-                label: "\u{23ce}:Install",
+                label: " \u{23ce} :Install",
                 key: KeyCode::Enter,
             },
             FooterShortcut {
@@ -60,7 +60,7 @@ pub(crate) fn store_install_shortcuts(state: &StoreInstallPaletteState) -> Vec<F
                 key: KeyCode::Char('r'),
             },
             FooterShortcut {
-                label: "\u{238B}:Close",
+                label: " \u{238B} :Close",
                 key: KeyCode::Esc,
             },
         ]
@@ -78,11 +78,11 @@ pub(crate) fn store_detect_shortcuts() -> Vec<FooterShortcut> {
             key: KeyCode::Right,
         },
         FooterShortcut {
-            label: "\u{23ce}:Apply",
+            label: " \u{23ce} :Apply",
             key: KeyCode::Enter,
         },
         FooterShortcut {
-            label: "\u{238B}:Cancel",
+            label: " \u{238B} :Cancel",
             key: KeyCode::Esc,
         },
     ]
@@ -274,7 +274,7 @@ pub(super) fn render_dir_bookmarks(f: &mut Frame, app: &App, area: Rect) {
     );
 
     let hint_items = footer_shortcut_items(&dir_bookmarks_shortcuts());
-    render_shortcut_bar(f, hint_area, &hint_items, default_shortcut_bar_style());
+    render_shortcut_bar(f, hint_area, &hint_items, secondary_shortcut_bar_style());
 }
 
 // ---------------------------------------------------------------------------

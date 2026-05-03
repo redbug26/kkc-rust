@@ -4,7 +4,7 @@ pub(crate) fn help_shortcuts(view: &crate::help::HelpView) -> Vec<FooterShortcut
     match view {
         HelpView::Index { .. } => vec![
             FooterShortcut {
-                label: "\u{238B}:Close",
+                label: " \u{238B} :Close",
                 key: KeyCode::Esc,
             },
             FooterShortcut {
@@ -12,13 +12,13 @@ pub(crate) fn help_shortcuts(view: &crate::help::HelpView) -> Vec<FooterShortcut
                 key: KeyCode::F(10),
             },
             FooterShortcut {
-                label: "\u{23ce}:Open",
+                label: " \u{23ce} :Open",
                 key: KeyCode::Enter,
             },
         ],
         HelpView::Topics { .. } => vec![
             FooterShortcut {
-                label: "\u{238B}:Close",
+                label: " \u{238B} :Close",
                 key: KeyCode::Esc,
             },
             FooterShortcut {
@@ -26,13 +26,13 @@ pub(crate) fn help_shortcuts(view: &crate::help::HelpView) -> Vec<FooterShortcut
                 key: KeyCode::Backspace,
             },
             FooterShortcut {
-                label: "\u{23ce}:Open",
+                label: " \u{23ce} :Open",
                 key: KeyCode::Enter,
             },
         ],
         HelpView::Page { .. } => vec![
             FooterShortcut {
-                label: "\u{238B}:Close",
+                label: " \u{238B} :Close",
                 key: KeyCode::Esc,
             },
             FooterShortcut {
@@ -44,11 +44,11 @@ pub(crate) fn help_shortcuts(view: &crate::help::HelpView) -> Vec<FooterShortcut
                 key: KeyCode::Null,
             },
             FooterShortcut {
-                label: "\u{21E5}:NextLink",
+                label: " \u{21E5} :NextLink",
                 key: KeyCode::Tab,
             },
             FooterShortcut {
-                label: "\u{23ce}:Open",
+                label: " \u{23ce} :Open",
                 key: KeyCode::Enter,
             },
         ],
