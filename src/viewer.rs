@@ -576,6 +576,19 @@ impl Viewer {
         self.scroll = 0;
     }
 
+    pub fn goto_first_non_blank(&mut self) {
+        if matches!(self.mode, ViewMode::Text | ViewMode::Ansi) && self.viewer_plugin.is_none() {
+            let line = self
+                .current_plain_lines()
+                .iter()
+                .position(|line| !line.trim().is_empty())
+                .unwrap_or(0);
+            self.goto_line(line);
+        } else {
+            self.goto_start();
+        }
+    }
+
     pub fn goto_end(&mut self, height: usize) {
         self.scroll = self.line_count().saturating_sub(height.max(1));
     }

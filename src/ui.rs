@@ -30,7 +30,10 @@ use self::shortcuts::render_shortcut_panel;
 use self::terminal::render_terminal;
 use self::tree_view::render_tree_view;
 pub use self::viewer::{kitty_image_area, kitty_image_area_quick_preview};
-use self::viewer::{menu_dropdown_line, mnemonics_for_labels, render_viewer, render_viewer_menu};
+use self::viewer::{
+    menu_dropdown_line, mnemonics_for_labels, render_viewer, render_viewer_goto,
+    render_viewer_menu,
+};
 
 use self::command_palette::render_command_palette;
 use self::panel::{render_center_buttons, render_panel_or_file_id};
@@ -39,8 +42,8 @@ use crate::app::{
     ActionPaletteState, ActivePanel, App, AppMode, AssocEditorState, BookmarkListItem, ConfigState,
     ConfirmAction, ConfirmDialog, InputDialog, MENU_DATA, MENU_HEADERS, MenuAction, MenuState,
     OpenerState, PluginsState, RemoteConnectState, RemoteConnectingState, RemoteEditKind,
-    RemoteEditState, SearchState, StoreInstallPaletteState, ViewerMenuKind, ViewerMenuState,
-    ViewerPluginPaletteState,
+    RemoteEditState, SearchState, StoreInstallPaletteState, ViewerGotoState, ViewerMenuKind,
+    ViewerMenuState, ViewerPluginPaletteState,
 };
 use crate::config::SortMode;
 use crate::copy::{CopyDialogState, CopyProgressState};
@@ -171,6 +174,11 @@ pub fn render(f: &mut Frame, app: &App) {
         }
         AppMode::ViewerGotoLine(v, input) => {
             render_viewer(f, v, false, Some(input), f.area(), true, true, None);
+            return;
+        }
+        AppMode::ViewerGoto(v, state) => {
+            render_viewer(f, v, false, None, f.area(), true, true, None);
+            render_viewer_goto(f, state, f.area());
             return;
         }
         AppMode::ViewerMenu(v, menu) => {

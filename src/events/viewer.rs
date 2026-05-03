@@ -1,5 +1,7 @@
 use super::fx_shortcut;
-use crate::app::{App, AppMode, ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState};
+use crate::app::{
+    App, AppMode, ViewerGotoState, ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,
+};
 use crate::viewer::{EncodingMode, LineFeedMode, MaskKind, PreprocOpKind, ViewMode, Viewer};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -76,6 +78,16 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
                 return Ok(false);
             };
             app.mode = AppMode::ViewerGotoLine(v, String::new());
+            return Ok(false);
+        }
+        KeyCode::Char('g')
+            if !key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::ALT) =>
+        {
+            let AppMode::Viewer(v) = std::mem::replace(&mut app.mode, AppMode::Browse) else {
+                return Ok(false);
+            };
+            app.mode = AppMode::ViewerGoto(v, ViewerGotoState::new());
             return Ok(false);
         }
         _ => {}
@@ -188,6 +200,114 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
         }
     }
     Ok(false)
+}
+
+const VIEWER_GOTO_ITEMS: &[(&str, &str)] = &[
+    ("g", "Goto line number <n> else file start"),
+    ("e", "Goto last line"),
+    ("s", "Goto first non-blank"),
+    ("n", "Goto next page"),
+    ("p", "Goto previous page"),
+];
+
+pub(super) fn handle_viewer_goto(app: &mut App, key: KeyEvent) -> Result<bool> {
+    let fn_key = fx_shortcut(key);
+    let (viewer, mut state) = match std::mem::replace(&mut app.mode, AppMode::Browse) {
+        AppMode::ViewerGoto(viewer, state) => (viewer, state),
+        other => {
+            app.mode = other;
+            return Ok(false);
+        }
+    };
+
+    match key.code {
+        KeyCode::Esc => {
+            app.mode = AppMode::Viewer(viewer);
+            return Ok(false);
+        }
+        _ if fn_key == Some(10) => {
+            viewer.save_position();
+            app.mode = AppMode::Browse;
+            return Ok(false);
+        }
+        KeyCode::Up => state.cursor = viewer_goto_prev_cursor(state.cursor),
+        KeyCode::Down => state.cursor = viewer_goto_next_cursor(state.cursor),
+        KeyCode::Home => state.cursor = 0,
+        KeyCode::End => state.cursor = VIEWER_GOTO_ITEMS.len().saturating_sub(1),
+        KeyCode::Backspace | KeyCode::Delete => {
+            state.count.pop();
+        }
+        KeyCode::Enter => {
+            apply_viewer_goto_selection(app, viewer, state);
+            return Ok(false);
+        }
+        KeyCode::Char(ch)
+            if ch.is_ascii_digit()
+                && !key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::ALT) =>
+        {
+            if state.count.len() < 9 {
+                state.count.push(ch);
+            }
+        }
+        KeyCode::Char(ch)
+            if !key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::ALT) =>
+        {
+            let ch = ch.to_ascii_lowercase();
+            if let Some(idx) = VIEWER_GOTO_ITEMS
+                .iter()
+                .position(|(shortcut, _)| shortcut.starts_with(ch))
+            {
+                state.cursor = idx;
+                apply_viewer_goto_selection(app, viewer, state);
+                return Ok(false);
+            }
+        }
+        _ => {}
+    }
+
+    app.mode = AppMode::ViewerGoto(viewer, state);
+    Ok(false)
+}
+
+fn viewer_goto_next_cursor(cursor: usize) -> usize {
+    if cursor + 1 >= VIEWER_GOTO_ITEMS.len() {
+        0
+    } else {
+        cursor + 1
+    }
+}
+
+fn viewer_goto_prev_cursor(cursor: usize) -> usize {
+    if cursor == 0 {
+        VIEWER_GOTO_ITEMS.len().saturating_sub(1)
+    } else {
+        cursor - 1
+    }
+}
+
+fn apply_viewer_goto_selection(app: &mut App, mut viewer: Viewer, state: ViewerGotoState) {
+    let page_size = viewer_page_size(&viewer);
+    match state.cursor {
+        0 => {
+            if let Ok(line) = state.count.parse::<usize>() {
+                if line > 0 {
+                    viewer.goto_line(line - 1);
+                } else {
+                    viewer.goto_start();
+                }
+            } else {
+                viewer.goto_start();
+            }
+        }
+        1 => viewer.goto_line(viewer.line_count().saturating_sub(1)),
+        2 => viewer.goto_first_non_blank(),
+        3 => viewer.page_down(page_size),
+        4 => viewer.page_up(page_size),
+        _ => {}
+    }
+    app.mode = AppMode::Viewer(viewer);
 }
 
 pub(super) fn handle_viewer_menu(app: &mut App, key: KeyEvent) -> Result<bool> {

@@ -378,10 +378,96 @@ pub(super) fn render_viewer(
             .min(footer_area.x + footer_area.width - 1);
         safe_set_cursor_position(f, cx, footer_area.y);
     } else if show_footer {
-        let help = Paragraph::new(" F10:Close  F2:Wrap  F3:LnFeed  F4:Mode  F5:Zoom  F6:Prepro  F7:Search  F8:Enc  F9:Syntax  ^G:Goto ")
+        let help = Paragraph::new(" F10:Close  F2:Wrap  F3:LnFeed  F4:Mode  F5:Zoom  F6:Prepro  F7:Search  F8:Enc  F9:Syntax  g:Goto ")
             .style(Style::default().fg(Color::Black).bg(Color::Cyan));
         f.render_widget(help, footer_area);
     }
+}
+
+pub(super) fn render_viewer_goto(f: &mut Frame, state: &ViewerGotoState, area: Rect) {
+    let items = [
+        ("g", "Goto line number <n> else file start"),
+        ("e", "Goto last line"),
+        ("s", "Goto first non-blank"),
+        ("n", "Goto next page"),
+        ("p", "Goto previous page"),
+    ];
+    let width = 48u16;
+    let height = items.len() as u16 + 3;
+    let popup = clamp_rect(
+        area,
+        Rect {
+            x: area.x + area.width.saturating_sub(width) / 2,
+            y: area.y + area.height.saturating_sub(height) / 2,
+            width,
+            height,
+        },
+    );
+
+    safe_render_widget(f, Clear, popup);
+    let title = if state.count.is_empty() {
+        " Goto ".to_string()
+    } else {
+        format!(" Goto {} ", state.count)
+    };
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(CLR_PANEL_BORDER))
+        .style(Style::default().bg(CLR_MENU_DD_BG));
+    let inner = block.inner(popup);
+    safe_render_widget(f, block, popup);
+    safe_render_widget(
+        f,
+        Block::default().style(Style::default().bg(CLR_MENU_DD_BG)),
+        inner,
+    );
+
+    let list_items = items
+        .iter()
+        .enumerate()
+        .map(|(idx, (shortcut, label))| {
+            let style = if idx == state.cursor {
+                Style::default()
+                    .fg(CLR_MENU_SEL_FG)
+                    .bg(CLR_MENU_SEL_BG)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
+            };
+            let mut spans = vec![
+                Span::styled(" ", style),
+                Span::styled(format!("{shortcut}  "), style.add_modifier(Modifier::BOLD)),
+            ];
+            spans.push(Span::styled((*label).to_string(), style));
+            ListItem::new(Line::from(spans)).style(style)
+        })
+        .collect::<Vec<_>>();
+
+    let list_area = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: inner.width,
+        height: items.len() as u16,
+    };
+    safe_render_widget(
+        f,
+        List::new(list_items).style(Style::default().bg(CLR_MENU_DD_BG)),
+        list_area,
+    );
+
+    let hint_area = Rect {
+        x: inner.x,
+        y: inner.y + items.len() as u16,
+        width: inner.width,
+        height: inner.height.saturating_sub(items.len() as u16),
+    };
+    safe_render_widget(
+        f,
+        Paragraph::new(" digits set <n>  Enter:run  Esc:close ")
+            .style(Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)),
+        hint_area,
+    );
 }
 
 pub(super) fn render_viewer_menu(f: &mut Frame, viewer: &Viewer, menu: &ViewerMenuState, area: Rect) {
@@ -715,4 +801,3 @@ pub(super) fn mnemonics_for_labels(labels: &[String]) -> Vec<Option<char>> {
 // ---------------------------------------------------------------------------
 // Confirm dialog
 // ---------------------------------------------------------------------------
-

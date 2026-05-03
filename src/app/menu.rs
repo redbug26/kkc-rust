@@ -87,6 +87,21 @@ pub enum ViewerMenuKind {
 }
 
 #[derive(Debug, Clone)]
+pub struct ViewerGotoState {
+    pub cursor: usize,
+    pub count: String,
+}
+
+impl ViewerGotoState {
+    pub fn new() -> Self {
+        Self {
+            cursor: 0,
+            count: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct ViewerMenuState {
     pub kind: ViewerMenuKind,
     pub cursor: usize,

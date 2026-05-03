@@ -7,8 +7,8 @@ use self::menu::handle_menu;
 use self::palette::{handle_command_palette, handle_store_install_palette};
 use self::shortcuts::handle_shortcut_panel;
 use self::viewer::{
-    handle_viewer, handle_viewer_goto_line, handle_viewer_menu, handle_viewer_plugin_palette,
-    handle_viewer_searching,
+    handle_viewer, handle_viewer_goto, handle_viewer_goto_line, handle_viewer_menu,
+    handle_viewer_plugin_palette, handle_viewer_searching,
 };
 use crate::app::{
     App, AppMode, AssocEditorState, BookmarkListItem, ConfigState, ConfirmAction, InputAction,
@@ -63,6 +63,7 @@ pub fn handle_event(app: &mut App, event: Event) -> Result<bool> {
         AppMode::Viewer(_) => return handle_viewer(app, key),
         AppMode::ViewerSearching(_) => return handle_viewer_searching(app, key),
         AppMode::ViewerGotoLine(_, _) => return handle_viewer_goto_line(app, key),
+        AppMode::ViewerGoto(_, _) => return handle_viewer_goto(app, key),
         AppMode::ViewerMenu(_, _) => return handle_viewer_menu(app, key),
         AppMode::ViewerPluginPalette(_, _) => return handle_viewer_plugin_palette(app, key),
         AppMode::Confirm(_) => return handle_confirm(app, key),

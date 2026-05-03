@@ -18,8 +18,8 @@ use self::helpers::{
 };
 pub use self::menu::{
     MENU_DATA, MENU_HEADERS, MenuAction, MenuEntry, MenuState, StoreInstallPaletteState,
-    StoreDetectChoice, StoreDetectItem, StoreDetectState, StoreInstallProgress, ViewerMenuKind,
-    ViewerMenuState, ViewerPluginPaletteState,
+    StoreDetectChoice, StoreDetectItem, StoreDetectState, StoreInstallProgress, ViewerGotoState,
+    ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,
 };
 use self::panel_tabs::{PanelTabs, panel_config_for_save, restore_panel_side};
 pub use self::remote_edit::{RemoteEditKind, RemoteEditState};
@@ -95,6 +95,8 @@ pub enum AppMode {
     ViewerSearching(Viewer),
     /// Viewer with the Ctrl-G goto-line input active.
     ViewerGotoLine(Viewer, String),
+    /// Viewer with Helix-style goto dropdown active.
+    ViewerGoto(Viewer, ViewerGotoState),
     /// Viewer with a popup choice menu.
     ViewerMenu(Viewer, ViewerMenuState),
     /// Viewer plugin picker with a quick-palette filter.

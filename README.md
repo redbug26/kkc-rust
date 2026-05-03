@@ -132,6 +132,7 @@ cargo build --release
 | Key | Action |
 |-----|--------|
 | `↑` / `↓` / `PgUp` / `PgDn` | Scroll |
+| `g` | Open goto dropdown (`g`, `e`, `s`, `n`, `p`) |
 | `/` | Search in document |
 | `n` | Next search match |
 | `F4` | Change viewer mode / plugin |

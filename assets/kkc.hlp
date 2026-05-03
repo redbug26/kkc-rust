@@ -189,6 +189,12 @@
     LEFT / RIGHT     Scroll 8 columns left / right (Text mode).
     C-LEFT / C-RIGHT Scroll 40 columns left / right.
     C-HOME           Scroll to column 0.
+    g                Open goto dropdown:
+                       g  Go to line number <n>, or file start if no <n>.
+                       e  Go to last line.
+                       s  Go to first non-blank line.
+                       n  Go to next page.
+                       p  Go to previous page.
 
 % Search
 
