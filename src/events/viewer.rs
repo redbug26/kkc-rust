@@ -413,7 +413,7 @@ fn apply_viewer_goto_selection(app: &mut App, mut viewer: Viewer, state: ViewerG
                 viewer.goto_start();
             }
         }
-        1 => viewer.goto_line(viewer.line_count().saturating_sub(1)),
+        1 => viewer.goto_end(viewer_page_size(&viewer)),
         2 => viewer.goto_first_non_blank(),
         3 => viewer.page_down(page_size),
         4 => viewer.page_up(page_size),
