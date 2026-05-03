@@ -30,6 +30,7 @@ use self::shortcuts::render_shortcut_panel;
 use self::terminal::render_terminal;
 use self::tree_view::render_tree_view;
 pub use self::viewer::{kitty_image_area, kitty_image_area_quick_preview};
+pub(crate) use self::viewer::viewer_area;
 use self::viewer::{
     menu_dropdown_line, mnemonics_for_labels, render_viewer, render_viewer_goto,
     render_viewer_menu,
@@ -524,6 +525,48 @@ fn menu_action_shortcut(app: &App, action: MenuAction) -> Option<String> {
 // ---------------------------------------------------------------------------
 
 fn render_status(f: &mut Frame, app: &App, area: Rect) {
+    let status_text = status_line_left_text(app);
+
+    let sort_label = match app.active_panel().sort {
+        SortMode::Name => "Name",
+        SortMode::Extension => "Ext",
+        SortMode::Date => "Date",
+        SortMode::Size => "Size",
+        SortMode::Unsorted => "---",
+    };
+    let hidden_label = if app.active_panel().show_hidden {
+        "H"
+    } else {
+        " "
+    };
+    let right_info = format!(" Sort:{} [{}] ", sort_label, hidden_label);
+
+    let left_w = area.width.saturating_sub(right_info.len() as u16);
+    let status_lead = if app.status_copy_icon_visible() {
+        "⧉ "
+    } else {
+        "  "
+    };
+
+    let line = Line::from(vec![
+        Span::styled(
+            format!(
+                "{}{:<width$}",
+                status_lead,
+                status_text,
+                width = left_w.saturating_sub(1) as usize
+            ),
+            Style::default().fg(CLR_STATUS_FG).bg(CLR_STATUS_BG),
+        ),
+        Span::styled(
+            right_info,
+            Style::default().fg(CLR_BUTTON_FG).bg(CLR_STATUS_BG),
+        ),
+    ]);
+    f.render_widget(Paragraph::new(line), area);
+}
+
+fn status_line_left_text(app: &App) -> String {
     let entry_info = if let Some(e) = app.active_panel().current_entry() {
         if e.name == ".." {
             let mode_str = format_mode(e.mode);
@@ -566,6 +609,10 @@ fn render_status(f: &mut Frame, app: &App, area: Rect) {
         app.status.text.clone()
     };
 
+    status_text
+}
+
+pub(crate) fn status_line_for_copy(app: &App) -> String {
     let sort_label = match app.active_panel().sort {
         SortMode::Name => "Name",
         SortMode::Extension => "Ext",
@@ -578,34 +625,20 @@ fn render_status(f: &mut Frame, app: &App, area: Rect) {
     } else {
         " "
     };
-    let right_info = format!(" Sort:{} [{}] ", sort_label, hidden_label);
-
-    let left_w = area.width.saturating_sub(right_info.len() as u16);
-
-    let line = Line::from(vec![
-        Span::styled(
-            format!(
-                " {:<width$}",
-                status_text,
-                width = left_w.saturating_sub(1) as usize
-            ),
-            Style::default().fg(CLR_STATUS_FG).bg(CLR_STATUS_BG),
-        ),
-        Span::styled(
-            right_info,
-            Style::default().fg(CLR_BUTTON_FG).bg(CLR_STATUS_BG),
-        ),
-    ]);
-    f.render_widget(Paragraph::new(line), area);
+    format!(
+        "{} Sort:{} [{}]",
+        status_line_left_text(app),
+        sort_label,
+        hidden_label
+    )
 }
 
 // ---------------------------------------------------------------------------
 // Function key bar
 // ---------------------------------------------------------------------------
 
-fn render_fkey_bar(f: &mut Frame, app: &App, area: Rect) {
-    let mut labels: Vec<(String, String)> =
-        (1..=10).map(|n| (n.to_string(), String::new())).collect();
+pub(crate) fn fkey_slots(app: &App) -> Vec<(u8, String)> {
+    let mut labels: Vec<(u8, String)> = (1..=10).map(|n| (n as u8, String::new())).collect();
 
     for n in 1..=10 {
         let shortcut = format!("F{}", n);
@@ -621,10 +654,16 @@ fn render_fkey_bar(f: &mut Frame, app: &App, area: Rect) {
         labels[1].1 = "Menu".to_string();
     }
 
+    labels
+}
+
+fn render_fkey_bar(f: &mut Frame, app: &App, area: Rect) {
+    let labels = fkey_slots(app);
+
     let mut spans = Vec::new();
-    for (num, label) in &labels {
+    for (num, label) in labels {
         spans.push(Span::styled(
-            num.clone(),
+            num.to_string(),
             Style::default().fg(CLR_FKEY_NUM).bg(CLR_FKEY_NUM_BG),
         ));
         spans.push(Span::styled(

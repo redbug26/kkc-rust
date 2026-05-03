@@ -738,6 +738,8 @@ pub struct StatusMessage {
     pub text: String,
     /// When the current text was last set (used for auto-clear after 30 s).
     pub set_at: Option<std::time::Instant>,
+    /// When the status-copy icon was triggered by mouse copy action.
+    pub copy_icon_at: Option<std::time::Instant>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1533,6 +1535,11 @@ impl App {
             if set_at.elapsed() >= std::time::Duration::from_secs(30) {
                 self.status.text.clear();
                 self.status.set_at = None;
+            }
+        }
+        if let Some(icon_at) = self.status.copy_icon_at {
+            if icon_at.elapsed() >= std::time::Duration::from_secs(10) {
+                self.status.copy_icon_at = None;
             }
         }
         let mut remote_connect_result: Option<RemoteConnectMessage> = None;
@@ -2629,6 +2636,18 @@ impl App {
     pub fn set_status(&mut self, text: impl Into<String>) {
         self.status.text = text.into();
         self.status.set_at = Some(std::time::Instant::now());
+    }
+
+    /// Trigger the transient copy icon in the status bar for 10 seconds.
+    pub fn trigger_status_copy_icon(&mut self) {
+        self.status.copy_icon_at = Some(std::time::Instant::now());
+    }
+
+    pub fn status_copy_icon_visible(&self) -> bool {
+        self.status
+            .copy_icon_at
+            .map(|at| at.elapsed() < std::time::Duration::from_secs(10))
+            .unwrap_or(false)
     }
 
     pub fn run_with_busy<T, F>(&mut self, message: &str, op: F) -> Result<T>

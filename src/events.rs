@@ -7,12 +7,13 @@ use self::menu::handle_menu;
 use self::palette::{handle_command_palette, handle_store_install_palette};
 use self::shortcuts::handle_shortcut_panel;
 use self::viewer::{
-    handle_viewer, handle_viewer_goto, handle_viewer_goto_line, handle_viewer_menu,
+    handle_mouse_viewer, handle_viewer, handle_viewer_goto, handle_viewer_goto_line, handle_viewer_menu,
     handle_viewer_plugin_palette, handle_viewer_searching,
 };
 use crate::app::{
-    App, AppMode, AssocEditorState, BookmarkListItem, ConfigState, ConfirmAction, InputAction,
-    InputDialog, MenuAction, OpenerActionItem, OpenerActionKind, OpenerState, RemoteEditKind,
+    ActivePanel, App, AppMode, AssocEditorState, BookmarkListItem, ConfigState, ConfirmAction,
+    ConfirmDialog, InputAction, InputDialog, MENU_DATA, MENU_HEADERS, MenuAction, MenuState,
+    OpenerActionItem, OpenerActionKind, OpenerState, RemoteEditKind,
 };
 use crate::archive::supports_archive_navigation;
 use crate::copy::CopyDialogState;
@@ -23,10 +24,14 @@ use crate::remote::{
 use crate::viewer::ViewMode;
 use anyhow::Result;
 use crossterm::{
-    event::{DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers},
+    event::{
+        DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+        MouseButton, MouseEvent, MouseEventKind,
+    },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use std::io::{self, Write};
 
 pub(crate) fn fx_shortcut(key: KeyEvent) -> Option<u8> {
@@ -107,51 +112,1102 @@ fn remote_plugin_auth_start_feedback(auth_session: &str) -> (String, Vec<String>
 }
 
 pub fn handle_event(app: &mut App, event: Event) -> Result<bool> {
-    let Event::Key(key) = event else {
+    match event {
+        Event::Key(key) => {
+            if app.action_for_key(key) == Some(MenuAction::CaptureGif) {
+                app.capture_gif = true;
+                return Ok(false);
+            }
+
+            match &app.mode {
+                AppMode::Help(_) => return handle_help(app, key),
+                AppMode::Viewer(_) => return handle_viewer(app, key),
+                AppMode::ViewerSearching(_) => return handle_viewer_searching(app, key),
+                AppMode::ViewerGotoLine(_, _) => return handle_viewer_goto_line(app, key),
+                AppMode::ViewerGoto(_, _) => return handle_viewer_goto(app, key),
+                AppMode::ViewerMenu(_, _) => return handle_viewer_menu(app, key),
+                AppMode::ViewerPluginPalette(_, _) => return handle_viewer_plugin_palette(app, key),
+                AppMode::Confirm(_) => return handle_confirm(app, key),
+                AppMode::Input(_) => return handle_input(app, key),
+                AppMode::CopyDialog(_) => return handle_copy_dialog(app, key),
+                AppMode::CopyProgress(_) => return handle_copy_progress(app, key),
+                AppMode::SearchPanel(_) => return handle_search(app, key),
+                AppMode::TreeView(_) => return handle_tree_view(app, key),
+                AppMode::DirBookmarks => return handle_dir_bookmarks(app, key),
+                AppMode::QuickSearch => return handle_quicksearch(app, key),
+                AppMode::Menu(_) => return handle_menu(app, key),
+                AppMode::Config(_) => return handle_config(app, key),
+                AppMode::Plugins(_) => return handle_plugins(app, key),
+                AppMode::ActionPalette(_) => return handle_action_palette(app, key),
+                AppMode::CommandPalette(_) => return handle_command_palette(app, key),
+                AppMode::ShortcutPanel(_) => return handle_shortcut_panel(app, key),
+                AppMode::StoreInstallPalette(_) => return handle_store_install_palette(app, key),
+                AppMode::Opener(_) => return handle_opener(app, key),
+                AppMode::AssocEditor(_) => return handle_assoc_editor(app, key),
+                AppMode::RemoteConnect(_) => return handle_remote_connect(app, key),
+                AppMode::RemoteEdit(_) => return handle_remote_edit(app, key),
+                AppMode::RemoteAddMenu(_) => return handle_remote_add_menu(app, key),
+                AppMode::RemoteConnecting(_) => return handle_remote_connecting(app, key),
+                AppMode::Terminal => return crate::terminal::handle_terminal(app, key),
+                AppMode::About(_) => return handle_about(app, key),
+                AppMode::Browse => {}
+            }
+
+            handle_browse(app, key)
+        }
+        Event::Mouse(mouse) => handle_mouse(app, mouse),
+        _ => Ok(false),
+    }
+}
+
+#[derive(Clone, Copy)]
+struct MainMouseLayout {
+    left_panel: Rect,
+    center: Rect,
+    right_panel: Rect,
+    status: Rect,
+    fkey: Option<Rect>,
+}
+
+fn handle_mouse(app: &mut App, mouse: MouseEvent) -> Result<bool> {
+    match &app.mode {
+        AppMode::Browse => handle_mouse_browse(app, mouse),
+        AppMode::Viewer(_) => handle_mouse_viewer(app, mouse),
+        AppMode::RemoteConnect(_) => handle_mouse_remote_connect(app, mouse),
+        AppMode::Menu(_) => handle_mouse_menu(app, mouse),
+        AppMode::Confirm(_) => handle_mouse_confirm(app, mouse),
+        AppMode::Input(_) => handle_mouse_input(app, mouse),
+        AppMode::CopyDialog(_) => handle_mouse_copy_dialog(app, mouse),
+        AppMode::RemoteAddMenu(_) => handle_mouse_remote_add_menu(app, mouse),
+        AppMode::RemoteEdit(_) => handle_mouse_remote_edit(app, mouse),
+        _ => Ok(false),
+    }
+}
+
+fn handle_mouse_remote_connect(app: &mut App, mouse: MouseEvent) -> Result<bool> {
+    let Some(area) = terminal_rect() else {
+        return Ok(false);
+    };
+    if handle_status_copy_click(app, mouse, area) {
+        return Ok(false);
+    }
+    let (_popup, _inner, list_area, hint_area) = remote_connect_rect(area);
+
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            if point_in_rect(mouse.column, mouse.row, list_area) {
+                let row = (mouse.row - list_area.y) as usize;
+                let (clicked_match_idx, profile_opt) = if let AppMode::RemoteConnect(ref s) = app.mode {
+                    let rows = list_area.height as usize;
+                    let scroll = if s.match_pos >= rows && rows > 0 {
+                        s.match_pos - rows + 1
+                    } else {
+                        0
+                    };
+                    let clicked = scroll + row;
+                    let profile = s
+                        .filtered_indices()
+                        .get(clicked)
+                        .and_then(|idx| s.items.get(*idx))
+                        .cloned();
+                    (Some(clicked), profile)
+                } else {
+                    (None, None)
+                };
+
+                if let Some(clicked) = clicked_match_idx
+                    && let AppMode::RemoteConnect(ref mut s) = app.mode
+                {
+                    let same = s.match_pos == clicked;
+                    s.match_pos = clicked.min(s.filtered_indices().len().saturating_sub(1));
+                    if same
+                        && let Some(profile) = profile_opt
+                    {
+                        let return_state = s.clone();
+                        app.start_remote_connect(profile, return_state);
+                    }
+                }
+                return Ok(false);
+            }
+
+            if point_in_rect(mouse.column, mouse.row, hint_area)
+                && let Some(hit) = remote_connect_hint_hit(hint_area, mouse.column)
+            {
+                match hit {
+                    RemoteConnectHintHit::Ssh => {
+                        launch_ssh_for_profile(app)?;
+                    }
+                    RemoteConnectHintHit::Edit => {
+                        app.open_remote_edit();
+                    }
+                    RemoteConnectHintHit::Add => {
+                        app.open_remote_add_menu();
+                    }
+                }
+                return Ok(false);
+            }
+        }
+        MouseEventKind::ScrollUp => {
+            if point_in_rect(mouse.column, mouse.row, list_area)
+                && let AppMode::RemoteConnect(ref mut s) = app.mode
+            {
+                s.move_prev();
+            }
+        }
+        MouseEventKind::ScrollDown => {
+            if point_in_rect(mouse.column, mouse.row, list_area)
+                && let AppMode::RemoteConnect(ref mut s) = app.mode
+            {
+                s.move_next();
+            }
+        }
+        _ => {}
+    }
+
+    Ok(false)
+}
+
+fn handle_mouse_remote_add_menu(app: &mut App, mouse: MouseEvent) -> Result<bool> {
+    let Some(area) = terminal_rect() else {
+        return Ok(false);
+    };
+    if handle_status_copy_click(app, mouse, area) {
+        return Ok(false);
+    }
+    let choices = RemoteEditKind::all();
+    let (popup, inner) = remote_add_menu_rect(area, choices.len());
+
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            if !point_in_rect(mouse.column, mouse.row, popup) {
+                return Ok(false);
+            }
+            if mouse.row >= inner.y && mouse.row < inner.y + choices.len() as u16 {
+                let idx = (mouse.row - inner.y) as usize;
+                if idx < choices.len() {
+                    app.mode = AppMode::RemoteEdit(crate::app::RemoteEditState::new(choices[idx].clone()));
+                }
+            }
+        }
+        MouseEventKind::ScrollUp => {
+            if point_in_rect(mouse.column, mouse.row, popup)
+                && let AppMode::RemoteAddMenu(ref mut cursor) = app.mode
+            {
+                *cursor = cursor.saturating_sub(1);
+            }
+        }
+        MouseEventKind::ScrollDown => {
+            if point_in_rect(mouse.column, mouse.row, popup)
+                && let AppMode::RemoteAddMenu(ref mut cursor) = app.mode
+            {
+                let max = choices.len().saturating_sub(1);
+                *cursor = (*cursor + 1).min(max);
+            }
+        }
+        _ => {}
+    }
+
+    Ok(false)
+}
+
+fn handle_mouse_remote_edit(app: &mut App, mouse: MouseEvent) -> Result<bool> {
+    let Some(area) = terminal_rect() else {
+        return Ok(false);
+    };
+    if handle_status_copy_click(app, mouse, area) {
+        return Ok(false);
+    }
+    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        return Ok(false);
+    }
+    let (popup, inner) = remote_edit_rect(area);
+    if !point_in_rect(mouse.column, mouse.row, popup) {
+        return Ok(false);
+    }
+
+    enum ClickAction {
+        None,
+        Submit,
+        Cancel,
+    }
+
+    let mut action = ClickAction::None;
+
+    if let AppMode::RemoteEdit(ref mut s) = app.mode {
+        if let Some((ref shares, picker_cur)) = s.share_picker {
+            if let Some((dd_area, dd_inner, scroll)) =
+                remote_edit_share_picker_rect(area, inner, shares.len(), picker_cur)
+            {
+                if point_in_rect(mouse.column, mouse.row, dd_area)
+                    && point_in_rect(mouse.column, mouse.row, dd_inner)
+                {
+                    let rel = (mouse.row - dd_inner.y) as usize;
+                    let idx = scroll + rel;
+                    if idx < shares.len() {
+                        s.fields[crate::app::RemoteEditState::PATH] = shares[idx].clone();
+                        s.input_cursor = s.fields[crate::app::RemoteEditState::PATH].len();
+                        s.share_picker = None;
+                        s.cursor = crate::app::RemoteEditState::SECRET;
+                        s.sync_cursor();
+                    }
+                } else {
+                    s.share_picker = None;
+                }
+            }
+            return Ok(false);
+        }
+
+        let labels = s.kind.field_labels();
+        if mouse.row >= inner.y && mouse.row < inner.y + labels.len() as u16 {
+            let idx = (mouse.row - inner.y) as usize;
+            let label = labels.get(idx).copied().unwrap_or_default();
+            if idx < 6 && !label.is_empty() {
+                s.cursor = idx;
+                let value_x = inner.x + 9;
+                let col = mouse.column.saturating_sub(value_x) as usize;
+                let len = s.fields[idx].len();
+                s.input_cursor = byte_index_for_display_column(&s.fields[idx], col.min(len));
+                return Ok(false);
+            }
+        }
+
+        let button_y = inner.y + labels.len() as u16 + 1;
+        if mouse.row == button_y {
+            let save_rect = Rect {
+                x: inner.x,
+                y: button_y,
+                width: 10,
+                height: 1,
+            };
+            let cancel_rect = Rect {
+                x: inner.x + 12,
+                y: button_y,
+                width: 10,
+                height: 1,
+            };
+            if point_in_rect(mouse.column, mouse.row, save_rect) {
+                s.cursor = crate::app::RemoteEditState::SAVE;
+                action = ClickAction::Submit;
+            } else if point_in_rect(mouse.column, mouse.row, cancel_rect) {
+                s.cursor = crate::app::RemoteEditState::CANCEL;
+                action = ClickAction::Cancel;
+            }
+        }
+    }
+
+    match action {
+        ClickAction::Submit => handle_remote_edit(app, KeyEvent::from(KeyCode::Enter)),
+        ClickAction::Cancel => handle_remote_edit(app, KeyEvent::from(KeyCode::Enter)),
+        ClickAction::None => Ok(false),
+    }
+}
+
+fn handle_mouse_browse(app: &mut App, mouse: MouseEvent) -> Result<bool> {
+    let Some(area) = terminal_rect() else {
+        return Ok(false);
+    };
+    let layout = main_mouse_layout(app, area);
+
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            if point_in_rect(mouse.column, mouse.row, layout.status) {
+                let line = crate::ui::status_line_for_copy(app);
+                match copy_text_to_clipboard(&line) {
+                    Ok(()) => app.trigger_status_copy_icon(),
+                    Err(err) => app.set_status(format!("Clipboard error: {}", err)),
+                }
+                return Ok(false);
+            }
+
+            if let Some(fkey_area) = layout.fkey
+                && point_in_rect(mouse.column, mouse.row, fkey_area)
+                && let Some(fnum) = fkey_number_hit(app, fkey_area, mouse.column)
+                && let Some(action) = fkey_action_for_number(app, fnum)
+            {
+                app.set_status(format!(
+                    "F{}: {}",
+                    fnum,
+                    crate::app::palette_label_for_action(action)
+                ));
+                return menu::execute_menu_action(app, action);
+            }
+
+            if let Some((side, index, list_height)) = panel_hit(app, mouse.column, mouse.row, layout)
+            {
+                let was_active = app.active == side;
+                let was_current = match side {
+                    ActivePanel::Left => app.left.cursor == index,
+                    ActivePanel::Right => app.right.cursor == index,
+                };
+                app.active = side;
+                match side {
+                    ActivePanel::Left => {
+                        app.left.cursor = index;
+                        app.left.clamp_scroll(list_height);
+                    }
+                    ActivePanel::Right => {
+                        app.right.cursor = index;
+                        app.right.clamp_scroll(list_height);
+                    }
+                }
+                app.refresh_quick_preview();
+                if was_active && was_current {
+                    handle_enter(app)?;
+                }
+                return Ok(false);
+            }
+
+            if point_in_rect(mouse.column, mouse.row, layout.center)
+                && let Some(label) = center_button_hit(layout.center, mouse.column, mouse.row)
+            {
+                match label.as_str() {
+                    "Swap" => return menu::execute_menu_action(app, MenuAction::SwapPanels),
+                    "QuickDir" => {
+                        return menu::execute_menu_action(app, MenuAction::DirBookmarks);
+                    }
+                    "Select" => {
+                        return menu::execute_menu_action(app, MenuAction::SelectPattern);
+                    }
+                    "Info" => {
+                        return menu::execute_menu_action(app, MenuAction::FileIdPreview);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        MouseEventKind::Down(MouseButton::Right) => {
+            if let Some((side, index, list_height)) = panel_hit(app, mouse.column, mouse.row, layout)
+            {
+                app.active = side;
+                let panel = match side {
+                    ActivePanel::Left => &mut app.left,
+                    ActivePanel::Right => &mut app.right,
+                };
+                panel.cursor = index;
+                panel.clamp_scroll(list_height);
+                panel.toggle_selected();
+                app.refresh_quick_preview();
+            }
+        }
+        MouseEventKind::ScrollUp => {
+            if let Some((side, _, list_height)) = panel_hit(app, mouse.column, mouse.row, layout) {
+                app.active = side;
+                app.active_panel_mut().move_up();
+                app.active_panel_mut().clamp_scroll(list_height);
+                app.refresh_quick_preview();
+            }
+        }
+        MouseEventKind::ScrollDown => {
+            if let Some((side, _, list_height)) = panel_hit(app, mouse.column, mouse.row, layout) {
+                app.active = side;
+                app.active_panel_mut().move_down();
+                app.active_panel_mut().clamp_scroll(list_height);
+                app.refresh_quick_preview();
+            }
+        }
+        _ => {}
+    }
+
+    Ok(false)
+}
+
+fn handle_mouse_menu(app: &mut App, mouse: MouseEvent) -> Result<bool> {
+    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        return Ok(false);
+    }
+
+    let Some(area) = terminal_rect() else {
+        return Ok(false);
+    };
+    let AppMode::Menu(state) = &app.mode else {
         return Ok(false);
     };
 
-    // Global shortcut available in every mode.
-    if app.action_for_key(key) == Some(MenuAction::CaptureGif) {
-        app.capture_gif = true;
+    let bar_area = Rect {
+        x: area.x,
+        y: area.y,
+        width: area.width,
+        height: 1,
+    };
+    if let Some(header_idx) = menu_header_hit(bar_area, mouse.column, mouse.row) {
+        if let AppMode::Menu(ref mut state) = app.mode {
+            state.bar_pos = header_idx;
+            state.open = true;
+            state.item_pos = first_menu_selectable(MENU_DATA[header_idx]);
+        }
         return Ok(false);
     }
 
-    match &app.mode {
-        AppMode::Help(_) => return handle_help(app, key),
-        AppMode::Viewer(_) => return handle_viewer(app, key),
-        AppMode::ViewerSearching(_) => return handle_viewer_searching(app, key),
-        AppMode::ViewerGotoLine(_, _) => return handle_viewer_goto_line(app, key),
-        AppMode::ViewerGoto(_, _) => return handle_viewer_goto(app, key),
-        AppMode::ViewerMenu(_, _) => return handle_viewer_menu(app, key),
-        AppMode::ViewerPluginPalette(_, _) => return handle_viewer_plugin_palette(app, key),
-        AppMode::Confirm(_) => return handle_confirm(app, key),
-        AppMode::Input(_) => return handle_input(app, key),
-        AppMode::CopyDialog(_) => return handle_copy_dialog(app, key),
-        AppMode::CopyProgress(_) => return handle_copy_progress(app, key),
-        AppMode::SearchPanel(_) => return handle_search(app, key),
-        AppMode::TreeView(_) => return handle_tree_view(app, key),
-        AppMode::DirBookmarks => return handle_dir_bookmarks(app, key),
-        AppMode::QuickSearch => return handle_quicksearch(app, key),
-        AppMode::Menu(_) => return handle_menu(app, key),
-        AppMode::Config(_) => return handle_config(app, key),
-        AppMode::Plugins(_) => return handle_plugins(app, key),
-        AppMode::ActionPalette(_) => return handle_action_palette(app, key),
-        AppMode::CommandPalette(_) => return handle_command_palette(app, key),
-        AppMode::ShortcutPanel(_) => return handle_shortcut_panel(app, key),
-        AppMode::StoreInstallPalette(_) => return handle_store_install_palette(app, key),
-        AppMode::Opener(_) => return handle_opener(app, key),
-        AppMode::AssocEditor(_) => return handle_assoc_editor(app, key),
-        AppMode::RemoteConnect(_) => return handle_remote_connect(app, key),
-        AppMode::RemoteEdit(_) => return handle_remote_edit(app, key),
-        AppMode::RemoteAddMenu(_) => return handle_remote_add_menu(app, key),
-        AppMode::RemoteConnecting(_) => return handle_remote_connecting(app, key),
-        AppMode::Terminal => return crate::terminal::handle_terminal(app, key),
-        AppMode::About(_) => return handle_about(app, key),
-        AppMode::Browse => {}
+    if state.open
+        && let Some((dd_area, inner)) = menu_dropdown_rect(app, state, area)
+        && point_in_rect(mouse.column, mouse.row, dd_area)
+        && mouse.row >= inner.y
+    {
+        let idx = (mouse.row - inner.y) as usize;
+        if idx < MENU_DATA[state.bar_pos].len() && MENU_DATA[state.bar_pos][idx] != MenuAction::Separator {
+            if let AppMode::Menu(ref mut state) = app.mode {
+                state.item_pos = idx;
+            }
+            return handle_menu(app, KeyEvent::from(KeyCode::Enter));
+        }
+        return Ok(false);
     }
 
-    handle_browse(app, key)
+    app.mode = AppMode::Browse;
+    Ok(false)
+}
+
+fn handle_mouse_confirm(app: &mut App, mouse: MouseEvent) -> Result<bool> {
+    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        return Ok(false);
+    }
+
+    let Some(area) = terminal_rect() else {
+        return Ok(false);
+    };
+    let AppMode::Confirm(dlg) = &app.mode else {
+        return Ok(false);
+    };
+    let (accept, reject) = confirm_button_rects(dlg, area);
+    if point_in_rect(mouse.column, mouse.row, accept) {
+        return handle_confirm(app, KeyEvent::from(KeyCode::Enter));
+    }
+    if let Some(reject) = reject
+        && point_in_rect(mouse.column, mouse.row, reject)
+    {
+        return handle_confirm(app, KeyEvent::from(KeyCode::Esc));
+    }
+    Ok(false)
+}
+
+fn handle_mouse_input(app: &mut App, mouse: MouseEvent) -> Result<bool> {
+    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        return Ok(false);
+    }
+
+    let Some(area) = terminal_rect() else {
+        return Ok(false);
+    };
+    let (popup, inner) = input_popup_rect(area);
+    if !point_in_rect(mouse.column, mouse.row, popup) {
+        return Ok(false);
+    }
+    let input_area = Rect {
+        x: inner.x + 1,
+        y: inner.y + 3,
+        width: inner.width.saturating_sub(2),
+        height: 1,
+    };
+    if point_in_rect(mouse.column, mouse.row, input_area)
+        && let AppMode::Input(ref mut dlg) = app.mode
+    {
+        let offset = mouse.column.saturating_sub(input_area.x) as usize;
+        dlg.cursor = byte_index_for_display_column(&dlg.value, offset);
+    }
+    Ok(false)
+}
+
+fn handle_mouse_copy_dialog(app: &mut App, mouse: MouseEvent) -> Result<bool> {
+    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        return Ok(false);
+    }
+
+    let Some(area) = terminal_rect() else {
+        return Ok(false);
+    };
+    let (_popup, inner) = copy_dialog_rect(area);
+    let AppMode::CopyDialog(dlg) = &app.mode else {
+        return Ok(false);
+    };
+    let waiting_to_start = dlg.waiting_to_start;
+    let stats_pending = dlg.stats_pending;
+
+    let destination = Rect {
+        x: inner.x,
+        y: inner.y + 4,
+        width: inner.width,
+        height: 1,
+    };
+    if point_in_rect(mouse.column, mouse.row, destination) && !stats_pending && !waiting_to_start {
+        if let AppMode::CopyDialog(ref mut dlg) = app.mode {
+            dlg.field = CopyDialogState::DESTINATION;
+            let offset = mouse.column.saturating_sub(inner.x + 1) as usize;
+            dlg.cursor = byte_index_for_display_column(&dlg.destination, offset);
+        }
+        return Ok(false);
+    }
+
+    let toggle_rows = [
+        (CopyDialogState::KEEP_ATTRIBUTES, inner.y + 5),
+        (CopyDialogState::OVERWRITE, inner.y + 6),
+        (CopyDialogState::NEWER_ONLY, inner.y + 7),
+    ];
+    for (field, y) in toggle_rows {
+        let row = Rect {
+            x: inner.x,
+            y,
+            width: inner.width,
+            height: 1,
+        };
+        if point_in_rect(mouse.column, mouse.row, row) {
+            if let AppMode::CopyDialog(ref mut dlg) = app.mode {
+                dlg.field = field;
+                match field {
+                    CopyDialogState::KEEP_ATTRIBUTES => dlg.keep_attributes = !dlg.keep_attributes,
+                    CopyDialogState::OVERWRITE => dlg.overwrite = !dlg.overwrite,
+                    CopyDialogState::NEWER_ONLY => dlg.newer_only = !dlg.newer_only,
+                    _ => {}
+                }
+            }
+            return Ok(false);
+        }
+    }
+
+    let start_width = if waiting_to_start { 11 } else { 16 };
+    let start_rect = Rect {
+        x: inner.x,
+        y: inner.y + 9,
+        width: start_width,
+        height: 1,
+    };
+    if point_in_rect(mouse.column, mouse.row, start_rect) {
+        if let AppMode::CopyDialog(ref mut dlg) = app.mode {
+            dlg.field = CopyDialogState::START;
+        }
+        return handle_copy_dialog(app, KeyEvent::from(KeyCode::Enter));
+    }
+
+    if !waiting_to_start {
+        let cancel_rect = Rect {
+            x: inner.x + 18,
+            y: inner.y + 9,
+            width: 12,
+            height: 1,
+        };
+        if point_in_rect(mouse.column, mouse.row, cancel_rect) {
+            if let AppMode::CopyDialog(ref mut dlg) = app.mode {
+                dlg.field = CopyDialogState::CANCEL;
+            }
+            return handle_copy_dialog(app, KeyEvent::from(KeyCode::Esc));
+        }
+    }
+
+    Ok(false)
+}
+
+fn terminal_rect() -> Option<Rect> {
+    crossterm::terminal::size().ok().map(|(width, height)| Rect {
+        x: 0,
+        y: 0,
+        width,
+        height,
+    })
+}
+
+fn main_mouse_layout(app: &App, area: Rect) -> MainMouseLayout {
+    let main_vert = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(if app.config.show_fkey_bar {
+            vec![Constraint::Min(5), Constraint::Length(1), Constraint::Length(1)]
+        } else {
+            vec![Constraint::Min(5), Constraint::Length(1)]
+        })
+        .split(area);
+    let panel_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Min(28),
+            Constraint::Length(13),
+            Constraint::Min(28),
+        ])
+        .split(main_vert[0]);
+
+    MainMouseLayout {
+        left_panel: panel_chunks[0],
+        center: panel_chunks[1],
+        right_panel: panel_chunks[2],
+        status: main_vert[1],
+        fkey: if app.config.show_fkey_bar {
+            Some(main_vert[2])
+        } else {
+            None
+        },
+    }
+}
+
+fn fkey_number_hit(app: &App, area: Rect, column: u16) -> Option<u8> {
+    let slots = crate::ui::fkey_slots(app);
+    let mut x = area.x;
+    for (n, label) in slots {
+        let width = 1 + label.len() as u16 + 1;
+        let rect = Rect {
+            x,
+            y: area.y,
+            width,
+            height: area.height.max(1),
+        };
+        if point_in_rect(column, area.y, rect) {
+            return Some(n);
+        }
+        x = x.saturating_add(width);
+        if x >= area.right() {
+            break;
+        }
+    }
+    None
+}
+
+fn fkey_action_for_number(app: &App, n: u8) -> Option<MenuAction> {
+    let shortcut = format!("F{}", n);
+    let action = crate::app::PALETTE_DATA
+        .iter()
+        .find(|entry| {
+            app.effective_shortcut_for(entry.fn_name, entry.shortcut)
+                .as_deref()
+                == Some(shortcut.as_str())
+        })
+        .map(|entry| entry.action);
+
+    action.or_else(|| {
+        if n == 2 {
+            Some(MenuAction::OpenMenu)
+        } else {
+            None
+        }
+    })
+}
+
+fn inset_rect(area: Rect, dx: u16, dy: u16) -> Rect {
+    Rect {
+        x: area.x.saturating_add(dx),
+        y: area.y.saturating_add(dy),
+        width: area.width.saturating_sub(dx.saturating_mul(2)),
+        height: area.height.saturating_sub(dy.saturating_mul(2)),
+    }
+}
+
+fn point_in_rect(column: u16, row: u16, rect: Rect) -> bool {
+    column >= rect.x && column < rect.right() && row >= rect.y && row < rect.bottom()
+}
+
+fn panel_hit(
+    app: &App,
+    column: u16,
+    row: u16,
+    layout: MainMouseLayout,
+) -> Option<(ActivePanel, usize, usize)> {
+    panel_list_hit(&app.left, layout.left_panel, column, row)
+        .map(|(idx, height)| (ActivePanel::Left, idx, height))
+        .or_else(|| {
+            panel_list_hit(&app.right, layout.right_panel, column, row)
+                .map(|(idx, height)| (ActivePanel::Right, idx, height))
+        })
+}
+
+fn panel_list_hit(
+    panel: &crate::panel::Panel,
+    area: Rect,
+    column: u16,
+    row: u16,
+) -> Option<(usize, usize)> {
+    let inner = inset_rect(area, 1, 1);
+    if inner.height < 4 {
+        return None;
+    }
+    let list_area = Rect {
+        x: inner.x,
+        y: inner.y + 1,
+        width: inner.width,
+        height: inner.height.saturating_sub(2),
+    };
+    if !point_in_rect(column, row, list_area) {
+        return None;
+    }
+    let rel = (row - list_area.y) as usize;
+    let idx = panel.scroll + rel;
+    (idx < panel.entries.len()).then_some((idx, list_area.height as usize))
+}
+
+fn center_button_hit(area: Rect, column: u16, row: u16) -> Option<String> {
+    if area.height == 0 || area.width < 9 {
+        return None;
+    }
+
+    let mut labels = vec![
+        "ChgDrive".to_string(),
+        "Swap".to_string(),
+        "Go Trash".to_string(),
+        "QuickDir".to_string(),
+        "Select".to_string(),
+        "Info".to_string(),
+        chrono::Local::now().format("%H:%M:%S").to_string(),
+    ];
+
+    let button_count = labels.len() as u16;
+    let button_h = if area.height >= button_count * 3 {
+        3
+    } else if area.height >= button_count * 2 {
+        2
+    } else {
+        1
+    };
+    let total_button_h = button_count * button_h;
+    if total_button_h > area.height {
+        let skip = (total_button_h - area.height) as usize;
+        if skip >= labels.len() {
+            return None;
+        }
+        labels.drain(0..skip);
+    }
+
+    let button_count = labels.len() as u16;
+    let total_button_h = button_count * button_h;
+    let gaps = button_count.saturating_add(1);
+    let free = area.height.saturating_sub(total_button_h);
+    let base_gap = free / gaps.max(1);
+    let extra_gap = free % gaps.max(1);
+
+    let mut y = area.y + base_gap;
+    for (idx, label) in labels.into_iter().enumerate() {
+        if idx < extra_gap as usize {
+            y += 1;
+        }
+        let slot = Rect {
+            x: area.x,
+            y,
+            width: area.width,
+            height: button_h.min(area.bottom().saturating_sub(y)),
+        };
+        if point_in_rect(column, row, slot) {
+            return Some(label);
+        }
+        y = y.saturating_add(button_h).saturating_add(base_gap);
+        if idx + 1 < button_count as usize && idx + 1 < extra_gap as usize {
+            y += 1;
+        }
+    }
+    None
+}
+
+fn menu_header_hit(bar_area: Rect, column: u16, row: u16) -> Option<usize> {
+    if !point_in_rect(column, row, bar_area) {
+        return None;
+    }
+    let mut x = bar_area.x + 1;
+    for (idx, header) in MENU_HEADERS.iter().enumerate() {
+        x = x.saturating_add(1);
+        let rect = Rect {
+            x,
+            y: bar_area.y,
+            width: header.len() as u16 + 1,
+            height: 1,
+        };
+        if point_in_rect(column, row, rect) {
+            return Some(idx);
+        }
+        x = x.saturating_add(header.len() as u16 + 3);
+    }
+    None
+}
+
+fn menu_dropdown_rect(app: &App, state: &MenuState, area: Rect) -> Option<(Rect, Rect)> {
+    if !state.open {
+        return None;
+    }
+    let items = MENU_DATA[state.bar_pos];
+    let mut dd_x = 1u16;
+    for header in MENU_HEADERS.iter().take(state.bar_pos) {
+        dd_x += header.len() as u16 + 4;
+    }
+    let max_label = items
+        .iter()
+        .map(|action| unicode_width::UnicodeWidthStr::width(crate::app::palette_label_for_action(*action)))
+        .max()
+        .unwrap_or(6);
+    let max_key = items
+        .iter()
+        .filter_map(|action| {
+            crate::app::PALETTE_DATA
+                .iter()
+                .find(|entry| entry.action == *action)
+                .and_then(|entry| app.effective_shortcut_for(entry.fn_name, entry.shortcut))
+        })
+        .map(|shortcut| shortcut.len())
+        .max()
+        .unwrap_or(0);
+    let inner_w = (max_label + max_key + 4).max(18) as u16;
+    let dd_width = inner_w + 2;
+    let dd_height = items.len() as u16 + 2;
+    let dd_area = Rect {
+        x: area.x + dd_x.min(area.width.saturating_sub(dd_width)),
+        y: area.y + 1,
+        width: dd_width.min(area.width),
+        height: dd_height.min(area.height.saturating_sub(1)),
+    };
+    Some((dd_area, inset_rect(dd_area, 1, 1)))
+}
+
+fn first_menu_selectable(items: &[crate::app::MenuEntry]) -> usize {
+    items
+        .iter()
+        .position(|action| *action != MenuAction::Separator)
+        .unwrap_or(0)
+}
+
+fn confirm_button_rects(dlg: &ConfirmDialog, area: Rect) -> (Rect, Option<Rect>) {
+    match &dlg.action {
+        ConfirmAction::Message | ConfirmAction::MessageThen(_) => {
+            let width = 72u16.min(area.width.saturating_sub(4)).max(40);
+            let height = 8u16.min(area.height.saturating_sub(2).max(8));
+            let popup = Rect {
+                x: area.x + area.width.saturating_sub(width) / 2,
+                y: area.y + area.height.saturating_sub(height) / 2,
+                width,
+                height,
+            };
+            let inner = inset_rect(popup, 1, 1);
+            (
+                Rect {
+                    x: inner.x + inner.width.saturating_sub(8) / 2,
+                    y: inner.y + inner.height.saturating_sub(2),
+                    width: 8,
+                    height: 1,
+                },
+                None,
+            )
+        }
+        ConfirmAction::Quit => {
+            let popup = Rect {
+                x: area.x + area.width.saturating_sub(38) / 2,
+                y: area.y + area.height.saturating_sub(11) / 2,
+                width: 38,
+                height: 11,
+            };
+            let inner = inset_rect(popup, 1, 1);
+            let btn_y = inner.y + 7;
+            let btn_x = inner.x + inner.width.saturating_sub(26) / 2;
+            (
+                Rect { x: btn_x, y: btn_y, width: 11, height: 1 },
+                Some(Rect { x: btn_x + 15, y: btn_y, width: 11, height: 1 }),
+            )
+        }
+        ConfirmAction::Delete(_) | ConfirmAction::DeleteRemote(_) => {
+            let popup = Rect {
+                x: area.x + area.width.saturating_sub(44) / 2,
+                y: area.y + area.height.saturating_sub(9) / 2,
+                width: 44,
+                height: 9,
+            };
+            let inner = inset_rect(popup, 1, 1);
+            let btn_y = inner.y + 5;
+            let btn_x = inner.x + inner.width.saturating_sub(30) / 2;
+            (
+                Rect { x: btn_x, y: btn_y, width: 13, height: 1 },
+                Some(Rect { x: btn_x + 17, y: btn_y, width: 13, height: 1 }),
+            )
+        }
+    }
+}
+
+fn input_popup_rect(area: Rect) -> (Rect, Rect) {
+    let width = 60u16.min(area.width.saturating_sub(4));
+    let height = 7u16;
+    let popup = Rect {
+        x: (area.width.saturating_sub(width)) / 2 + area.x,
+        y: (area.height.saturating_sub(height)) / 2 + area.y,
+        width,
+        height,
+    };
+    (popup, inset_rect(popup, 1, 1))
+}
+
+fn copy_dialog_rect(area: Rect) -> (Rect, Rect) {
+    let width = 66u16.min(area.width.saturating_sub(4));
+    let height = 14u16.min(area.height.saturating_sub(2));
+    let popup = Rect {
+        x: (area.width.saturating_sub(width)) / 2 + area.x,
+        y: (area.height.saturating_sub(height)) / 2 + area.y,
+        width,
+        height,
+    };
+    (popup, inset_rect(popup, 1, 1))
+}
+
+fn remote_add_menu_rect(area: Rect, choices_len: usize) -> (Rect, Rect) {
+    let width: u16 = 22;
+    let height: u16 = (choices_len as u16) + 3;
+    let popup = clamp_rect_local(
+        area,
+        Rect {
+            x: area.x + area.width.saturating_sub(width) / 2,
+            y: area.y + area.height.saturating_sub(height) / 2,
+            width,
+            height,
+        },
+    );
+    (popup, inset_rect(popup, 1, 1))
+}
+
+fn remote_edit_rect(area: Rect) -> (Rect, Rect) {
+    let width = 72u16.min(area.width.saturating_sub(4));
+    let height = 14u16.min(area.height.saturating_sub(2)).max(10);
+    let popup = clamp_rect_local(
+        area,
+        Rect {
+            x: area.x + area.width.saturating_sub(width) / 2,
+            y: area.y + area.height.saturating_sub(height) / 2,
+            width,
+            height,
+        },
+    );
+    (popup, inset_rect(popup, 1, 1))
+}
+
+fn remote_edit_share_picker_rect(
+    area: Rect,
+    inner: Rect,
+    shares_len: usize,
+    picker_cur: usize,
+) -> Option<(Rect, Rect, usize)> {
+    const PATH_ROW: u16 = crate::app::RemoteEditState::PATH as u16;
+    let dd_x = inner.x + 9;
+    let dd_y = inner.y + PATH_ROW + 1;
+    let dd_w = inner.width.saturating_sub(9).min(40).max(16);
+    let max_visible: usize = 8;
+    let visible = shares_len.min(max_visible);
+    let dd_h = (visible as u16 + 2).min(area.height.saturating_sub(dd_y));
+    let dd_area = clamp_rect_local(
+        area,
+        Rect {
+            x: dd_x,
+            y: dd_y,
+            width: dd_w,
+            height: dd_h,
+        },
+    );
+    let dd_inner = inset_rect(dd_area, 1, 1);
+    let scroll = if picker_cur >= max_visible {
+        picker_cur - max_visible + 1
+    } else {
+        0
+    };
+    Some((dd_area, dd_inner, scroll))
+}
+
+fn remote_connect_rect(area: Rect) -> (Rect, Rect, Rect, Rect) {
+    let width = 76u16.min(area.width.saturating_sub(4));
+    let height = 20u16.min(area.height.saturating_sub(2)).max(10);
+    let popup = clamp_rect_local(
+        area,
+        Rect {
+            x: area.x + area.width.saturating_sub(width) / 2,
+            y: area.y + area.height.saturating_sub(height) / 2,
+            width,
+            height,
+        },
+    );
+    let inner = inset_rect(popup, 1, 1);
+    let list_area = Rect {
+        x: inner.x,
+        y: inner.y + 2,
+        width: inner.width,
+        height: inner.height.saturating_sub(3),
+    };
+    let hint_area = clamp_rect_local(
+        area,
+        Rect {
+            x: inner.x,
+            y: inner.y + inner.height.saturating_sub(1),
+            width: inner.width,
+            height: 1,
+        },
+    );
+    (popup, inner, list_area, hint_area)
+}
+
+fn handle_status_copy_click(app: &mut App, mouse: MouseEvent, area: Rect) -> bool {
+    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        return false;
+    }
+    let layout = main_mouse_layout(app, area);
+    if !point_in_rect(mouse.column, mouse.row, layout.status) {
+        return false;
+    }
+    let line = crate::ui::status_line_for_copy(app);
+    match copy_text_to_clipboard(&line) {
+        Ok(()) => app.trigger_status_copy_icon(),
+        Err(err) => app.set_status(format!("Clipboard error: {}", err)),
+    }
+    true
+}
+
+enum RemoteConnectHintHit {
+    Ssh,
+    Edit,
+    Add,
+}
+
+fn remote_connect_hint_hit(hint_area: Rect, column: u16) -> Option<RemoteConnectHintHit> {
+    const HINT: &str = " Type:Filter  Enter:Connect  Tab:SSH  F6:Edit  F7:Add  Esc:Cancel ";
+    let col = column.saturating_sub(hint_area.x) as usize;
+
+    let in_token = |token: &str| {
+        HINT.find(token)
+            .map(|start| col >= start && col < start + token.len())
+            .unwrap_or(false)
+    };
+
+    if in_token("Tab:SSH") {
+        return Some(RemoteConnectHintHit::Ssh);
+    }
+    if in_token("F6:Edit") {
+        return Some(RemoteConnectHintHit::Edit);
+    }
+    if in_token("F7:Add") {
+        return Some(RemoteConnectHintHit::Add);
+    }
+    None
+}
+
+fn clamp_rect_local(area: Rect, rect: Rect) -> Rect {
+    let x1 = rect.x.max(area.x);
+    let y1 = rect.y.max(area.y);
+    let x2 = rect.right().min(area.right());
+    let y2 = rect.bottom().min(area.bottom());
+    Rect {
+        x: x1,
+        y: y1,
+        width: x2.saturating_sub(x1),
+        height: y2.saturating_sub(y1),
+    }
+}
+
+fn byte_index_for_display_column(s: &str, column: usize) -> usize {
+    if column == 0 {
+        return 0;
+    }
+    let mut display = 0usize;
+    let mut last = 0usize;
+    for (idx, ch) in s.char_indices() {
+        let width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+        if display + width > column {
+            break;
+        }
+        display += width;
+        last = idx + ch.len_utf8();
+    }
+    last
+}
+
+fn copy_text_to_clipboard(text: &str) -> Result<()> {
+    let mut clipboard = arboard::Clipboard::new()?;
+    clipboard.set_text(text.to_string())?;
+    Ok(())
+}
+
+fn paste_text_from_clipboard() -> Option<String> {
+    let mut clipboard = arboard::Clipboard::new().ok()?;
+    clipboard.get_text().ok()
 }
 
 fn handle_about(app: &mut App, _key: KeyEvent) -> Result<bool> {
@@ -907,6 +1963,16 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(false);
     };
 
+    if key.modifiers.contains(KeyModifiers::CONTROL)
+        && matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V'))
+    {
+        if let Some(text) = paste_text_from_clipboard() {
+            dlg.value.insert_str(dlg.cursor, &text);
+            dlg.cursor += text.len();
+        }
+        return Ok(false);
+    }
+
     match key.code {
         KeyCode::Esc => {
             app.mode = AppMode::Browse;
@@ -1120,6 +2186,17 @@ fn handle_copy_dialog(app: &mut App, key: KeyEvent) -> Result<bool> {
                 app.set_status("Copy aborted");
             }
             _ => {}
+        }
+        return Ok(false);
+    }
+
+    if key.modifiers.contains(KeyModifiers::CONTROL)
+        && matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V'))
+        && dlg.field == CopyDialogState::DESTINATION
+    {
+        if let Some(text) = paste_text_from_clipboard() {
+            dlg.destination.insert_str(dlg.cursor, &text);
+            dlg.cursor += text.len();
         }
         return Ok(false);
     }

@@ -118,6 +118,7 @@ pub struct Viewer {
     plugin_document_cache: RefCell<Option<PluginDocumentCache>>,
     /// Bytes-per-row for hex mode, updated lazily during rendering to match panel width.
     pub hex_bytes_per_row: Cell<usize>,
+    mouse_selection: Option<MouseTextSelection>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -213,6 +214,21 @@ struct ViewerPosition {
     hscroll: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MouseTextPoint {
+    row: usize,
+    column: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MouseTextSelection {
+    scroll: usize,
+    text_width: usize,
+    visible_rows: usize,
+    anchor: MouseTextPoint,
+    focus: MouseTextPoint,
+}
+
 impl Viewer {
     /// Create a viewer displaying synthetic plain-text content (no file is read).
     /// Useful for placeholder views such as folder placeholders.
@@ -243,6 +259,7 @@ impl Viewer {
             image: None,
             plugin_document_cache: RefCell::new(None),
             hex_bytes_per_row: Cell::new(16),
+            mouse_selection: None,
         }
     }
 
@@ -308,6 +325,7 @@ impl Viewer {
             image,
             plugin_document_cache: RefCell::new(None),
             hex_bytes_per_row: Cell::new(16),
+            mouse_selection: None,
         };
         // Only decode the initial mode — other modes are built lazily on first access.
         viewer.ensure_mode_decoded(mode);
@@ -547,10 +565,137 @@ impl Viewer {
         if matches!(self.mode, ViewMode::Text | ViewMode::Ansi) {
             self.wrap = !self.wrap;
         }
+        self.clear_mouse_selection();
     }
 
     pub fn toggle_zoom(&mut self) {
         self.zoomed = !self.zoomed;
+        self.clear_mouse_selection();
+    }
+
+    pub fn supports_mouse_text_selection(&self) -> bool {
+        !self.wrap
+            && self.viewer_plugin.is_none()
+            && matches!(self.mode, ViewMode::Text | ViewMode::Ansi)
+    }
+
+    pub fn clear_mouse_selection(&mut self) {
+        self.mouse_selection = None;
+    }
+
+    pub fn start_mouse_selection(
+        &mut self,
+        row: usize,
+        column: usize,
+        text_width: usize,
+        visible_rows: usize,
+    ) {
+        if !self.supports_mouse_text_selection() || text_width == 0 || visible_rows == 0 {
+            self.mouse_selection = None;
+            return;
+        }
+
+        let point = MouseTextPoint {
+            row: row.min(visible_rows.saturating_sub(1)),
+            column: column.min(text_width),
+        };
+        self.mouse_selection = Some(MouseTextSelection {
+            scroll: self.scroll,
+            text_width,
+            visible_rows,
+            anchor: point,
+            focus: point,
+        });
+    }
+
+    pub fn update_mouse_selection(&mut self, row: usize, column: usize) {
+        let Some(selection) = self.mouse_selection.as_mut() else {
+            return;
+        };
+        selection.focus = MouseTextPoint {
+            row: row.min(selection.visible_rows.saturating_sub(1)),
+            column: column.min(selection.text_width),
+        };
+    }
+
+    pub fn selection_display_segments_for_visible_row(
+        &self,
+        row: usize,
+        text_width: usize,
+        visible_rows: usize,
+    ) -> Option<(String, String, String)> {
+        let (start_col, end_col) = self.selection_range_for_visible_row(row, text_width, visible_rows)?;
+        let display = self.visible_display_line(row, text_width)?;
+        Some((
+            slice_display_columns(&display, 0, start_col),
+            slice_display_columns(&display, start_col, end_col),
+            slice_display_columns(&display, end_col, text_width),
+        ))
+    }
+
+    pub fn selected_visible_text(&self, text_width: usize, visible_rows: usize) -> Option<String> {
+        let selection = self.active_mouse_selection(text_width, visible_rows)?;
+        let (start, end) = ordered_mouse_points(selection.anchor, selection.focus);
+        if start == end {
+            return None;
+        }
+
+        let mut lines = Vec::new();
+        for row in start.row..=end.row {
+            let Some((start_col, end_col)) = self.selection_range_for_visible_row(row, text_width, visible_rows) else {
+                continue;
+            };
+            let Some(display) = self.visible_display_line(row, text_width) else {
+                continue;
+            };
+            lines.push(slice_display_columns(&display, start_col, end_col).trim_end_matches(' ').to_string());
+        }
+        if lines.is_empty() {
+            None
+        } else {
+            Some(lines.join("\n"))
+        }
+    }
+
+    fn active_mouse_selection(
+        &self,
+        text_width: usize,
+        visible_rows: usize,
+    ) -> Option<MouseTextSelection> {
+        let selection = self.mouse_selection?;
+        if selection.scroll != self.scroll
+            || selection.text_width != text_width
+            || selection.visible_rows != visible_rows
+            || !self.supports_mouse_text_selection()
+        {
+            return None;
+        }
+        Some(selection)
+    }
+
+    fn selection_range_for_visible_row(
+        &self,
+        row: usize,
+        text_width: usize,
+        visible_rows: usize,
+    ) -> Option<(usize, usize)> {
+        let selection = self.active_mouse_selection(text_width, visible_rows)?;
+        let (start, end) = ordered_mouse_points(selection.anchor, selection.focus);
+        if start == end || row < start.row || row > end.row {
+            return None;
+        }
+
+        let start_col = if row == start.row { start.column } else { 0 };
+        let end_col = if row == end.row { end.column } else { text_width };
+        (start_col < end_col).then_some((start_col, end_col))
+    }
+
+    fn visible_display_line(&self, row: usize, text_width: usize) -> Option<String> {
+        let abs_idx = self.scroll + row;
+        if abs_idx >= self.line_count() {
+            return None;
+        }
+        Some(self.display_line(&self.plain_line_at(abs_idx), text_width))
     }
 
     pub fn scroll_up(&mut self) {
@@ -1277,6 +1422,37 @@ impl Viewer {
             self.hscroll = pos.hscroll;
         }
     }
+}
+
+fn ordered_mouse_points(a: MouseTextPoint, b: MouseTextPoint) -> (MouseTextPoint, MouseTextPoint) {
+    if (a.row, a.column) <= (b.row, b.column) {
+        (a, b)
+    } else {
+        (b, a)
+    }
+}
+
+fn slice_display_columns(s: &str, start: usize, end: usize) -> String {
+    if start >= end {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    let mut width = 0usize;
+    for ch in s.chars() {
+        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(1);
+        let next = width + ch_width;
+        if next <= start {
+            width = next;
+            continue;
+        }
+        if width >= end {
+            break;
+        }
+        out.push(ch);
+        width = next;
+    }
+    out
 }
 
 fn viewer_plugin_color(name: &str) -> Color {

@@ -647,7 +647,7 @@ pub fn store_index_path() -> PathBuf {
         return PathBuf::from(url);
     }
     PathBuf::from(
-        "https://raw.githubusercontent.com/redbug26/kkc-plugins/main/dist/store-index.json",
+        "https://raw.githubusercontent.com/redbug26/kkc-store/main/dist/store-index.json",
     )
 }
 
@@ -3290,7 +3290,7 @@ mod tests {
 
     #[test]
     fn plugin_remove_only_allows_non_bundled_direct_children() {
-        let root = Path::new("/tmp/kkc-plugins");
+        let root = Path::new("/tmp/kkc-store");
 
         assert!(!plugin_can_remove(root, root));
         assert!(!plugin_can_remove(&root.join("csv_viewer"), root));

@@ -4,7 +4,8 @@ use crate::app::{
 };
 use crate::viewer::{EncodingMode, LineFeedMode, MaskKind, PreprocOpKind, ViewMode, Viewer};
 use anyhow::Result;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::layout::Rect;
 
 /// Number of display rows available for viewer content in full-screen mode.
 /// Full-screen viewer: terminal height − 1 (footer) − 2 (border) = height − 3.
@@ -91,6 +92,10 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
             return Ok(false);
         }
         _ => {}
+    }
+
+    if let AppMode::Viewer(ref mut v) = app.mode {
+        v.clear_mouse_selection();
     }
 
     match fn_key {
@@ -200,6 +205,94 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
         }
     }
     Ok(false)
+}
+
+pub(super) fn handle_mouse_viewer(app: &mut App, mouse: MouseEvent) -> Result<bool> {
+    let AppMode::Viewer(ref mut viewer) = app.mode else {
+        return Ok(false);
+    };
+
+    let Some((inner, text_width, visible_rows)) = viewer_mouse_text_layout(viewer) else {
+        return Ok(false);
+    };
+
+    match mouse.kind {
+        MouseEventKind::ScrollUp => {
+            viewer.clear_mouse_selection();
+            viewer.scroll_up();
+        }
+        MouseEventKind::ScrollDown => {
+            viewer.clear_mouse_selection();
+            viewer.scroll_down();
+        }
+        MouseEventKind::Down(MouseButton::Left) => {
+            if point_in_rect(mouse.column, mouse.row, inner) && viewer.supports_mouse_text_selection() {
+                let row = mouse.row.saturating_sub(inner.y) as usize;
+                let col = mouse.column.saturating_sub(inner.x + viewer.line_number_width() as u16) as usize;
+                viewer.start_mouse_selection(row, col, text_width, visible_rows);
+            } else {
+                viewer.clear_mouse_selection();
+            }
+        }
+        MouseEventKind::Drag(MouseButton::Left) => {
+            if viewer.supports_mouse_text_selection() {
+                let row = mouse.row.clamp(inner.y, inner.bottom().saturating_sub(1)) - inner.y;
+                let col = mouse
+                    .column
+                    .clamp(inner.x + viewer.line_number_width() as u16, inner.right())
+                    .saturating_sub(inner.x + viewer.line_number_width() as u16)
+                    as usize;
+                viewer.update_mouse_selection(row as usize, col);
+            }
+        }
+        MouseEventKind::Up(MouseButton::Left) => {
+            if let Some(text) = viewer.selected_visible_text(text_width, visible_rows)
+                && !text.is_empty()
+            {
+                match super::copy_text_to_clipboard(&text) {
+                    Ok(()) => app.set_status("Selection copied"),
+                    Err(err) => app.set_status(format!("Clipboard error: {}", err)),
+                }
+            }
+        }
+        _ => {}
+    }
+
+    Ok(false)
+}
+
+fn viewer_mouse_text_layout(viewer: &Viewer) -> Option<(Rect, usize, usize)> {
+    let (width, height) = crossterm::terminal::size().ok()?;
+    if height == 0 {
+        return None;
+    }
+    let term_area = Rect {
+        x: 0,
+        y: 0,
+        width,
+        height,
+    };
+    let viewer_host = Rect {
+        x: term_area.x,
+        y: term_area.y,
+        width: term_area.width,
+        height: term_area.height.saturating_sub(1),
+    };
+    let area = crate::ui::viewer_area(viewer, viewer_host);
+    let inner = Rect {
+        x: area.x + 1,
+        y: area.y + 1,
+        width: area.width.saturating_sub(2),
+        height: area.height.saturating_sub(2),
+    };
+    let ln_width = viewer.line_number_width();
+    let text_width = inner.width.saturating_sub(ln_width as u16) as usize;
+    let visible_rows = inner.height as usize;
+    (inner.width > 0 && inner.height > 0 && text_width > 0).then_some((inner, text_width, visible_rows))
+}
+
+fn point_in_rect(column: u16, row: u16, rect: Rect) -> bool {
+    column >= rect.x && column < rect.right() && row >= rect.y && row < rect.bottom()
 }
 
 const VIEWER_GOTO_ITEMS: &[(&str, &str)] = &[

@@ -239,7 +239,7 @@ pub(super) fn render_remote_add_menu(
     area: Rect,
 ) {
     let width: u16 = 22;
-    let height: u16 = (choices.len() as u16) + 4; // border(2) + title row + items + hint
+    let height: u16 = (choices.len() as u16) + 3; // border(2) + items + hint
     let popup = clamp_rect(
         area,
         Rect {

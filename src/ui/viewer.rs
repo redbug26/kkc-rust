@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn viewer_area(v: &Viewer, area: Rect) -> Rect {
+pub(crate) fn viewer_area(v: &Viewer, area: Rect) -> Rect {
     // Plugin document views always use the full area (like zoomed) so that
     // (a) no stale file-manager content bleeds through the margins, and
     // (b) the actual panel width is available to the plugin renderer.
@@ -303,7 +303,24 @@ pub(super) fn render_viewer(
             let is_match = !search_lower.is_empty() && plain.to_lowercase().contains(&search_lower);
             let is_current_match = is_match && v.matches.get(v.match_pos).copied() == Some(abs_idx);
 
-            let content_line = if is_current_match {
+            let content_line = if let Some((before, selected, after)) =
+                v.selection_display_segments_for_visible_row(rel_idx, text_width, height)
+            {
+                let mut spans = Vec::new();
+                if !before.is_empty() {
+                    spans.push(Span::styled(before, Style::default().fg(Color::White)));
+                }
+                if !selected.is_empty() {
+                    spans.push(Span::styled(
+                        selected,
+                        Style::default().fg(Color::Black).bg(Color::LightGreen),
+                    ));
+                }
+                if !after.is_empty() {
+                    spans.push(Span::styled(after, Style::default().fg(Color::White)));
+                }
+                Line::from(spans)
+            } else if is_current_match {
                 Line::from(vec![Span::styled(
                     truncate_str(&plain, text_width),
                     Style::default().fg(Color::Black).bg(Color::Yellow),
