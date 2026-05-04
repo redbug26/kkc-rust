@@ -553,7 +553,8 @@ impl OpenerState {
 pub struct AssocEditorState {
     /// (MIME type, openers) pairs - mirrors config.file_assoc.
     pub assocs: Vec<(String, Vec<String>)>,
-    pub cursor: usize,
+    pub query: String,
+    pub match_pos: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -719,14 +720,83 @@ enum StoreInstallMessage {
 
 impl AssocEditorState {
     pub fn from_config(cfg: &crate::config::Config) -> Self {
+        let mut assocs = cfg
+            .file_assoc
+            .iter()
+            .map(|a| (a.mime_type.clone(), a.openers.clone()))
+            .collect::<Vec<_>>();
+        assocs.sort_by(|(mime_a, _), (mime_b, _)| mime_a.to_lowercase().cmp(&mime_b.to_lowercase()));
+
         Self {
-            assocs: cfg
-                .file_assoc
-                .iter()
-                .map(|a| (a.mime_type.clone(), a.openers.clone()))
-                .collect(),
-            cursor: 0,
+            assocs,
+            query: String::new(),
+            match_pos: 0,
         }
+    }
+
+    pub fn filtered_indices(&self) -> Vec<usize> {
+        if self.query.trim().is_empty() {
+            return (0..self.assocs.len()).collect();
+        }
+
+        let tokens = self
+            .query
+            .split_whitespace()
+            .map(|token| token.to_ascii_lowercase())
+            .filter(|token| !token.is_empty())
+            .collect::<Vec<_>>();
+        if tokens.is_empty() {
+            return (0..self.assocs.len()).collect();
+        }
+
+        self.assocs
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, (mime_type, openers))| {
+                let haystack = format!(
+                    "{} {}",
+                    mime_type.to_ascii_lowercase(),
+                    openers.join(" ").to_ascii_lowercase()
+                );
+                tokens.iter().all(|token| haystack.contains(token)).then_some(idx)
+            })
+            .collect()
+    }
+
+    pub fn clamp_match(&mut self) {
+        let total = self.filtered_indices().len();
+        if total == 0 {
+            self.match_pos = 0;
+        } else {
+            self.match_pos = self.match_pos.min(total.saturating_sub(1));
+        }
+    }
+
+    pub fn selected_index(&self) -> Option<usize> {
+        self.filtered_indices().get(self.match_pos).copied()
+    }
+
+    pub fn move_prev(&mut self) {
+        if self.match_pos > 0 {
+            self.match_pos -= 1;
+        }
+    }
+
+    pub fn move_next(&mut self) {
+        let total = self.filtered_indices().len();
+        if self.match_pos + 1 < total {
+            self.match_pos += 1;
+        }
+    }
+
+    pub fn push_query(&mut self, ch: char) {
+        self.query.push(ch);
+        self.clamp_match();
+    }
+
+    pub fn pop_query(&mut self) {
+        self.query.pop();
+        self.clamp_match();
     }
 }
 
@@ -2007,7 +2077,7 @@ impl App {
         &mut self,
         item: &crate::plugins::StorePluginInfo,
     ) -> usize {
-        let Some(bin) = item.install_bin.as_deref() else {
+        let Some(opener) = store_application_opener(item) else {
             return 0;
         };
         let _ = crate::plugins::remember_store_application(item);
@@ -2015,7 +2085,6 @@ impl App {
             return 0;
         }
 
-        let opener = format!("{bin} %f");
         let mut configured = 0;
         for mime_type in &item.mime_types {
             let before = self.config.openers_for_mime(mime_type).len();
@@ -2033,10 +2102,9 @@ impl App {
     }
 
     fn remove_application_associations(&mut self, item: &crate::plugins::StorePluginInfo) -> bool {
-        let Some(bin) = item.install_bin.as_deref() else {
+        let Some(opener) = store_application_opener(item) else {
             return false;
         };
-        let opener = format!("{bin} %f");
         let mut changed = false;
         for mime_type in &item.mime_types {
             changed |= self.config.remove_opener_for_mime(mime_type, &opener);
@@ -3008,6 +3076,19 @@ impl App {
             &self.terminal.output[start..],
         );
         self.config.save_state()
+    }
+}
+
+fn store_application_opener(item: &crate::plugins::StorePluginInfo) -> Option<String> {
+    let bin = item.install_bin.as_deref()?.trim();
+    if bin.is_empty() {
+        return None;
+    }
+    let args = item.launch_args.as_deref().map(str::trim).unwrap_or_default();
+    if args.is_empty() {
+        Some(format!("{bin} %f"))
+    } else {
+        Some(format!("{bin} {args}"))
     }
 }
 

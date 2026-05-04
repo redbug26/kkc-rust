@@ -326,6 +326,9 @@ pub struct Config {
     /// External pager/viewer command.
     #[serde(default = "default_pager")]
     pub pager: String,
+    /// Plugin store index source (URL or local file path).
+    #[serde(default = "default_store_index_path")]
+    pub store_index_path: String,
 
     // --- Viewer ---
     #[serde(default)]
@@ -397,6 +400,7 @@ impl Default for Config {
             show_file_icons: false,
             editor: default_editor(),
             pager: default_pager(),
+            store_index_path: default_store_index_path(),
             viewer: ViewerConfig::default(),
             dir_history_max: 32,
             dir_history: Vec::new(),
@@ -576,6 +580,10 @@ impl Config {
             "pager = {}\n",
             toml::Value::String(self.pager.clone())
         ));
+        out.push_str(&format!(
+            "store_index_path = {}\n",
+            toml::Value::String(self.store_index_path.clone())
+        ));
         out.push_str(&format!("dir_history_max = {}\n", self.dir_history_max));
         out.push('\n');
 
@@ -751,6 +759,10 @@ fn default_pager() -> String {
     std::env::var("PAGER").unwrap_or_else(|_| "less".into())
 }
 
+pub fn default_store_index_path() -> String {
+    "https://raw.githubusercontent.com/redbug26/kkc-store/main/dist/store-index.json".to_string()
+}
+
 const fn t() -> bool {
     true
 }
@@ -791,6 +803,7 @@ mod tests {
         cfg.viewer.default_zoom = false;
         cfg.editor = "vim".into();
         cfg.pager = "less -R".into();
+        cfg.store_index_path = "/tmp/store-index.json".into();
         cfg.dir_history_max = 64;
         cfg.debug_log = true;
         cfg.bookmarks = vec![PathBuf::from("/Users/test")];
@@ -810,6 +823,7 @@ mod tests {
         assert!(!parsed.viewer.word_wrap);
         assert_eq!(parsed.viewer.tab_width, 8);
         assert_eq!(parsed.editor, "vim");
+        assert_eq!(parsed.store_index_path, "/tmp/store-index.json");
         assert_eq!(parsed.dir_history_max, 64);
         assert_eq!(parsed.file_assoc[0].mime_type, "text/plain");
         assert_eq!(parsed.file_assoc[0].openers, vec!["vim %f"]);

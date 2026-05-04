@@ -14,6 +14,7 @@ mod terminal;
 mod tree_view;
 mod viewer;
 use self::assoc::{render_action_palette, render_assoc_editor, render_opener};
+pub(crate) use self::assoc::assoc_editor_shortcuts;
 pub(crate) use self::bookmarks::dir_bookmarks_shortcuts;
 use self::bookmarks::{
     render_dir_bookmarks, render_quicksearch_palette, render_store_install_palette,
@@ -21,6 +22,7 @@ use self::bookmarks::{
 };
 pub(crate) use self::bookmarks::{store_detect_shortcuts, store_install_shortcuts};
 use self::config::render_config;
+pub(crate) use self::confirm::assoc_input_shortcuts;
 use self::confirm::{render_confirm, render_input};
 use self::copy::{render_copy_dialog, render_copy_progress};
 pub(crate) use self::help::help_shortcuts;

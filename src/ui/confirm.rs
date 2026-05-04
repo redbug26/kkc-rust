@@ -1,4 +1,22 @@
 use super::*;
+use crate::app::InputAction;
+
+pub(crate) fn assoc_input_shortcuts() -> Vec<FooterShortcut> {
+    vec![
+        FooterShortcut {
+            label: "Enter:NewLine",
+            key: KeyCode::Enter,
+        },
+        FooterShortcut {
+            label: "F2:Save",
+            key: KeyCode::F(2),
+        },
+        FooterShortcut {
+            label: "Esc:Cancel",
+            key: KeyCode::Esc,
+        },
+    ]
+}
 
 pub(super) fn render_confirm(f: &mut Frame, dlg: &ConfirmDialog, area: Rect) {
     match &dlg.action {
@@ -434,8 +452,22 @@ fn render_confirm_delete(f: &mut Frame, message: &str, count: usize, area: Rect)
 // ---------------------------------------------------------------------------
 
 pub(super) fn render_input(f: &mut Frame, dlg: &InputDialog, area: Rect) {
-    let width = 60u16.min(area.width.saturating_sub(4));
-    let height = 7u16;
+    let is_assoc = matches!(
+        dlg.action,
+        InputAction::AssocAddExt | InputAction::AssocAddOpeners { .. }
+    );
+    let is_multiline = matches!(dlg.action, InputAction::AssocAddOpeners { .. });
+
+    let width = if is_multiline {
+        84u16.min(area.width.saturating_sub(4)).max(56)
+    } else {
+        60u16.min(area.width.saturating_sub(4)).max(42)
+    };
+    let height = if is_multiline {
+        12u16.min(area.height.saturating_sub(4)).max(8)
+    } else {
+        7u16
+    };
     let x = (area.width.saturating_sub(width)) / 2 + area.x;
     let y = (area.height.saturating_sub(height)) / 2 + area.y;
     let popup = clamp_rect(
@@ -449,44 +481,152 @@ pub(super) fn render_input(f: &mut Frame, dlg: &InputDialog, area: Rect) {
     );
 
     safe_render_widget(f, Clear, popup);
+    let border_fg = if is_assoc { CLR_QS_BORDER } else { Color::Yellow };
+    let dialog_bg = if is_assoc { CLR_QS_BG } else { CLR_MENU_DD_BG };
+    let prompt_fg = if is_assoc { CLR_QS_LIST_FG } else { Color::White };
+    let input_bg = if is_assoc { CLR_QS_INPUT_BG } else { Color::White };
+    let input_fg = if is_assoc { CLR_QS_INPUT_FG } else { Color::Black };
+    let hint_fg = if is_assoc { CLR_QS_NO_MATCH } else { Color::DarkGray };
+
     let block = Block::default()
         .title(format!(" {} ", dlg.title))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow));
+        .border_style(Style::default().fg(border_fg).bg(dialog_bg))
+        .style(Style::default().bg(dialog_bg));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
 
-    let input_w = inner.width.saturating_sub(2) as usize;
-    let value_display = format!("{:<width$}", dlg.value, width = input_w);
-
-    let prompt_line = Line::from(Span::styled(
-        format!(" {} ", dlg.prompt),
-        Style::default().fg(Color::White),
-    ));
-    let input_line = Line::from(Span::styled(
-        format!(" {} ", value_display),
-        Style::default().fg(Color::Black).bg(Color::White),
-    ));
-    let hint_line = Line::from(Span::styled(
-        "  Enter:OK  Esc:Cancel",
-        Style::default().fg(Color::DarkGray),
-    ));
-
-    f.render_widget(
-        Paragraph::new(vec![
-            Line::default(),
-            prompt_line,
-            Line::default(),
-            input_line,
-            hint_line,
-        ]),
-        inner,
+    safe_render_widget(
+        f,
+        Paragraph::new(Line::from(Span::styled(
+            format!(" {} ", dlg.prompt),
+            Style::default().fg(prompt_fg).bg(dialog_bg),
+        ))),
+        Rect {
+            x: inner.x,
+            y: inner.y,
+            width: inner.width,
+            height: 1,
+        },
     );
 
-    // Draw cursor inside input field
-    let cursor_x = (inner.x + 1 + dlg.cursor as u16).min(inner.x + inner.width.saturating_sub(2));
-    let cursor_y = inner.y + 3;
-    if cursor_y < inner.y + inner.height {
-        safe_set_cursor_position(f, cursor_x, cursor_y);
+    if is_multiline {
+        let line_w = inner.width.saturating_sub(2) as usize;
+        let input_top = inner.y + 1;
+        let input_h = inner.height.saturating_sub(3) as usize;
+        let (cursor_line, cursor_col) = cursor_line_col(&dlg.value, dlg.cursor);
+        let mut lines = dlg.value.split('\n').collect::<Vec<_>>();
+        if lines.is_empty() {
+            lines.push("");
+        }
+
+        let vscroll = if cursor_line < input_h {
+            0
+        } else {
+            cursor_line.saturating_sub(input_h - 1)
+        };
+        let active_hscroll = cursor_col.saturating_sub(line_w.saturating_sub(1));
+
+        for draw_row in 0..input_h {
+            let line_idx = vscroll + draw_row;
+            let line = lines.get(line_idx).copied().unwrap_or("");
+            let hscroll = if line_idx == cursor_line { active_hscroll } else { 0 };
+            let shown = slice_chars(line, hscroll, line_w);
+            let padded = format!("{:<width$}", shown, width = line_w);
+            safe_render_widget(
+                f,
+                Paragraph::new(padded).style(Style::default().fg(input_fg).bg(input_bg)),
+                Rect {
+                    x: inner.x + 1,
+                    y: input_top + draw_row as u16,
+                    width: inner.width.saturating_sub(2),
+                    height: 1,
+                },
+            );
+        }
+
+        let cursor_y = input_top + cursor_line.saturating_sub(vscroll) as u16;
+        let cursor_x = inner.x
+            + 1
+            + cursor_col
+                .saturating_sub(active_hscroll)
+                .min(line_w.saturating_sub(1)) as u16;
+        if cursor_y < inner.y + inner.height.saturating_sub(1) {
+            safe_set_cursor_position(f, cursor_x, cursor_y);
+        }
+    } else {
+        let input_w = inner.width.saturating_sub(2) as usize;
+        let cursor_col = dlg.value[..dlg.cursor.min(dlg.value.len())].chars().count();
+        let hscroll = cursor_col.saturating_sub(input_w.saturating_sub(1));
+        let shown = slice_chars(&dlg.value, hscroll, input_w);
+        let value_display = format!("{:<width$}", shown, width = input_w);
+
+        safe_render_widget(
+            f,
+            Paragraph::new(Line::from(Span::styled(
+                format!(" {} ", value_display),
+                Style::default().fg(input_fg).bg(input_bg),
+            ))),
+            Rect {
+                x: inner.x,
+                y: inner.y + 2,
+                width: inner.width,
+                height: 1,
+            },
+        );
+
+        let cursor_x = inner.x
+            + 1
+            + cursor_col
+                .saturating_sub(hscroll)
+                .min(input_w.saturating_sub(1)) as u16;
+        let cursor_y = inner.y + 2;
+        if cursor_y < inner.y + inner.height {
+            safe_set_cursor_position(f, cursor_x, cursor_y);
+        }
     }
+
+    let hint_area = Rect {
+        x: inner.x,
+        y: inner.y + inner.height.saturating_sub(1),
+        width: inner.width,
+        height: 1,
+    };
+    if is_multiline {
+        let hint_items = footer_shortcut_items(&assoc_input_shortcuts());
+        render_shortcut_bar(f, hint_area, &hint_items, secondary_shortcut_bar_style());
+    } else {
+        let hint = " Enter:OK  Esc:Cancel";
+        safe_render_widget(
+            f,
+            Paragraph::new(Line::from(Span::styled(
+                hint,
+                Style::default().fg(hint_fg).bg(dialog_bg),
+            ))),
+            hint_area,
+        );
+    }
+}
+
+fn cursor_line_col(value: &str, cursor: usize) -> (usize, usize) {
+    let mut line = 0usize;
+    let mut col = 0usize;
+    let cursor = cursor.min(value.len());
+
+    for (idx, ch) in value.char_indices() {
+        if idx >= cursor {
+            break;
+        }
+        if ch == '\n' {
+            line += 1;
+            col = 0;
+        } else {
+            col += 1;
+        }
+    }
+    (line, col)
+}
+
+fn slice_chars(value: &str, start: usize, width: usize) -> String {
+    value.chars().skip(start).take(width).collect()
 }

@@ -162,10 +162,11 @@ impl Panel {
             })
         };
         self.sort_entries(&mut entries);
-        entries.insert(0, self.remote_disconnect_entry());
+        // entries.insert(0, self.remote_disconnect_entry());
         if let Some(pe) = parent_entry {
-            entries.insert(1, pe);
+            entries.insert(0, pe);
         }
+        entries.push(self.remote_disconnect_entry());
         let _ = profile;
         entries
     }
@@ -242,10 +243,11 @@ impl Panel {
 
         let parent_entry = self.parent_entry();
         self.sort_entries(&mut entries);
-        entries.insert(0, self.remote_disconnect_entry());
+        // entries.insert(0, self.remote_disconnect_entry());
         if let Some(pe) = parent_entry {
-            entries.insert(1, pe);
+            entries.insert(0, pe);
         }
+        entries.push(self.remote_disconnect_entry());
 
         let old_name = self.entries.get(self.cursor).map(|e| e.name.clone());
         self.entries = entries;

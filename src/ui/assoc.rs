@@ -1,5 +1,26 @@
 use super::*;
 
+pub(crate) fn assoc_editor_shortcuts() -> Vec<FooterShortcut> {
+    vec![
+        FooterShortcut {
+            label: "Enter:Edit",
+            key: KeyCode::Enter,
+        },
+        FooterShortcut {
+            label: "A:Add",
+            key: KeyCode::Char('a'),
+        },
+        FooterShortcut {
+            label: "Del:Delete",
+            key: KeyCode::Delete,
+        },
+        FooterShortcut {
+            label: "Esc:Close",
+            key: KeyCode::Esc,
+        },
+    ]
+}
+
 pub(super) fn render_opener(f: &mut Frame, s: &OpenerState, area: Rect, preferred_area: Rect) {
     enum DisplayRow {
         Header(&'static str),
@@ -355,7 +376,7 @@ pub(super) fn render_action_palette(f: &mut Frame, s: &ActionPaletteState, area:
 }
 
 pub(super) fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rect) {
-    const W: u16 = 64;
+    const W: u16 = 88;
     const H: u16 = 24;
     let x = area.x + (area.width.saturating_sub(W)) / 2;
     let y = area.y + (area.height.saturating_sub(H)) / 2;
@@ -379,7 +400,7 @@ pub(super) fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rec
     if sh.right() <= area.right() && sh.bottom() <= area.bottom() {
         safe_render_widget(
             f,
-            Block::default().style(Style::default().bg(Color::Rgb(20, 15, 10))),
+            Block::default().style(Style::default().bg(Color::Black)),
             sh,
         );
     }
@@ -387,28 +408,40 @@ pub(super) fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rec
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG))
+        .border_style(Style::default().fg(CLR_QS_BORDER).bg(CLR_QS_BG))
         .title(Span::styled(
             " Associations ",
             Style::default()
-                .fg(CLR_BUTTON_FG)
-                .bg(CLR_APP_BG)
+                .fg(CLR_QS_INPUT_FG)
+                .bg(CLR_QS_BG)
                 .add_modifier(Modifier::BOLD),
         ))
-        .style(Style::default().bg(CLR_APP_BG));
+        .style(Style::default().bg(CLR_QS_BG));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
 
-    // Column header
-    let header = format!("  {:<24} {}", "MIME type", "Openers");
+    let matches = s.filtered_indices();
+    let count_hint = if matches.is_empty() {
+        " 0/0 ".to_string()
+    } else {
+        format!(" {}/{} ", s.match_pos + 1, matches.len())
+    };
+    let hint_w = count_hint.len() as u16;
+    let input_w = inner.width.saturating_sub(hint_w) as usize;
+    let input_text = format!(" search {}_", s.query);
+    let input_row = Line::from(vec![
+        Span::styled(
+            truncate_str(&input_text, input_w),
+            Style::default().fg(CLR_QS_INPUT_FG).bg(CLR_QS_INPUT_BG),
+        ),
+        Span::styled(
+            count_hint,
+            Style::default().fg(CLR_QS_MATCH_HI).bg(CLR_QS_INPUT_BG),
+        ),
+    ]);
     safe_render_widget(
         f,
-        Paragraph::new(header).style(
-            Style::default()
-                .fg(CLR_HEADER_FG)
-                .bg(CLR_HEADER_BG)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Paragraph::new(input_row).style(Style::default().bg(CLR_QS_INPUT_BG)),
         Rect {
             x: inner.x,
             y: inner.y,
@@ -416,10 +449,11 @@ pub(super) fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rec
             height: 1,
         },
     );
+
     let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
     safe_render_widget(
         f,
-        Paragraph::new(sep.clone()).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
+        Paragraph::new(sep.clone()).style(Style::default().fg(CLR_QS_SEP).bg(CLR_QS_BG)),
         Rect {
             x: inner.x,
             y: inner.y + 1,
@@ -428,54 +462,82 @@ pub(super) fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rec
         },
     );
 
+    // Column header
+    let header = format!("  {:<28} {}", "MIME type", "Commands");
+    safe_render_widget(
+        f,
+        Paragraph::new(header).style(
+            Style::default()
+                .fg(CLR_QS_DIR_FG)
+                .bg(CLR_QS_BG)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Rect {
+            x: inner.x,
+            y: inner.y + 2,
+            width: inner.width,
+            height: 1,
+        },
+    );
+    safe_render_widget(
+        f,
+        Paragraph::new(sep.clone()).style(Style::default().fg(CLR_QS_SEP).bg(CLR_QS_BG)),
+        Rect {
+            x: inner.x,
+            y: inner.y + 3,
+            width: inner.width,
+            height: 1,
+        },
+    );
+
     // List rows
-    let list_h = inner.height.saturating_sub(4) as usize; // header + sep + hint_sep + hint
-    let start = if s.assocs.is_empty() || s.cursor < list_h {
+    let list_h = inner.height.saturating_sub(6) as usize;
+    let start = if matches.is_empty() || s.match_pos < list_h {
         0
     } else {
-        s.cursor.saturating_sub(list_h - 1)
+        s.match_pos.saturating_sub(list_h - 1)
     };
 
-    if s.assocs.is_empty() {
+    if matches.is_empty() {
         safe_render_widget(
             f,
-            Paragraph::new("  (no associations defined)")
-                .style(Style::default().fg(Color::Rgb(110, 88, 65)).bg(CLR_APP_BG)),
+            Paragraph::new("  (no match)").style(Style::default().fg(CLR_QS_NO_MATCH).bg(CLR_QS_BG)),
             Rect {
                 x: inner.x,
-                y: inner.y + 2,
+                y: inner.y + 4,
                 width: inner.width,
                 height: 1,
             },
         );
     } else {
-        for (list_row, idx) in (start..).zip(0..list_h) {
-            if list_row >= s.assocs.len() {
+        for (filtered_row, draw_row) in (start..).zip(0..list_h) {
+            if filtered_row >= matches.len() {
                 break;
             }
-            let row_y = inner.y + 2 + idx as u16;
+            let row_y = inner.y + 4 + draw_row as u16;
             if row_y >= inner.y + inner.height {
                 break;
             }
-            let (mime_type, openers) = &s.assocs[list_row];
-            let selected = s.cursor == list_row;
+            let assoc_idx = matches[filtered_row];
+            let (mime_type, openers) = &s.assocs[assoc_idx];
+            let selected = s.match_pos == filtered_row;
             let style = if selected {
                 Style::default()
-                    .fg(Color::Black)
-                    .bg(CLR_CURSOR_BG)
+                    .fg(CLR_QS_SEL_FG)
+                    .bg(CLR_QS_SEL_BG)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::Rgb(50, 36, 22)).bg(CLR_APP_BG)
+                Style::default().fg(CLR_QS_LIST_FG).bg(CLR_QS_BG)
             };
-            let icon = if selected { "▶" } else { " " };
-            let openers_str = openers.join(", ");
-            let avail = inner.width.saturating_sub(28) as usize;
-            let openers_disp = if openers_str.len() > avail {
-                format!("{}…", &openers_str[..avail.saturating_sub(1)])
+            let icon = if selected { ">" } else { " " };
+            let openers_str = openers.join(" | ");
+            let avail = inner.width.saturating_sub(32) as usize;
+            let openers_disp = if openers_str.chars().count() > avail {
+                format!("{}...", truncate_str(&openers_str, avail.saturating_sub(3)))
             } else {
                 openers_str
             };
-            let text = format!(" {} {:<24} {}", icon, mime_type, openers_disp);
+            let text = format!(" {} {:<28} {}", icon, mime_type, openers_disp);
             let padded = format!("{:<width$}", text, width = inner.width as usize);
             safe_render_widget(
                 f,
@@ -494,7 +556,7 @@ pub(super) fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rec
     let hint_sep_y = inner.y + inner.height.saturating_sub(2);
     safe_render_widget(
         f,
-        Paragraph::new(sep).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
+        Paragraph::new(sep).style(Style::default().fg(CLR_QS_SEP).bg(CLR_QS_BG)),
         Rect {
             x: inner.x,
             y: hint_sep_y,
@@ -502,15 +564,16 @@ pub(super) fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rec
             height: 1,
         },
     );
-    safe_render_widget(
+    let hint_items = footer_shortcut_items(&assoc_editor_shortcuts());
+    render_shortcut_bar(
         f,
-        Paragraph::new("  A/+ Add   Enter/E Edit   Del/D Delete   Esc Close")
-            .style(Style::default().fg(Color::Rgb(110, 88, 65)).bg(CLR_APP_BG)),
         Rect {
             x: inner.x,
             y: hint_sep_y + 1,
             width: inner.width,
             height: 1,
         },
+        &hint_items,
+        secondary_shortcut_bar_style(),
     );
 }

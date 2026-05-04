@@ -188,6 +188,7 @@ fn handle_mouse(app: &mut App, mouse: MouseEvent) -> Result<bool> {
         AppMode::Confirm(_) => handle_mouse_confirm(app, mouse),
         AppMode::Input(_) => handle_mouse_input(app, mouse),
         AppMode::CopyDialog(_) => handle_mouse_copy_dialog(app, mouse),
+        AppMode::AssocEditor(_) => handle_mouse_assoc_editor(app, mouse),
         AppMode::RemoteAddMenu(_) => handle_mouse_remote_add_menu(app, mouse),
         AppMode::RemoteEdit(_) => handle_mouse_remote_edit(app, mouse),
         AppMode::RemoteConnecting(_) => handle_mouse_remote_connecting(app, mouse),
@@ -1135,6 +1136,31 @@ fn handle_mouse_input(app: &mut App, mouse: MouseEvent) -> Result<bool> {
     if !point_in_rect(mouse.column, mouse.row, popup) {
         return Ok(false);
     }
+
+    let is_assoc_openers = matches!(
+        app.mode,
+        AppMode::Input(InputDialog {
+            action: InputAction::AssocAddOpeners { .. },
+            ..
+        })
+    );
+    let hint_area = Rect {
+        x: inner.x,
+        y: inner.y + inner.height.saturating_sub(1),
+        width: inner.width,
+        height: 1,
+    };
+    if is_assoc_openers
+        && point_in_rect(mouse.column, mouse.row, hint_area)
+        && let Some(key) = crate::ui::footer_shortcut_key_at_column(
+            &crate::ui::assoc_input_shortcuts(),
+            hint_area.x,
+            mouse.column,
+        )
+    {
+        return handle_input(app, KeyEvent::from(key));
+    }
+
     let input_area = Rect {
         x: inner.x + 1,
         y: inner.y + 3,
@@ -1147,6 +1173,55 @@ fn handle_mouse_input(app: &mut App, mouse: MouseEvent) -> Result<bool> {
         let offset = mouse.column.saturating_sub(input_area.x) as usize;
         dlg.cursor = byte_index_for_display_column(&dlg.value, offset);
     }
+    Ok(false)
+}
+
+fn handle_mouse_assoc_editor(app: &mut App, mouse: MouseEvent) -> Result<bool> {
+    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        return Ok(false);
+    }
+
+    let Some(area) = terminal_rect() else {
+        return Ok(false);
+    };
+
+    const W: u16 = 88;
+    const H: u16 = 24;
+    let popup_w = W.min(area.width).max(1);
+    let popup_h = H.min(area.height).max(1);
+    let popup = Rect {
+        x: area.x + (area.width.saturating_sub(popup_w)) / 2,
+        y: area.y + (area.height.saturating_sub(popup_h)) / 2,
+        width: popup_w,
+        height: popup_h,
+    };
+    if !point_in_rect(mouse.column, mouse.row, popup) {
+        return Ok(false);
+    }
+
+    let inner = Rect {
+        x: popup.x.saturating_add(1),
+        y: popup.y.saturating_add(1),
+        width: popup.width.saturating_sub(2),
+        height: popup.height.saturating_sub(2),
+    };
+    let hint_area = Rect {
+        x: inner.x,
+        y: inner.y + inner.height.saturating_sub(1),
+        width: inner.width,
+        height: 1,
+    };
+
+    if point_in_rect(mouse.column, mouse.row, hint_area)
+        && let Some(key) = crate::ui::footer_shortcut_key_at_column(
+            &crate::ui::assoc_editor_shortcuts(),
+            hint_area.x,
+            mouse.column,
+        )
+    {
+        return handle_assoc_editor(app, KeyEvent::from(key));
+    }
+
     Ok(false)
 }
 
@@ -2936,6 +3011,13 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(false);
     };
 
+    let is_assoc_openers = matches!(dlg.action, InputAction::AssocAddOpeners { .. });
+    let is_assoc_dialog = is_assoc_openers || matches!(dlg.action, InputAction::AssocAddExt);
+    let save_assoc_openers = is_assoc_openers
+        && (matches!(key.code, KeyCode::F(2))
+            || (key.modifiers.contains(KeyModifiers::CONTROL)
+                && matches!(key.code, KeyCode::Char('s') | KeyCode::Char('S'))));
+
     if key.modifiers.contains(KeyModifiers::CONTROL)
         && matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V'))
     {
@@ -2946,11 +3028,41 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(false);
     }
 
+    if is_assoc_openers
+        && key.modifiers.contains(KeyModifiers::CONTROL)
+        && matches!(key.code, KeyCode::Char('j') | KeyCode::Char('J'))
+    {
+        dlg.insert_char('\n');
+        return Ok(false);
+    }
+
     match key.code {
         KeyCode::Esc => {
+            if is_assoc_dialog {
+                app.mode = AppMode::AssocEditor(AssocEditorState::from_config(&app.config));
+            } else {
+                app.mode = AppMode::Browse;
+            }
+        }
+        _ if save_assoc_openers => {
+            let value = dlg.value.clone();
+            let ext = match &dlg.action {
+                InputAction::AssocAddOpeners { ext, .. } => ext.clone(),
+                _ => String::new(),
+            };
             app.mode = AppMode::Browse;
+            apply_assoc_openers_input(app, &ext, &value);
+            app.mode = AppMode::AssocEditor(AssocEditorState::from_config(&app.config));
         }
         KeyCode::Enter => {
+            if is_assoc_openers {
+                let AppMode::Input(ref mut dlg) = app.mode else {
+                    return Ok(false);
+                };
+                dlg.insert_char('\n');
+                return Ok(false);
+            }
+
             let value = dlg.value.clone();
             let action = dlg.action.clone();
             app.mode = AppMode::Browse;
@@ -3025,11 +3137,11 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                     if mime_type.is_empty() {
                         app.mode = AppMode::AssocEditor(AssocEditorState::from_config(&app.config));
                     } else {
-                        // Find existing openers for pre-fill
-                        let existing = app.config.openers_for_mime(&mime_type).join(", ");
+                        // Find existing openers for pre-fill (one command per line).
+                        let existing = app.config.openers_for_mime(&mime_type).join("\n");
                         app.mode = AppMode::Input(InputDialog {
                             title: "Association".into(),
-                            prompt: format!("Openers for {} (comma-separated):", mime_type),
+                            prompt: format!("Openers for {} (one command per line):", mime_type),
                             value: existing,
                             cursor: 0,
                             action: InputAction::AssocAddOpeners {
@@ -3045,41 +3157,8 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                     }
                 }
                 InputAction::AssocAddOpeners { ext, edit_index } => {
-                    let mime_type = ext.trim().to_ascii_lowercase();
-                    let openers: Vec<String> = value
-                        .split(',')
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty())
-                        .collect();
-                    if openers.is_empty() {
-                        // Remove entry if openers cleared
-                        if let Some(idx) = edit_index {
-                            if idx < app.config.file_assoc.len() {
-                                app.config.file_assoc.remove(idx);
-                            }
-                        }
-                    } else {
-                        match edit_index {
-                            Some(idx) if idx < app.config.file_assoc.len() => {
-                                app.config.file_assoc[idx].openers = openers;
-                            }
-                            _ => {
-                                if let Some(existing) = app
-                                    .config
-                                    .file_assoc
-                                    .iter_mut()
-                                    .find(|a| a.mime_type.eq_ignore_ascii_case(&mime_type))
-                                {
-                                    existing.openers = openers;
-                                } else {
-                                    app.config
-                                        .file_assoc
-                                        .push(crate::config::FileAssoc { mime_type, openers });
-                                }
-                            }
-                        }
-                    }
-                    app.save_config().ok();
+                    let _ = edit_index;
+                    apply_assoc_openers_input(app, &ext, &value);
                     app.mode = AppMode::AssocEditor(AssocEditorState::from_config(&app.config));
                 }
                 InputAction::PluginAction { plugin, id, cwd } => {
@@ -3141,9 +3220,84 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             };
             dlg.end();
         }
+        KeyCode::Up if is_assoc_openers => {
+            let AppMode::Input(ref mut dlg) = app.mode else {
+                return Ok(false);
+            };
+            move_input_cursor_vertical(dlg, -1);
+        }
+        KeyCode::Down if is_assoc_openers => {
+            let AppMode::Input(ref mut dlg) = app.mode else {
+                return Ok(false);
+            };
+            move_input_cursor_vertical(dlg, 1);
+        }
         _ => {}
     }
     Ok(false)
+}
+
+fn apply_assoc_openers_input(app: &mut App, ext: &str, value: &str) {
+    let mime_type = ext.trim().to_ascii_lowercase();
+    let openers: Vec<String> = value
+        .lines()
+        .flat_map(|line| line.split(','))
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if openers.is_empty() {
+        app.config
+            .file_assoc
+            .retain(|a| !a.mime_type.eq_ignore_ascii_case(&mime_type));
+    } else if let Some(existing) = app
+        .config
+        .file_assoc
+        .iter_mut()
+        .find(|a| a.mime_type.eq_ignore_ascii_case(&mime_type))
+    {
+        existing.openers = openers;
+    } else {
+        app.config
+            .file_assoc
+            .push(crate::config::FileAssoc { mime_type, openers });
+    }
+    app.save_config().ok();
+}
+
+fn move_input_cursor_vertical(dlg: &mut InputDialog, delta: isize) {
+    let cursor = dlg.cursor.min(dlg.value.len());
+    let before = &dlg.value[..cursor];
+    let current_col = before.chars().rev().take_while(|&ch| ch != '\n').count();
+    let lines = dlg.value.split('\n').collect::<Vec<_>>();
+    if lines.is_empty() {
+        return;
+    }
+
+    let current_line = before.chars().filter(|&ch| ch == '\n').count() as isize;
+    let target_line = (current_line + delta).clamp(0, lines.len().saturating_sub(1) as isize) as usize;
+    let target_col = current_col.min(lines[target_line].chars().count());
+
+    let target_char_index = lines
+        .iter()
+        .take(target_line)
+        .map(|line| line.chars().count() + 1)
+        .sum::<usize>()
+        + target_col;
+
+    let total_chars = dlg.value.chars().count();
+    if target_char_index >= total_chars {
+        dlg.cursor = dlg.value.len();
+        return;
+    }
+
+    for (count, (idx, _)) in dlg.value.char_indices().enumerate() {
+        if count == target_char_index {
+            dlg.cursor = idx;
+            return;
+        }
+    }
+    dlg.cursor = dlg.value.len();
 }
 
 fn handle_copy_dialog(app: &mut App, key: KeyEvent) -> Result<bool> {
@@ -4058,63 +4212,67 @@ fn handle_opener(app: &mut App, key: KeyEvent) -> Result<bool> {
 
 fn handle_assoc_editor(app: &mut App, key: KeyEvent) -> Result<bool> {
     let fn_key = fx_shortcut(key);
-    let total = if let AppMode::AssocEditor(ref s) = app.mode {
-        s.assocs.len()
-    } else {
-        0
-    };
+    if key.modifiers.contains(KeyModifiers::CONTROL)
+        && matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V'))
+    {
+        if let Some(text) = paste_text_from_clipboard()
+            && let AppMode::AssocEditor(ref mut s) = app.mode
+        {
+            s.query.push_str(&text);
+            s.clamp_match();
+        }
+        return Ok(false);
+    }
 
     match key.code {
         KeyCode::Esc => {
             app.mode = AppMode::Browse;
         }
-        KeyCode::Up => {
+        KeyCode::Up | KeyCode::BackTab => {
             if let AppMode::AssocEditor(ref mut s) = app.mode {
-                if s.cursor > 0 {
-                    s.cursor -= 1;
-                }
+                s.move_prev();
             }
         }
-        KeyCode::Down => {
+        KeyCode::Down | KeyCode::Tab => {
             if let AppMode::AssocEditor(ref mut s) = app.mode {
-                if s.cursor + 1 < total {
-                    s.cursor += 1;
-                }
+                s.move_next();
+            }
+        }
+        KeyCode::Backspace => {
+            if let AppMode::AssocEditor(ref mut s) = app.mode {
+                s.pop_query();
             }
         }
         // Add new association
         KeyCode::Char('a') | KeyCode::Char('A') | KeyCode::Char('+') => {
-            app.mode = AppMode::Input(InputDialog {
-                title: "New association".into(),
-                prompt: "MIME type:".into(),
-                value: String::new(),
-                cursor: 0,
-                action: InputAction::AssocAddExt,
-            });
+            app.mode = assoc_mime_input_dialog(app);
         }
         _ if fn_key == Some(1) => {
-            app.mode = AppMode::Input(InputDialog {
-                title: "New association".into(),
-                prompt: "MIME type:".into(),
-                value: String::new(),
-                cursor: 0,
-                action: InputAction::AssocAddExt,
-            });
+            app.mode = assoc_mime_input_dialog(app);
+        }
+        KeyCode::Char(ch)
+            if !key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::ALT)
+                && !ch.is_control() =>
+        {
+            if let AppMode::AssocEditor(ref mut s) = app.mode {
+                s.push_query(ch);
+            }
         }
         // Edit selected
         KeyCode::Enter | KeyCode::Char('e') | KeyCode::Char('E') => {
             let (mime_type, openers_str, idx) = if let AppMode::AssocEditor(ref s) = app.mode {
-                if s.assocs.is_empty() {
+                let Some(idx) = s.selected_index() else {
                     return Ok(false);
-                }
-                let (mime_type, openers) = &s.assocs[s.cursor];
-                (mime_type.clone(), openers.join(", "), s.cursor)
+                };
+                let (mime_type, openers) = &s.assocs[idx];
+                (mime_type.clone(), openers.join("\n"), idx)
             } else {
                 return Ok(false);
             };
             app.mode = AppMode::Input(InputDialog {
                 title: "Edit association".into(),
-                prompt: format!("Openers for {} (comma-separated):", mime_type),
+                prompt: format!("Openers for {} (one command per line):", mime_type),
                 value: openers_str.clone(),
                 cursor: openers_str.len(),
                 action: InputAction::AssocAddOpeners {
@@ -4125,30 +4283,56 @@ fn handle_assoc_editor(app: &mut App, key: KeyEvent) -> Result<bool> {
         }
         // Delete selected
         KeyCode::Delete | KeyCode::Char('d') | KeyCode::Char('D') => {
-            let (idx, cursor) = if let AppMode::AssocEditor(ref s) = app.mode {
-                if s.assocs.is_empty() {
+            let (mime_type, query, match_pos) = if let AppMode::AssocEditor(ref s) = app.mode {
+                let Some(idx) = s.selected_index() else {
                     return Ok(false);
-                }
-                (s.cursor, s.cursor)
+                };
+                let (mime_type, _) = &s.assocs[idx];
+                (mime_type.clone(), s.query.clone(), s.match_pos)
             } else {
                 return Ok(false);
             };
-            if idx < app.config.file_assoc.len() {
-                app.config.file_assoc.remove(idx);
-            }
+            app.config
+                .file_assoc
+                .retain(|a| !a.mime_type.eq_ignore_ascii_case(&mime_type));
             app.save_config().ok();
-            let new_cursor = if cursor > 0 && cursor >= app.config.file_assoc.len() {
-                app.config.file_assoc.len().saturating_sub(1)
-            } else {
-                cursor
-            };
             let mut new_s = AssocEditorState::from_config(&app.config);
-            new_s.cursor = new_cursor;
+            new_s.query = query;
+            new_s.match_pos = match_pos;
+            new_s.clamp_match();
             app.mode = AppMode::AssocEditor(new_s);
         }
         _ => {}
     }
     Ok(false)
+}
+
+fn assoc_mime_input_dialog(app: &App) -> AppMode {
+    let value = default_assoc_mime_type(app).unwrap_or_default();
+    let cursor = value.len();
+    AppMode::Input(InputDialog {
+        title: "New association".into(),
+        prompt: "MIME type:".into(),
+        value,
+        cursor,
+        action: InputAction::AssocAddExt,
+    })
+}
+
+fn default_assoc_mime_type(app: &App) -> Option<String> {
+    let panel = app.active_panel();
+    if panel.is_remote_view() {
+        return None;
+    }
+
+    let entry = panel.current_entry()?;
+    if entry.name == ".." || entry.is_dir || entry.cloud_only {
+        return None;
+    }
+
+    crate::idf::probe_path(&entry.path)
+        .map(|info| info.mime_type)
+        .filter(|mime_type| !mime_type.trim().is_empty())
 }
 
 fn handle_remote_connect(app: &mut App, key: KeyEvent) -> Result<bool> {

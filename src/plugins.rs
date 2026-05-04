@@ -658,7 +658,13 @@ pub fn store_index_path() -> PathBuf {
     if let Some(url) = std::env::var_os("KKC_PLUGIN_STORE_URL") {
         return PathBuf::from(url);
     }
-    PathBuf::from("https://raw.githubusercontent.com/redbug26/kkc-store/main/dist/store-index.json")
+    if let Ok(cfg) = crate::config::Config::load() {
+        let configured = cfg.store_index_path.trim();
+        if !configured.is_empty() {
+            return PathBuf::from(configured);
+        }
+    }
+    PathBuf::from(crate::config::default_store_index_path())
 }
 
 pub fn install_plugin_from_store_with_progress<F>(

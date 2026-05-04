@@ -715,7 +715,7 @@ fn remote_plugin_profile(profile: &RemoteProfile) -> Result<&RemotePluginProfile
 fn remote_plugin_module(profile: &RemoteProfile) -> Result<kkc_plugin_api::RemotePluginModRef> {
     let plugin = remote_plugin_profile(profile)?;
     let module = crate::remote_plugins::load_remote_plugin(&plugin.plugin_id)?;
-    module.set_debug_log()(remote_plugin_debug_log as usize);
+    module.set_debug_log()(remote_plugin_debug_log as *const () as usize);
     Ok(module)
 }
 
@@ -730,7 +730,7 @@ fn remote_plugin_error(err: abi_stable::std_types::RString) -> anyhow::Error {
 #[allow(dead_code)]
 pub fn remote_plugin_auth_start(plugin_id: &str, config_json: &str) -> Result<String> {
     let module = crate::remote_plugins::load_remote_plugin(plugin_id)?;
-    module.set_debug_log()(remote_plugin_debug_log as usize);
+    module.set_debug_log()(remote_plugin_debug_log as *const () as usize);
     let call = module.auth_start()(config_json.into());
     match call {
         abi_stable::std_types::RResult::ROk(session) => Ok(session.to_string()),
@@ -746,7 +746,7 @@ pub fn remote_plugin_auth_complete(
     input: &str,
 ) -> Result<String> {
     let module = crate::remote_plugins::load_remote_plugin(plugin_id)?;
-    module.set_debug_log()(remote_plugin_debug_log as usize);
+    module.set_debug_log()(remote_plugin_debug_log as *const () as usize);
     let call = module.auth_complete()(config_json.into(), auth_session_json.into(), input.into());
     match call {
         abi_stable::std_types::RResult::ROk(config) => Ok(config.to_string()),
