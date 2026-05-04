@@ -23,7 +23,7 @@ use self::bookmarks::{
 pub(crate) use self::bookmarks::{store_detect_shortcuts, store_install_shortcuts};
 use self::config::render_config;
 pub(crate) use self::confirm::assoc_input_shortcuts;
-use self::confirm::{render_confirm, render_input};
+use self::confirm::{render_assoc_input, render_confirm, render_input};
 use self::copy::{render_copy_dialog, render_copy_progress};
 pub(crate) use self::help::help_shortcuts;
 use self::help::render_help;
@@ -294,6 +294,7 @@ pub fn render(f: &mut Frame, app: &App) {
     match &app.mode {
         AppMode::Confirm(dlg) => render_confirm(f, dlg, f.area()),
         AppMode::Input(dlg) => render_input(f, dlg, f.area()),
+        AppMode::AssocInput(dlg) => render_assoc_input(f, dlg, f.area()),
         AppMode::CopyDialog(state) => render_copy_dialog(f, state, f.area()),
         AppMode::CopyProgress(state) => render_copy_progress(f, state, f.area()),
         AppMode::SearchPanel(s) => render_search(f, s, f.area()),

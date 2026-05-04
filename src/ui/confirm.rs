@@ -1,5 +1,19 @@
 use super::*;
-use crate::app::InputAction;
+use crate::app::{AssocInputAction, AssocInputDialog};
+
+struct TextDialogStyle {
+    border_fg: Color,
+    dialog_bg: Color,
+    prompt_fg: Color,
+    input_bg: Color,
+    input_fg: Color,
+    hint_fg: Color,
+}
+
+enum TextDialogFooter<'a> {
+    Plain(&'a str),
+    AssocMultiline,
+}
 
 pub(crate) fn assoc_input_shortcuts() -> Vec<FooterShortcut> {
     vec![
@@ -452,12 +466,86 @@ fn render_confirm_delete(f: &mut Frame, message: &str, count: usize, area: Rect)
 // ---------------------------------------------------------------------------
 
 pub(super) fn render_input(f: &mut Frame, dlg: &InputDialog, area: Rect) {
-    let is_assoc = matches!(
-        dlg.action,
-        InputAction::AssocAddExt | InputAction::AssocAddOpeners { .. }
+    render_text_input_dialog(
+        f,
+        &dlg.title,
+        &dlg.prompt,
+        &dlg.value,
+        dlg.cursor,
+        area,
+        false,
+        TextDialogStyle {
+            border_fg: Color::Yellow,
+            dialog_bg: CLR_MENU_DD_BG,
+            prompt_fg: Color::White,
+            input_bg: Color::White,
+            input_fg: Color::Black,
+            hint_fg: Color::DarkGray,
+        },
+        TextDialogFooter::Plain(" Enter:OK  Esc:Cancel"),
     );
-    let is_multiline = matches!(dlg.action, InputAction::AssocAddOpeners { .. });
+}
 
+pub(super) fn render_assoc_input(f: &mut Frame, dlg: &AssocInputDialog, area: Rect) {
+    let is_multiline = matches!(dlg.action, AssocInputAction::Openers { .. });
+    render_text_input_dialog(
+        f,
+        &dlg.title,
+        &dlg.prompt,
+        &dlg.value,
+        dlg.cursor,
+        area,
+        is_multiline,
+        TextDialogStyle {
+            border_fg: CLR_QS_BORDER,
+            dialog_bg: CLR_QS_BG,
+            prompt_fg: CLR_QS_LIST_FG,
+            input_bg: CLR_QS_INPUT_BG,
+            input_fg: CLR_QS_INPUT_FG,
+            hint_fg: CLR_QS_NO_MATCH,
+        },
+        if is_multiline {
+            TextDialogFooter::AssocMultiline
+        } else {
+            TextDialogFooter::Plain(" Enter:OK  Esc:Cancel")
+        },
+    );
+}
+
+fn render_text_input_dialog(
+    f: &mut Frame,
+    title: &str,
+    prompt: &str,
+    value: &str,
+    cursor: usize,
+    area: Rect,
+    is_multiline: bool,
+    style: TextDialogStyle,
+    footer: TextDialogFooter<'_>,
+) {
+    let popup = text_input_popup_rect(area, is_multiline);
+    safe_render_widget(f, Clear, popup);
+
+    let block = Block::default()
+        .title(format!(" {} ", title))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(style.border_fg).bg(style.dialog_bg))
+        .style(Style::default().bg(style.dialog_bg));
+    let inner = block.inner(popup);
+    safe_render_widget(f, block, popup);
+
+    render_text_input_prompt(f, inner, prompt, &style);
+
+    if is_multiline {
+        render_multiline_text_input(f, inner, value, cursor, &style);
+    } else {
+        render_singleline_text_input(f, inner, value, cursor, &style);
+    }
+
+    render_text_input_footer(f, inner, footer, &style);
+}
+
+fn text_input_popup_rect(area: Rect, is_multiline: bool) -> Rect {
     let width = if is_multiline {
         84u16.min(area.width.saturating_sub(4)).max(56)
     } else {
@@ -470,7 +558,7 @@ pub(super) fn render_input(f: &mut Frame, dlg: &InputDialog, area: Rect) {
     };
     let x = (area.width.saturating_sub(width)) / 2 + area.x;
     let y = (area.height.saturating_sub(height)) / 2 + area.y;
-    let popup = clamp_rect(
+    clamp_rect(
         area,
         Rect {
             x,
@@ -478,29 +566,15 @@ pub(super) fn render_input(f: &mut Frame, dlg: &InputDialog, area: Rect) {
             width,
             height,
         },
-    );
+    )
+}
 
-    safe_render_widget(f, Clear, popup);
-    let border_fg = if is_assoc { CLR_QS_BORDER } else { Color::Yellow };
-    let dialog_bg = if is_assoc { CLR_QS_BG } else { CLR_MENU_DD_BG };
-    let prompt_fg = if is_assoc { CLR_QS_LIST_FG } else { Color::White };
-    let input_bg = if is_assoc { CLR_QS_INPUT_BG } else { Color::White };
-    let input_fg = if is_assoc { CLR_QS_INPUT_FG } else { Color::Black };
-    let hint_fg = if is_assoc { CLR_QS_NO_MATCH } else { Color::DarkGray };
-
-    let block = Block::default()
-        .title(format!(" {} ", dlg.title))
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_fg).bg(dialog_bg))
-        .style(Style::default().bg(dialog_bg));
-    let inner = block.inner(popup);
-    safe_render_widget(f, block, popup);
-
+fn render_text_input_prompt(f: &mut Frame, inner: Rect, prompt: &str, style: &TextDialogStyle) {
     safe_render_widget(
         f,
         Paragraph::new(Line::from(Span::styled(
-            format!(" {} ", dlg.prompt),
-            Style::default().fg(prompt_fg).bg(dialog_bg),
+            format!(" {} ", prompt),
+            Style::default().fg(style.prompt_fg).bg(style.dialog_bg),
         ))),
         Rect {
             x: inner.x,
@@ -509,102 +583,126 @@ pub(super) fn render_input(f: &mut Frame, dlg: &InputDialog, area: Rect) {
             height: 1,
         },
     );
+}
 
-    if is_multiline {
-        let line_w = inner.width.saturating_sub(2) as usize;
-        let input_top = inner.y + 1;
-        let input_h = inner.height.saturating_sub(3) as usize;
-        let (cursor_line, cursor_col) = cursor_line_col(&dlg.value, dlg.cursor);
-        let mut lines = dlg.value.split('\n').collect::<Vec<_>>();
-        if lines.is_empty() {
-            lines.push("");
-        }
+fn render_singleline_text_input(
+    f: &mut Frame,
+    inner: Rect,
+    value: &str,
+    cursor: usize,
+    style: &TextDialogStyle,
+) {
+    let input_w = inner.width.saturating_sub(2) as usize;
+    let cursor_col = value[..cursor.min(value.len())].chars().count();
+    let hscroll = cursor_col.saturating_sub(input_w.saturating_sub(1));
+    let shown = slice_chars(value, hscroll, input_w);
+    let value_display = format!("{:<width$}", shown, width = input_w);
 
-        let vscroll = if cursor_line < input_h {
-            0
-        } else {
-            cursor_line.saturating_sub(input_h - 1)
-        };
-        let active_hscroll = cursor_col.saturating_sub(line_w.saturating_sub(1));
+    safe_render_widget(
+        f,
+        Paragraph::new(Line::from(Span::styled(
+            format!(" {} ", value_display),
+            Style::default().fg(style.input_fg).bg(style.input_bg),
+        ))),
+        Rect {
+            x: inner.x,
+            y: inner.y + 2,
+            width: inner.width,
+            height: 1,
+        },
+    );
 
-        for draw_row in 0..input_h {
-            let line_idx = vscroll + draw_row;
-            let line = lines.get(line_idx).copied().unwrap_or("");
-            let hscroll = if line_idx == cursor_line { active_hscroll } else { 0 };
-            let shown = slice_chars(line, hscroll, line_w);
-            let padded = format!("{:<width$}", shown, width = line_w);
-            safe_render_widget(
-                f,
-                Paragraph::new(padded).style(Style::default().fg(input_fg).bg(input_bg)),
-                Rect {
-                    x: inner.x + 1,
-                    y: input_top + draw_row as u16,
-                    width: inner.width.saturating_sub(2),
-                    height: 1,
-                },
-            );
-        }
+    let cursor_x = inner.x
+        + 1
+        + cursor_col
+            .saturating_sub(hscroll)
+            .min(input_w.saturating_sub(1)) as u16;
+    let cursor_y = inner.y + 2;
+    if cursor_y < inner.y + inner.height {
+        safe_set_cursor_position(f, cursor_x, cursor_y);
+    }
+}
 
-        let cursor_y = input_top + cursor_line.saturating_sub(vscroll) as u16;
-        let cursor_x = inner.x
-            + 1
-            + cursor_col
-                .saturating_sub(active_hscroll)
-                .min(line_w.saturating_sub(1)) as u16;
-        if cursor_y < inner.y + inner.height.saturating_sub(1) {
-            safe_set_cursor_position(f, cursor_x, cursor_y);
-        }
+fn render_multiline_text_input(
+    f: &mut Frame,
+    inner: Rect,
+    value: &str,
+    cursor: usize,
+    style: &TextDialogStyle,
+) {
+    let line_w = inner.width.saturating_sub(2) as usize;
+    let input_top = inner.y + 1;
+    let input_h = inner.height.saturating_sub(3) as usize;
+    let (cursor_line, cursor_col) = cursor_line_col(value, cursor);
+    let mut lines = value.split('\n').collect::<Vec<_>>();
+    if lines.is_empty() {
+        lines.push("");
+    }
+
+    let vscroll = if cursor_line < input_h {
+        0
     } else {
-        let input_w = inner.width.saturating_sub(2) as usize;
-        let cursor_col = dlg.value[..dlg.cursor.min(dlg.value.len())].chars().count();
-        let hscroll = cursor_col.saturating_sub(input_w.saturating_sub(1));
-        let shown = slice_chars(&dlg.value, hscroll, input_w);
-        let value_display = format!("{:<width$}", shown, width = input_w);
+        cursor_line.saturating_sub(input_h - 1)
+    };
+    let active_hscroll = cursor_col.saturating_sub(line_w.saturating_sub(1));
 
+    for draw_row in 0..input_h {
+        let line_idx = vscroll + draw_row;
+        let line = lines.get(line_idx).copied().unwrap_or("");
+        let hscroll = if line_idx == cursor_line { active_hscroll } else { 0 };
+        let shown = slice_chars(line, hscroll, line_w);
+        let padded = format!("{:<width$}", shown, width = line_w);
         safe_render_widget(
             f,
-            Paragraph::new(Line::from(Span::styled(
-                format!(" {} ", value_display),
-                Style::default().fg(input_fg).bg(input_bg),
-            ))),
+            Paragraph::new(padded).style(Style::default().fg(style.input_fg).bg(style.input_bg)),
             Rect {
-                x: inner.x,
-                y: inner.y + 2,
-                width: inner.width,
+                x: inner.x + 1,
+                y: input_top + draw_row as u16,
+                width: inner.width.saturating_sub(2),
                 height: 1,
             },
         );
-
-        let cursor_x = inner.x
-            + 1
-            + cursor_col
-                .saturating_sub(hscroll)
-                .min(input_w.saturating_sub(1)) as u16;
-        let cursor_y = inner.y + 2;
-        if cursor_y < inner.y + inner.height {
-            safe_set_cursor_position(f, cursor_x, cursor_y);
-        }
     }
 
+    let cursor_y = input_top + cursor_line.saturating_sub(vscroll) as u16;
+    let cursor_x = inner.x
+        + 1
+        + cursor_col
+            .saturating_sub(active_hscroll)
+            .min(line_w.saturating_sub(1)) as u16;
+    if cursor_y < inner.y + inner.height.saturating_sub(1) {
+        safe_set_cursor_position(f, cursor_x, cursor_y);
+    }
+}
+
+fn render_text_input_footer(
+    f: &mut Frame,
+    inner: Rect,
+    footer: TextDialogFooter<'_>,
+    style: &TextDialogStyle,
+) {
     let hint_area = Rect {
         x: inner.x,
         y: inner.y + inner.height.saturating_sub(1),
         width: inner.width,
         height: 1,
     };
-    if is_multiline {
-        let hint_items = footer_shortcut_items(&assoc_input_shortcuts());
-        render_shortcut_bar(f, hint_area, &hint_items, secondary_shortcut_bar_style());
-    } else {
-        let hint = " Enter:OK  Esc:Cancel";
-        safe_render_widget(
-            f,
-            Paragraph::new(Line::from(Span::styled(
-                hint,
-                Style::default().fg(hint_fg).bg(dialog_bg),
-            ))),
-            hint_area,
-        );
+
+    match footer {
+        TextDialogFooter::Plain(hint) => {
+            safe_render_widget(
+                f,
+                Paragraph::new(Line::from(Span::styled(
+                    hint,
+                    Style::default().fg(style.hint_fg).bg(style.dialog_bg),
+                ))),
+                hint_area,
+            );
+        }
+        TextDialogFooter::AssocMultiline => {
+            let hint_items = footer_shortcut_items(&assoc_input_shortcuts());
+            render_shortcut_bar(f, hint_area, &hint_items, secondary_shortcut_bar_style());
+        }
     }
 }
 

@@ -11,7 +11,8 @@ pub use self::command_palette::{
     palette_shortname_for_action,
 };
 pub use self::dialogs::{
-    ConfirmAction, ConfirmDialog, InputAction, InputDialog, RemoteDeleteTarget, SearchState,
+    AssocInputAction, AssocInputDialog, ConfirmAction, ConfirmDialog, InputAction, InputDialog,
+    RemoteDeleteTarget, SearchState, TextInputState,
 };
 use self::helpers::{
     cleanup_temp_download, draw_busy_status, panel_config_needs_profiles, same_remote_target,
@@ -111,6 +112,8 @@ pub enum AppMode {
     Confirm(ConfirmDialog),
     /// Single-line text input dialog.
     Input(InputDialog),
+    /// Association input dialog (single-line MIME type or multi-line openers).
+    AssocInput(AssocInputDialog),
     /// Directory bookmarks popup.
     DirBookmarks,
     /// Help overlay.

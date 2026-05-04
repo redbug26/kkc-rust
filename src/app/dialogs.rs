@@ -34,6 +34,15 @@ pub struct InputDialog {
 }
 
 #[derive(Debug, Clone)]
+pub struct AssocInputDialog {
+    pub title: String,
+    pub prompt: String,
+    pub value: String,
+    pub cursor: usize,
+    pub action: AssocInputAction,
+}
+
+#[derive(Debug, Clone)]
 pub enum InputAction {
     Rename(PathBuf),
     Mkdir(PathBuf),
@@ -51,14 +60,6 @@ pub enum InputAction {
     DeselectPattern,
     /// Navigate active panel to typed path
     GoToPath,
-    /// Step 1 of adding an association: user typed the extension
-    AssocAddExt,
-    /// Step 2 of adding/editing: user typed the openers (comma-separated)
-    AssocAddOpeners {
-        ext: String,
-        /// Some(idx) = editing existing row, None = new
-        edit_index: Option<usize>,
-    },
     PluginAction {
         plugin: String,
         id: String,
@@ -66,56 +67,113 @@ pub enum InputAction {
     },
 }
 
-impl InputDialog {
-    pub fn insert_char(&mut self, ch: char) {
-        self.value.insert(self.cursor, ch);
-        self.cursor += ch.len_utf8();
+#[derive(Debug, Clone)]
+pub enum AssocInputAction {
+    /// Step 1 of adding an association: user typed the MIME type.
+    MimeType,
+    /// Step 2 of adding/editing: user typed the openers (one command per line).
+    Openers {
+        ext: String,
+        /// Some(idx) = editing existing row, None = new.
+        edit_index: Option<usize>,
+    },
+}
+
+pub trait TextInputState {
+    fn value(&self) -> &String;
+    fn value_mut(&mut self) -> &mut String;
+    fn cursor(&self) -> usize;
+    fn cursor_mut(&mut self) -> &mut usize;
+
+    fn insert_char(&mut self, ch: char) {
+        let cursor = self.cursor();
+        self.value_mut().insert(cursor, ch);
+        *self.cursor_mut() = cursor + ch.len_utf8();
     }
 
-    pub fn backspace(&mut self) {
-        if self.cursor > 0 {
-            // Find the previous char boundary
-            let mut prev = self.cursor - 1;
-            while prev > 0 && !self.value.is_char_boundary(prev) {
+    fn backspace(&mut self) {
+        let cursor = self.cursor();
+        if cursor > 0 {
+            let mut prev = cursor - 1;
+            while prev > 0 && !self.value().is_char_boundary(prev) {
                 prev -= 1;
             }
-            self.value.remove(prev);
-            self.cursor = prev;
+            self.value_mut().remove(prev);
+            *self.cursor_mut() = prev;
         }
     }
 
-    pub fn delete_char(&mut self) {
-        if self.cursor < self.value.len() {
-            self.value.remove(self.cursor);
+    fn delete_char(&mut self) {
+        let cursor = self.cursor();
+        if cursor < self.value().len() {
+            self.value_mut().remove(cursor);
         }
     }
 
-    pub fn move_left(&mut self) {
-        if self.cursor > 0 {
-            let mut p = self.cursor - 1;
-            while p > 0 && !self.value.is_char_boundary(p) {
-                p -= 1;
+    fn move_left(&mut self) {
+        let cursor = self.cursor();
+        if cursor > 0 {
+            let mut pos = cursor - 1;
+            while pos > 0 && !self.value().is_char_boundary(pos) {
+                pos -= 1;
             }
-            self.cursor = p;
+            *self.cursor_mut() = pos;
         }
     }
 
-    pub fn move_right(&mut self) {
-        if self.cursor < self.value.len() {
-            let mut p = self.cursor + 1;
-            while p < self.value.len() && !self.value.is_char_boundary(p) {
-                p += 1;
+    fn move_right(&mut self) {
+        let cursor = self.cursor();
+        if cursor < self.value().len() {
+            let mut pos = cursor + 1;
+            while pos < self.value().len() && !self.value().is_char_boundary(pos) {
+                pos += 1;
             }
-            self.cursor = p;
+            *self.cursor_mut() = pos;
         }
     }
 
-    pub fn home(&mut self) {
-        self.cursor = 0;
+    fn home(&mut self) {
+        *self.cursor_mut() = 0;
     }
 
-    pub fn end(&mut self) {
-        self.cursor = self.value.len();
+    fn end(&mut self) {
+        *self.cursor_mut() = self.value().len();
+    }
+}
+
+impl TextInputState for InputDialog {
+    fn value(&self) -> &String {
+        &self.value
+    }
+
+    fn value_mut(&mut self) -> &mut String {
+        &mut self.value
+    }
+
+    fn cursor(&self) -> usize {
+        self.cursor
+    }
+
+    fn cursor_mut(&mut self) -> &mut usize {
+        &mut self.cursor
+    }
+}
+
+impl TextInputState for AssocInputDialog {
+    fn value(&self) -> &String {
+        &self.value
+    }
+
+    fn value_mut(&mut self) -> &mut String {
+        &mut self.value
+    }
+
+    fn cursor(&self) -> usize {
+        self.cursor
+    }
+
+    fn cursor_mut(&mut self) -> &mut usize {
+        &mut self.cursor
     }
 }
 

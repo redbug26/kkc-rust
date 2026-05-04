@@ -95,6 +95,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
                 AppMode::MatrixScreensaver(_)
                     | AppMode::Terminal
                     | AppMode::Input(_)
+                    | AppMode::AssocInput(_)
                     | AppMode::CopyProgress(_)
                     | AppMode::RemoteConnecting(_)
             )
@@ -225,7 +226,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
         }
 
         match app.mode {
-            AppMode::Input(_) | AppMode::ViewerSearching(_) | AppMode::Terminal => {
+            AppMode::Input(_) | AppMode::AssocInput(_) | AppMode::ViewerSearching(_) | AppMode::Terminal => {
                 terminal.show_cursor()?
             }
             _ => terminal.hide_cursor()?,

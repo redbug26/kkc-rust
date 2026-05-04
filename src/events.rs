@@ -11,9 +11,10 @@ use self::viewer::{
     handle_viewer_menu, handle_viewer_plugin_palette, handle_viewer_searching,
 };
 use crate::app::{
-    ActivePanel, App, AppMode, AssocEditorState, BookmarkListItem, ConfigState, ConfirmAction,
-    ConfirmDialog, InputAction, InputDialog, MENU_DATA, MENU_HEADERS, MenuAction, MenuState,
-    OpenerActionItem, OpenerActionKind, OpenerState, RemoteEditKind,
+    ActivePanel, App, AppMode, AssocEditorState, AssocInputAction, AssocInputDialog,
+    BookmarkListItem, ConfigState, ConfirmAction, ConfirmDialog, InputAction, InputDialog,
+    MENU_DATA, MENU_HEADERS, MenuAction, MenuState, OpenerActionItem, OpenerActionKind,
+    OpenerState, RemoteEditKind, TextInputState,
 };
 use crate::archive::supports_archive_navigation;
 use crate::copy::CopyDialogState;
@@ -135,6 +136,7 @@ pub fn handle_event(app: &mut App, event: Event) -> Result<bool> {
                 }
                 AppMode::Confirm(_) => return handle_confirm(app, key),
                 AppMode::Input(_) => return handle_input(app, key),
+                AppMode::AssocInput(_) => return handle_assoc_input(app, key),
                 AppMode::CopyDialog(_) => return handle_copy_dialog(app, key),
                 AppMode::CopyProgress(_) => return handle_copy_progress(app, key),
                 AppMode::SearchPanel(_) => return handle_search(app, key),
@@ -187,6 +189,7 @@ fn handle_mouse(app: &mut App, mouse: MouseEvent) -> Result<bool> {
         AppMode::Menu(_) => handle_mouse_menu(app, mouse),
         AppMode::Confirm(_) => handle_mouse_confirm(app, mouse),
         AppMode::Input(_) => handle_mouse_input(app, mouse),
+        AppMode::AssocInput(_) => handle_mouse_assoc_input(app, mouse),
         AppMode::CopyDialog(_) => handle_mouse_copy_dialog(app, mouse),
         AppMode::AssocEditor(_) => handle_mouse_assoc_editor(app, mouse),
         AppMode::RemoteAddMenu(_) => handle_mouse_remote_add_menu(app, mouse),
@@ -1137,30 +1140,6 @@ fn handle_mouse_input(app: &mut App, mouse: MouseEvent) -> Result<bool> {
         return Ok(false);
     }
 
-    let is_assoc_openers = matches!(
-        app.mode,
-        AppMode::Input(InputDialog {
-            action: InputAction::AssocAddOpeners { .. },
-            ..
-        })
-    );
-    let hint_area = Rect {
-        x: inner.x,
-        y: inner.y + inner.height.saturating_sub(1),
-        width: inner.width,
-        height: 1,
-    };
-    if is_assoc_openers
-        && point_in_rect(mouse.column, mouse.row, hint_area)
-        && let Some(key) = crate::ui::footer_shortcut_key_at_column(
-            &crate::ui::assoc_input_shortcuts(),
-            hint_area.x,
-            mouse.column,
-        )
-    {
-        return handle_input(app, KeyEvent::from(key));
-    }
-
     let input_area = Rect {
         x: inner.x + 1,
         y: inner.y + 3,
@@ -1172,6 +1151,73 @@ fn handle_mouse_input(app: &mut App, mouse: MouseEvent) -> Result<bool> {
     {
         let offset = mouse.column.saturating_sub(input_area.x) as usize;
         dlg.cursor = byte_index_for_display_column(&dlg.value, offset);
+    }
+    Ok(false)
+}
+
+fn handle_mouse_assoc_input(app: &mut App, mouse: MouseEvent) -> Result<bool> {
+    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        return Ok(false);
+    }
+
+    let Some(area) = terminal_rect() else {
+        return Ok(false);
+    };
+    let (popup, inner) = assoc_input_popup_rect(area, &app.mode);
+    if !point_in_rect(mouse.column, mouse.row, popup) {
+        return Ok(false);
+    }
+
+    let is_openers = matches!(
+        app.mode,
+        AppMode::AssocInput(AssocInputDialog {
+            action: AssocInputAction::Openers { .. },
+            ..
+        })
+    );
+    let hint_area = Rect {
+        x: inner.x,
+        y: inner.y + inner.height.saturating_sub(1),
+        width: inner.width,
+        height: 1,
+    };
+    if is_openers
+        && point_in_rect(mouse.column, mouse.row, hint_area)
+        && let Some(key) = crate::ui::footer_shortcut_key_at_column(
+            &crate::ui::assoc_input_shortcuts(),
+            hint_area.x,
+            mouse.column,
+        )
+    {
+        return handle_assoc_input(app, KeyEvent::from(key));
+    }
+
+    let input_area = if is_openers {
+        Rect {
+            x: inner.x + 1,
+            y: inner.y + 1,
+            width: inner.width.saturating_sub(2),
+            height: inner.height.saturating_sub(3),
+        }
+    } else {
+        Rect {
+            x: inner.x + 1,
+            y: inner.y + 2,
+            width: inner.width.saturating_sub(2),
+            height: 1,
+        }
+    };
+
+    if point_in_rect(mouse.column, mouse.row, input_area)
+        && let AppMode::AssocInput(ref mut dlg) = app.mode
+    {
+        let offset = mouse.column.saturating_sub(input_area.x) as usize;
+        if is_openers {
+            let row = mouse.row.saturating_sub(input_area.y) as usize;
+            assoc_input_set_cursor_from_point(dlg, row, offset);
+        } else {
+            dlg.cursor = byte_index_for_display_column(&dlg.value, offset);
+        }
     }
     Ok(false)
 }
@@ -1634,6 +1680,33 @@ fn confirm_button_rects(dlg: &ConfirmDialog, area: Rect) -> (Rect, Option<Rect>)
 fn input_popup_rect(area: Rect) -> (Rect, Rect) {
     let width = 60u16.min(area.width.saturating_sub(4));
     let height = 7u16;
+    let popup = Rect {
+        x: (area.width.saturating_sub(width)) / 2 + area.x,
+        y: (area.height.saturating_sub(height)) / 2 + area.y,
+        width,
+        height,
+    };
+    (popup, inset_rect(popup, 1, 1))
+}
+
+fn assoc_input_popup_rect(area: Rect, mode: &AppMode) -> (Rect, Rect) {
+    let is_multiline = matches!(
+        mode,
+        AppMode::AssocInput(AssocInputDialog {
+            action: AssocInputAction::Openers { .. },
+            ..
+        })
+    );
+    let width = if is_multiline {
+        84u16.min(area.width.saturating_sub(4)).max(56)
+    } else {
+        60u16.min(area.width.saturating_sub(4)).max(42)
+    };
+    let height = if is_multiline {
+        12u16.min(area.height.saturating_sub(4)).max(8)
+    } else {
+        7u16
+    };
     let popup = Rect {
         x: (area.width.saturating_sub(width)) / 2 + area.x,
         y: (area.height.saturating_sub(height)) / 2 + area.y,
@@ -3011,58 +3084,13 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(false);
     };
 
-    let is_assoc_openers = matches!(dlg.action, InputAction::AssocAddOpeners { .. });
-    let is_assoc_dialog = is_assoc_openers || matches!(dlg.action, InputAction::AssocAddExt);
-    let save_assoc_openers = is_assoc_openers
-        && (matches!(key.code, KeyCode::F(2))
-            || (key.modifiers.contains(KeyModifiers::CONTROL)
-                && matches!(key.code, KeyCode::Char('s') | KeyCode::Char('S'))));
-
-    if key.modifiers.contains(KeyModifiers::CONTROL)
-        && matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V'))
-    {
-        if let Some(text) = paste_text_from_clipboard() {
-            dlg.value.insert_str(dlg.cursor, &text);
-            dlg.cursor += text.len();
-        }
-        return Ok(false);
-    }
-
-    if is_assoc_openers
-        && key.modifiers.contains(KeyModifiers::CONTROL)
-        && matches!(key.code, KeyCode::Char('j') | KeyCode::Char('J'))
-    {
-        dlg.insert_char('\n');
+    if handle_text_input_paste(dlg, key) {
         return Ok(false);
     }
 
     match key.code {
-        KeyCode::Esc => {
-            if is_assoc_dialog {
-                app.mode = AppMode::AssocEditor(AssocEditorState::from_config(&app.config));
-            } else {
-                app.mode = AppMode::Browse;
-            }
-        }
-        _ if save_assoc_openers => {
-            let value = dlg.value.clone();
-            let ext = match &dlg.action {
-                InputAction::AssocAddOpeners { ext, .. } => ext.clone(),
-                _ => String::new(),
-            };
-            app.mode = AppMode::Browse;
-            apply_assoc_openers_input(app, &ext, &value);
-            app.mode = AppMode::AssocEditor(AssocEditorState::from_config(&app.config));
-        }
+        KeyCode::Esc => app.mode = AppMode::Browse,
         KeyCode::Enter => {
-            if is_assoc_openers {
-                let AppMode::Input(ref mut dlg) = app.mode else {
-                    return Ok(false);
-                };
-                dlg.insert_char('\n');
-                return Ok(false);
-            }
-
             let value = dlg.value.clone();
             let action = dlg.action.clone();
             app.mode = AppMode::Browse;
@@ -3132,35 +3160,6 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                         app.notify(format!("Not a directory: {}", value));
                     }
                 }
-                InputAction::AssocAddExt => {
-                    let mime_type = value.trim().to_ascii_lowercase();
-                    if mime_type.is_empty() {
-                        app.mode = AppMode::AssocEditor(AssocEditorState::from_config(&app.config));
-                    } else {
-                        // Find existing openers for pre-fill (one command per line).
-                        let existing = app.config.openers_for_mime(&mime_type).join("\n");
-                        app.mode = AppMode::Input(InputDialog {
-                            title: "Association".into(),
-                            prompt: format!("Openers for {} (one command per line):", mime_type),
-                            value: existing,
-                            cursor: 0,
-                            action: InputAction::AssocAddOpeners {
-                                ext: mime_type,
-                                edit_index: None,
-                            },
-                        });
-                        // fix cursor to end
-                        let AppMode::Input(ref mut dlg) = app.mode else {
-                            return Ok(false);
-                        };
-                        dlg.cursor = dlg.value.len();
-                    }
-                }
-                InputAction::AssocAddOpeners { ext, edit_index } => {
-                    let _ = edit_index;
-                    apply_assoc_openers_input(app, &ext, &value);
-                    app.mode = AppMode::AssocEditor(AssocEditorState::from_config(&app.config));
-                }
                 InputAction::PluginAction { plugin, id, cwd } => {
                     match app.run_with_busy("Running plugin action...", |_| {
                         crate::plugins::run_action(&plugin, &id, &cwd, Some(&value))
@@ -3178,59 +3177,101 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                 }
             }
         }
-        KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-            let AppMode::Input(ref mut dlg) = app.mode else {
-                return Ok(false);
-            };
-            dlg.insert_char(ch);
+        _ if handle_text_input_edit_key(dlg, key) => {}
+        _ => {}
+    }
+    Ok(false)
+}
+
+fn handle_assoc_input(app: &mut App, key: KeyEvent) -> Result<bool> {
+    let AppMode::AssocInput(ref mut dlg) = app.mode else {
+        return Ok(false);
+    };
+
+    let is_openers = matches!(dlg.action, AssocInputAction::Openers { .. });
+    let save_openers = is_openers
+        && (matches!(key.code, KeyCode::F(2))
+            || (key.modifiers.contains(KeyModifiers::CONTROL)
+                && matches!(key.code, KeyCode::Char('s') | KeyCode::Char('S'))));
+
+    if handle_text_input_paste(dlg, key) {
+        return Ok(false);
+    }
+
+    if is_openers
+        && key.modifiers.contains(KeyModifiers::CONTROL)
+        && matches!(key.code, KeyCode::Char('j') | KeyCode::Char('J'))
+    {
+        dlg.insert_char('\n');
+        return Ok(false);
+    }
+
+    match key.code {
+        KeyCode::Esc => {
+            app.mode = AppMode::AssocEditor(AssocEditorState::from_config(&app.config));
         }
-        KeyCode::Backspace => {
-            let AppMode::Input(ref mut dlg) = app.mode else {
-                return Ok(false);
+        _ if save_openers => {
+            let value = dlg.value.clone();
+            let ext = match &dlg.action {
+                AssocInputAction::Openers { ext, .. } => ext.clone(),
+                AssocInputAction::MimeType => String::new(),
             };
-            dlg.backspace();
+            app.mode = AppMode::Browse;
+            apply_assoc_openers_input(app, &ext, &value);
+            app.mode = AppMode::AssocEditor(AssocEditorState::from_config(&app.config));
         }
-        KeyCode::Delete => {
-            let AppMode::Input(ref mut dlg) = app.mode else {
+        KeyCode::Enter => {
+            if is_openers {
+                let AppMode::AssocInput(ref mut dlg) = app.mode else {
+                    return Ok(false);
+                };
+                dlg.insert_char('\n');
                 return Ok(false);
-            };
-            dlg.delete_char();
+            }
+
+            let value = dlg.value.clone();
+            let action = dlg.action.clone();
+            app.mode = AppMode::Browse;
+
+            match action {
+                AssocInputAction::MimeType => {
+                    let mime_type = value.trim().to_ascii_lowercase();
+                    if mime_type.is_empty() {
+                        app.mode = AppMode::AssocEditor(AssocEditorState::from_config(&app.config));
+                    } else {
+                        let existing = app.config.openers_for_mime(&mime_type).join("\n");
+                        let cursor = existing.len();
+                        app.mode = AppMode::AssocInput(AssocInputDialog {
+                            title: "Association".into(),
+                            prompt: format!("Openers for {} (one command per line):", mime_type),
+                            value: existing,
+                            cursor,
+                            action: AssocInputAction::Openers {
+                                ext: mime_type,
+                                edit_index: None,
+                            },
+                        });
+                    }
+                }
+                AssocInputAction::Openers { ext, edit_index } => {
+                    let _ = edit_index;
+                    apply_assoc_openers_input(app, &ext, &value);
+                    app.mode = AppMode::AssocEditor(AssocEditorState::from_config(&app.config));
+                }
+            }
         }
-        KeyCode::Left => {
-            let AppMode::Input(ref mut dlg) = app.mode else {
+        _ if handle_text_input_edit_key(dlg, key) => {}
+        KeyCode::Up if is_openers => {
+            let AppMode::AssocInput(ref mut dlg) = app.mode else {
                 return Ok(false);
             };
-            dlg.move_left();
+            move_assoc_input_cursor_vertical(dlg, -1);
         }
-        KeyCode::Right => {
-            let AppMode::Input(ref mut dlg) = app.mode else {
+        KeyCode::Down if is_openers => {
+            let AppMode::AssocInput(ref mut dlg) = app.mode else {
                 return Ok(false);
             };
-            dlg.move_right();
-        }
-        KeyCode::Home => {
-            let AppMode::Input(ref mut dlg) = app.mode else {
-                return Ok(false);
-            };
-            dlg.home();
-        }
-        KeyCode::End => {
-            let AppMode::Input(ref mut dlg) = app.mode else {
-                return Ok(false);
-            };
-            dlg.end();
-        }
-        KeyCode::Up if is_assoc_openers => {
-            let AppMode::Input(ref mut dlg) = app.mode else {
-                return Ok(false);
-            };
-            move_input_cursor_vertical(dlg, -1);
-        }
-        KeyCode::Down if is_assoc_openers => {
-            let AppMode::Input(ref mut dlg) = app.mode else {
-                return Ok(false);
-            };
-            move_input_cursor_vertical(dlg, 1);
+            move_assoc_input_cursor_vertical(dlg, 1);
         }
         _ => {}
     }
@@ -3265,11 +3306,41 @@ fn apply_assoc_openers_input(app: &mut App, ext: &str, value: &str) {
     app.save_config().ok();
 }
 
-fn move_input_cursor_vertical(dlg: &mut InputDialog, delta: isize) {
+fn handle_text_input_paste<T: TextInputState>(dlg: &mut T, key: KeyEvent) -> bool {
+    if key.modifiers.contains(KeyModifiers::CONTROL)
+        && matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V'))
+    {
+        if let Some(text) = paste_text_from_clipboard() {
+            let cursor = dlg.cursor();
+            dlg.value_mut().insert_str(cursor, &text);
+            *dlg.cursor_mut() = cursor + text.len();
+        }
+        return true;
+    }
+
+    false
+}
+
+fn handle_text_input_edit_key<T: TextInputState>(dlg: &mut T, key: KeyEvent) -> bool {
+    match key.code {
+        KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => dlg.insert_char(ch),
+        KeyCode::Backspace => dlg.backspace(),
+        KeyCode::Delete => dlg.delete_char(),
+        KeyCode::Left => dlg.move_left(),
+        KeyCode::Right => dlg.move_right(),
+        KeyCode::Home => dlg.home(),
+        KeyCode::End => dlg.end(),
+        _ => return false,
+    }
+
+    true
+}
+
+fn move_assoc_input_cursor_vertical(dlg: &mut AssocInputDialog, delta: isize) {
     let cursor = dlg.cursor.min(dlg.value.len());
     let before = &dlg.value[..cursor];
     let current_col = before.chars().rev().take_while(|&ch| ch != '\n').count();
-    let lines = dlg.value.split('\n').collect::<Vec<_>>();
+    let lines: Vec<&str> = dlg.value.split('\n').collect();
     if lines.is_empty() {
         return;
     }
@@ -3281,6 +3352,37 @@ fn move_input_cursor_vertical(dlg: &mut InputDialog, delta: isize) {
     let target_char_index = lines
         .iter()
         .take(target_line)
+        .map(|line| line.chars().count() + 1)
+        .sum::<usize>()
+        + target_col;
+
+    let total_chars = dlg.value.chars().count();
+    if target_char_index >= total_chars {
+        dlg.cursor = dlg.value.len();
+        return;
+    }
+
+    for (count, (idx, _)) in dlg.value.char_indices().enumerate() {
+        if count == target_char_index {
+            dlg.cursor = idx;
+            return;
+        }
+    }
+    dlg.cursor = dlg.value.len();
+}
+
+fn assoc_input_set_cursor_from_point(dlg: &mut AssocInputDialog, row: usize, column: usize) {
+    let lines: Vec<&str> = dlg.value.split('\n').collect();
+    if lines.is_empty() {
+        dlg.cursor = 0;
+        return;
+    }
+
+    let line_idx = row.min(lines.len().saturating_sub(1));
+    let target_col = column.min(lines[line_idx].chars().count());
+    let target_char_index = lines
+        .iter()
+        .take(line_idx)
         .map(|line| line.chars().count() + 1)
         .sum::<usize>()
         + target_col;
@@ -4270,12 +4372,12 @@ fn handle_assoc_editor(app: &mut App, key: KeyEvent) -> Result<bool> {
             } else {
                 return Ok(false);
             };
-            app.mode = AppMode::Input(InputDialog {
+            app.mode = AppMode::AssocInput(AssocInputDialog {
                 title: "Edit association".into(),
                 prompt: format!("Openers for {} (one command per line):", mime_type),
                 value: openers_str.clone(),
                 cursor: openers_str.len(),
-                action: InputAction::AssocAddOpeners {
+                action: AssocInputAction::Openers {
                     ext: mime_type,
                     edit_index: Some(idx),
                 },
@@ -4310,12 +4412,12 @@ fn handle_assoc_editor(app: &mut App, key: KeyEvent) -> Result<bool> {
 fn assoc_mime_input_dialog(app: &App) -> AppMode {
     let value = default_assoc_mime_type(app).unwrap_or_default();
     let cursor = value.len();
-    AppMode::Input(InputDialog {
+    AppMode::AssocInput(AssocInputDialog {
         title: "New association".into(),
         prompt: "MIME type:".into(),
         value,
         cursor,
-        action: InputAction::AssocAddExt,
+        action: AssocInputAction::MimeType,
     })
 }
 
