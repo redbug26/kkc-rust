@@ -120,51 +120,55 @@ pub fn handle_event(app: &mut App, event: Event) -> Result<bool> {
                 return Ok(false);
             }
 
-            match &app.mode {
-                AppMode::MatrixScreensaver(_) => {
-                    app.mode = AppMode::Browse;
-                    return Ok(false);
-                }
-                AppMode::Help(_) => return handle_help(app, key),
-                AppMode::Viewer(_) => return handle_viewer(app, key),
-                AppMode::ViewerSearching(_) => return handle_viewer_searching(app, key),
-                AppMode::ViewerGotoLine(_, _) => return handle_viewer_goto_line(app, key),
-                AppMode::ViewerGoto(_, _) => return handle_viewer_goto(app, key),
-                AppMode::ViewerMenu(_, _) => return handle_viewer_menu(app, key),
-                AppMode::ViewerPluginPalette(_, _) => {
-                    return handle_viewer_plugin_palette(app, key);
-                }
-                AppMode::Confirm(_) => return handle_confirm(app, key),
-                AppMode::Input(_) => return handle_input(app, key),
-                AppMode::AssocInput(_) => return handle_assoc_input(app, key),
-                AppMode::CopyDialog(_) => return handle_copy_dialog(app, key),
-                AppMode::CopyProgress(_) => return handle_copy_progress(app, key),
-                AppMode::SearchPanel(_) => return handle_search(app, key),
-                AppMode::TreeView(_) => return handle_tree_view(app, key),
-                AppMode::DirBookmarks => return handle_dir_bookmarks(app, key),
-                AppMode::QuickSearch => return handle_quicksearch(app, key),
-                AppMode::Menu(_) => return handle_menu(app, key),
-                AppMode::Config(_) => return handle_config(app, key),
-                AppMode::Plugins(_) => return handle_plugins(app, key),
-                AppMode::ActionPalette(_) => return handle_action_palette(app, key),
-                AppMode::CommandPalette(_) => return handle_command_palette(app, key),
-                AppMode::ShortcutPanel(_) => return handle_shortcut_panel(app, key),
-                AppMode::StoreInstallPalette(_) => return handle_store_install_palette(app, key),
-                AppMode::Opener(_) => return handle_opener(app, key),
-                AppMode::AssocEditor(_) => return handle_assoc_editor(app, key),
-                AppMode::RemoteConnect(_) => return handle_remote_connect(app, key),
-                AppMode::RemoteEdit(_) => return handle_remote_edit(app, key),
-                AppMode::RemoteAddMenu(_) => return handle_remote_add_menu(app, key),
-                AppMode::RemoteConnecting(_) => return handle_remote_connecting(app, key),
-                AppMode::Terminal => return crate::terminal::handle_terminal(app, key),
-                AppMode::About(_) => return handle_about(app, key),
-                AppMode::Browse => {}
+            if let Some(result) = handle_key_mode(app, key) {
+                return result;
             }
 
             handle_browse(app, key)
         }
         Event::Mouse(mouse) => handle_mouse(app, mouse),
         _ => Ok(false),
+    }
+}
+
+fn handle_key_mode(app: &mut App, key: KeyEvent) -> Option<Result<bool>> {
+    match &app.mode {
+        AppMode::MatrixScreensaver(_) => {
+            app.mode = AppMode::Browse;
+            Some(Ok(false))
+        }
+        AppMode::Help(_) => Some(handle_help(app, key)),
+        AppMode::Viewer(_) => Some(handle_viewer(app, key)),
+        AppMode::ViewerSearching(_) => Some(handle_viewer_searching(app, key)),
+        AppMode::ViewerGotoLine(_, _) => Some(handle_viewer_goto_line(app, key)),
+        AppMode::ViewerGoto(_, _) => Some(handle_viewer_goto(app, key)),
+        AppMode::ViewerMenu(_, _) => Some(handle_viewer_menu(app, key)),
+        AppMode::ViewerPluginPalette(_, _) => Some(handle_viewer_plugin_palette(app, key)),
+        AppMode::Confirm(_) => Some(handle_confirm(app, key)),
+        AppMode::Input(_) => Some(handle_input(app, key)),
+        AppMode::AssocInput(_) => Some(handle_assoc_input(app, key)),
+        AppMode::CopyDialog(_) => Some(handle_copy_dialog(app, key)),
+        AppMode::CopyProgress(_) => Some(handle_copy_progress(app, key)),
+        AppMode::SearchPanel(_) => Some(handle_search(app, key)),
+        AppMode::TreeView(_) => Some(handle_tree_view(app, key)),
+        AppMode::DirBookmarks => Some(handle_dir_bookmarks(app, key)),
+        AppMode::QuickSearch => Some(handle_quicksearch(app, key)),
+        AppMode::Menu(_) => Some(handle_menu(app, key)),
+        AppMode::Config(_) => Some(handle_config(app, key)),
+        AppMode::Plugins(_) => Some(handle_plugins(app, key)),
+        AppMode::ActionPalette(_) => Some(handle_action_palette(app, key)),
+        AppMode::CommandPalette(_) => Some(handle_command_palette(app, key)),
+        AppMode::ShortcutPanel(_) => Some(handle_shortcut_panel(app, key)),
+        AppMode::StoreInstallPalette(_) => Some(handle_store_install_palette(app, key)),
+        AppMode::Opener(_) => Some(handle_opener(app, key)),
+        AppMode::AssocEditor(_) => Some(handle_assoc_editor(app, key)),
+        AppMode::RemoteConnect(_) => Some(handle_remote_connect(app, key)),
+        AppMode::RemoteEdit(_) => Some(handle_remote_edit(app, key)),
+        AppMode::RemoteAddMenu(_) => Some(handle_remote_add_menu(app, key)),
+        AppMode::RemoteConnecting(_) => Some(handle_remote_connecting(app, key)),
+        AppMode::Terminal => Some(crate::terminal::handle_terminal(app, key)),
+        AppMode::About(_) => Some(handle_about(app, key)),
+        AppMode::Browse => None,
     }
 }
 

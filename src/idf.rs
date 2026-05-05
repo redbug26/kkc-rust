@@ -1005,6 +1005,12 @@ fn image_info_lines(w: u32, h: u32, data: &[u8], container: ImageExifContainer) 
         ImageExifContainer::Png => png_info_lines(w, h, data),
         _ => wh_lines(w, h),
     };
+    if matches!(container, ImageExifContainer::Jpeg) {
+        lines.extend(jpeg_info_lines(data));
+    }
+    if matches!(container, ImageExifContainer::Tiff) {
+        lines.extend(tiff_header_lines(data));
+    }
     if let Some(exif) = image_exif_data(data, container) {
         lines.extend(exif_lines(exif));
     }
@@ -1021,6 +1027,412 @@ fn image_exif_data(data: &[u8], container: ImageExifContainer) -> Option<&[u8]> 
 }
 
 fn jpeg_exif_data(data: &[u8]) -> Option<&[u8]> {
+    for segment in jpeg_segments(data) {
+        if segment.marker == 0xe1 && segment.payload.starts_with(b"Exif\0\0") {
+            return Some(&segment.payload[6..]);
+        }
+    }
+    None
+}
+
+fn jpeg_comment_lines(data: &[u8]) -> Vec<String> {
+    let Some(comment) = jpeg_comment(data) else {
+        return Vec::new();
+    };
+    let comment = comment.trim();
+    if comment.is_empty() {
+        return Vec::new();
+    }
+    if let Some((label, value)) = jpeg_key_value_comment(comment) {
+        return vec![format!(" {}: {}", label, value)];
+    }
+    vec![format!(" Comment: {}", comment)]
+}
+
+fn jpeg_info_lines(data: &[u8]) -> Vec<String> {
+    let mut lines = Vec::new();
+    if let Some(jfif) = jpeg_jfif_info(data) {
+        lines.extend(jfif.lines());
+    }
+    lines.extend(jpeg_photoshop_lines(data));
+    lines.extend(jpeg_iptc_lines(data));
+    lines.extend(jpeg_tiff_header_lines(data));
+    lines.extend(jpeg_xmp_lines(data));
+    if let Some(frame) = jpeg_frame_info(data) {
+        lines.extend(frame.lines());
+    }
+    lines.extend(jpeg_comment_lines(data));
+    lines
+}
+
+fn jpeg_photoshop_lines(data: &[u8]) -> Vec<String> {
+    let Some(header) = jpeg_photoshop_header(data) else {
+        return Vec::new();
+    };
+    vec![format!(" {}", header)]
+}
+
+fn jpeg_photoshop_header(data: &[u8]) -> Option<String> {
+    for segment in jpeg_segments(data) {
+        if segment.marker == 0xed
+            && let Some(header) = photoshop_header_from_app13(segment.payload)
+        {
+            return Some(header);
+        }
+    }
+    None
+}
+
+fn jpeg_iptc_lines(data: &[u8]) -> Vec<String> {
+    for segment in jpeg_segments(data) {
+        if segment.marker == 0xed
+            && let Some(iptc) = iptc_block_from_app13(segment.payload)
+        {
+            let mut lines = Vec::new();
+            let version = iptc_iim_version(iptc)
+                .map(|v| format!(" v{}", v))
+                .unwrap_or_default();
+            lines.push(format!(" IPTC: IIM{} ({} bytes)", version, iptc.len()));
+            lines.extend(iptc_field_lines(iptc));
+            return lines;
+        }
+    }
+    Vec::new()
+}
+
+fn iptc_block_from_app13(payload: &[u8]) -> Option<&[u8]> {
+    let mut i = if payload.starts_with(b"Photoshop 3.0\0") {
+        b"Photoshop 3.0\0".len()
+    } else {
+        0
+    };
+
+    while i + 12 <= payload.len() {
+        if payload.get(i..i + 4) != Some(b"8BIM") {
+            i += 1;
+            continue;
+        }
+        let resource_id = u16::from_be_bytes([payload[i + 4], payload[i + 5]]);
+        let name_len = payload[i + 6] as usize;
+        let name_padded = if (1 + name_len) % 2 == 0 {
+            1 + name_len
+        } else {
+            1 + name_len + 1
+        };
+        let size_offset = i + 6 + name_padded;
+        if size_offset + 4 > payload.len() {
+            break;
+        }
+        let data_len = u32::from_be_bytes([
+            payload[size_offset],
+            payload[size_offset + 1],
+            payload[size_offset + 2],
+            payload[size_offset + 3],
+        ]) as usize;
+        let data_start = size_offset + 4;
+        let data_end = data_start.checked_add(data_len)?;
+        if data_end > payload.len() {
+            break;
+        }
+
+        if resource_id == 0x0404 {
+            return Some(&payload[data_start..data_end]);
+        }
+
+        i = data_end + (data_len % 2);
+    }
+
+    None
+}
+
+fn iptc_field_lines(data: &[u8]) -> Vec<String> {
+    let mut object_name = None;
+    let mut byline = None;
+    let mut caption = None;
+    let mut date_created = None;
+    let mut copyright = None;
+    let mut keywords = Vec::new();
+
+    let mut i = 0usize;
+    while i + 5 <= data.len() {
+        if data[i] != 0x1c {
+            i += 1;
+            continue;
+        }
+        let record = data[i + 1];
+        let dataset = data[i + 2];
+        let len = u16::from_be_bytes([data[i + 3], data[i + 4]]) as usize;
+        let value_start = i + 5;
+        let Some(value_end) = value_start.checked_add(len) else {
+            break;
+        };
+        if value_end > data.len() {
+            break;
+        }
+
+        if record == 0x02 {
+            let value = String::from_utf8_lossy(&data[value_start..value_end])
+                .trim()
+                .to_string();
+            if !value.is_empty() {
+                match dataset {
+                    0x05 if object_name.is_none() => object_name = Some(value),
+                    0x50 if byline.is_none() => byline = Some(value),
+                    0x19 => keywords.push(value),
+                    0x78 if caption.is_none() => caption = Some(value),
+                    0x37 if date_created.is_none() => date_created = Some(value),
+                    0x74 if copyright.is_none() => copyright = Some(value),
+                    _ => {}
+                }
+            }
+        }
+
+        i = value_end;
+    }
+
+    let mut lines = Vec::new();
+    if let Some(value) = object_name {
+        lines.push(format!(" IPTC Object: {}", value));
+    }
+    if let Some(value) = byline {
+        lines.push(format!(" IPTC Byline: {}", value));
+    }
+    if !keywords.is_empty() {
+        lines.push(format!(" IPTC Keywords: {}", keywords.join(", ")));
+    }
+    if let Some(value) = caption {
+        lines.push(format!(" IPTC Caption: {}", value));
+    }
+    if let Some(value) = date_created {
+        lines.push(format!(" IPTC Date: {}", value));
+    }
+    if let Some(value) = copyright {
+        lines.push(format!(" IPTC Copyright: {}", value));
+    }
+    lines
+}
+
+fn iptc_iim_version(data: &[u8]) -> Option<u16> {
+    let mut i = 0usize;
+    while i + 5 <= data.len() {
+        if data[i] != 0x1c {
+            i += 1;
+            continue;
+        }
+        let record = data[i + 1];
+        let dataset = data[i + 2];
+        let len = u16::from_be_bytes([data[i + 3], data[i + 4]]) as usize;
+        let value_start = i + 5;
+        let value_end = value_start.checked_add(len)?;
+        if value_end > data.len() {
+            break;
+        }
+        if record == 0x02 && dataset == 0x00 && len == 2 {
+            return Some(u16::from_be_bytes([data[value_start], data[value_start + 1]]));
+        }
+        i = value_end;
+    }
+    None
+}
+
+fn jpeg_tiff_header_lines(data: &[u8]) -> Vec<String> {
+    jpeg_exif_data(data)
+        .map(tiff_header_lines)
+        .unwrap_or_default()
+}
+
+fn tiff_header_lines(data: &[u8]) -> Vec<String> {
+    let Some(line) = tiff_header_line(data) else {
+        return Vec::new();
+    };
+    vec![line]
+}
+
+fn tiff_header_line(data: &[u8]) -> Option<String> {
+    let (endian_label, little) = match data.get(..2)? {
+        b"II" => ("Little-endian", true),
+        b"MM" => ("Big-endian", false),
+        _ => return None,
+    };
+    let magic = if little {
+        u16::from_le_bytes([data[2], data[3]])
+    } else {
+        u16::from_be_bytes([data[2], data[3]])
+    };
+    if magic == 42 {
+        let ifd0 = if little {
+            u32::from_le_bytes([data[4], data[5], data[6], data[7]])
+        } else {
+            u32::from_be_bytes([data[4], data[5], data[6], data[7]])
+        };
+        return Some(format!(
+            " TIFF header: {}, v42, IFD0 @ {}",
+            endian_label, ifd0
+        ));
+    }
+    if magic == 43 && data.len() >= 16 {
+        let ifd0 = if little {
+            u64::from_le_bytes([
+                data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15],
+            ])
+        } else {
+            u64::from_be_bytes([
+                data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15],
+            ])
+        };
+        return Some(format!(
+            " TIFF header: {}, BigTIFF, IFD0 @ {}",
+            endian_label, ifd0
+        ));
+    }
+    None
+}
+
+fn photoshop_header_from_app13(payload: &[u8]) -> Option<String> {
+    let header = payload.strip_prefix(b"Photoshop ")?;
+    let end = header.iter().position(|&b| b == 0).unwrap_or(header.len());
+    let version_text = String::from_utf8_lossy(&header[..end]).to_string();
+    let version = version_text.trim();
+    if version.is_empty() {
+        None
+    } else {
+        Some(format!("Photoshop {}", version))
+    }
+}
+
+fn jpeg_comment(data: &[u8]) -> Option<String> {
+    for segment in jpeg_segments(data) {
+        if segment.marker == 0xfe {
+            let comment = String::from_utf8_lossy(segment.payload)
+                .trim_matches(char::from(0))
+                .to_string();
+            if !comment.trim().is_empty() {
+                return Some(comment);
+            }
+        }
+    }
+    None
+}
+
+fn jpeg_xmp_lines(data: &[u8]) -> Vec<String> {
+    let Some(packet) = jpeg_xmp_packet(data) else {
+        return Vec::new();
+    };
+    let text = String::from_utf8_lossy(packet);
+    let mut lines = Vec::new();
+    if let Some(toolkit) = xml_attr_value(&text, "x:xmptk") {
+        lines.push(format!(" XMP Toolkit: {}", toolkit));
+    }
+    if let Some(software) = xml_attr_value(&text, "stEvt:softwareAgent")
+        .or_else(|| xml_attr_value(&text, "xmp:CreatorTool"))
+    {
+        lines.push(format!(" Software: {}", software));
+    }
+    lines
+}
+
+fn jpeg_xmp_packet(data: &[u8]) -> Option<&[u8]> {
+    const XMP_HEADER: &[u8] = b"http://ns.adobe.com/xap/1.0/\0";
+    for segment in jpeg_segments(data) {
+        if segment.marker == 0xe1 && segment.payload.starts_with(XMP_HEADER) {
+            return Some(&segment.payload[XMP_HEADER.len()..]);
+        }
+    }
+    None
+}
+
+#[derive(Debug, Clone, Copy)]
+struct JpegSegment<'a> {
+    marker: u8,
+    payload: &'a [u8],
+}
+
+fn jpeg_segments(data: &[u8]) -> Vec<JpegSegment<'_>> {
+    let mut segments = Vec::new();
+    let mut i = 2usize;
+    while i + 4 <= data.len() {
+        if data[i] != 0xff {
+            i += 1;
+            continue;
+        }
+        let marker = data[i + 1];
+        i += 2;
+        if marker == 0xd8 || marker == 0x01 {
+            continue;
+        }
+        if marker == 0xd9 || marker == 0xda || i + 2 > data.len() {
+            break;
+        }
+        let Some(len_bytes) = data.get(i..i + 2) else {
+            break;
+        };
+        let len = u16::from_be_bytes([len_bytes[0], len_bytes[1]]) as usize;
+        if len < 2 || i + len > data.len() {
+            break;
+        }
+        segments.push(JpegSegment {
+            marker,
+            payload: &data[i + 2..i + len],
+        });
+        i += len;
+    }
+    segments
+}
+
+fn jpeg_key_value_comment(comment: &str) -> Option<(String, String)> {
+    let (label, value) = comment.split_once(':')?;
+    let label = label.trim();
+    let value = value.trim();
+    if label.is_empty() || value.is_empty() {
+        return None;
+    }
+    let mut chars = label.chars();
+    let first = chars.next()?;
+    let normalized = first.to_uppercase().collect::<String>() + &chars.as_str().to_ascii_lowercase();
+    Some((normalized, value.to_string()))
+}
+
+fn xml_attr_value(text: &str, attr: &str) -> Option<String> {
+    let needle = format!("{attr}=\"");
+    let start = text.find(&needle)? + needle.len();
+    let rest = &text[start..];
+    let end = rest.find('"')?;
+    let value = rest[..end].trim();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct JpegJfifInfo {
+    major: u8,
+    minor: u8,
+    unit: u8,
+    x_density: u16,
+    y_density: u16,
+}
+
+impl JpegJfifInfo {
+    fn lines(self) -> Vec<String> {
+        let mut lines = vec![format!(" JFIF: {}.{:02}", self.major, self.minor)];
+        if self.x_density > 0 && self.y_density > 0 {
+            let unit = match self.unit {
+                1 => "dpi",
+                2 => "dpcm",
+                _ => "units",
+            };
+            lines.push(format!(
+                " Resolution: {} x {} {}",
+                self.x_density, self.y_density, unit
+            ));
+        }
+        lines
+    }
+}
+
+fn jpeg_jfif_info(data: &[u8]) -> Option<JpegJfifInfo> {
     let mut i = 2usize;
     while i + 4 <= data.len() {
         if data[i] != 0xff {
@@ -1040,12 +1452,122 @@ fn jpeg_exif_data(data: &[u8]) -> Option<&[u8]> {
             break;
         }
         let payload = &data[i + 2..i + len];
-        if marker == 0xe1 && payload.starts_with(b"Exif\0\0") {
-            return Some(&payload[6..]);
+        if marker == 0xe0 && payload.starts_with(b"JFIF\0") && payload.len() >= 12 {
+            return Some(JpegJfifInfo {
+                major: payload[5],
+                minor: payload[6],
+                unit: payload[7],
+                x_density: u16::from_be_bytes([payload[8], payload[9]]),
+                y_density: u16::from_be_bytes([payload[10], payload[11]]),
+            });
         }
         i += len;
     }
     None
+}
+
+#[derive(Debug, Clone)]
+struct JpegFrameInfo {
+    process: &'static str,
+    bits_per_sample: u8,
+    component_count: u8,
+    subsampling: Option<String>,
+}
+
+impl JpegFrameInfo {
+    fn lines(&self) -> Vec<String> {
+        let mut lines = vec![format!(" Encoding: {}", self.process)];
+        lines.push(format!(" Precision: {} bit", self.bits_per_sample));
+        lines.push(format!(" Components: {}", self.component_count));
+        if let Some(subsampling) = self.subsampling.as_deref() {
+            lines.push(format!(" Subsampling: {}", subsampling));
+        }
+        lines
+    }
+}
+
+fn jpeg_frame_info(data: &[u8]) -> Option<JpegFrameInfo> {
+    let mut i = 2usize;
+    while i + 9 < data.len() {
+        if data[i] != 0xff {
+            i += 1;
+            continue;
+        }
+        let marker = data[i + 1];
+        i += 2;
+        if marker == 0xd8 || marker == 0x01 {
+            continue;
+        }
+        if marker == 0xd9 || marker == 0xda || i + 2 > data.len() {
+            break;
+        }
+        let len = u16::from_be_bytes(data[i..i + 2].try_into().ok()?) as usize;
+        if len < 2 || i + len > data.len() {
+            break;
+        }
+        let payload = &data[i + 2..i + len];
+        if matches!(marker, 0xC0..=0xC3 | 0xC5..=0xC7 | 0xC9..=0xCB | 0xCD..=0xCF) && payload.len() >= 6 {
+            let component_count = payload[5];
+            return Some(JpegFrameInfo {
+                process: jpeg_process_name(marker),
+                bits_per_sample: payload[0],
+                component_count,
+                subsampling: jpeg_subsampling(payload),
+            });
+        }
+        i += len;
+    }
+    None
+}
+
+fn jpeg_process_name(marker: u8) -> &'static str {
+    match marker {
+        0xC0 => "Baseline DCT",
+        0xC1 => "Extended sequential DCT",
+        0xC2 => "Progressive DCT",
+        0xC3 => "Lossless sequential",
+        0xC5 => "Differential sequential DCT",
+        0xC6 => "Differential progressive DCT",
+        0xC7 => "Differential lossless",
+        0xC9 => "Extended sequential DCT (arithmetic)",
+        0xCA => "Progressive DCT (arithmetic)",
+        0xCB => "Lossless sequential (arithmetic)",
+        0xCD => "Differential sequential DCT (arithmetic)",
+        0xCE => "Differential progressive DCT (arithmetic)",
+        0xCF => "Differential lossless (arithmetic)",
+        _ => "JPEG",
+    }
+}
+
+fn jpeg_subsampling(payload: &[u8]) -> Option<String> {
+    let component_count = payload.get(5).copied()? as usize;
+    if component_count < 3 || payload.len() < 6 + component_count * 3 {
+        return None;
+    }
+    let y_sampling = payload.get(7).copied()?;
+    let cb_sampling = payload.get(10).copied()?;
+    let cr_sampling = payload.get(13).copied()?;
+    if cb_sampling != cr_sampling {
+        return None;
+    }
+    let y_h = y_sampling >> 4;
+    let y_v = y_sampling & 0x0f;
+    let c_h = cb_sampling >> 4;
+    let c_v = cb_sampling & 0x0f;
+    if y_h == 0 || y_v == 0 || c_h == 0 || c_v == 0 {
+        return None;
+    }
+    let h_ratio = (y_h / c_h).max(1);
+    let v_ratio = (y_v / c_v).max(1);
+    let label = match (h_ratio, v_ratio) {
+        (1, 1) => "4:4:4".to_string(),
+        (2, 1) => "4:2:2".to_string(),
+        (2, 2) => "4:2:0".to_string(),
+        (4, 1) => "4:1:1".to_string(),
+        (4, 2) => "4:1:0".to_string(),
+        _ => format!("{}x{} / {}x{}", y_h, y_v, c_h, c_v),
+    };
+    Some(label)
 }
 
 fn png_exif_data(data: &[u8]) -> Option<&[u8]> {
@@ -2555,6 +3077,179 @@ mod tests {
                 .iter()
                 .any(|line| line.contains("Focal length: 50.0 mm"))
         );
+        assert!(
+            info.extra
+                .iter()
+                .any(|line| line.contains("TIFF header: Little-endian, v42, IFD0 @ 8"))
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn jpeg_creator_comment_is_reported() {
+        let path = std::env::temp_dir().join(format!("kkc-idf-comment-{}.jpg", std::process::id()));
+        fs::write(&path, jpeg_with_comment("CREATOR: gd-jpeg v1.0 (using IJG JPEG v80), quality = 75.")).expect("write jpeg");
+
+        let info = probe_file(&path)
+            .expect("probe should not fail")
+            .expect("jpeg should be detected");
+        assert_eq!(info.mime_type, "image/jpeg");
+        assert!(
+            info.extra
+                .iter()
+                .any(|line| line.contains("Creator: gd-jpeg v1.0 (using IJG JPEG v80), quality = 75."))
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn jpeg_jfif_and_frame_metadata_are_reported() {
+        let path = std::env::temp_dir().join(format!("kkc-idf-jfif-{}.jpg", std::process::id()));
+        fs::write(&path, jpeg_with_jfif_comment("CREATOR: gd-jpeg v1.0", 96, 96)).expect("write jpeg");
+
+        let info = probe_file(&path)
+            .expect("probe should not fail")
+            .expect("jpeg should be detected");
+        assert!(info.extra.iter().any(|line| line.contains("JFIF: 1.01")));
+        assert!(
+            info.extra
+                .iter()
+                .any(|line| line.contains("Resolution: 96 x 96 dpi"))
+        );
+        assert!(
+            info.extra
+                .iter()
+                .any(|line| line.contains("Encoding: Baseline DCT"))
+        );
+        assert!(info.extra.iter().any(|line| line.contains("Precision: 8 bit")));
+        assert!(info.extra.iter().any(|line| line.contains("Components: 3")));
+        assert!(info.extra.iter().any(|line| line.contains("Subsampling: 4:2:0")));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn jpeg_photoshop_header_is_reported() {
+        let path = std::env::temp_dir().join(format!("kkc-idf-ps-{}.jpg", std::process::id()));
+        fs::write(&path, jpeg_with_photoshop_app13("3.0")).expect("write jpeg");
+
+        let info = probe_file(&path)
+            .expect("probe should not fail")
+            .expect("jpeg should be detected");
+        assert!(info.extra.iter().any(|line| line.contains("Photoshop 3.0")));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn jpeg_xmp_software_is_reported() {
+        let path = std::env::temp_dir().join(format!("kkc-idf-xmp-{}.jpg", std::process::id()));
+        fs::write(&path, jpeg_with_xmp_software("Affinity Photo 1.10.6")).expect("write jpeg");
+
+        let info = probe_file(&path)
+            .expect("probe should not fail")
+            .expect("jpeg should be detected");
+        assert!(
+            info.extra
+                .iter()
+                .any(|line| line.contains("XMP Toolkit: XMP Core 5.5.0"))
+        );
+        assert!(
+            info.extra
+                .iter()
+                .any(|line| line.contains("Software: Affinity Photo 1.10.6"))
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn jpeg_iptc_header_is_reported() {
+        let path = std::env::temp_dir().join(format!("kkc-idf-iptc-{}.jpg", std::process::id()));
+        fs::write(&path, jpeg_with_iptc_app13(4)).expect("write jpeg");
+
+        let info = probe_file(&path)
+            .expect("probe should not fail")
+            .expect("jpeg should be detected");
+        assert!(
+            info.extra
+                .iter()
+                .any(|line| line.contains("IPTC: IIM v4 (7 bytes)"))
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn jpeg_iptc_fields_are_reported() {
+        let path = std::env::temp_dir().join(format!("kkc-idf-iptc-fields-{}.jpg", std::process::id()));
+        fs::write(
+            &path,
+            jpeg_with_iptc_fields_app13(
+                4,
+                "State Of The Art",
+                "Miguel Van Hove",
+                &["fire", "affinity", "jpeg"],
+                "Demo caption",
+                "20260505",
+                "(c) 2026 KKC",
+            ),
+        )
+        .expect("write jpeg");
+
+        let info = probe_file(&path)
+            .expect("probe should not fail")
+            .expect("jpeg should be detected");
+        assert!(
+            info.extra
+                .iter()
+                .any(|line| line.contains("IPTC Object: State Of The Art"))
+        );
+        assert!(
+            info.extra
+                .iter()
+                .any(|line| line.contains("IPTC Byline: Miguel Van Hove"))
+        );
+        assert!(
+            info.extra
+                .iter()
+                .any(|line| line.contains("IPTC Keywords: fire, affinity, jpeg"))
+        );
+        assert!(
+            info.extra
+                .iter()
+                .any(|line| line.contains("IPTC Caption: Demo caption"))
+        );
+        assert!(
+            info.extra
+                .iter()
+                .any(|line| line.contains("IPTC Date: 20260505"))
+        );
+        assert!(
+            info.extra
+                .iter()
+                .any(|line| line.contains("IPTC Copyright: (c) 2026 KKC"))
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn tiff_header_is_reported() {
+        let path = std::env::temp_dir().join(format!("kkc-idf-tiff-{}.tif", std::process::id()));
+        fs::write(&path, test_exif_tiff()).expect("write tiff");
+
+        let info = probe_file(&path)
+            .expect("probe should not fail")
+            .expect("tiff should be detected");
+        assert_eq!(info.mime_type, "image/tiff");
+        assert!(
+            info.extra
+                .iter()
+                .any(|line| line.contains("TIFF header: Little-endian, v42, IFD0 @ 8"))
+        );
 
         let _ = fs::remove_file(path);
     }
@@ -2568,10 +3263,139 @@ mod tests {
         jpeg.extend(app1_len.to_be_bytes());
         jpeg.extend(app1);
         jpeg.extend([
-            0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x10, 0x00, 0x20, 0x03, 0x01, 0x11, 0x00, 0x02,
+            0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x10, 0x00, 0x20, 0x03, 0x01, 0x22, 0x00, 0x02,
             0x11, 0x00, 0x03, 0x11, 0x00, 0xff, 0xd9,
         ]);
         jpeg
+    }
+
+    fn jpeg_with_comment(comment: &str) -> Vec<u8> {
+        jpeg_with_jfif_comment(comment, 1, 1)
+    }
+
+    fn jpeg_with_jfif_comment(comment: &str, x_density: u16, y_density: u16) -> Vec<u8> {
+        let app0 = [
+            b'J', b'F', b'I', b'F', 0x00, 0x01, 0x01, 0x01,
+            (x_density >> 8) as u8,
+            (x_density & 0xff) as u8,
+            (y_density >> 8) as u8,
+            (y_density & 0xff) as u8,
+            0x00, 0x00,
+        ];
+        let app0_len = u16::try_from(app0.len() + 2).expect("APP0 length fits");
+        let mut payload = comment.as_bytes().to_vec();
+        let len = u16::try_from(payload.len() + 2).expect("COM length fits");
+        let mut jpeg = vec![0xff, 0xd8, 0xff, 0xe0];
+        jpeg.extend(app0_len.to_be_bytes());
+        jpeg.extend(app0);
+        jpeg.extend([0xff, 0xfe]);
+        jpeg.extend(len.to_be_bytes());
+        jpeg.append(&mut payload);
+        jpeg.extend([
+            0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x10, 0x00, 0x20, 0x03, 0x01, 0x22, 0x00, 0x02,
+            0x11, 0x00, 0x03, 0x11, 0x00, 0xff, 0xd9,
+        ]);
+        jpeg
+    }
+
+    fn jpeg_with_photoshop_app13(version: &str) -> Vec<u8> {
+        let mut app13 = b"Photoshop ".to_vec();
+        app13.extend(version.as_bytes());
+        app13.push(0);
+        app13.extend(b"8BIM\x04\x04\0\0\0\0\0\0");
+        let app13_len = u16::try_from(app13.len() + 2).expect("APP13 length fits");
+
+        let mut jpeg = vec![0xff, 0xd8, 0xff, 0xed];
+        jpeg.extend(app13_len.to_be_bytes());
+        jpeg.extend(app13);
+        jpeg.extend([
+            0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x10, 0x00, 0x20, 0x03, 0x01, 0x22, 0x00, 0x02,
+            0x11, 0x00, 0x03, 0x11, 0x00, 0xff, 0xd9,
+        ]);
+        jpeg
+    }
+
+    fn jpeg_with_xmp_software(software: &str) -> Vec<u8> {
+        let xmp = format!(
+            "http://ns.adobe.com/xap/1.0/\0<?xpacket begin=\"\u{feff}\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?><x:xmpmeta xmlns:x=\"adobe:ns:meta/\" x:xmptk=\"XMP Core 5.5.0\"><rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"><rdf:Description xmlns:stEvt=\"http://ns.adobe.com/xap/1.0/sType/ResourceEvent#\"><xmpMM:History xmlns:xmpMM=\"http://ns.adobe.com/xap/1.0/mm/\"><rdf:Seq><rdf:li stEvt:action=\"produced\" stEvt:softwareAgent=\"{software}\"/></rdf:Seq></xmpMM:History></rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end=\"w\"?>"
+        );
+        let app1 = xmp.into_bytes();
+        let app1_len = u16::try_from(app1.len() + 2).expect("APP1 XMP length fits");
+
+        let mut jpeg = vec![0xff, 0xd8, 0xff, 0xe1];
+        jpeg.extend(app1_len.to_be_bytes());
+        jpeg.extend(app1);
+        jpeg.extend([
+            0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x10, 0x00, 0x20, 0x03, 0x01, 0x22, 0x00, 0x02,
+            0x11, 0x00, 0x03, 0x11, 0x00, 0xff, 0xd9,
+        ]);
+        jpeg
+    }
+
+    fn jpeg_with_iptc_app13(version: u16) -> Vec<u8> {
+        jpeg_with_iptc_fields_app13(version, "", "", &[], "", "", "")
+    }
+
+    fn jpeg_with_iptc_fields_app13(
+        version: u16,
+        object: &str,
+        byline: &str,
+        keywords: &[&str],
+        caption: &str,
+        date: &str,
+        copyright: &str,
+    ) -> Vec<u8> {
+        let mut iptc = vec![0x1c, 0x02, 0x00, 0x00, 0x02];
+        iptc.extend(version.to_be_bytes());
+        if !object.is_empty() {
+            append_iptc_dataset(&mut iptc, 0x05, object);
+        }
+        if !byline.is_empty() {
+            append_iptc_dataset(&mut iptc, 0x50, byline);
+        }
+        for keyword in keywords {
+            append_iptc_dataset(&mut iptc, 0x19, keyword);
+        }
+        if !caption.is_empty() {
+            append_iptc_dataset(&mut iptc, 0x78, caption);
+        }
+        if !date.is_empty() {
+            append_iptc_dataset(&mut iptc, 0x37, date);
+        }
+        if !copyright.is_empty() {
+            append_iptc_dataset(&mut iptc, 0x74, copyright);
+        }
+
+        let mut app13 = b"Photoshop 3.0\0".to_vec();
+        app13.extend(b"8BIM");
+        app13.extend(0x0404u16.to_be_bytes());
+        app13.push(0x00);
+        app13.push(0x00);
+        app13.extend((iptc.len() as u32).to_be_bytes());
+        app13.extend(&iptc);
+        if iptc.len() % 2 == 1 {
+            app13.push(0x00);
+        }
+
+        let app13_len = u16::try_from(app13.len() + 2).expect("APP13 length fits");
+        let mut jpeg = vec![0xff, 0xd8, 0xff, 0xed];
+        jpeg.extend(app13_len.to_be_bytes());
+        jpeg.extend(app13);
+        jpeg.extend([
+            0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x10, 0x00, 0x20, 0x03, 0x01, 0x22, 0x00, 0x02,
+            0x11, 0x00, 0x03, 0x11, 0x00, 0xff, 0xd9,
+        ]);
+        jpeg
+    }
+
+    fn append_iptc_dataset(buf: &mut Vec<u8>, dataset: u8, value: &str) {
+        let bytes = value.as_bytes();
+        let len = u16::try_from(bytes.len()).expect("IPTC field length fits");
+        buf.push(0x1c);
+        buf.push(0x02);
+        buf.push(dataset);
+        buf.extend(len.to_be_bytes());
+        buf.extend(bytes);
     }
 
     fn test_exif_tiff() -> Vec<u8> {
