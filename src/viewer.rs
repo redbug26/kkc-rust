@@ -1716,11 +1716,23 @@ pub fn kitty_graphics_supported() -> bool {
             .unwrap_or(false)
         || matches!(
             env::var("TERM_PROGRAM").ok().as_deref(),
-            Some("ghostty") | Some("WezTerm")
+            Some("ghostty") | Some("WezTerm") | Some("iTerm.app")
         )
 }
 
-pub fn clear_kitty_images<W: Write>(out: &mut W) -> Result<()> {
+pub fn iterm2_supported() -> bool {
+    matches!(
+        env::var("TERM_PROGRAM").ok().as_deref(),
+        Some("iTerm.app")
+    )
+}
+
+pub fn clear_kitty_images<W: Write>(out: &mut W, _area: Option<Rect>) -> Result<()> {
+    if iterm2_supported() {
+        // For iTerm2 we don't write anything here; the caller must invalidate
+        // ratatui's buffers (terminal.resize) so the next draw overwrites the image.
+        return Ok(());
+    }
     write!(out, "\x1b_Ga=d,d=A\x1b\\")?;
     out.flush()?;
     Ok(())
@@ -1758,6 +1770,31 @@ pub fn render_kitty_image<W: Write>(out: &mut W, viewer: &Viewer, area: Rect) ->
     let fit = fit_image_to_area(area, image.width, image.height);
     queue!(out, MoveTo(fit.x, fit.y))?;
 
+    if iterm2_supported() {
+        // iTerm2 Inline Images Protocol
+        let payload = base64::encode(&viewer.raw);
+        write!(
+            out,
+            "\x1b]1337;File=inline=1;width={}chars;height={}chars;preserveAspectRatio=0:{}\x07",
+            fit.width, fit.height, payload,
+        )?;
+        out.flush()?;
+
+        // log to debug via crate::viewer::debug_log so it doesn't interfere with the terminal output and can be enabled when needed.
+        crate::viewer::debug_log(&format!(
+            "Rendered image with iTerm2 protocol: original=({:?}x{:?}), fitted=({}x{}), area=({}x{})",
+            image.width,
+            image.height,
+            fit.width,
+            fit.height,
+            area.width,
+            area.height)
+        );
+
+        return Ok(());
+    }
+
+    // Kitty graphics protocol
     const RAW_CHUNK_LEN: usize = 3072;
     let payload = image
         .kitty_png

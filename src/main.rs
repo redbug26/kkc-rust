@@ -47,7 +47,7 @@ fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
 }
 
 fn teardown_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
-    let _ = viewer::clear_kitty_images(terminal.backend_mut());
+    let _ = viewer::clear_kitty_images(terminal.backend_mut(), None);
     disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),
@@ -134,6 +134,45 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
             state.step_worm();
         }
 
+        // Compute next kitty image state before drawing so we can clear the old
+        // image *before* the TUI draw (required for iTerm2 where clearing writes
+        // spaces that would otherwise erase freshly drawn TUI content).
+        let term_size = terminal.size()?;
+        let term_area = Rect {
+            x: 0,
+            y: 0,
+            width: term_size.width,
+            height: term_size.height,
+        };
+        let next_kitty_image = if viewer::kitty_graphics_supported() {
+            match &app.mode {
+                AppMode::Viewer(v) | AppMode::ViewerSearching(v) | AppMode::ViewerMenu(v, _) => {
+                    ui::kitty_image_area(v, term_area).map(|rect| (v.path.clone(), rect, v.zoomed))
+                }
+                _ => {
+                    // Quick-preview: use the inactive panel area
+                    app.quick_preview.as_ref().and_then(|v| {
+                        ui::kitty_image_area_quick_preview(&app, term_area)
+                            .map(|rect| (v.path.clone(), rect, v.zoomed))
+                    })
+                }
+            }
+        } else {
+            None
+        };
+
+        // PRE-DRAW: clear old image when transitioning away from it.
+        // Must happen before terminal.draw() so the TUI can paint over the cleared area.
+        if next_kitty_image != last_kitty_image && last_kitty_image.is_some() {
+            let last_rect = last_kitty_image.as_ref().map(|(_, rect, _)| *rect);
+            viewer::clear_kitty_images(terminal.backend_mut(), last_rect)?;
+            // For iTerm2: invalidate ratatui's internal buffers so the next draw
+            // repaints every cell, overwriting the image — without flashing the screen.
+            if viewer::iterm2_supported() {
+                terminal.resize(term_area)?;
+            }
+        }
+
         let draw_start = Instant::now();
         let completed = terminal.draw(|f| ui::render(f, &app))?;
         if !first_draw_logged {
@@ -160,34 +199,8 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
             }
         }
 
-        let term_size = terminal.size()?;
-        let term_area = Rect {
-            x: 0,
-            y: 0,
-            width: term_size.width,
-            height: term_size.height,
-        };
-        let next_kitty_image = if viewer::kitty_graphics_supported() {
-            match &app.mode {
-                AppMode::Viewer(v) | AppMode::ViewerSearching(v) | AppMode::ViewerMenu(v, _) => {
-                    ui::kitty_image_area(v, term_area).map(|rect| (v.path.clone(), rect, v.zoomed))
-                }
-                _ => {
-                    // Quick-preview: use the inactive panel area
-                    app.quick_preview.as_ref().and_then(|v| {
-                        ui::kitty_image_area_quick_preview(&app, term_area)
-                            .map(|rect| (v.path.clone(), rect, v.zoomed))
-                    })
-                }
-            }
-        } else {
-            None
-        };
-
+        // POST-DRAW: render the new image on top of the freshly drawn TUI.
         if next_kitty_image != last_kitty_image {
-            if last_kitty_image.is_some() {
-                viewer::clear_kitty_images(terminal.backend_mut())?;
-            }
             if let Some((path, rect, _)) = &next_kitty_image {
                 if viewer::kitty_graphics_supported() {
                     // Find the viewer to render (full viewer or quick_preview)
