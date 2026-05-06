@@ -223,13 +223,41 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             vec![],
         ))
     } else if data.len() >= 2 && data[0] == 0x1a && (1..=11).contains(&data[1]) {
-        Some(info("application/x-arc", path, IdfKind::Archive, None, None, vec![]))
+        Some(info(
+            "application/x-arc",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(b"ZOO ") {
-        Some(info("application/x-zoo", path, IdfKind::Archive, None, None, vec![]))
+        Some(info(
+            "application/x-zoo",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(b"HLSQZ") {
-        Some(info("application/x-sqz", path, IdfKind::Archive, None, None, vec![]))
+        Some(info(
+            "application/x-sqz",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(&[0x76, 0xff]) || data.starts_with(&[0xfa, 0xff]) {
-        Some(info("application/x-sq", path, IdfKind::Archive, None, None, vec![]))
+        Some(info(
+            "application/x-sq",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(&[0x1F, 0x8B]) {
         if ext == "vgz" {
             Some(info(
@@ -345,7 +373,14 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             lha_lines(&data),
         ))
     } else if data.starts_with(b"UC2\x1a") || data.starts_with(b"UE2") {
-        Some(info("application/x-uc2", path, IdfKind::Archive, None, None, vec![]))
+        Some(info(
+            "application/x-uc2",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(b"ICE!")
         || data.starts_with(b"Ice!")
         || data.starts_with(b"TMM!")
@@ -1350,7 +1385,10 @@ fn iptc_iim_version(data: &[u8]) -> Option<u16> {
             break;
         }
         if record == 0x02 && dataset == 0x00 && len == 2 {
-            return Some(u16::from_be_bytes([data[value_start], data[value_start + 1]]));
+            return Some(u16::from_be_bytes([
+                data[value_start],
+                data[value_start + 1],
+            ]));
         }
         i = value_end;
     }
@@ -1510,7 +1548,8 @@ fn jpeg_key_value_comment(comment: &str) -> Option<(String, String)> {
     }
     let mut chars = label.chars();
     let first = chars.next()?;
-    let normalized = first.to_uppercase().collect::<String>() + &chars.as_str().to_ascii_lowercase();
+    let normalized =
+        first.to_uppercase().collect::<String>() + &chars.as_str().to_ascii_lowercase();
     Some((normalized, value.to_string()))
 }
 
@@ -1628,7 +1667,9 @@ fn jpeg_frame_info(data: &[u8]) -> Option<JpegFrameInfo> {
             break;
         }
         let payload = &data[i + 2..i + len];
-        if matches!(marker, 0xC0..=0xC3 | 0xC5..=0xC7 | 0xC9..=0xCB | 0xCD..=0xCF) && payload.len() >= 6 {
+        if matches!(marker, 0xC0..=0xC3 | 0xC5..=0xC7 | 0xC9..=0xCB | 0xCD..=0xCF)
+            && payload.len() >= 6
+        {
             let component_count = payload[5];
             return Some(JpegFrameInfo {
                 process: jpeg_process_name(marker),
@@ -3211,17 +3252,19 @@ mod tests {
     #[test]
     fn jpeg_creator_comment_is_reported() {
         let path = std::env::temp_dir().join(format!("kkc-idf-comment-{}.jpg", std::process::id()));
-        fs::write(&path, jpeg_with_comment("CREATOR: gd-jpeg v1.0 (using IJG JPEG v80), quality = 75.")).expect("write jpeg");
+        fs::write(
+            &path,
+            jpeg_with_comment("CREATOR: gd-jpeg v1.0 (using IJG JPEG v80), quality = 75."),
+        )
+        .expect("write jpeg");
 
         let info = probe_file(&path)
             .expect("probe should not fail")
             .expect("jpeg should be detected");
         assert_eq!(info.mime_type, "image/jpeg");
-        assert!(
-            info.extra
-                .iter()
-                .any(|line| line.contains("Creator: gd-jpeg v1.0 (using IJG JPEG v80), quality = 75."))
-        );
+        assert!(info.extra.iter().any(|line| {
+            line.contains("Creator: gd-jpeg v1.0 (using IJG JPEG v80), quality = 75.")
+        }));
 
         let _ = fs::remove_file(path);
     }
@@ -3229,7 +3272,11 @@ mod tests {
     #[test]
     fn jpeg_jfif_and_frame_metadata_are_reported() {
         let path = std::env::temp_dir().join(format!("kkc-idf-jfif-{}.jpg", std::process::id()));
-        fs::write(&path, jpeg_with_jfif_comment("CREATOR: gd-jpeg v1.0", 96, 96)).expect("write jpeg");
+        fs::write(
+            &path,
+            jpeg_with_jfif_comment("CREATOR: gd-jpeg v1.0", 96, 96),
+        )
+        .expect("write jpeg");
 
         let info = probe_file(&path)
             .expect("probe should not fail")
@@ -3245,9 +3292,17 @@ mod tests {
                 .iter()
                 .any(|line| line.contains("Encoding: Baseline DCT"))
         );
-        assert!(info.extra.iter().any(|line| line.contains("Precision: 8 bit")));
+        assert!(
+            info.extra
+                .iter()
+                .any(|line| line.contains("Precision: 8 bit"))
+        );
         assert!(info.extra.iter().any(|line| line.contains("Components: 3")));
-        assert!(info.extra.iter().any(|line| line.contains("Subsampling: 4:2:0")));
+        assert!(
+            info.extra
+                .iter()
+                .any(|line| line.contains("Subsampling: 4:2:0"))
+        );
 
         let _ = fs::remove_file(path);
     }
@@ -3306,7 +3361,8 @@ mod tests {
 
     #[test]
     fn jpeg_iptc_fields_are_reported() {
-        let path = std::env::temp_dir().join(format!("kkc-idf-iptc-fields-{}.jpg", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("kkc-idf-iptc-fields-{}.jpg", std::process::id()));
         fs::write(
             &path,
             jpeg_with_iptc_fields_app13(
@@ -3397,12 +3453,20 @@ mod tests {
 
     fn jpeg_with_jfif_comment(comment: &str, x_density: u16, y_density: u16) -> Vec<u8> {
         let app0 = [
-            b'J', b'F', b'I', b'F', 0x00, 0x01, 0x01, 0x01,
+            b'J',
+            b'F',
+            b'I',
+            b'F',
+            0x00,
+            0x01,
+            0x01,
+            0x01,
             (x_density >> 8) as u8,
             (x_density & 0xff) as u8,
             (y_density >> 8) as u8,
             (y_density & 0xff) as u8,
-            0x00, 0x00,
+            0x00,
+            0x00,
         ];
         let app0_len = u16::try_from(app0.len() + 2).expect("APP0 length fits");
         let mut payload = comment.as_bytes().to_vec();

@@ -3110,7 +3110,8 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                     Err(e) => app.notify(format!("Rename error: {}", e)),
                 },
                 InputAction::Mkdir(parent) => match crate::file_ops::make_dir(&parent, &value) {
-                    Ok(_) => {
+                    Ok(path) => {
+                        app.enter_dir(path)?;
                         app.notify(format!("Created directory '{}'", value));
                         if app.config.auto_reload {
                             app.reload_panels();
@@ -3142,6 +3143,7 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                         remote_make_dir(&profile, &path)
                     }) {
                         Ok(_) => {
+                            app.enter_dir(std::path::PathBuf::from(path))?;
                             app.notify(format!("Created directory '{}'", value));
                             if app.config.auto_reload {
                                 app.reload_panels();
@@ -3350,7 +3352,8 @@ fn move_assoc_input_cursor_vertical(dlg: &mut AssocInputDialog, delta: isize) {
     }
 
     let current_line = before.chars().filter(|&ch| ch == '\n').count() as isize;
-    let target_line = (current_line + delta).clamp(0, lines.len().saturating_sub(1) as isize) as usize;
+    let target_line =
+        (current_line + delta).clamp(0, lines.len().saturating_sub(1) as isize) as usize;
     let target_col = current_col.min(lines[target_line].chars().count());
 
     let target_char_index = lines

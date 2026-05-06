@@ -649,7 +649,11 @@ fn render_multiline_text_input(
     for draw_row in 0..input_h {
         let line_idx = vscroll + draw_row;
         let line = lines.get(line_idx).copied().unwrap_or("");
-        let hscroll = if line_idx == cursor_line { active_hscroll } else { 0 };
+        let hscroll = if line_idx == cursor_line {
+            active_hscroll
+        } else {
+            0
+        };
         let shown = slice_chars(line, hscroll, line_w);
         let padded = format!("{:<width$}", shown, width = line_w);
         safe_render_widget(

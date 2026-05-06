@@ -168,7 +168,10 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
         // PRE-DRAW: clear the old image only when leaving image rendering entirely.
         // For image-to-image transitions, the Kitty renderer reuses the same image
         // id and replacing it in post-draw avoids a one-frame black flash.
-        if next_kitty_image.is_none() && next_kitty_image != last_kitty_image && last_kitty_image.is_some() {
+        if next_kitty_image.is_none()
+            && next_kitty_image != last_kitty_image
+            && last_kitty_image.is_some()
+        {
             let last_rect = last_kitty_image.as_ref().map(|(_, rect, _)| *rect);
             viewer::clear_kitty_images(terminal.backend_mut(), last_rect)?;
         }
@@ -245,9 +248,10 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
         }
 
         match app.mode {
-            AppMode::Input(_) | AppMode::AssocInput(_) | AppMode::ViewerSearching(_) | AppMode::Terminal => {
-                terminal.show_cursor()?
-            }
+            AppMode::Input(_)
+            | AppMode::AssocInput(_)
+            | AppMode::ViewerSearching(_)
+            | AppMode::Terminal => terminal.show_cursor()?,
             _ => terminal.hide_cursor()?,
         }
 

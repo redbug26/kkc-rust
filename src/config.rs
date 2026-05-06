@@ -688,14 +688,13 @@ fn load_state_file() -> Result<Option<PersistedState>> {
         return Ok(None);
     }
 
-    let text = fs::read_to_string(&path)
-        .with_context(|| format!("Reading state: {}", path.display()))?;
+    let text =
+        fs::read_to_string(&path).with_context(|| format!("Reading state: {}", path.display()))?;
     let state: PersistedState = match toml::from_str(&text) {
         Ok(state) => state,
         Err(parse_err) => {
-            let backup = backup_invalid_config(&path).with_context(|| {
-                format!("Parsing state and backing it up: {}", path.display())
-            })?;
+            let backup = backup_invalid_config(&path)
+                .with_context(|| format!("Parsing state and backing it up: {}", path.display()))?;
             return Err(anyhow::anyhow!(
                 "Parsing state: {} ({parse_err}). Invalid file moved to {}",
                 path.display(),
@@ -845,16 +844,19 @@ sort = "size"
 sort = "date"
 "#,
         )
-    .expect("state should parse");
+        .expect("state should parse");
 
-    assert_eq!(state.left.sort, SortMode::Size);
-    assert_eq!(state.left.path, dirs_home());
-    assert_eq!(state.left.tabs.len(), 1);
-    assert_eq!(state.left.tabs[0].path, dirs_home());
-    assert_eq!(state.left.tabs[0].sort, SortMode::Date);
-    assert_eq!(state.dir_history, vec![PathBuf::from("/tmp"), PathBuf::from("/var")]);
-    assert_eq!(state.palette_recent, vec!["copy", "save_config"]);
-    assert_eq!(state.panel_view_type, PanelViewType::QuickPreview);
-    assert_eq!(state.active_panel, ActivePanelSide::Right);
+        assert_eq!(state.left.sort, SortMode::Size);
+        assert_eq!(state.left.path, dirs_home());
+        assert_eq!(state.left.tabs.len(), 1);
+        assert_eq!(state.left.tabs[0].path, dirs_home());
+        assert_eq!(state.left.tabs[0].sort, SortMode::Date);
+        assert_eq!(
+            state.dir_history,
+            vec![PathBuf::from("/tmp"), PathBuf::from("/var")]
+        );
+        assert_eq!(state.palette_recent, vec!["copy", "save_config"]);
+        assert_eq!(state.panel_view_type, PanelViewType::QuickPreview);
+        assert_eq!(state.active_panel, ActivePanelSide::Right);
     }
 }

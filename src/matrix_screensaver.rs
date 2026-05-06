@@ -152,11 +152,17 @@ pub fn render(f: &mut Frame, state: &MatrixScreensaverState, area: Rect) {
                     .bg(Color::Black)
                     .add_modifier(Modifier::BOLD)
             } else if dist < 3 {
-                Style::default().fg(Color::Rgb(150, 255, 150)).bg(Color::Black)
+                Style::default()
+                    .fg(Color::Rgb(150, 255, 150))
+                    .bg(Color::Black)
             } else if dist < 7 {
-                Style::default().fg(Color::Rgb(60, 210, 60)).bg(Color::Black)
+                Style::default()
+                    .fg(Color::Rgb(60, 210, 60))
+                    .bg(Color::Black)
             } else {
-                Style::default().fg(Color::Rgb(20, 120, 20)).bg(Color::Black)
+                Style::default()
+                    .fg(Color::Rgb(20, 120, 20))
+                    .bg(Color::Black)
             };
 
             chars[row][col] = ch;
@@ -202,7 +208,9 @@ pub fn render(f: &mut Frame, state: &MatrixScreensaverState, area: Rect) {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 hint,
-                Style::default().fg(Color::Rgb(30, 180, 30)).bg(Color::Black),
+                Style::default()
+                    .fg(Color::Rgb(30, 180, 30))
+                    .bg(Color::Black),
             )))
             .alignment(Alignment::Center),
             hint_area,

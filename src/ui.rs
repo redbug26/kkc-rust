@@ -13,8 +13,8 @@ mod shortcuts;
 mod terminal;
 mod tree_view;
 mod viewer;
-use self::assoc::{render_action_palette, render_assoc_editor, render_opener};
 pub(crate) use self::assoc::assoc_editor_shortcuts;
+use self::assoc::{render_action_palette, render_assoc_editor, render_opener};
 pub(crate) use self::bookmarks::dir_bookmarks_shortcuts;
 use self::bookmarks::{
     render_dir_bookmarks, render_quicksearch_palette, render_store_install_palette,

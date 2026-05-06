@@ -501,7 +501,8 @@ pub(super) fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rec
     if matches.is_empty() {
         safe_render_widget(
             f,
-            Paragraph::new("  (no match)").style(Style::default().fg(CLR_QS_NO_MATCH).bg(CLR_QS_BG)),
+            Paragraph::new("  (no match)")
+                .style(Style::default().fg(CLR_QS_NO_MATCH).bg(CLR_QS_BG)),
             Rect {
                 x: inner.x,
                 y: inner.y + 4,

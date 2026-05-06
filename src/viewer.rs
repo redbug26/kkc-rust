@@ -25,7 +25,8 @@ mod viewer_render;
 mod viewer_search;
 
 use self::viewer_decode::{
-    ansi_lines, detect_mode, hex_line, preproc_op_label, preprocess_bytes, text_lines,
+    AnsiLine, ansi_screen_lines, detect_mode, hex_line, preproc_op_label, preprocess_bytes,
+    text_lines,
 };
 use self::viewer_render::{pad_visible, slice_visible};
 use self::viewer_search::parse_hex_query;
@@ -116,6 +117,7 @@ pub struct Viewer {
     pub preproc_ops: Vec<PreprocOp>,
     text_lines: Vec<String>,
     ansi_lines: Vec<String>,
+    ansi_screen_lines: Vec<AnsiLine>,
     image: Option<ImageInfo>,
     plugin_document_cache: RefCell<Option<PluginDocumentCache>>,
     /// Bytes-per-row for hex mode, updated lazily during rendering to match panel width.
@@ -259,6 +261,7 @@ impl Viewer {
             preproc_ops: Vec::new(),
             text_lines: lines,
             ansi_lines: Vec::new(),
+            ansi_screen_lines: Vec::new(),
             image: None,
             plugin_document_cache: RefCell::new(None),
             hex_bytes_per_row: Cell::new(16),
@@ -301,9 +304,9 @@ impl Viewer {
             fs::read(path).with_context(|| format!("Reading {}", path.display()))?
         };
         let line_feed = LineFeedMode::Mixed;
-        let encoding = EncodingMode::Plain;
         let image = detect_image_info(path, &raw);
         let mode = detect_mode(path, &raw);
+        let encoding = default_encoding_for_mode(mode);
         let mut viewer = Self {
             path: path.to_path_buf(),
             raw,
@@ -326,6 +329,7 @@ impl Viewer {
             preproc_ops: Vec::new(),
             text_lines: Vec::new(),
             ansi_lines: Vec::new(),
+            ansi_screen_lines: Vec::new(),
             image,
             plugin_document_cache: RefCell::new(None),
             hex_bytes_per_row: Cell::new(16),
@@ -957,9 +961,8 @@ impl Viewer {
             return lines;
         }
         match self.mode {
-            ViewMode::Text | ViewMode::Ansi => {
-                self.render_text_like_lines(selected_width, start, height)
-            }
+            ViewMode::Text => self.render_text_like_lines(selected_width, start, height),
+            ViewMode::Ansi => self.render_ansi_lines(selected_width, start, height),
             ViewMode::Image => self.render_image_fallback_lines(selected_width, height),
             ViewMode::Hex => self.render_hex_lines(selected_width, start, height),
         }
@@ -1216,6 +1219,73 @@ impl Viewer {
             .into_iter()
             .map(|line| Line::from(Span::raw(line)))
             .collect()
+    }
+
+    fn render_ansi_lines(
+        &self,
+        selected_width: usize,
+        start: usize,
+        height: usize,
+    ) -> Vec<Line<'static>> {
+        self.ansi_screen_lines
+            .iter()
+            .skip(start)
+            .take(height)
+            .map(|line| self.display_ansi_line(line, selected_width))
+            .collect()
+    }
+
+    fn display_ansi_line(&self, line: &AnsiLine, width: usize) -> Line<'static> {
+        if width == 0 {
+            return Line::from(Span::raw(String::new()));
+        }
+
+        let start_col = if self.wrap { 0 } else { self.hscroll };
+        let end_col = if self.wrap {
+            line.cells.len()
+        } else {
+            start_col.saturating_add(width)
+        };
+        let mut spans = Vec::new();
+        let mut current_text = String::new();
+        let mut current_style = None;
+        let mut visible_cols = 0usize;
+
+        for cell in line
+            .cells
+            .iter()
+            .skip(start_col)
+            .take(end_col.saturating_sub(start_col))
+        {
+            let style = cell.style.ratatui();
+            if current_style != Some(style) {
+                if !current_text.is_empty() {
+                    spans.push(Span::styled(
+                        std::mem::take(&mut current_text),
+                        current_style.unwrap_or_default(),
+                    ));
+                }
+                current_style = Some(style);
+            }
+            current_text.push(cell.ch);
+            visible_cols += 1;
+        }
+
+        if !current_text.is_empty() {
+            spans.push(Span::styled(
+                current_text,
+                current_style.unwrap_or_default(),
+            ));
+        }
+
+        if !self.wrap && visible_cols < width {
+            spans.push(Span::styled(
+                " ".repeat(width - visible_cols),
+                Style::default().fg(Color::White).bg(Color::Black),
+            ));
+        }
+
+        Line::from(spans)
     }
 
     pub fn current_plain_lines(&self) -> &[String] {
@@ -1521,6 +1591,7 @@ impl Viewer {
         // Clear cached lines — other modes will be rebuilt lazily when accessed.
         self.text_lines = Vec::new();
         self.ansi_lines = Vec::new();
+        self.ansi_screen_lines = Vec::new();
         self.image = detect_image_info(&self.path, &self.raw);
         // Immediately rebuild only the currently active mode.
         let mode = self.mode;
@@ -1537,9 +1608,24 @@ impl Viewer {
             }
             ViewMode::Hex => {}
             ViewMode::Ansi => {
-                if self.ansi_lines.is_empty() {
-                    self.ansi_lines =
-                        ansi_lines(&self.raw, self.line_feed, &self.preproc_ops, self.encoding);
+                if self.ansi_screen_lines.is_empty() {
+                    self.ansi_screen_lines = ansi_screen_lines(
+                        &self.raw,
+                        self.line_feed,
+                        &self.preproc_ops,
+                        self.encoding,
+                    );
+                    self.ansi_lines = self
+                        .ansi_screen_lines
+                        .iter()
+                        .map(AnsiLine::plain_text)
+                        .collect();
+                } else if self.ansi_lines.is_empty() {
+                    self.ansi_lines = self
+                        .ansi_screen_lines
+                        .iter()
+                        .map(AnsiLine::plain_text)
+                        .collect();
                 }
             }
             ViewMode::Image => {}
@@ -1721,10 +1807,7 @@ pub fn kitty_graphics_supported() -> bool {
 }
 
 pub fn iterm2_supported() -> bool {
-    matches!(
-        env::var("TERM_PROGRAM").ok().as_deref(),
-        Some("iTerm.app")
-    )
+    matches!(env::var("TERM_PROGRAM").ok().as_deref(), Some("iTerm.app"))
 }
 
 pub fn embedded_graphics_supported() -> bool {
@@ -1793,13 +1876,8 @@ pub fn render_kitty_image<W: Write>(out: &mut W, viewer: &Viewer, area: Rect) ->
         // log to debug via crate::viewer::debug_log so it doesn't interfere with the terminal output and can be enabled when needed.
         crate::viewer::debug_log(&format!(
             "Rendered image with iTerm2 protocol: original=({:?}x{:?}), fitted=({}x{}), area=({}x{})",
-            image.width,
-            image.height,
-            fit.width,
-            fit.height,
-            area.width,
-            area.height)
-        );
+            image.width, image.height, fit.width, fit.height, area.width, area.height
+        ));
 
         return Ok(());
     }
@@ -1958,6 +2036,13 @@ fn detect_image_info(path: &Path, data: &[u8]) -> Option<ImageInfo> {
     None
 }
 
+fn default_encoding_for_mode(mode: ViewMode) -> EncodingMode {
+    match mode {
+        ViewMode::Ansi => EncodingMode::Cp437,
+        _ => EncodingMode::Plain,
+    }
+}
+
 fn build_kitty_png_payload(raw: &[u8], format: &'static str) -> Result<Vec<u8>> {
     if format == "PNG" {
         return Ok(raw.to_vec());
@@ -2043,4 +2128,21 @@ fn jpeg_dimensions(data: &[u8]) -> (Option<u32>, Option<u32>) {
         i += seg_len;
     }
     (None, None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ansi_mode_defaults_to_cp437() {
+        assert_eq!(
+            default_encoding_for_mode(ViewMode::Ansi),
+            EncodingMode::Cp437
+        );
+        assert_eq!(
+            default_encoding_for_mode(ViewMode::Text),
+            EncodingMode::Plain
+        );
+    }
 }

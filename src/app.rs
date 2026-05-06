@@ -26,7 +26,6 @@ pub use self::menu::{
 use self::panel_tabs::{PanelTabs, panel_config_for_save, restore_panel_side};
 pub use self::remote_edit::{RemoteEditKind, RemoteEditState};
 pub use self::shortcuts::{ShortcutPanelState, normalize_shortcut, shortcut_from_key_event};
-pub use crate::matrix_screensaver::MatrixScreensaverState;
 use crate::about::AboutState;
 use crate::config::{ActivePanelSide, Config, PanelConfig, PanelViewType, SortMode};
 use crate::copy::{
@@ -36,6 +35,7 @@ use crate::copy::{
 use crate::file_ops::{self, CopyOptions};
 use crate::help::HelpState;
 use crate::idf::render_idf_card;
+pub use crate::matrix_screensaver::MatrixScreensaverState;
 use crate::panel::Panel;
 use crate::remote::{
     RemoteEntry, RemoteKind, RemoteProfile, RemoteSource, delete_path as remote_delete_path,
@@ -728,7 +728,8 @@ impl AssocEditorState {
             .iter()
             .map(|a| (a.mime_type.clone(), a.openers.clone()))
             .collect::<Vec<_>>();
-        assocs.sort_by(|(mime_a, _), (mime_b, _)| mime_a.to_lowercase().cmp(&mime_b.to_lowercase()));
+        assocs
+            .sort_by(|(mime_a, _), (mime_b, _)| mime_a.to_lowercase().cmp(&mime_b.to_lowercase()));
 
         Self {
             assocs,
@@ -761,7 +762,10 @@ impl AssocEditorState {
                     mime_type.to_ascii_lowercase(),
                     openers.join(" ").to_ascii_lowercase()
                 );
-                tokens.iter().all(|token| haystack.contains(token)).then_some(idx)
+                tokens
+                    .iter()
+                    .all(|token| haystack.contains(token))
+                    .then_some(idx)
             })
             .collect()
     }
@@ -3087,7 +3091,11 @@ fn store_application_opener(item: &crate::plugins::StorePluginInfo) -> Option<St
     if bin.is_empty() {
         return None;
     }
-    let args = item.launch_args.as_deref().map(str::trim).unwrap_or_default();
+    let args = item
+        .launch_args
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or_default();
     if args.is_empty() {
         Some(format!("{bin} %f"))
     } else {

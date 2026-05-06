@@ -1,13 +1,18 @@
 use super::{EncodingMode, LineFeedMode, PreprocOp, ViewMode};
+use ratatui::style::{Color, Modifier, Style};
 use std::path::Path;
+use unicode_width::UnicodeWidthChar;
+
+const ANSI_SCREEN_COLUMNS: usize = 80;
+const ANSI_SCREEN_ROWS: usize = 25;
 
 pub(super) fn detect_mode(path: &Path, data: &[u8]) -> ViewMode {
     if looks_like_image(path, data) {
         ViewMode::Image
-    } else if is_likely_binary(data) {
-        ViewMode::Hex
     } else if contains_ansi_escape(data) {
         ViewMode::Ansi
+    } else if is_likely_binary(data) {
+        ViewMode::Hex
     } else {
         ViewMode::Text
     }
@@ -56,9 +61,7 @@ pub(super) fn text_lines(
     let processed = preprocess_bytes(data, preproc_ops);
     let lines = split_line_bytes(&processed, line_feed)
         .into_iter()
-        .map(|bytes| {
-            decode_line_bytes(&bytes, encoding)
-        })
+        .map(|bytes| decode_line_bytes(&bytes, encoding))
         .collect::<Vec<_>>();
     if lines.is_empty() {
         vec![String::new()]
@@ -67,18 +70,218 @@ pub(super) fn text_lines(
     }
 }
 
-pub(super) fn ansi_lines(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct AnsiCellStyle {
+    pub fg: Color,
+    pub bg: Color,
+    pub modifier: Modifier,
+}
+
+impl Default for AnsiCellStyle {
+    fn default() -> Self {
+        Self {
+            fg: Color::White,
+            bg: Color::Black,
+            modifier: Modifier::empty(),
+        }
+    }
+}
+
+impl AnsiCellStyle {
+    pub fn ratatui(self) -> Style {
+        Style::default()
+            .fg(self.fg)
+            .bg(self.bg)
+            .add_modifier(self.modifier)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct AnsiCell {
+    pub ch: char,
+    pub style: AnsiCellStyle,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct AnsiLine {
+    pub cells: Vec<AnsiCell>,
+}
+
+impl AnsiLine {
+    pub fn plain_text(&self) -> String {
+        self.cells.iter().map(|cell| cell.ch).collect()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AnsiState {
+    style: AnsiCellStyle,
+    saved_row: usize,
+    saved_col: usize,
+    insert_mode: bool,
+}
+
+impl Default for AnsiState {
+    fn default() -> Self {
+        Self {
+            style: AnsiCellStyle::default(),
+            saved_row: 0,
+            saved_col: 0,
+            insert_mode: false,
+        }
+    }
+}
+
+pub(super) fn ansi_screen_lines(
     data: &[u8],
     line_feed: LineFeedMode,
     preproc_ops: &[PreprocOp],
     encoding: EncodingMode,
-) -> Vec<String> {
+) -> Vec<AnsiLine> {
     let processed = preprocess_bytes(data, preproc_ops);
-    let text = ansi_to_text(&processed, line_feed, encoding);
-    if text.is_empty() {
-        vec![String::new()]
+    let data = strip_utf8_bom(&processed);
+    let data = strip_dos_eof(data);
+    let mut lines = vec![AnsiLine { cells: Vec::new() }];
+    let mut state = AnsiState::default();
+    let mut row = 0usize;
+    let mut col = 0usize;
+    let mut i = 0usize;
+
+    while i < data.len() {
+        let b = data[i];
+        if b == 0x1b {
+            if i + 1 >= data.len() {
+                break;
+            }
+            match data[i + 1] {
+                b'[' => {
+                    let Some((final_byte, params, consumed)) = parse_csi(&data[i + 2..]) else {
+                        break;
+                    };
+                    apply_csi(
+                        final_byte,
+                        &params,
+                        &mut lines,
+                        &mut row,
+                        &mut col,
+                        &mut state,
+                        ANSI_SCREEN_ROWS,
+                    );
+                    i += 2 + consumed;
+                    continue;
+                }
+                b']' => {
+                    i += 2 + osc_len(&data[i + 2..]);
+                    continue;
+                }
+                b'P' | b'X' | b'^' | b'_' => {
+                    i += 2 + string_control_len(&data[i + 2..]);
+                    continue;
+                }
+                b'#' => {
+                    i += (i + 2 < data.len()).then_some(3).unwrap_or(2);
+                    continue;
+                }
+                b's' => {
+                    state.saved_row = row;
+                    state.saved_col = col;
+                    i += 2;
+                    continue;
+                }
+                b'u' => {
+                    row = state.saved_row.min(ANSI_SCREEN_ROWS - 1);
+                    col = state.saved_col.min(ANSI_SCREEN_COLUMNS - 1);
+                    ensure_row(&mut lines, row, ANSI_SCREEN_ROWS);
+                    i += 2;
+                    continue;
+                }
+                _ => {
+                    i += 2;
+                    continue;
+                }
+            }
+        }
+
+        match b {
+            b'\r' => {
+                if matches!(line_feed, LineFeedMode::MacCr) {
+                    line_feed_ansi_cursor(&mut lines, &mut row, ANSI_SCREEN_ROWS);
+                }
+                col = 0;
+                i += 1;
+            }
+            b'\n' => {
+                if matches!(
+                    line_feed,
+                    LineFeedMode::DosCrLf | LineFeedMode::UnixLf | LineFeedMode::Mixed
+                ) {
+                    line_feed_ansi_cursor(&mut lines, &mut row, ANSI_SCREEN_ROWS);
+                }
+                i += 1;
+            }
+            8 => {
+                col = col.saturating_sub(1);
+                i += 1;
+            }
+            b'\t' => {
+                let next = ((col / 8) + 1) * 8;
+                while col < next {
+                    wrap_ansi_cursor(
+                        &mut lines,
+                        &mut row,
+                        &mut col,
+                        ANSI_SCREEN_COLUMNS,
+                        ANSI_SCREEN_ROWS,
+                    );
+                    put_ansi_cell(
+                        &mut lines,
+                        row,
+                        col,
+                        ' ',
+                        state.style,
+                        state.insert_mode,
+                        ANSI_SCREEN_ROWS,
+                    );
+                    col += 1;
+                }
+                i += 1;
+            }
+            0x00..=0x1f | 0x7f => {
+                i += 1;
+            }
+            _ => {
+                let (ch, consumed) = match encoding {
+                    EncodingMode::Plain => decode_utf8_char_at(data, i),
+                    EncodingMode::Cp437 => (byte_to_display_char(b, encoding), 1),
+                };
+                if !matches!(ch, '\0') {
+                    wrap_ansi_cursor(
+                        &mut lines,
+                        &mut row,
+                        &mut col,
+                        ANSI_SCREEN_COLUMNS,
+                        ANSI_SCREEN_ROWS,
+                    );
+                    put_ansi_cell(
+                        &mut lines,
+                        row,
+                        col,
+                        ch,
+                        state.style,
+                        state.insert_mode,
+                        ANSI_SCREEN_ROWS,
+                    );
+                    col += UnicodeWidthChar::width(ch).unwrap_or(1).max(1);
+                }
+                i += consumed;
+            }
+        }
+    }
+
+    if lines.is_empty() {
+        vec![AnsiLine { cells: Vec::new() }]
     } else {
-        text
+        lines
     }
 }
 
@@ -100,6 +303,410 @@ pub(super) fn hex_line(offset: usize, chunk: &[u8], bpr: usize, encoding: Encodi
         .collect();
     let pad = bpr.saturating_mul(3).saturating_sub(1).max(1);
     format!("{:08X}  {:<width$}  {}", offset, hex, ascii, width = pad)
+}
+
+fn wrap_ansi_cursor(
+    lines: &mut Vec<AnsiLine>,
+    row: &mut usize,
+    col: &mut usize,
+    screen_columns: usize,
+    screen_rows: usize,
+) {
+    if *col < screen_columns {
+        return;
+    }
+    *col = 0;
+    line_feed_ansi_cursor(lines, row, screen_rows);
+}
+
+fn line_feed_ansi_cursor(lines: &mut Vec<AnsiLine>, row: &mut usize, screen_rows: usize) {
+    if *row + 1 < screen_rows {
+        *row += 1;
+        ensure_row(lines, *row, screen_rows);
+        return;
+    }
+    scroll_screen_up(lines, screen_rows);
+    *row = screen_rows.saturating_sub(1);
+}
+
+fn scroll_screen_up(lines: &mut Vec<AnsiLine>, screen_rows: usize) {
+    ensure_row(lines, screen_rows.saturating_sub(1), screen_rows);
+    if !lines.is_empty() {
+        lines.remove(0);
+    }
+    while lines.len() < screen_rows {
+        lines.push(AnsiLine { cells: Vec::new() });
+    }
+}
+
+fn strip_utf8_bom(data: &[u8]) -> &[u8] {
+    data.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(data)
+}
+
+fn strip_dos_eof(data: &[u8]) -> &[u8] {
+    data.iter()
+        .position(|&b| b == 0x1A)
+        .map(|pos| &data[..pos])
+        .unwrap_or(data)
+}
+
+fn parse_csi(data: &[u8]) -> Option<(u8, Vec<i32>, usize)> {
+    let mut end = 0usize;
+    while end < data.len() {
+        let b = data[end];
+        if (0x40..=0x7e).contains(&b) {
+            let params = parse_csi_params(&data[..end]);
+            return Some((b, params, end + 1));
+        }
+        end += 1;
+    }
+    None
+}
+
+fn parse_csi_params(data: &[u8]) -> Vec<i32> {
+    let s = std::str::from_utf8(data).unwrap_or("");
+    let s = s
+        .trim_start_matches('?')
+        .trim_start_matches('>')
+        .trim_start_matches('=');
+    if s.is_empty() {
+        return vec![0];
+    }
+    s.split(';')
+        .map(|part| part.parse::<i32>().unwrap_or(0))
+        .collect()
+}
+
+fn osc_len(data: &[u8]) -> usize {
+    string_control_len(data)
+}
+
+fn string_control_len(data: &[u8]) -> usize {
+    let mut i = 0usize;
+    while i < data.len() {
+        if data[i] == 0x07 {
+            return i + 1;
+        }
+        if data[i] == 0x1b && i + 1 < data.len() && data[i + 1] == b'\\' {
+            return i + 2;
+        }
+        i += 1;
+    }
+    data.len()
+}
+
+fn ensure_row(lines: &mut Vec<AnsiLine>, row: usize, max_rows: usize) {
+    while lines.len() <= row && lines.len() < max_rows {
+        lines.push(AnsiLine { cells: Vec::new() });
+    }
+}
+
+fn put_ansi_cell(
+    lines: &mut Vec<AnsiLine>,
+    row: usize,
+    col: usize,
+    ch: char,
+    style: AnsiCellStyle,
+    insert_mode: bool,
+    max_rows: usize,
+) {
+    ensure_row(lines, row, max_rows);
+    let Some(line) = lines.get_mut(row) else {
+        return;
+    };
+    while line.cells.len() < col {
+        line.cells.push(AnsiCell {
+            ch: ' ',
+            style: AnsiCellStyle::default(),
+        });
+    }
+    if insert_mode && col < line.cells.len() {
+        line.cells.insert(col, AnsiCell { ch, style });
+    } else if line.cells.len() == col {
+        line.cells.push(AnsiCell { ch, style });
+    } else if let Some(cell) = line.cells.get_mut(col) {
+        *cell = AnsiCell { ch, style };
+    }
+}
+
+fn apply_csi(
+    final_byte: u8,
+    params: &[i32],
+    lines: &mut Vec<AnsiLine>,
+    row: &mut usize,
+    col: &mut usize,
+    state: &mut AnsiState,
+    max_rows: usize,
+) {
+    let n = |idx: usize, default: i32| -> usize {
+        params
+            .get(idx)
+            .copied()
+            .filter(|value| *value > 0)
+            .unwrap_or(default)
+            .max(0) as usize
+    };
+
+    match final_byte as char {
+        'm' => apply_sgr(params, &mut state.style),
+        'H' | 'f' => {
+            *row = n(0, 1).saturating_sub(1).min(max_rows - 1);
+            *col = n(1, 1).saturating_sub(1).min(ANSI_SCREEN_COLUMNS - 1);
+            ensure_row(lines, *row, max_rows);
+        }
+        'A' => *row = row.saturating_sub(n(0, 1)),
+        'B' => {
+            *row = (*row + n(0, 1)).min(max_rows - 1);
+            ensure_row(lines, *row, max_rows);
+        }
+        'C' => *col += n(0, 1),
+        'D' => *col = col.saturating_sub(n(0, 1)),
+        '@' => {
+            ensure_row(lines, *row, max_rows);
+            if let Some(line) = lines.get_mut(*row) {
+                let count = n(0, 1);
+                let at = (*col).min(line.cells.len());
+                for _ in 0..count {
+                    line.cells.insert(
+                        at,
+                        AnsiCell {
+                            ch: ' ',
+                            style: state.style,
+                        },
+                    );
+                }
+            }
+        }
+        'P' => {
+            ensure_row(lines, *row, max_rows);
+            if let Some(line) = lines.get_mut(*row) {
+                let count = n(0, 1);
+                if *col < line.cells.len() {
+                    let end = (*col + count).min(line.cells.len());
+                    line.cells.drain(*col..end);
+                }
+            }
+        }
+        'X' => {
+            ensure_row(lines, *row, max_rows);
+            if let Some(line) = lines.get_mut(*row) {
+                let count = n(0, 1);
+                let end = (*col + count).min(line.cells.len());
+                for cell in line.cells.iter_mut().take(end).skip(*col) {
+                    *cell = AnsiCell {
+                        ch: ' ',
+                        style: state.style,
+                    };
+                }
+            }
+        }
+        'E' => {
+            *row = (*row + n(0, 1)).min(max_rows - 1);
+            *col = 0;
+            ensure_row(lines, *row, max_rows);
+        }
+        'F' => {
+            *row = row.saturating_sub(n(0, 1));
+            *col = 0;
+        }
+        'G' => *col = n(0, 1).saturating_sub(1).min(ANSI_SCREEN_COLUMNS - 1),
+        'J' => match params.first().copied().unwrap_or(0) {
+            2 | 3 => {
+                lines.clear();
+                lines.push(AnsiLine { cells: Vec::new() });
+                *row = 0;
+                *col = 0;
+            }
+            0 => {
+                ensure_row(lines, *row, max_rows);
+                if let Some(line) = lines.get_mut(*row)
+                    && *col < line.cells.len()
+                {
+                    line.cells.truncate(*col);
+                }
+                lines.truncate(*row + 1);
+            }
+            1 => {
+                for line in lines.iter_mut().take(*row) {
+                    line.cells.clear();
+                }
+                if let Some(line) = lines.get_mut(*row) {
+                    for cell in line.cells.iter_mut().take(*col + 1) {
+                        *cell = AnsiCell {
+                            ch: ' ',
+                            style: AnsiCellStyle::default(),
+                        };
+                    }
+                }
+            }
+            _ => {}
+        },
+        'K' => {
+            ensure_row(lines, *row, max_rows);
+            if let Some(line) = lines.get_mut(*row) {
+                match params.first().copied().unwrap_or(0) {
+                    0 => {
+                        if *col < line.cells.len() {
+                            line.cells.truncate(*col);
+                        }
+                    }
+                    1 => {
+                        for cell in line.cells.iter_mut().take(*col + 1) {
+                            *cell = AnsiCell {
+                                ch: ' ',
+                                style: AnsiCellStyle::default(),
+                            };
+                        }
+                    }
+                    2 => line.cells.clear(),
+                    _ => {}
+                }
+            }
+        }
+        's' => {
+            state.saved_row = *row;
+            state.saved_col = *col;
+        }
+        'u' => {
+            *row = state.saved_row.min(max_rows - 1);
+            *col = state.saved_col;
+            ensure_row(lines, *row, max_rows);
+        }
+        'h' => {
+            if params.contains(&4) {
+                state.insert_mode = true;
+            }
+        }
+        'l' => {
+            if params.contains(&4) {
+                state.insert_mode = false;
+            }
+        }
+        _ => {}
+    }
+}
+
+fn apply_sgr(params: &[i32], style: &mut AnsiCellStyle) {
+    let params = if params.is_empty() { &[0][..] } else { params };
+    let mut i = 0usize;
+    while i < params.len() {
+        match params[i] {
+            0 => *style = AnsiCellStyle::default(),
+            1 => {
+                style.modifier.insert(Modifier::BOLD);
+                style.fg = bright_ansi_color(style.fg);
+            }
+            2 => style.modifier.insert(Modifier::DIM),
+            3 => style.modifier.insert(Modifier::ITALIC),
+            4 => style.modifier.insert(Modifier::UNDERLINED),
+            5 | 6 => style.modifier.insert(Modifier::SLOW_BLINK),
+            7 => {
+                style.modifier.insert(Modifier::REVERSED);
+            }
+            22 => {
+                style.modifier.remove(Modifier::BOLD);
+                style.modifier.remove(Modifier::DIM);
+            }
+            23 => style.modifier.remove(Modifier::ITALIC),
+            24 => style.modifier.remove(Modifier::UNDERLINED),
+            25 => style.modifier.remove(Modifier::SLOW_BLINK),
+            27 => {
+                style.modifier.remove(Modifier::REVERSED);
+            }
+            30..=37 => {
+                style.fg = ansi_16_color(
+                    params[i] as u8 - 30,
+                    style.modifier.contains(Modifier::BOLD),
+                );
+            }
+            40..=47 => style.bg = ansi_16_color(params[i] as u8 - 40, false),
+            90..=97 => style.fg = ansi_16_color(params[i] as u8 - 90, true),
+            100..=107 => style.bg = ansi_16_color(params[i] as u8 - 100, true),
+            39 => style.fg = Color::White,
+            49 => style.bg = Color::Black,
+            38 | 48 => {
+                if let Some((color, consumed)) = parse_extended_color(&params[i + 1..]) {
+                    if params[i] == 38 {
+                        style.fg = color;
+                    } else {
+                        style.bg = color;
+                    }
+                    i += consumed;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+}
+
+fn parse_extended_color(params: &[i32]) -> Option<(Color, usize)> {
+    match params.first().copied()? {
+        5 => {
+            let idx = *params.get(1)? as u8;
+            Some((ansi_256_color(idx), 2))
+        }
+        2 => {
+            let r = (*params.get(1)?).clamp(0, 255) as u8;
+            let g = (*params.get(2)?).clamp(0, 255) as u8;
+            let b = (*params.get(3)?).clamp(0, 255) as u8;
+            Some((Color::Rgb(r, g, b), 4))
+        }
+        _ => None,
+    }
+}
+
+fn ansi_16_color(idx: u8, bright: bool) -> Color {
+    match (idx, bright) {
+        (0, false) => Color::Black,
+        (1, false) => Color::Red,
+        (2, false) => Color::Green,
+        (3, false) => Color::Yellow,
+        (4, false) => Color::Blue,
+        (5, false) => Color::Magenta,
+        (6, false) => Color::Cyan,
+        (7, false) => Color::Gray,
+        (0, true) => Color::DarkGray,
+        (1, true) => Color::LightRed,
+        (2, true) => Color::LightGreen,
+        (3, true) => Color::LightYellow,
+        (4, true) => Color::LightBlue,
+        (5, true) => Color::LightMagenta,
+        (6, true) => Color::LightCyan,
+        (7, true) => Color::White,
+        _ => Color::White,
+    }
+}
+
+fn bright_ansi_color(color: Color) -> Color {
+    match color {
+        Color::Black => Color::DarkGray,
+        Color::Red => Color::LightRed,
+        Color::Green => Color::LightGreen,
+        Color::Yellow => Color::LightYellow,
+        Color::Blue => Color::LightBlue,
+        Color::Magenta => Color::LightMagenta,
+        Color::Cyan => Color::LightCyan,
+        Color::Gray => Color::White,
+        other => other,
+    }
+}
+
+fn ansi_256_color(idx: u8) -> Color {
+    if idx < 16 {
+        return ansi_16_color(idx % 8, idx >= 8);
+    }
+    if idx < 232 {
+        let n = idx - 16;
+        let scale = [0, 95, 135, 175, 215, 255];
+        return Color::Rgb(
+            scale[(n / 36) as usize],
+            scale[((n / 6) % 6) as usize],
+            scale[(n % 6) as usize],
+        );
+    }
+    let gray = 8 + (idx - 232) * 10;
+    Color::Rgb(gray, gray, gray)
 }
 
 fn split_line_bytes(input: &[u8], mode: LineFeedMode) -> Vec<Vec<u8>> {
@@ -291,153 +898,6 @@ fn decode_utf8_char_at(data: &[u8], start: usize) -> (char, usize) {
     }
 }
 
-fn ansi_to_text(data: &[u8], line_feed: LineFeedMode, encoding: EncodingMode) -> Vec<String> {
-    let mut lines = vec![String::new()];
-    let mut row = 0usize;
-    let mut col = 0usize;
-    let mut i = 0usize;
-    while i < data.len() {
-        let mut step = 1usize;
-        let b = data[i];
-        if b == 0x1b && i + 1 < data.len() && data[i + 1] == b'[' {
-            i += 2;
-            let start = i;
-            while i < data.len() && !data[i].is_ascii_alphabetic() {
-                i += 1;
-            }
-            if i >= data.len() {
-                break;
-            }
-            let cmd = data[i] as char;
-            let args = std::str::from_utf8(&data[start..i]).unwrap_or("");
-            let params = parse_ansi_params(args);
-            match cmd {
-                'J' => {
-                    if params.first().copied().unwrap_or(0) == 2 {
-                        lines.clear();
-                        lines.push(String::new());
-                        row = 0;
-                        col = 0;
-                    }
-                }
-                'K' => {
-                    if let Some(line) = lines.get_mut(row) {
-                        truncate_at_char_boundary(line, col);
-                    }
-                }
-                'H' | 'f' => {
-                    row = params.first().copied().unwrap_or(1).saturating_sub(1) as usize;
-                    col = params.get(1).copied().unwrap_or(1).saturating_sub(1) as usize;
-                    while lines.len() <= row {
-                        lines.push(String::new());
-                    }
-                }
-                'A' => row = row.saturating_sub(params.first().copied().unwrap_or(1) as usize),
-                'B' => {
-                    row += params.first().copied().unwrap_or(1) as usize;
-                    while lines.len() <= row {
-                        lines.push(String::new());
-                    }
-                }
-                'C' => col += params.first().copied().unwrap_or(1) as usize,
-                'D' => col = col.saturating_sub(params.first().copied().unwrap_or(1) as usize),
-                _ => {}
-            }
-            i += 1;
-            continue;
-        }
-
-        match b {
-            b'\r' => {
-                if matches!(line_feed, LineFeedMode::MacCr | LineFeedMode::Mixed) {
-                    row += 1;
-                    while lines.len() <= row {
-                        lines.push(String::new());
-                    }
-                }
-                col = 0;
-            }
-            b'\n' => {
-                if matches!(
-                    line_feed,
-                    LineFeedMode::DosCrLf | LineFeedMode::UnixLf | LineFeedMode::Mixed
-                ) {
-                    row += 1;
-                    while lines.len() <= row {
-                        lines.push(String::new());
-                    }
-                }
-            }
-            8 => col = col.saturating_sub(1),
-            b'\t' => {
-                let next = ((col / 8) + 1) * 8;
-                while col < next {
-                    put_char(&mut lines, row, col, ' ');
-                    col += 1;
-                }
-            }
-            _ => {
-                let ch = match encoding {
-                    EncodingMode::Plain => {
-                        let (ch, consumed) = decode_utf8_char_at(data, i);
-                        step = consumed;
-                        ch
-                    }
-                    EncodingMode::Cp437 => byte_to_display_char(b, encoding),
-                };
-                put_char(&mut lines, row, col, ch);
-                col += 1;
-            }
-        }
-        i += step;
-    }
-    lines.into_iter().map(|l| l.replace('\t', "    ")).collect()
-}
-
-fn put_char(lines: &mut Vec<String>, row: usize, col: usize, ch: char) {
-    while lines.len() <= row {
-        lines.push(String::new());
-    }
-    let line = &mut lines[row];
-    let len = line.chars().count();
-    if len < col {
-        line.push_str(&" ".repeat(col - len));
-    }
-    if len == col {
-        line.push(ch);
-    } else {
-        let mut chars: Vec<char> = line.chars().collect();
-        if col < chars.len() {
-            chars[col] = ch;
-            *line = chars.into_iter().collect();
-        } else {
-            line.push(ch);
-        }
-    }
-}
-
-fn truncate_at_char_boundary(s: &mut String, char_len: usize) {
-    let current_len = s.chars().count();
-    if char_len >= current_len {
-        return;
-    }
-    let new_len = s
-        .char_indices()
-        .nth(char_len)
-        .map(|(idx, _)| idx)
-        .unwrap_or(s.len());
-    s.truncate(new_len);
-}
-
-fn parse_ansi_params(args: &str) -> Vec<u16> {
-    if args.is_empty() {
-        return vec![0];
-    }
-    args.split(';')
-        .filter_map(|p| p.parse::<u16>().ok())
-        .collect()
-}
-
 pub(super) fn preproc_op_label(op: PreprocOp) -> String {
     match op {
         PreprocOp::Xor(v) => format!("XOR {:02X}", v),
@@ -461,11 +921,11 @@ const CP437: [char; 256] = [
     'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '{', '|', '}', '~', '⌂', 'Ç', 'ü', 'é', 'â', 'ä',
     'à', 'å', 'ç', 'ê', 'ë', 'è', 'ï', 'î', 'ì', 'Ä', 'Å', 'É', 'æ', 'Æ', 'ô', 'ö', 'ò', 'û', 'ù',
     'ÿ', 'Ö', 'Ü', '¢', '£', '¥', '₧', 'ƒ', 'á', 'í', 'ó', 'ú', 'ñ', 'Ñ', 'ª', 'º', '¿', '⌐', '¬',
-    '½', '¼', '¡', '«', '»', '░', '▒', '▓', '│', '┤', 'Á', 'Â', 'À', '©', '╣', '║', '╗', '╝', '¢',
-    '¥', '┐', '└', '┴', '┬', '├', '─', '┼', 'ã', 'Ã', '╚', '╔', '╩', '╦', '╠', '═', '╬', '¤', 'ð',
-    'Ð', 'Ê', 'Ë', 'È', 'ı', 'Í', 'Î', 'Ï', '┘', '┌', '█', '▄', '¦', 'Ì', '▀', 'Ó', 'ß', 'Ô', 'Ò',
-    'õ', 'Õ', 'µ', 'þ', 'Þ', 'Ú', 'Û', 'Ù', 'ý', 'Ý', '¯', '´', '≡', '±', '‗', '¾', '¶', '§', '÷',
-    '¸', '°', '¨', '·', '¹', '³', '²', '■', ' ',
+    '½', '¼', '¡', '«', '»', '░', '▒', '▓', '│', '┤', '╡', '╢', '╖', '╕', '╣', '║', '╗', '╝', '╜',
+    '╛', '┐', '└', '┴', '┬', '├', '─', '┼', '╞', '╟', '╚', '╔', '╩', '╦', '╠', '═', '╬', '╧', '╨',
+    '╤', '╥', '╙', '╘', '╒', '╓', '╫', '╪', '┘', '┌', '█', '▄', '▌', '▐', '▀', 'α', 'ß', 'Γ', 'π',
+    'Σ', 'σ', 'µ', 'τ', 'Φ', 'Θ', 'Ω', 'δ', '∞', 'φ', 'ε', '∩', '≡', '±', '≥', '≤', '⌠', '⌡', '÷',
+    '≈', '°', '∙', '·', '√', 'ⁿ', '²', '■', ' ',
 ];
 
 #[cfg(test)]
@@ -476,13 +936,102 @@ mod tests {
     fn text_lines_plain_keeps_utf8_chars() {
         let input = "caf\u{00e9}\n\u{4f60}\u{597d}".as_bytes();
         let lines = text_lines(input, LineFeedMode::UnixLf, &[], EncodingMode::Plain);
-        assert_eq!(lines, vec!["caf\u{00e9}".to_string(), "\u{4f60}\u{597d}".to_string()]);
+        assert_eq!(
+            lines,
+            vec!["caf\u{00e9}".to_string(), "\u{4f60}\u{597d}".to_string()]
+        );
     }
 
     #[test]
-    fn ansi_lines_plain_keeps_utf8_chars() {
+    fn ansi_screen_lines_plain_keeps_utf8_chars() {
         let input = "\u{00e9}cho".as_bytes();
-        let lines = ansi_lines(input, LineFeedMode::UnixLf, &[], EncodingMode::Plain);
-        assert_eq!(lines, vec!["\u{00e9}cho".to_string()]);
+        let lines = ansi_screen_lines(input, LineFeedMode::UnixLf, &[], EncodingMode::Plain);
+        let plain = lines.iter().map(AnsiLine::plain_text).collect::<Vec<_>>();
+        assert_eq!(plain, vec!["\u{00e9}cho".to_string()]);
+    }
+
+    #[test]
+    fn detect_mode_prefers_esc_bracket_over_binary_heuristic() {
+        let input = b"\x1b[2J\x1b[31mANSI\x1b[0m\x00\x01\x02\x03";
+        assert_eq!(detect_mode(Path::new("art.dat"), input), ViewMode::Ansi);
+    }
+
+    #[test]
+    fn ansi_screen_lines_applies_cursor_positioning() {
+        let input = b"A\x1b[2;4HB";
+        let lines = ansi_screen_lines(input, LineFeedMode::UnixLf, &[], EncodingMode::Plain);
+        let plain = lines.iter().map(AnsiLine::plain_text).collect::<Vec<_>>();
+        assert_eq!(plain, vec!["A".to_string(), "   B".to_string()]);
+    }
+
+    #[test]
+    fn ansi_screen_lines_keeps_sgr_style() {
+        let input = b"\x1b[31mR\x1b[0mW";
+        let lines = ansi_screen_lines(input, LineFeedMode::UnixLf, &[], EncodingMode::Plain);
+        assert_eq!(lines[0].cells[0].ch, 'R');
+        assert_eq!(lines[0].cells[0].style.fg, Color::Red);
+        assert_eq!(lines[0].cells[1].ch, 'W');
+        assert_eq!(lines[0].cells[1].style.fg, Color::White);
+    }
+
+    #[test]
+    fn ansi_screen_lines_maps_bold_to_bright_foreground() {
+        let input = b"\x1b[1;31mR";
+        let lines = ansi_screen_lines(input, LineFeedMode::UnixLf, &[], EncodingMode::Plain);
+        assert_eq!(lines[0].cells[0].style.fg, Color::LightRed);
+    }
+
+    #[test]
+    fn ansi_screen_lines_decodes_cp437_box_drawing() {
+        let input = b"\xC9\xCD\xBB\xCC\xD0\xDD\xDE";
+        let lines = ansi_screen_lines(input, LineFeedMode::UnixLf, &[], EncodingMode::Cp437);
+        let plain = lines.iter().map(AnsiLine::plain_text).collect::<Vec<_>>();
+        assert_eq!(
+            plain,
+            vec!["\u{2554}\u{2550}\u{2557}\u{2560}\u{2568}\u{258c}\u{2590}".to_string()]
+        );
+    }
+
+    #[test]
+    fn ansi_screen_lines_ignores_nonprinting_control_bytes() {
+        let input = b"A\x00\x14\x16B";
+        let lines = ansi_screen_lines(input, LineFeedMode::UnixLf, &[], EncodingMode::Cp437);
+        let plain = lines.iter().map(AnsiLine::plain_text).collect::<Vec<_>>();
+        assert_eq!(plain, vec!["AB".to_string()]);
+    }
+
+    #[test]
+    fn ansi_screen_lines_skips_dcs_payload() {
+        let input = b"A\x1bPq~sixeldummy\x1b\\B";
+        let lines = ansi_screen_lines(input, LineFeedMode::UnixLf, &[], EncodingMode::Plain);
+        let plain = lines.iter().map(AnsiLine::plain_text).collect::<Vec<_>>();
+        assert_eq!(plain, vec!["AB".to_string()]);
+    }
+
+    #[test]
+    fn ansi_screen_lines_supports_insert_and_delete_char() {
+        let input = b"AC\x1b[2G\x1b[4hB\x1b[4l\x1b[2G\x1b[P";
+        let lines = ansi_screen_lines(input, LineFeedMode::UnixLf, &[], EncodingMode::Plain);
+        let plain = lines.iter().map(AnsiLine::plain_text).collect::<Vec<_>>();
+        assert_eq!(plain, vec!["AC".to_string()]);
+    }
+
+    #[test]
+    fn ansi_screen_lines_wraps_at_eighty_columns() {
+        let input = b"\x1b[1;80HAB";
+        let lines = ansi_screen_lines(input, LineFeedMode::UnixLf, &[], EncodingMode::Plain);
+        let plain = lines.iter().map(AnsiLine::plain_text).collect::<Vec<_>>();
+        assert_eq!(plain, vec![format!("{}A", " ".repeat(79)), "B".to_string()]);
+    }
+
+    #[test]
+    fn ansi_screen_lines_scrolls_when_wrapping_from_bottom_row() {
+        let input = b"\x1b[1;1HTOP\x1b[25;80HAB";
+        let lines = ansi_screen_lines(input, LineFeedMode::UnixLf, &[], EncodingMode::Plain);
+        let plain = lines.iter().map(AnsiLine::plain_text).collect::<Vec<_>>();
+        assert_eq!(plain.len(), ANSI_SCREEN_ROWS);
+        assert_eq!(plain[0], "");
+        assert_eq!(plain[23], format!("{}A", " ".repeat(79)));
+        assert_eq!(plain[24], "B");
     }
 }

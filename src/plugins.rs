@@ -642,7 +642,10 @@ pub fn list_store_plugins_with_info(
                 .map(|mime| mime.to_ascii_lowercase())
                 .collect(),
             wait_for_key_after_exit: app.wait_for_key_after_exit,
-            launch_args: app.args.as_ref().map(store_application_args_to_command_string),
+            launch_args: app
+                .args
+                .as_ref()
+                .map(store_application_args_to_command_string),
         }
     }));
     out.sort_by(|a, b| a.id.cmp(&b.id));
@@ -1434,21 +1437,19 @@ pub fn store_application_launch_args_for_command(command: &str) -> Option<Option
         .and_then(|name| name.to_str())
         .unwrap_or(program.as_str());
 
-    load_store_applications()
-        .ok()
-        .and_then(|apps| {
-            apps.into_iter().find_map(|app| {
-                let bin_name = Path::new(&app.bin)
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or(app.bin.as_str());
-                if app.bin == program || bin_name == program_name {
-                    Some(app.launch_args)
-                } else {
-                    None
-                }
-            })
+    load_store_applications().ok().and_then(|apps| {
+        apps.into_iter().find_map(|app| {
+            let bin_name = Path::new(&app.bin)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or(app.bin.as_str());
+            if app.bin == program || bin_name == program_name {
+                Some(app.launch_args)
+            } else {
+                None
+            }
         })
+    })
 }
 
 fn first_command_token(command: &str) -> Option<String> {
@@ -1990,7 +1991,6 @@ fn ensure_plugins_dir() -> Result<PathBuf> {
 }
 
 fn install_bundled_plugins(plugins_dir: &Path) -> Result<()> {
-
     let pdf_dir = plugins_dir.join("pdf_file");
     fs::create_dir_all(&pdf_dir)?;
     write_bundled_file(&pdf_dir.join("plugin.lua"), BUNDLED_PDF_FILE_PLUGIN)?;
@@ -3367,8 +3367,8 @@ mod tests {
 
         let (items, info) = list_store_plugins_with_info(&index_path).expect("read index");
         assert_eq!(info.plugins_count, Some(1));
-                assert_eq!(info.applications_count, Some(2));
-                assert_eq!(items.len(), 3);
+        assert_eq!(info.applications_count, Some(2));
+        assert_eq!(items.len(), 3);
 
         let app = items.iter().find(|item| item.id == "bat").expect("bat app");
         assert!(matches!(app.item_kind, StoreItemKind::Application));

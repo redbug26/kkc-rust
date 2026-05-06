@@ -67,8 +67,9 @@ fn extract_archive_with_unarc(path: &Path, temp_root: &Path) -> Result<()> {
         }
 
         if out_path.is_dir() {
-            fs::remove_dir_all(&out_path)
-                .with_context(|| format!("Removing conflicting directory {}", out_path.display()))?;
+            fs::remove_dir_all(&out_path).with_context(|| {
+                format!("Removing conflicting directory {}", out_path.display())
+            })?;
         }
 
         let data = archive
