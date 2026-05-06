@@ -7,7 +7,7 @@ use abi_stable::{
 };
 
 pub const KKC_REMOTE_PLUGIN_API_VERSION: u32 = 3;
-pub const KKC_VIEWER_PLUGIN_API_VERSION: u32 = 1;
+pub const KKC_VIEWER_PLUGIN_API_VERSION: u32 = 2;
 
 pub type RemotePluginResult<T> = RResult<T, RString>;
 pub type ViewerPluginResult<T> = RResult<T, RString>;
@@ -85,6 +85,30 @@ pub struct ViewerHandleKeyResult {
     pub state_json: RString,
 }
 
+/// Image data for viewer plugins (PNG or RGB raw bytes, base64 encoded)
+#[repr(C)]
+#[derive(Debug, Clone, StableAbi)]
+pub struct ViewerImage {
+    /// Base64-encoded PNG or raw RGB data
+    pub data: RString,
+    /// Format: "png" or "rgb"
+    pub format: RString,
+    /// Image width in pixels
+    pub width: u32,
+    /// Image height in pixels
+    pub height: u32,
+}
+
+/// Result from render_document_image: image + optional text overlay lines
+#[repr(C)]
+#[derive(Debug, Clone, StableAbi)]
+pub struct ViewerDocumentImage {
+    /// The rendered image
+    pub image: ViewerImage,
+    /// Optional text lines to overlay/show below the image
+    pub overlay_lines: RVec<ViewerLine>,
+}
+
 #[repr(C)]
 #[derive(Debug, Clone, StableAbi)]
 pub struct RemoteEntry {
@@ -153,6 +177,13 @@ pub struct ViewerPluginMod {
         state_json: RStr<'_>,
         width: u64,
     ) -> ViewerPluginResult<RVec<ViewerLine>>,
+    pub render_document_image: extern "C" fn(
+        path: RStr<'_>,
+        mode: RStr<'_>,
+        state_json: RStr<'_>,
+        width: u64,
+        height: u64,
+    ) -> ViewerPluginResult<ViewerDocumentImage>,
     #[sabi(last_prefix_field)]
     pub handle_key: extern "C" fn(
         path: RStr<'_>,

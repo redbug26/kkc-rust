@@ -82,7 +82,8 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
         "startup: App::new completed in {:.3} ms",
         app_new_start.elapsed().as_secs_f64() * 1000.0
     ));
-    let mut last_kitty_image: Option<(PathBuf, ratatui::layout::Rect, bool)> = None;
+    let mut last_kitty_image: Option<(PathBuf, ratatui::layout::Rect, bool, Option<String>)> =
+        None;
     let mut first_draw_logged = false;
     let mut startup_ready_logged = false;
     let mut last_user_activity = Instant::now();
@@ -148,14 +149,28 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
         let next_kitty_image = if viewer::kitty_graphics_supported() {
             match &app.mode {
                 AppMode::Viewer(v) | AppMode::ViewerSearching(v) | AppMode::ViewerMenu(v, _) => {
-                    ui::kitty_image_area(v, term_area).map(|rect| (v.path.clone(), rect, v.zoomed))
+                    ui::kitty_image_area(v, term_area).map(|rect| {
+                        (
+                            v.path.clone(),
+                            rect,
+                            v.zoomed,
+                            v.plugin_state.get("page").cloned(),
+                        )
+                    })
                 }
                 AppMode::Browse => {
                     // Quick-preview: only render image when no modal overlay is shown
                     if viewer::embedded_graphics_supported() {
                         app.quick_preview.as_ref().and_then(|v| {
                             ui::kitty_image_area_quick_preview(&app, term_area)
-                                .map(|rect| (v.path.clone(), rect, v.zoomed))
+                                .map(|rect| {
+                                    (
+                                        v.path.clone(),
+                                        rect,
+                                        v.zoomed,
+                                        v.plugin_state.get("page").cloned(),
+                                    )
+                                })
                         })
                     } else {
                         None
@@ -179,7 +194,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
             && next_kitty_image != last_kitty_image
             && last_kitty_image.is_some()
         {
-            let last_rect = last_kitty_image.as_ref().map(|(_, rect, _)| *rect);
+            let last_rect = last_kitty_image.as_ref().map(|(_, rect, _, _)| *rect);
             viewer::clear_kitty_images(terminal.backend_mut(), last_rect)?;
         }
 
@@ -214,10 +229,10 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
         // flash. Leaving image mode entirely is still handled in pre-draw.
         if next_kitty_image != last_kitty_image {
             if next_kitty_image.is_some() && last_kitty_image.is_some() {
-                let last_rect = last_kitty_image.as_ref().map(|(_, rect, _)| *rect);
+                let last_rect = last_kitty_image.as_ref().map(|(_, rect, _, _)| *rect);
                 viewer::clear_kitty_images(terminal.backend_mut(), last_rect)?;
             }
-            if let Some((path, rect, _)) = &next_kitty_image {
+            if let Some((path, rect, _, _)) = &next_kitty_image {
                 if viewer::kitty_graphics_supported() {
                     // Find the viewer to render (full viewer or quick_preview)
                     let v_opt: Option<&viewer::Viewer> = match &app.mode {

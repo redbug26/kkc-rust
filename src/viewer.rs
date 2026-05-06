@@ -467,10 +467,18 @@ impl Viewer {
     }
 
     pub fn set_viewer_plugin(&mut self, plugin_name: String) {
-        self.mode = ViewMode::Text;
+        let mode = if crate::plugins::viewer_plugin_supports_mode(&plugin_name, "image") {
+            ViewMode::Image
+        } else {
+            ViewMode::Text
+        };
+        self.mode = mode;
         self.viewer_plugin = Some(plugin_name);
         self.plugin_state = HashMap::new();
-        self.ensure_mode_decoded(ViewMode::Text);
+        self.ensure_mode_decoded(mode);
+        if matches!(mode, ViewMode::Image) {
+            self.zoomed = true;
+        }
         self.scroll = 0;
         self.hscroll = 0;
         self.rebuild_matches();
@@ -1562,6 +1570,26 @@ impl Viewer {
     fn ensure_plugin_document_cache(&self, width: usize) -> Option<()> {
         let mode = self.viewer_mode_key()?;
         let plugin_name = self.viewer_plugin.as_deref()?;
+
+        let lines = if mode == "image" {
+            let image = crate::plugins::render_viewer_document_image(
+                &self.path,
+                plugin_name,
+                &self.plugin_state,
+                width,
+                self.cached_plugin_document_height(),
+            )?;
+            image.overlay_lines
+        } else {
+            crate::plugins::render_viewer_document(
+                &self.path,
+                mode,
+                plugin_name,
+                &self.plugin_state,
+                width,
+            )?
+        };
+
         let key = PluginDocumentCacheKey {
             plugin_name: plugin_name.to_string(),
             mode,
@@ -1574,21 +1602,21 @@ impl Viewer {
             }
         }
 
-        let lines = crate::plugins::render_viewer_document(
-            &self.path,
-            mode,
-            plugin_name,
-            &self.plugin_state,
-            width,
-        )?;
         *self.plugin_document_cache.borrow_mut() = Some(PluginDocumentCache { key, lines });
         Some(())
+    }
+
+    fn cached_plugin_document_height(&self) -> usize {
+        terminal_size()
+            .map(|(_, rows)| rows.saturating_sub(4).max(1) as usize)
+            .unwrap_or(40)
     }
 
     fn viewer_mode_key(&self) -> Option<&'static str> {
         match self.mode {
             ViewMode::Text => Some("text"),
             ViewMode::Ansi => Some("ansi"),
+            ViewMode::Image => Some("image"),
             _ => None,
         }
     }
@@ -1891,43 +1919,73 @@ pub fn render_kitty_image<W: Write>(out: &mut W, viewer: &Viewer, area: Rect) ->
         return Ok(());
     }
 
+    // Plugin-provided image path (used by PDF plugin).
+    if let Some(plugin_name) = viewer.viewer_plugin.as_deref() {
+        if crate::plugins::viewer_plugin_supports_mode(plugin_name, "image") {
+            if let Some(rendered) = crate::plugins::render_viewer_document_image(
+                &viewer.path,
+                plugin_name,
+                &viewer.plugin_state,
+                area.width as usize,
+                area.height as usize,
+            ) {
+                let fit = fit_image_to_area(area, Some(rendered.width), Some(rendered.height));
+                queue!(out, MoveTo(fit.x, fit.y))?;
+
+                let png_payload = if rendered.format.eq_ignore_ascii_case("png") {
+                    Some(rendered.data)
+                } else if rendered.format.eq_ignore_ascii_case("rgb") {
+                    let rgb = image::RgbImage::from_raw(rendered.width, rendered.height, rendered.data);
+                    rgb.and_then(|rgb_img| {
+                        let dyn_img = image::DynamicImage::ImageRgb8(rgb_img);
+                        let mut out = Cursor::new(Vec::new());
+                        dyn_img.write_to(&mut out, ImageFormat::Png).ok()?;
+                        Some(out.into_inner())
+                    })
+                } else {
+                    None
+                };
+
+                if let Some(payload) = png_payload {
+                    return render_terminal_png(out, &payload, fit);
+                }
+            }
+        }
+    }
+
+    // Native image-file path (png/jpg/gif/etc on disk).
     let Some(image) = viewer.image_info() else {
         return Ok(());
     };
     let fit = fit_image_to_area(area, image.width, image.height);
     queue!(out, MoveTo(fit.x, fit.y))?;
 
-    if iterm2_supported() {
-        // iTerm2 Inline Images Protocol
-        let payload = base64::encode(&viewer.raw);
-        write!(
-            out,
-            "\x1b]1337;File=inline=1;width={}chars;height={}chars;preserveAspectRatio=0:{}\x07",
-            fit.width, fit.height, payload,
-        )?;
-        out.flush()?;
-
-        // log to debug via crate::viewer::debug_log so it doesn't interfere with the terminal output and can be enabled when needed.
-        crate::viewer::debug_log(&format!(
-            "Rendered image with iTerm2 protocol: original=({:?}x{:?}), fitted=({}x{}), area=({}x{})",
-            image.width, image.height, fit.width, fit.height, area.width, area.height
-        ));
-
-        return Ok(());
-    }
-
-    // Kitty graphics protocol
-    const RAW_CHUNK_LEN: usize = 3072;
     let payload = image
         .kitty_png
         .get_or_init(|| build_kitty_png_payload(&viewer.raw, image.format).ok());
     let Some(payload) = payload.as_ref() else {
         return Ok(());
     };
+    render_terminal_png(out, payload, fit)
+}
+
+fn render_terminal_png<W: Write>(out: &mut W, payload: &[u8], fit: Rect) -> Result<()> {
+    if iterm2_supported() {
+        let encoded = base64::encode(payload);
+        write!(
+            out,
+            "\x1b]1337;File=inline=1;width={}chars;height={}chars;preserveAspectRatio=0:{}\x07",
+            fit.width, fit.height, encoded,
+        )?;
+        out.flush()?;
+        return Ok(());
+    }
+
+    const RAW_CHUNK_LEN: usize = 3072;
     let mut chunks = payload.chunks(RAW_CHUNK_LEN).peekable();
     let mut first = true;
     while let Some(chunk) = chunks.next() {
-        let payload = base64::encode(chunk);
+        let encoded = base64::encode(chunk);
         if first {
             write!(
                 out,
@@ -1935,7 +1993,7 @@ pub fn render_kitty_image<W: Write>(out: &mut W, viewer: &Viewer, area: Rect) ->
                 fit.width,
                 fit.height,
                 usize::from(chunks.peek().is_some()),
-                payload,
+                encoded,
             )?;
             first = false;
         } else {
@@ -1943,7 +2001,7 @@ pub fn render_kitty_image<W: Write>(out: &mut W, viewer: &Viewer, area: Rect) ->
                 out,
                 "\x1b_Gq=2,m={};{}\x1b\\",
                 usize::from(chunks.peek().is_some()),
-                payload,
+                encoded,
             )?;
         }
     }

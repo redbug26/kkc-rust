@@ -251,6 +251,15 @@ pub struct ViewerSpan {
     pub bold: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct ViewerRenderedImage {
+    pub data: Vec<u8>,
+    pub format: String,
+    pub width: u32,
+    pub height: u32,
+    pub overlay_lines: Vec<Vec<ViewerSpan>>,
+}
+
 pub fn initialize() -> Result<()> {
     if PLUGINS.get().is_some() {
         crate::viewer::debug_log("startup: plugin registry already initialized");
@@ -500,6 +509,23 @@ pub fn render_viewer_document(
     })
 }
 
+pub fn render_viewer_document_image(
+    path: &Path,
+    plugin_name: &str,
+    state: &HashMap<String, String>,
+    width: usize,
+    height: usize,
+) -> Option<ViewerRenderedImage> {
+    PLUGINS.get().and_then(|registry| {
+        registry
+            .read()
+            .ok()?
+            .render_viewer_document_image(path, plugin_name, state, width, height)
+            .ok()
+            .flatten()
+    })
+}
+
 pub fn handle_viewer_key(
     path: &Path,
     mode: &str,
@@ -537,6 +563,14 @@ pub fn default_viewer_plugin_for_path(path: &Path) -> Option<String> {
             .default_viewer_plugin_for_path(path)
             .map(str::to_string)
     })
+}
+
+pub fn viewer_plugin_supports_mode(plugin_name: &str, mode: &str) -> bool {
+    PLUGINS
+        .get()
+        .and_then(|registry| registry.read().ok())
+        .map(|registry| registry.viewer_plugin_supports_mode(plugin_name, mode))
+        .unwrap_or(false)
 }
 
 pub fn viewer_plugins_for_path(path: &Path) -> Vec<String> {
@@ -2770,6 +2804,16 @@ impl PluginRegistry {
             })
     }
 
+    fn viewer_plugin_supports_mode(&self, plugin_name: &str, mode: &str) -> bool {
+        self.viewer_plugins
+            .iter()
+            .any(|plugin| plugin.name == plugin_name && plugin.supports_mode(mode))
+            || self
+                .viewer_rust_plugins
+                .iter()
+                .any(|plugin| plugin.name == plugin_name && plugin.supports_mode(mode))
+    }
+
     fn supports_archive(&self, path: &Path) -> bool {
         let mime_type = path_mime_type(path);
         self.archive_plugins
@@ -2882,6 +2926,66 @@ impl PluginRegistry {
                 })
                 .collect::<Vec<_>>(),
         ))
+    }
+
+    fn render_viewer_document_image(
+        &self,
+        path: &Path,
+        plugin_name: &str,
+        state: &HashMap<String, String>,
+        width: usize,
+        height: usize,
+    ) -> Result<Option<ViewerRenderedImage>> {
+        let Some(plugin) = self
+            .viewer_rust_plugins
+            .iter()
+            .find(|plugin| plugin.name == plugin_name && plugin.supports_mode("image"))
+        else {
+            return Ok(None);
+        };
+
+        let module = crate::viewer_plugins::load_viewer_plugin(&plugin.id)?;
+        let state_json = serde_json::to_string(state)?;
+        let rendered = module.render_document_image()(
+            path.to_string_lossy().as_ref().into(),
+            "image".into(),
+            state_json.as_str().into(),
+            width as u64,
+            height as u64,
+        )
+        .into_result()
+        .map_err(|err| anyhow!(err.to_string()))?;
+
+        let image_data = base64::decode(rendered.image.data.as_str())
+            .map_err(|err| anyhow!("invalid base64 image payload from plugin: {err}"))?;
+
+        let overlay_lines = rendered
+            .overlay_lines
+            .into_iter()
+            .map(|line| {
+                line.spans
+                    .into_iter()
+                    .map(|span| ViewerSpan {
+                        text: span.text.to_string(),
+                        fg: span.fg.to_string(),
+                        bg: if span.bg.is_empty() {
+                            None
+                        } else {
+                            Some(span.bg.to_string())
+                        },
+                        bold: span.bold,
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+
+        Ok(Some(ViewerRenderedImage {
+            data: image_data,
+            format: rendered.image.format.to_string(),
+            width: rendered.image.width,
+            height: rendered.image.height,
+            overlay_lines,
+        }))
     }
 
     fn handle_viewer_key(
