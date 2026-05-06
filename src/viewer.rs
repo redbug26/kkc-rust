@@ -1727,10 +1727,20 @@ pub fn iterm2_supported() -> bool {
     )
 }
 
-pub fn clear_kitty_images<W: Write>(out: &mut W, _area: Option<Rect>) -> Result<()> {
+pub fn embedded_graphics_supported() -> bool {
+    kitty_graphics_supported()
+}
+
+pub fn clear_kitty_images<W: Write>(out: &mut W, area: Option<Rect>) -> Result<()> {
     if iterm2_supported() {
-        // For iTerm2 we don't write anything here; the caller must invalidate
-        // ratatui's buffers (terminal.resize) so the next draw overwrites the image.
+        // iTerm2 inline images can be cleared by overwriting the occupied cells.
+        if let Some(area) = area {
+            for y in area.y..area.y.saturating_add(area.height) {
+                queue!(out, MoveTo(area.x, y))?;
+                write!(out, "{}", " ".repeat(area.width as usize))?;
+            }
+            out.flush()?;
+        }
         return Ok(());
     }
     write!(out, "\x1b_Ga=d,d=A\x1b\\")?;

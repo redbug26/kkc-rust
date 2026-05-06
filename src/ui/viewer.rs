@@ -297,7 +297,13 @@ pub(super) fn render_viewer(
         inner,
     );
 
-    if v.is_image_mode() && crate::viewer::kitty_graphics_supported() {
+    let use_graphics_protocol = if quick_preview_label.is_some() {
+        crate::viewer::embedded_graphics_supported()
+    } else {
+        crate::viewer::kitty_graphics_supported()
+    };
+
+    if v.is_image_mode() && use_graphics_protocol {
         let mut lines = vec![Line::from(Span::styled(
             "Image preview",
             Style::default()

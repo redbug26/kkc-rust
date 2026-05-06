@@ -151,26 +151,26 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
                 }
                 _ => {
                     // Quick-preview: use the inactive panel area
-                    app.quick_preview.as_ref().and_then(|v| {
-                        ui::kitty_image_area_quick_preview(&app, term_area)
-                            .map(|rect| (v.path.clone(), rect, v.zoomed))
-                    })
+                    if viewer::embedded_graphics_supported() {
+                        app.quick_preview.as_ref().and_then(|v| {
+                            ui::kitty_image_area_quick_preview(&app, term_area)
+                                .map(|rect| (v.path.clone(), rect, v.zoomed))
+                        })
+                    } else {
+                        None
+                    }
                 }
             }
         } else {
             None
         };
 
-        // PRE-DRAW: clear old image when transitioning away from it.
-        // Must happen before terminal.draw() so the TUI can paint over the cleared area.
-        if next_kitty_image != last_kitty_image && last_kitty_image.is_some() {
+        // PRE-DRAW: clear the old image only when leaving image rendering entirely.
+        // For image-to-image transitions, the Kitty renderer reuses the same image
+        // id and replacing it in post-draw avoids a one-frame black flash.
+        if next_kitty_image.is_none() && next_kitty_image != last_kitty_image && last_kitty_image.is_some() {
             let last_rect = last_kitty_image.as_ref().map(|(_, rect, _)| *rect);
             viewer::clear_kitty_images(terminal.backend_mut(), last_rect)?;
-            // For iTerm2: invalidate ratatui's internal buffers so the next draw
-            // repaints every cell, overwriting the image — without flashing the screen.
-            if viewer::iterm2_supported() {
-                terminal.resize(term_area)?;
-            }
         }
 
         let draw_start = Instant::now();
@@ -199,8 +199,14 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
             }
         }
 
-        // POST-DRAW: render the new image on top of the freshly drawn TUI.
+        // POST-DRAW: for image-to-image transitions, clear the previous Kitty
+        // image here so the new one can replace it without a pre-draw black
+        // flash. Leaving image mode entirely is still handled in pre-draw.
         if next_kitty_image != last_kitty_image {
+            if next_kitty_image.is_some() && last_kitty_image.is_some() {
+                let last_rect = last_kitty_image.as_ref().map(|(_, rect, _)| *rect);
+                viewer::clear_kitty_images(terminal.backend_mut(), last_rect)?;
+            }
             if let Some((path, rect, _)) = &next_kitty_image {
                 if viewer::kitty_graphics_supported() {
                     // Find the viewer to render (full viewer or quick_preview)
