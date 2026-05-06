@@ -7,8 +7,10 @@ use abi_stable::{
 };
 
 pub const KKC_REMOTE_PLUGIN_API_VERSION: u32 = 3;
+pub const KKC_VIEWER_PLUGIN_API_VERSION: u32 = 1;
 
 pub type RemotePluginResult<T> = RResult<T, RString>;
+pub type ViewerPluginResult<T> = RResult<T, RString>;
 
 #[repr(C)]
 #[derive(Debug, Clone, StableAbi)]
@@ -47,6 +49,40 @@ pub struct RemotePluginMetadata {
     pub description: RString,
     pub scheme: RString,
     pub fields: RVec<RemoteConfigField>,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, StableAbi)]
+pub struct ViewerPluginMetadata {
+    pub id: RString,
+    pub name: RString,
+    pub version: RString,
+    pub description: RString,
+    pub modes: RVec<RString>,
+    pub mime_types: RVec<RString>,
+    pub extensions: RVec<RString>,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, StableAbi)]
+pub struct ViewerSpan {
+    pub text: RString,
+    pub fg: RString,
+    pub bg: RString,
+    pub bold: bool,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, StableAbi)]
+pub struct ViewerLine {
+    pub spans: RVec<ViewerSpan>,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, StableAbi)]
+pub struct ViewerHandleKeyResult {
+    pub consumed: bool,
+    pub state_json: RString,
 }
 
 #[repr(C)]
@@ -104,9 +140,38 @@ pub struct RemotePluginMod {
     ) -> RemotePluginResult<RString>,
 }
 
+#[repr(C)]
+#[derive(StableAbi)]
+#[sabi(kind(Prefix(prefix_ref = ViewerPluginModRef)))]
+#[sabi(missing_field(panic))]
+pub struct ViewerPluginMod {
+    pub api_version: extern "C" fn() -> u32,
+    pub metadata: extern "C" fn() -> ViewerPluginMetadata,
+    pub render_document: extern "C" fn(
+        path: RStr<'_>,
+        mode: RStr<'_>,
+        state_json: RStr<'_>,
+        width: u64,
+    ) -> ViewerPluginResult<RVec<ViewerLine>>,
+    #[sabi(last_prefix_field)]
+    pub handle_key: extern "C" fn(
+        path: RStr<'_>,
+        mode: RStr<'_>,
+        key: RStr<'_>,
+        state_json: RStr<'_>,
+    ) -> ViewerPluginResult<ViewerHandleKeyResult>,
+}
+
 impl RootModule for RemotePluginModRef {
     abi_stable::declare_root_module_statics! {RemotePluginModRef}
     const BASE_NAME: &'static str = "kkc_remote_plugin";
     const NAME: &'static str = "kkc_remote_plugin";
+    const VERSION_STRINGS: VersionStrings = package_version_strings!();
+}
+
+impl RootModule for ViewerPluginModRef {
+    abi_stable::declare_root_module_statics! {ViewerPluginModRef}
+    const BASE_NAME: &'static str = "kkc_viewer_plugin";
+    const NAME: &'static str = "kkc_viewer_plugin";
     const VERSION_STRINGS: VersionStrings = package_version_strings!();
 }

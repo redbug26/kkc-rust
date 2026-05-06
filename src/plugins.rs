@@ -159,6 +159,7 @@ struct StoreIndexSource {
 pub struct PluginRegistry {
     archive_plugins: Vec<ArchivePlugin>,
     viewer_plugins: Vec<ViewerPlugin>,
+    viewer_rust_plugins: Vec<crate::viewer_plugins::ViewerRustPluginInfo>,
     action_plugins: Vec<ActionPlugin>,
     remote_rust_plugins: Vec<crate::remote_plugins::RemoteRustPluginInfo>,
 }
@@ -345,6 +346,28 @@ pub fn plugin_infos() -> Vec<PluginInfo> {
                 dir: manifest.dir,
             });
         }
+
+        let existing_viewer_rust_dirs = plugins
+            .iter()
+            .filter(|item| item.kind == "Viewer Rust")
+            .map(|item| item.dir.clone())
+            .collect::<std::collections::HashSet<_>>();
+
+        for manifest in crate::viewer_plugins::discover_viewer_rust_plugin_manifests(&plugins_dir)
+            .unwrap_or_default()
+        {
+            if existing_viewer_rust_dirs.contains(&manifest.dir) {
+                continue;
+            }
+            plugins.push(PluginInfo {
+                name: manifest.name,
+                version: manifest.version,
+                kind: "Viewer Rust".into(),
+                description: format!("{} (library not loaded)", manifest.description),
+                extensions: vec![manifest.id.clone()],
+                dir: manifest.dir,
+            });
+        }
     }
 
     plugins
@@ -382,6 +405,10 @@ pub fn installed_plugin_versions_by_dir() -> HashMap<String, String> {
                 continue;
             }
             if let Some(version) = remote_rust_manifest_version(&path) {
+                out.insert(dir_name, version);
+                continue;
+            }
+            if let Some(version) = viewer_rust_manifest_version(&path) {
                 out.insert(dir_name, version);
             }
         }
@@ -523,6 +550,12 @@ pub fn viewer_plugins_for_path(path: &Path) -> Vec<String> {
                 .iter()
                 .filter(|p| p.supports_path(path, mime_type.as_deref()))
                 .map(|p| p.name.clone())
+                .chain(
+                    reg.viewer_rust_plugins
+                        .iter()
+                        .filter(|p| p.supports_path(path, mime_type.as_deref()))
+                        .map(|p| p.name.clone()),
+                )
                 .collect::<Vec<_>>();
             Some(names)
         })
@@ -843,10 +876,10 @@ fn install_plugin_from_store_descriptor(
         }
     }
 
-    if !temp_dir.join("plugin.lua").is_file() && !is_remote_rust_plugin_dir(&temp_dir)? {
+    if !temp_dir.join("plugin.lua").is_file() && !is_native_rust_plugin_dir(&temp_dir)? {
         let _ = fs::remove_dir_all(&temp_dir);
         bail!(
-            "Installed store plugin '{}' does not contain plugin.lua or a valid remote-rust plugin.toml at its root",
+            "Installed store plugin '{}' does not contain plugin.lua or a valid native plugin.toml (remote-rust/viewer-rust) at its root",
             plugin_id
         );
     }
@@ -869,6 +902,12 @@ fn install_plugin_from_store_descriptor(
     if let Err(err) = crate::remote_plugins::debug_log_remote_plugin_library_status(&install_dir) {
         crate::viewer::debug_log(&format!(
             "remote-plugin-install: failed to inspect '{}': {err}",
+            install_dir.display()
+        ));
+    }
+    if let Err(err) = crate::viewer_plugins::debug_log_viewer_plugin_library_status(&install_dir) {
+        crate::viewer::debug_log(&format!(
+            "viewer-plugin-install: failed to inspect '{}': {err}",
             install_dir.display()
         ));
     }
@@ -1876,6 +1915,42 @@ fn load_plugins() -> Result<PluginRegistry> {
     let mut archive_plugins = Vec::new();
     let mut viewer_plugins = Vec::new();
     let mut action_plugins = Vec::new();
+    let viewer_rust_manifests = crate::viewer_plugins::discover_viewer_rust_plugin_manifests(
+        &plugins_dir,
+    )
+    .unwrap_or_else(|err| {
+        crate::viewer::debug_log(&format!(
+            "startup: native viewer plugin manifest discovery failed: {err}"
+        ));
+        Vec::new()
+    });
+    let mut viewer_rust_plugins = crate::viewer_plugins::discover_viewer_rust_plugins(&plugins_dir)
+        .unwrap_or_else(|err| {
+            crate::viewer::debug_log(&format!(
+                "startup: native viewer plugin discovery failed: {err}"
+            ));
+            Vec::new()
+        });
+    let loaded_viewers_by_id = viewer_rust_plugins
+        .iter()
+        .map(|plugin| plugin.id.clone())
+        .collect::<std::collections::HashSet<_>>();
+    for manifest in viewer_rust_manifests {
+        if loaded_viewers_by_id.contains(&manifest.id) {
+            continue;
+        }
+        viewer_rust_plugins.push(crate::viewer_plugins::ViewerRustPluginInfo {
+            id: manifest.id,
+            name: manifest.name,
+            version: manifest.version,
+            description: format!("{} (library not loaded)", manifest.description),
+            modes: vec!["text".to_string()],
+            mime_types: Vec::new(),
+            extensions: Vec::new(),
+            dir: manifest.dir,
+        });
+    }
+    viewer_rust_plugins.sort_by(|a, b| a.id.cmp(&b.id));
     let remote_rust_manifests = crate::remote_plugins::discover_remote_rust_plugin_manifests(
         &plugins_dir,
     )
@@ -1969,16 +2044,18 @@ fn load_plugins() -> Result<PluginRegistry> {
     }
 
     crate::viewer::debug_log(&format!(
-        "startup: load_plugins completed in {:.3} ms (archive={}, viewer={}, action={}, remote-rust={})",
+        "startup: load_plugins completed in {:.3} ms (archive={}, viewer={}, viewer-rust={}, action={}, remote-rust={})",
         load_start.elapsed().as_secs_f64() * 1000.0,
         archive_plugins.len(),
         viewer_plugins.len(),
+        viewer_rust_plugins.len(),
         action_plugins.len(),
         remote_rust_plugins.len()
     ));
     Ok(PluginRegistry {
         archive_plugins,
         viewer_plugins,
+        viewer_rust_plugins,
         action_plugins,
         remote_rust_plugins,
     })
@@ -2125,9 +2202,9 @@ fn extract_plugin_bundle(path: &Path, plugins_dir: &Path) -> Result<PathBuf> {
         let _ = fs::remove_dir_all(&temp_dir);
         bail!("Plugin bundle does not contain plugin.lua or plugin.toml at its root");
     }
-    if !has_plugin_lua && !is_remote_rust_plugin_dir(&temp_dir)? {
+    if !has_plugin_lua && !is_native_rust_plugin_dir(&temp_dir)? {
         let _ = fs::remove_dir_all(&temp_dir);
-        bail!("Plugin bundle contains plugin.toml but is not a valid remote-rust plugin");
+        bail!("Plugin bundle contains plugin.toml but is not a valid native plugin (remote-rust/viewer-rust)");
     }
 
     if install_dir.exists() {
@@ -2256,6 +2333,46 @@ fn is_remote_rust_plugin_dir(dir: &Path) -> Result<bool> {
     Ok(!remote.library.trim().is_empty())
 }
 
+fn is_viewer_rust_plugin_dir(dir: &Path) -> Result<bool> {
+    #[derive(Deserialize)]
+    struct Manifest {
+        plugin: ManifestPlugin,
+        viewer: Option<ManifestViewer>,
+    }
+    #[derive(Deserialize)]
+    struct ManifestPlugin {
+        #[serde(rename = "type")]
+        plugin_type: String,
+    }
+    #[derive(Deserialize)]
+    struct ManifestViewer {
+        library: String,
+    }
+
+    let manifest_path = dir.join("plugin.toml");
+    if !manifest_path.is_file() {
+        return Ok(false);
+    }
+    let text = fs::read_to_string(&manifest_path)
+        .with_context(|| format!("Reading {}", manifest_path.display()))?;
+    let manifest: Manifest =
+        toml::from_str(&text).with_context(|| format!("Parsing {}", manifest_path.display()))?;
+    if manifest.plugin.plugin_type != "viewer-rust" {
+        return Ok(false);
+    }
+    let Some(viewer) = manifest.viewer else {
+        bail!("viewer-rust plugin is missing [viewer]");
+    };
+    Ok(!viewer.library.trim().is_empty())
+}
+
+fn is_native_rust_plugin_dir(dir: &Path) -> Result<bool> {
+    if is_remote_rust_plugin_dir(dir)? {
+        return Ok(true);
+    }
+    is_viewer_rust_plugin_dir(dir)
+}
+
 fn remote_rust_manifest_version(dir: &Path) -> Option<String> {
     #[derive(Deserialize)]
     struct Manifest {
@@ -2272,6 +2389,31 @@ fn remote_rust_manifest_version(dir: &Path) -> Option<String> {
     let text = fs::read_to_string(&manifest_path).ok()?;
     let manifest: Manifest = toml::from_str(&text).ok()?;
     if manifest.plugin.plugin_type != "remote-rust" {
+        return None;
+    }
+    let version = manifest.plugin.version.trim();
+    if version.is_empty() {
+        return None;
+    }
+    Some(version.to_string())
+}
+
+fn viewer_rust_manifest_version(dir: &Path) -> Option<String> {
+    #[derive(Deserialize)]
+    struct Manifest {
+        plugin: ManifestPlugin,
+    }
+    #[derive(Deserialize)]
+    struct ManifestPlugin {
+        version: String,
+        #[serde(rename = "type")]
+        plugin_type: String,
+    }
+
+    let manifest_path = dir.join("plugin.toml");
+    let text = fs::read_to_string(&manifest_path).ok()?;
+    let manifest: Manifest = toml::from_str(&text).ok()?;
+    if manifest.plugin.plugin_type != "viewer-rust" {
         return None;
     }
     let version = manifest.plugin.version.trim();
@@ -2543,6 +2685,20 @@ impl PluginRegistry {
             },
             dir: plugin.plugin_dir.clone(),
         }));
+        plugins.extend(self.viewer_rust_plugins.iter().map(|plugin| PluginInfo {
+            name: plugin.name.clone(),
+            version: plugin.version.clone(),
+            kind: "Viewer Rust".into(),
+            description: plugin.description.clone(),
+            extensions: if !plugin.mime_types.is_empty() {
+                plugin.mime_types.clone()
+            } else if plugin.extensions.is_empty() {
+                plugin.modes.clone()
+            } else {
+                plugin.extensions.clone()
+            },
+            dir: plugin.dir.clone(),
+        }));
         plugins.extend(self.action_plugins.iter().map(|plugin| PluginInfo {
             name: plugin.name.clone(),
             version: plugin.version.clone(),
@@ -2563,7 +2719,8 @@ impl PluginRegistry {
     }
 
     fn viewer_plugin_infos(&self) -> Vec<PluginInfo> {
-        self.viewer_plugins
+        let mut plugins = self
+            .viewer_plugins
             .iter()
             .map(|plugin| PluginInfo {
                 name: plugin.name.clone(),
@@ -2579,7 +2736,22 @@ impl PluginRegistry {
                 },
                 dir: plugin.plugin_dir.clone(),
             })
-            .collect()
+            .collect::<Vec<_>>();
+        plugins.extend(self.viewer_rust_plugins.iter().map(|plugin| PluginInfo {
+            name: plugin.name.clone(),
+            version: plugin.version.clone(),
+            kind: "Viewer Rust".into(),
+            description: plugin.description.clone(),
+            extensions: if !plugin.mime_types.is_empty() {
+                plugin.mime_types.clone()
+            } else if plugin.extensions.is_empty() {
+                plugin.modes.clone()
+            } else {
+                plugin.extensions.clone()
+            },
+            dir: plugin.dir.clone(),
+        }));
+        plugins
     }
 
     fn default_viewer_plugin_for_path(&self, path: &Path) -> Option<&str> {
@@ -2588,6 +2760,12 @@ impl PluginRegistry {
             .iter()
             .find(|plugin| plugin.supports_path(path, mime_type.as_deref()))
             .map(|plugin| plugin.name.as_str())
+            .or_else(|| {
+                self.viewer_rust_plugins
+                    .iter()
+                    .find(|plugin| plugin.supports_path(path, mime_type.as_deref()))
+                    .map(|plugin| plugin.name.as_str())
+            })
     }
 
     fn supports_archive(&self, path: &Path) -> bool {
@@ -2655,14 +2833,53 @@ impl PluginRegistry {
         state: &HashMap<String, String>,
         width: usize,
     ) -> Result<Option<Vec<Vec<ViewerSpan>>>> {
-        let Some(plugin) = self
+        if let Some(plugin) = self
             .viewer_plugins
+            .iter()
+            .find(|plugin| plugin.name == plugin_name && plugin.supports_mode(mode))
+        {
+            return plugin.render_document(path, mode, state, width);
+        }
+
+        let Some(plugin) = self
+            .viewer_rust_plugins
             .iter()
             .find(|plugin| plugin.name == plugin_name && plugin.supports_mode(mode))
         else {
             return Ok(None);
         };
-        plugin.render_document(path, mode, state, width)
+
+        let module = crate::viewer_plugins::load_viewer_plugin(&plugin.id)?;
+        let state_json = serde_json::to_string(state)?;
+        let rendered = module.render_document()(
+            path.to_string_lossy().as_ref().into(),
+            mode.into(),
+            state_json.as_str().into(),
+            width as u64,
+        )
+        .into_result()
+        .map_err(|err| anyhow!(err.to_string()))?;
+
+        Ok(Some(
+            rendered
+                .into_iter()
+                .map(|line| {
+                    line.spans
+                        .into_iter()
+                        .map(|span| ViewerSpan {
+                            text: span.text.to_string(),
+                            fg: span.fg.to_string(),
+                            bg: if span.bg.is_empty() {
+                                None
+                            } else {
+                                Some(span.bg.to_string())
+                            },
+                            bold: span.bold,
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>(),
+        ))
     }
 
     fn handle_viewer_key(
@@ -2673,14 +2890,35 @@ impl PluginRegistry {
         key: &str,
         state: &HashMap<String, String>,
     ) -> Result<Option<(bool, HashMap<String, String>)>> {
-        let Some(plugin) = self
+        if let Some(plugin) = self
             .viewer_plugins
+            .iter()
+            .find(|plugin| plugin.name == plugin_name && plugin.supports_mode(mode))
+        {
+            return plugin.handle_key(path, mode, key, state);
+        }
+
+        let Some(plugin) = self
+            .viewer_rust_plugins
             .iter()
             .find(|plugin| plugin.name == plugin_name && plugin.supports_mode(mode))
         else {
             return Ok(None);
         };
-        plugin.handle_key(path, mode, key, state)
+
+        let module = crate::viewer_plugins::load_viewer_plugin(&plugin.id)?;
+        let state_json = serde_json::to_string(state)?;
+        let result = module.handle_key()(
+            path.to_string_lossy().as_ref().into(),
+            mode.into(),
+            key.into(),
+            state_json.as_str().into(),
+        )
+        .into_result()
+        .map_err(|err| anyhow!(err.to_string()))?;
+        let new_state: HashMap<String, String> =
+            serde_json::from_str(result.state_json.as_str()).unwrap_or_default();
+        Ok(Some((result.consumed, new_state)))
     }
 
     fn action_items(&self, cwd: &Path) -> Result<Vec<ActionItem>> {
@@ -2934,6 +3172,16 @@ impl ViewerPlugin {
         }
 
         Ok(None)
+    }
+}
+
+impl crate::viewer_plugins::ViewerRustPluginInfo {
+    fn supports_mode(&self, mode: &str) -> bool {
+        self.modes.iter().any(|candidate| candidate == mode)
+    }
+
+    fn supports_path(&self, path: &Path, mime_type: Option<&str>) -> bool {
+        supports_path_mime_or_legacy_ext(path, mime_type, &self.mime_types, &self.extensions)
     }
 }
 

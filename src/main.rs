@@ -21,6 +21,7 @@ mod terminal;
 mod tree_mode;
 mod ui;
 mod viewer;
+mod viewer_plugins;
 
 use anyhow::Result;
 use app::{App, AppMode};

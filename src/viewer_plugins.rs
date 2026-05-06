@@ -1,23 +1,25 @@
 use abi_stable::library::lib_header_from_path;
 use anyhow::{Context, Result, anyhow};
-use kkc_plugin_api::{KKC_REMOTE_PLUGIN_API_VERSION, RemotePluginModRef};
+use kkc_plugin_api::{KKC_VIEWER_PLUGIN_API_VERSION, ViewerPluginModRef};
 use serde::Deserialize;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
-pub struct RemoteRustPluginInfo {
+pub struct ViewerRustPluginInfo {
     pub id: String,
     pub name: String,
     pub version: String,
     pub description: String,
-    pub scheme: String,
+    pub modes: Vec<String>,
+    pub mime_types: Vec<String>,
+    pub extensions: Vec<String>,
     pub dir: PathBuf,
 }
 
 #[derive(Debug, Clone)]
-pub struct RemoteRustPluginManifestInfo {
+pub struct ViewerRustPluginManifestInfo {
     pub id: String,
     pub name: String,
     pub version: String,
@@ -28,7 +30,7 @@ pub struct RemoteRustPluginManifestInfo {
 #[derive(Debug, Deserialize)]
 struct NativePluginManifest {
     plugin: NativePluginMetadata,
-    remote: Option<NativeRemoteMetadata>,
+    viewer: Option<NativeViewerMetadata>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -42,69 +44,109 @@ struct NativePluginMetadata {
 }
 
 #[derive(Debug, Deserialize)]
-struct NativeRemoteMetadata {
+struct NativeViewerMetadata {
     library: String,
 }
 
-pub fn discover_remote_rust_plugins(plugins_dir: &Path) -> Result<Vec<RemoteRustPluginInfo>> {
-    let manifests = discover_remote_rust_plugin_manifests(plugins_dir)?;
+pub fn discover_viewer_rust_plugins(plugins_dir: &Path) -> Result<Vec<ViewerRustPluginInfo>> {
+    let manifests = discover_viewer_rust_plugin_manifests(plugins_dir)?;
     let mut plugins = Vec::new();
     for manifest_info in manifests {
         let manifest = read_manifest(&manifest_info.dir.join("plugin.toml"))?;
         let Some(library_path) =
-            resolve_remote_library_path(&manifest_info.dir, &manifest.remote.as_ref().expect("remote section").library)
+            resolve_viewer_library_path(&manifest_info.dir, &manifest.viewer.as_ref().expect("viewer section").library)
         else {
             crate::viewer::debug_log(&format!(
-                "startup: native remote plugin '{}' has no built library at {}",
+                "startup: native viewer plugin '{}' has no built library at {}",
                 manifest.plugin.id,
-                manifest_info.dir.join(&manifest.remote.as_ref().expect("remote section").library).display()
+                manifest_info.dir.join(&manifest.viewer.as_ref().expect("viewer section").library).display()
             ));
             continue;
         };
+
         crate::viewer::debug_log(&format!(
-            "startup: loading native remote plugin '{}' from {}",
+            "startup: loading native viewer plugin '{}' from {}",
             manifest.plugin.id,
             library_path.display()
         ));
-        // Use lib_header_from_path + init_root_module instead of load_from_file.
-        // load_from_file caches in a process-global static (one per RootModule type),
-        // so loading a second plugin of the same type would reuse the first one.
+
         let module = match lib_header_from_path(&library_path)
-            .and_then(|h| h.init_root_module::<RemotePluginModRef>())
+            .and_then(|h| h.init_root_module::<ViewerPluginModRef>())
         {
             Ok(module) => module,
             Err(err) => {
                 crate::viewer::debug_log(&format!(
-                    "startup: failed to load native remote plugin '{}': {err}",
+                    "startup: failed to load native viewer plugin '{}': {err}",
                     manifest.plugin.id
                 ));
                 continue;
             }
         };
+
         let api_version = module.api_version()();
-        if api_version != KKC_REMOTE_PLUGIN_API_VERSION {
+        if api_version != KKC_VIEWER_PLUGIN_API_VERSION {
             crate::viewer::debug_log(&format!(
-                "Remote plugin '{}' uses API version {}, expected {}",
-                manifest.plugin.id, api_version, KKC_REMOTE_PLUGIN_API_VERSION
+                "Viewer plugin '{}' uses API version {}, expected {}",
+                manifest.plugin.id, api_version, KKC_VIEWER_PLUGIN_API_VERSION
             ));
             continue;
         }
+
         let metadata = module.metadata()();
         if metadata.id.as_str() != manifest.plugin.id {
             crate::viewer::debug_log(&format!(
-                "Remote plugin '{}' exported id '{}' (loaded from {})",
+                "Viewer plugin '{}' exported id '{}' (loaded from {})",
                 manifest.plugin.id,
                 metadata.id,
                 library_path.display()
             ));
             continue;
         }
-        plugins.push(RemoteRustPluginInfo {
+
+        let mut modes = metadata
+            .modes
+            .iter()
+            .map(|value| value.as_str().trim().to_ascii_lowercase())
+            .filter(|value| !value.is_empty())
+            .collect::<Vec<_>>();
+        if modes.is_empty() {
+            modes.push("text".to_string());
+        }
+        modes.sort();
+        modes.dedup();
+
+        let mut mime_types = metadata
+            .mime_types
+            .iter()
+            .map(|value| value.as_str().trim().to_ascii_lowercase())
+            .filter(|value| !value.is_empty())
+            .collect::<Vec<_>>();
+        mime_types.sort();
+        mime_types.dedup();
+
+        let mut extensions = metadata
+            .extensions
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .trim()
+                    .trim_start_matches('.')
+                    .to_ascii_lowercase()
+            })
+            .filter(|value| !value.is_empty())
+            .collect::<Vec<_>>();
+        extensions.sort();
+        extensions.dedup();
+
+        plugins.push(ViewerRustPluginInfo {
             id: metadata.id.to_string(),
             name: metadata.name.to_string(),
             version: metadata.version.to_string(),
             description: metadata.description.to_string(),
-            scheme: metadata.scheme.to_string(),
+            modes,
+            mime_types,
+            extensions,
             dir: manifest_info.dir,
         });
     }
@@ -112,9 +154,9 @@ pub fn discover_remote_rust_plugins(plugins_dir: &Path) -> Result<Vec<RemoteRust
     Ok(plugins)
 }
 
-pub fn discover_remote_rust_plugin_manifests(
+pub fn discover_viewer_rust_plugin_manifests(
     plugins_dir: &Path,
-) -> Result<Vec<RemoteRustPluginManifestInfo>> {
+) -> Result<Vec<ViewerRustPluginManifestInfo>> {
     let mut plugins = Vec::new();
     for entry in fs::read_dir(plugins_dir)? {
         let entry = entry?;
@@ -127,10 +169,10 @@ pub fn discover_remote_rust_plugin_manifests(
             continue;
         }
         let manifest = read_manifest(&manifest_path)?;
-        if manifest.plugin.plugin_type != "remote-rust" {
+        if manifest.plugin.plugin_type != "viewer-rust" {
             continue;
         }
-        plugins.push(RemoteRustPluginManifestInfo {
+        plugins.push(ViewerRustPluginManifestInfo {
             id: manifest.plugin.id,
             name: manifest.plugin.name,
             version: manifest.plugin.version,
@@ -142,21 +184,21 @@ pub fn discover_remote_rust_plugin_manifests(
     Ok(plugins)
 }
 
-pub fn debug_log_remote_plugin_library_status(plugin_dir: &Path) -> Result<()> {
+pub fn debug_log_viewer_plugin_library_status(plugin_dir: &Path) -> Result<()> {
     let manifest_path = plugin_dir.join("plugin.toml");
     if !manifest_path.is_file() {
         return Ok(());
     }
     let manifest = read_manifest(&manifest_path)?;
-    if manifest.plugin.plugin_type != "remote-rust" {
+    if manifest.plugin.plugin_type != "viewer-rust" {
         return Ok(());
     }
 
-    let configured = manifest.remote.as_ref().expect("remote section").library.clone();
-    let candidates = candidate_remote_library_paths(plugin_dir, &configured);
+    let configured = manifest.viewer.as_ref().expect("viewer section").library.clone();
+    let candidates = candidate_viewer_library_paths(plugin_dir, &configured);
     if let Some(found) = candidates.iter().find(|p| p.is_file()) {
         crate::viewer::debug_log(&format!(
-            "remote-plugin-install: '{}' library resolved at {}",
+            "viewer-plugin-install: '{}' library resolved at {}",
             manifest.plugin.id,
             found.display()
         ));
@@ -167,45 +209,44 @@ pub fn debug_log_remote_plugin_library_status(plugin_dir: &Path) -> Result<()> {
             .collect::<Vec<_>>()
             .join(", ");
         crate::viewer::debug_log(&format!(
-            "remote-plugin-install: '{}' installed but library '{}' was not found (searched: {})",
+            "viewer-plugin-install: '{}' installed but library '{}' was not found (searched: {})",
             manifest.plugin.id, configured, searched
         ));
     }
     Ok(())
 }
 
-#[allow(dead_code)]
-pub fn load_remote_plugin(plugin_id: &str) -> Result<RemotePluginModRef> {
+pub fn load_viewer_plugin(plugin_id: &str) -> Result<ViewerPluginModRef> {
     let plugins_dir = crate::plugins::plugins_dir()?;
-    for manifest_info in discover_remote_rust_plugin_manifests(&plugins_dir)? {
+    for manifest_info in discover_viewer_rust_plugin_manifests(&plugins_dir)? {
         if manifest_info.id == plugin_id {
             let manifest = read_manifest(&manifest_info.dir.join("plugin.toml"))?;
             let Some(library_path) =
-                resolve_remote_library_path(&manifest_info.dir, &manifest.remote.as_ref().expect("remote section").library)
+                resolve_viewer_library_path(&manifest_info.dir, &manifest.viewer.as_ref().expect("viewer section").library)
             else {
                 return Err(not_found_error(
                     plugin_id,
                     &manifest_info.dir,
-                    &manifest.remote.as_ref().expect("remote section").library,
+                    &manifest.viewer.as_ref().expect("viewer section").library,
                 ));
             };
             return lib_header_from_path(&library_path)
-                .and_then(|h| h.init_root_module::<RemotePluginModRef>())
-                .with_context(|| format!("Loading native remote plugin '{}'", plugin_id));
+                .and_then(|h| h.init_root_module::<ViewerPluginModRef>())
+                .with_context(|| format!("Loading native viewer plugin '{}'", plugin_id));
         }
     }
     Err(anyhow!(
-        "Native remote plugin '{}' is not installed or built",
+        "Native viewer plugin '{}' is not installed or built",
         plugin_id
     ))
 }
 
-fn resolve_remote_library_path(plugin_dir: &Path, configured_library: &str) -> Option<PathBuf> {
-    let candidates = candidate_remote_library_paths(plugin_dir, configured_library);
+fn resolve_viewer_library_path(plugin_dir: &Path, configured_library: &str) -> Option<PathBuf> {
+    let candidates = candidate_viewer_library_paths(plugin_dir, configured_library);
     candidates.into_iter().find(|p| p.is_file())
 }
 
-fn candidate_remote_library_paths(plugin_dir: &Path, configured_library: &str) -> Vec<PathBuf> {
+fn candidate_viewer_library_paths(plugin_dir: &Path, configured_library: &str) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let configured = plugin_dir.join(configured_library);
     out.push(configured.clone());
@@ -238,13 +279,13 @@ fn candidate_remote_library_paths(plugin_dir: &Path, configured_library: &str) -
 }
 
 fn not_found_error(plugin_id: &str, plugin_dir: &Path, configured_library: &str) -> anyhow::Error {
-    let tried = candidate_remote_library_paths(plugin_dir, configured_library)
+    let tried = candidate_viewer_library_paths(plugin_dir, configured_library)
         .into_iter()
         .map(|p| p.display().to_string())
         .collect::<Vec<_>>()
         .join(", ");
     anyhow!(
-        "Native remote plugin '{}' is not installed or built (searched: {})",
+        "Native viewer plugin '{}' is not installed or built (searched: {})",
         plugin_id,
         tried
     )
@@ -261,9 +302,9 @@ fn read_manifest(path: &Path) -> Result<NativePluginManifest> {
     {
         return Err(anyhow!("{} contains empty plugin metadata", path.display()));
     }
-    if let Some(ref r) = manifest.remote {
-        if r.library.trim().is_empty() {
-            return Err(anyhow!("{} contains an empty remote.library", path.display()));
+    if let Some(ref v) = manifest.viewer {
+        if v.library.trim().is_empty() {
+            return Err(anyhow!("{} contains an empty viewer.library", path.display()));
         }
     }
     Ok(manifest)
