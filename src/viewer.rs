@@ -452,6 +452,10 @@ impl Viewer {
         matches!(self.mode, ViewMode::Image)
     }
 
+    pub fn is_fixed_ansi_canvas(&self) -> bool {
+        matches!(self.mode, ViewMode::Ansi) && self.ansi_canvas_mode == AnsiCanvasMode::Fixed80x25
+    }
+
     pub fn set_mode(&mut self, mode: ViewMode) {
         self.mode = mode;
         self.viewer_plugin = None;
