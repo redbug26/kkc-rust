@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::{DateTime, Local};
 use std::collections::HashMap;
 use std::fs;
-use std::io::Cursor;
+use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use zip::ZipArchive;
@@ -570,6 +570,24 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             tga_lines(&data),
         ))
+    } else if data.starts_with(b"wOFF") {
+        Some(info(
+            "font/woff",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"wOF2") {
+        Some(info(
+            "font/woff2",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(b"RIFF") && data.get(8..12) == Some(b"WAVE") {
         Some(wav_info(path, &data))
     } else if data.starts_with(b"FORM") && data.get(8..12) == Some(b"AIFF") {
@@ -635,15 +653,8 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             ogg_lines(&data),
         ))
-    } else if data.starts_with(b"ID3") {
-        Some(info(
-            "audio/mpeg",
-            path,
-            IdfKind::Sample,
-            id3v1_title(&data),
-            None,
-            vec![],
-        ))
+    } else if let Some(mp3) = mp3_info(path, &data, &ext) {
+        Some(mp3)
     } else if data.starts_with(b"MThd") {
         Some(midi_info(path, &data))
     } else if data.starts_with(b"%PDF-") {
@@ -837,6 +848,8 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             vec![],
         ))
+    } else if let Some(mime_type) = affinity_mime_type_from_extension(&ext) {
+        Some(info(mime_type, path, IdfKind::Other, None, None, vec![]))
     } else if let Some(mime_type) = archive_mime_type_from_extension(path, &ext) {
         Some(info(mime_type, path, IdfKind::Archive, None, None, vec![]))
     } else if matches!(ext.as_str(), "htm" | "html") || looks_like_html(&data) {
@@ -986,6 +999,8 @@ fn format_from_mime_type(mime_type: &str) -> Option<&'static str> {
         "image/heic" => Some("HEIC bitmap"),
         "image/vnd.adobe.photoshop" => Some("Photoshop bitmap"),
         "image/x-tga" => Some("TGA bitmap"),
+        "font/woff" => Some("WOFF font"),
+        "font/woff2" => Some("WOFF2 font"),
         "audio/wav" => Some("WAV sample"),
         "audio/aiff" => Some("AIFF audio"),
         "audio/basic" => Some("AU audio"),
@@ -1012,6 +1027,10 @@ fn format_from_mime_type(mime_type: &str) -> Option<&'static str> {
         "application/x-bittorrent" => Some("BitTorrent metadata"),
         "application/x-sqlite3" => Some("SQLite database"),
         "application/x-apple-diskimage" => Some("Apple Disk Image"),
+        "application/x-affinity-photo" => Some("Affinity Photo document"),
+        "application/x-affinity-designer" => Some("Affinity Designer document"),
+        "application/x-affinity-publisher" => Some("Affinity Publisher document"),
+        "application/x-affinity-common" => Some("Affinity document"),
         "text/vcard" => Some("vCard contact"),
         "application/json" => Some("JSON document"),
         "image/svg+xml" => Some("SVG vector image"),
@@ -1054,6 +1073,16 @@ fn archive_mime_type_from_extension(path: &Path, ext: &str) -> Option<&'static s
         "uc2" | "ue2" => Some("application/x-uc2"),
         "ice" => Some("application/x-ice-compressed"),
         "pi9" => Some("application/x-packice"),
+        _ => None,
+    }
+}
+
+fn affinity_mime_type_from_extension(ext: &str) -> Option<&'static str> {
+    match ext {
+        "afphoto" => Some("application/x-affinity-photo"),
+        "afdesign" => Some("application/x-affinity-designer"),
+        "afpub" => Some("application/x-affinity-publisher"),
+        "aftemplate" | "afassets" | "afstyles" => Some("application/x-affinity-common"),
         _ => None,
     }
 }
@@ -2591,12 +2620,303 @@ fn tracker_name(data: &[u8], start: usize, end: usize) -> Option<String> {
     }
 }
 
-fn id3v1_title(data: &[u8]) -> Option<String> {
-    if data.len() >= 128 && &data[data.len() - 128..data.len() - 125] == b"TAG" {
-        fixed_text(&data[data.len() - 125..data.len() - 95])
+#[derive(Default)]
+struct Id3Tags {
+    version: Option<String>,
+    title: Option<String>,
+    artist: Option<String>,
+    album: Option<String>,
+    year: Option<String>,
+    track: Option<String>,
+    genre: Option<String>,
+}
+
+fn mp3_info(path: &Path, data: &[u8], ext: &str) -> Option<IdInfo> {
+    let has_id3v2 = data.starts_with(b"ID3");
+    let tags_v1 = read_id3v1_tags(path);
+    let has_id3v1 = tags_v1.is_some();
+    let is_mp3_ext = matches!(ext, "mp3" | "mp2" | "mp1" | "mpeg" | "mpga");
+    let has_frame = has_mpeg_audio_frame(data);
+
+    // Require multiple hints before classifying as MP3 to avoid false positives
+    // on arbitrary binary data that happens to contain a frame-like sync word.
+    let mut evidence = 0u8;
+    if has_id3v2 {
+        evidence += 2;
+    }
+    if has_id3v1 {
+        evidence += 1;
+    }
+    if is_mp3_ext {
+        evidence += 1;
+    }
+    if has_frame {
+        evidence += 1;
+    }
+
+    if evidence < 2 {
+        return None;
+    }
+
+    let tags_v2 = parse_id3v2_tags(data);
+    let merged = merge_id3_tags(tags_v2, tags_v1);
+
+    let mut extra = Vec::new();
+    if let Some(version) = merged.version.as_ref() {
+        extra.push(format!("ID3: {version}"));
+    } else if has_frame {
+        extra.push("MPEG audio stream".into());
+    }
+    if let Some(album) = merged.album.as_ref() {
+        extra.push(format!("Album: {album}"));
+    }
+    if let Some(year) = merged.year.as_ref() {
+        extra.push(format!("Year: {year}"));
+    }
+    if let Some(track) = merged.track.as_ref() {
+        extra.push(format!("Track: {track}"));
+    }
+    if let Some(genre) = merged.genre.as_ref() {
+        extra.push(format!("Genre: {genre}"));
+    }
+
+    Some(info(
+        "audio/mpeg",
+        path,
+        IdfKind::Sample,
+        merged.title,
+        merged.artist,
+        extra,
+    ))
+}
+
+fn has_mpeg_audio_frame(data: &[u8]) -> bool {
+    let limit = data.len().min(4096);
+    for i in 0..limit.saturating_sub(4) {
+        if is_valid_mpeg_header(&data[i..i + 4]) {
+            return true;
+        }
+    }
+    false
+}
+
+fn is_valid_mpeg_header(hdr: &[u8]) -> bool {
+    if hdr.len() < 4 {
+        return false;
+    }
+    let h = u32::from_be_bytes([hdr[0], hdr[1], hdr[2], hdr[3]]);
+    let sync = (h >> 21) & 0x7ff;
+    if sync != 0x7ff {
+        return false;
+    }
+    let version = (h >> 19) & 0x3;
+    if version == 0x1 {
+        return false;
+    }
+    let layer = (h >> 17) & 0x3;
+    if layer == 0x0 {
+        return false;
+    }
+    let bitrate_idx = (h >> 12) & 0x0f;
+    if bitrate_idx == 0 || bitrate_idx == 0x0f {
+        return false;
+    }
+    let sample_idx = (h >> 10) & 0x03;
+    if sample_idx == 0x03 {
+        return false;
+    }
+    true
+}
+
+fn merge_id3_tags(v2: Option<Id3Tags>, v1: Option<Id3Tags>) -> Id3Tags {
+    let mut out = v2.unwrap_or_default();
+    if let Some(v1) = v1 {
+        if out.version.is_none() {
+            out.version = v1.version;
+        }
+        if out.title.is_none() {
+            out.title = v1.title;
+        }
+        if out.artist.is_none() {
+            out.artist = v1.artist;
+        }
+        if out.album.is_none() {
+            out.album = v1.album;
+        }
+        if out.year.is_none() {
+            out.year = v1.year;
+        }
+        if out.track.is_none() {
+            out.track = v1.track;
+        }
+        if out.genre.is_none() {
+            out.genre = v1.genre;
+        }
+    }
+    out
+}
+
+fn parse_id3v2_tags(data: &[u8]) -> Option<Id3Tags> {
+    if data.len() < 10 || !data.starts_with(b"ID3") {
+        return None;
+    }
+    let major = data[3];
+    if major == 0 || major > 4 {
+        return None;
+    }
+    let size = synchsafe_u32(&data[6..10]) as usize;
+    let tag_end = (10usize).saturating_add(size).min(data.len());
+    let mut pos = 10usize;
+    let mut tags = Id3Tags {
+        version: Some(format!("ID3v2.{}", major)),
+        ..Id3Tags::default()
+    };
+
+    while pos + 10 <= tag_end {
+        let id = &data[pos..pos + 4];
+        if id == b"\0\0\0\0" {
+            break;
+        }
+        if !id.iter().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit()) {
+            break;
+        }
+        let frame_size = if major == 4 {
+            synchsafe_u32(&data[pos + 4..pos + 8]) as usize
+        } else {
+            u32::from_be_bytes(
+                data[pos + 4..pos + 8]
+                    .try_into()
+                    .expect("ID3 frame size bytes"),
+            ) as usize
+        };
+        pos += 10;
+        if frame_size == 0 || pos + frame_size > tag_end {
+            break;
+        }
+        let payload = &data[pos..pos + frame_size];
+        match id {
+            b"TIT2" => tags.title = decode_id3_text(payload),
+            b"TPE1" => tags.artist = decode_id3_text(payload),
+            b"TALB" => tags.album = decode_id3_text(payload),
+            b"TYER" | b"TDRC" => tags.year = decode_id3_text(payload),
+            b"TRCK" => tags.track = decode_id3_text(payload),
+            b"TCON" => tags.genre = decode_id3_text(payload),
+            _ => {}
+        }
+        pos += frame_size;
+    }
+
+    Some(tags)
+}
+
+fn synchsafe_u32(bytes: &[u8]) -> u32 {
+    ((bytes[0] as u32) << 21)
+        | ((bytes[1] as u32) << 14)
+        | ((bytes[2] as u32) << 7)
+        | (bytes[3] as u32)
+}
+
+fn decode_id3_text(payload: &[u8]) -> Option<String> {
+    if payload.is_empty() {
+        return None;
+    }
+    let enc = payload[0];
+    let raw = &payload[1..];
+    let text = match enc {
+        0 => decode_latin1(raw),
+        1 => decode_utf16_with_bom(raw)?,
+        2 => decode_utf16_be(raw)?,
+        3 => String::from_utf8(raw.to_vec()).ok()?,
+        _ => return None,
+    };
+    let trimmed = text.trim_matches(char::from(0)).trim().to_string();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
+fn decode_latin1(raw: &[u8]) -> String {
+    raw.iter().map(|b| *b as char).collect::<String>()
+}
+
+fn decode_utf16_with_bom(raw: &[u8]) -> Option<String> {
+    if raw.len() < 2 {
+        return None;
+    }
+    if raw.starts_with(&[0xff, 0xfe]) {
+        decode_utf16_bytes(&raw[2..], true)
+    } else if raw.starts_with(&[0xfe, 0xff]) {
+        decode_utf16_bytes(&raw[2..], false)
+    } else {
+        decode_utf16_bytes(raw, true)
+    }
+}
+
+fn decode_utf16_be(raw: &[u8]) -> Option<String> {
+    decode_utf16_bytes(raw, false)
+}
+
+fn decode_utf16_bytes(raw: &[u8], little_endian: bool) -> Option<String> {
+    if raw.len() < 2 {
+        return None;
+    }
+    let mut units = Vec::with_capacity(raw.len() / 2);
+    for chunk in raw.chunks_exact(2) {
+        let u = if little_endian {
+            u16::from_le_bytes([chunk[0], chunk[1]])
+        } else {
+            u16::from_be_bytes([chunk[0], chunk[1]])
+        };
+        if u == 0 {
+            break;
+        }
+        units.push(u);
+    }
+    String::from_utf16(&units).ok()
+}
+
+fn read_id3v1_tags(path: &Path) -> Option<Id3Tags> {
+    let mut file = fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    if len < 128 {
+        return None;
+    }
+    file.seek(SeekFrom::End(-128)).ok()?;
+    let mut tail = [0u8; 128];
+    file.read_exact(&mut tail).ok()?;
+    parse_id3v1_tags(&tail)
+}
+
+fn parse_id3v1_tags(tag: &[u8]) -> Option<Id3Tags> {
+    if tag.len() != 128 || &tag[0..3] != b"TAG" {
+        return None;
+    }
+    let title = fixed_text(&tag[3..33]);
+    let artist = fixed_text(&tag[33..63]);
+    let album = fixed_text(&tag[63..93]);
+    let year = fixed_text(&tag[93..97]);
+    let track = if tag[125] == 0 && tag[126] != 0 {
+        Some(tag[126].to_string())
     } else {
         None
-    }
+    };
+    let genre = if tag[127] != 255 {
+        Some(tag[127].to_string())
+    } else {
+        None
+    };
+
+    Some(Id3Tags {
+        version: Some("ID3v1".into()),
+        title,
+        artist,
+        album,
+        year,
+        track,
+        genre,
+    })
 }
 
 fn html_title(data: &[u8]) -> Option<String> {
@@ -3278,6 +3598,24 @@ mod tests {
     }
 
     #[test]
+    fn pdf_is_not_misdetected_as_mp3() {
+        let path = std::env::temp_dir().join(format!("kkc-idf-pdf-mp3-{}.pdf", std::process::id()));
+        let mut data = b"%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nstream\n".to_vec();
+        // MPEG-like header bytes inside PDF payload should not trigger MP3 detection.
+        data.extend([0xff, 0xfb, 0x90, 0x64, 0x00, 0x01, 0x02, 0x03]);
+        data.extend(b"\nendstream\nendobj\n");
+        fs::write(&path, data).expect("write pdf");
+
+        let info = probe_file(&path)
+            .expect("probe should not fail")
+            .expect("pdf should be detected");
+        assert_eq!(info.mime_types[0], "application/pdf");
+        assert_eq!(info.format, "PDF document");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
     fn jpeg_exif_metadata_is_reported() {
         let path = std::env::temp_dir().join(format!("kkc-idf-exif-{}.jpg", std::process::id()));
         fs::write(&path, jpeg_with_exif()).expect("write jpeg");
@@ -3510,6 +3848,49 @@ mod tests {
     }
 
     #[test]
+    fn mp3_with_id3v1_tags_is_reported() {
+        let path = std::env::temp_dir().join(format!("kkc-idf-mp3-v1-{}.mp3", std::process::id()));
+        let mut data = vec![0u8; 256];
+        data.extend([0xff, 0xfb, 0x90, 0x64]);
+        data.extend(id3v1_tag(
+            "Demo Song",
+            "Demo Artist",
+            "Demo Album",
+            "1999",
+            7,
+            13,
+        ));
+        fs::write(&path, data).expect("write mp3");
+
+        let info = probe_file(&path)
+            .expect("probe should not fail")
+            .expect("mp3 should be detected");
+        assert_eq!(info.mime_types[0], "audio/mpeg");
+        assert_eq!(info.title.as_deref(), Some("Demo Song"));
+        assert_eq!(info.composer.as_deref(), Some("Demo Artist"));
+        assert!(info.extra.iter().any(|line| line.contains("ID3: ID3v1")));
+        assert!(info.extra.iter().any(|line| line.contains("Album: Demo Album")));
+        assert!(info.extra.iter().any(|line| line.contains("Year: 1999")));
+        assert!(info.extra.iter().any(|line| line.contains("Track: 7")));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn mp3_detected_by_frame_header_without_id3() {
+        let path = std::env::temp_dir().join(format!("kkc-idf-mp3-frame-{}.mp3", std::process::id()));
+        fs::write(&path, [0xff, 0xfb, 0x90, 0x64, 0, 1, 2, 3, 4]).expect("write mp3");
+
+        let info = probe_file(&path)
+            .expect("probe should not fail")
+            .expect("mp3 should be detected");
+        assert_eq!(info.mime_types[0], "audio/mpeg");
+        assert!(info.extra.iter().any(|line| line.contains("MPEG audio stream")));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
     fn heic_file_type_box_is_detected_as_image() {
         let path = std::env::temp_dir().join(format!("kkc-idf-heic-{}.heic", std::process::id()));
         fs::write(
@@ -3528,6 +3909,71 @@ mod tests {
         let _ = fs::remove_file(path);
     }
 
+    #[test]
+    fn woff_fonts_are_detected() {
+        let path = std::env::temp_dir().join(format!("kkc-idf-woff-{}.woff", std::process::id()));
+        fs::write(&path, b"wOFF\x00\x01\x00\x00\x00\x00\x00\x2c").expect("write woff");
+
+        let info = probe_file(&path)
+            .expect("probe should not fail")
+            .expect("woff should be detected");
+        assert_eq!(info.mime_types[0], "font/woff");
+        assert_eq!(info.format, "WOFF font");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn woff2_fonts_are_detected() {
+        let path =
+            std::env::temp_dir().join(format!("kkc-idf-woff2-{}.woff2", std::process::id()));
+        fs::write(&path, b"wOF2\x00\x01\x00\x00\x00\x00\x00\x2c").expect("write woff2");
+
+        let info = probe_file(&path)
+            .expect("probe should not fail")
+            .expect("woff2 should be detected");
+        assert_eq!(info.mime_types[0], "font/woff2");
+        assert_eq!(info.format, "WOFF2 font");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn affinity_files_are_detected_by_extension() {
+        let root = std::env::temp_dir().join(format!("kkc-idf-affinity-{}", std::process::id()));
+        fs::create_dir_all(&root).expect("create temp dir");
+
+        let cases = [
+            (
+                "sample.afphoto",
+                "application/x-affinity-photo",
+                "Affinity Photo document",
+            ),
+            (
+                "sample.afdesign",
+                "application/x-affinity-designer",
+                "Affinity Designer document",
+            ),
+            (
+                "sample.afpub",
+                "application/x-affinity-publisher",
+                "Affinity Publisher document",
+            ),
+        ];
+
+        for (name, mime, format) in cases {
+            let path = root.join(name);
+            fs::write(&path, b"AFFINITY").expect("write sample");
+            let info = probe_file(&path)
+                .expect("probe should not fail")
+                .expect("affinity file should be detected");
+            assert_eq!(info.mime_types[0], mime);
+            assert_eq!(info.format, format);
+        }
+
+        let _ = fs::remove_dir_all(root);
+    }
+
     fn jpeg_with_exif() -> Vec<u8> {
         let mut app1 = b"Exif\0\0".to_vec();
         app1.extend(test_exif_tiff());
@@ -3541,6 +3987,32 @@ mod tests {
             0x11, 0x00, 0x03, 0x11, 0x00, 0xff, 0xd9,
         ]);
         jpeg
+    }
+
+    fn id3v1_tag(
+        title: &str,
+        artist: &str,
+        album: &str,
+        year: &str,
+        track: u8,
+        genre: u8,
+    ) -> [u8; 128] {
+        fn put(dst: &mut [u8], value: &str) {
+            let bytes = value.as_bytes();
+            let n = bytes.len().min(dst.len());
+            dst[..n].copy_from_slice(&bytes[..n]);
+        }
+
+        let mut tag = [0u8; 128];
+        tag[0..3].copy_from_slice(b"TAG");
+        put(&mut tag[3..33], title);
+        put(&mut tag[33..63], artist);
+        put(&mut tag[63..93], album);
+        put(&mut tag[93..97], year);
+        tag[125] = 0;
+        tag[126] = track;
+        tag[127] = genre;
+        tag
     }
 
     fn jpeg_with_comment(comment: &str) -> Vec<u8> {
