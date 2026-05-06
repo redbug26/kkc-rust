@@ -3839,16 +3839,24 @@ fn handle_dir_bookmarks(app: &mut App, key: KeyEvent) -> Result<bool> {
                             } else {
                                 app.notify(format!("Remote profile not found: {}", profile_name));
                             }
-                        } else if p.is_dir() {
-                            if app.active_panel().is_remote_view() {
-                                app.active_panel_mut().disconnect();
-                            }
-                            app.enter_dir(p)?;
                         } else {
-                            app.notify(format!(
-                                "Bookmark path is not a directory: {}",
-                                p.display()
-                            ));
+                            if let Some(target) = first_accessible_bookmark_dir(&p) {
+                                if app.active_panel().is_remote_view() {
+                                    app.active_panel_mut().disconnect();
+                                }
+                                if target != p {
+                                    app.set_status(format!(
+                                        "Bookmark path unreachable, opened parent: {}",
+                                        target.display()
+                                    ));
+                                }
+                                app.enter_dir(target)?;
+                            } else {
+                                app.notify(format!(
+                                    "Bookmark path is not accessible: {}",
+                                    p.display()
+                                ));
+                            }
                         }
                     }
                 }
@@ -3868,6 +3876,20 @@ fn handle_dir_bookmarks(app: &mut App, key: KeyEvent) -> Result<bool> {
         _ => {}
     }
     Ok(false)
+}
+
+fn first_accessible_bookmark_dir(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let mut cur = Some(path);
+    while let Some(candidate) = cur {
+        if std::fs::metadata(candidate)
+            .map(|meta| meta.file_type().is_dir())
+            .unwrap_or(false)
+        {
+            return Some(candidate.to_path_buf());
+        }
+        cur = candidate.parent();
+    }
+    None
 }
 
 fn delete_selected_bookmark(app: &mut App) {
