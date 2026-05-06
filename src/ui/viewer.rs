@@ -430,31 +430,28 @@ pub(super) fn render_viewer(
     };
 
     if v.is_image_mode() && use_graphics_protocol {
-        let mut lines = vec![Line::from(Span::styled(
-            "Image preview",
+        let lines = vec![Line::from(Span::styled(
+            "",
             Style::default()
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
         ))];
-        if let Some(image) = v.image_info() {
-            let detail = match (image.width, image.height) {
-                (Some(w), Some(h)) => format!("{} - {}x{}", image.format, w, h),
-                _ => image.format.to_string(),
-            };
-            lines.push(Line::from(Span::styled(
-                detail,
-                Style::default().fg(Color::Gray),
-            )));
-        }
-        lines.push(Line::from(Span::raw("")));
-        lines.push(Line::from(Span::styled(
-            "Rendered with Kitty Graphics Protocol",
-            Style::default().fg(Color::Cyan),
-        )));
-        lines.push(Line::from(Span::styled(
-            "Use F5 to toggle Auto/Full size",
-            Style::default().fg(Color::Gray),
-        )));
+        //     // let mut lines = vec![Line::from(Span::styled(
+        //     "Image preview",
+        //     Style::default()
+        //         .fg(Color::White)
+        //         .add_modifier(Modifier::BOLD),
+        // ))];
+        // if let Some(image) = v.image_info() {
+        //     let detail = match (image.width, image.height) {
+        //         (Some(w), Some(h)) => format!("{} - {}x{}", image.format, w, h),
+        //         _ => image.format.to_string(),
+        //     };
+        //     lines.push(Line::from(Span::styled(
+        //         detail,
+        //         Style::default().fg(Color::Gray),
+        //     )));
+        // }
         f.render_widget(
             Paragraph::new(lines)
                 .alignment(Alignment::Center)

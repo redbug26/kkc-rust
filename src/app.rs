@@ -2597,7 +2597,7 @@ impl App {
             match Viewer::open(&view_path, self.config.viewer.word_wrap) {
                 Ok(mut v) => {
                     // Classic 80x25 ANSI art fits best in the panel, even when default zoom is on.
-                    if matches!(v.mode, ViewMode::Ansi) {
+                    if v.is_fixed_ansi_canvas() {
                         v.zoomed = false;
                     } else if !matches!(v.mode, ViewMode::Image) {
                         v.zoomed = self.config.viewer.default_zoom;
