@@ -162,6 +162,32 @@ fn render_viewer_backdrop(f: &mut Frame, host: Rect, panel: Rect) {
     }
 }
 
+fn render_viewer_full_width_header(f: &mut Frame, host: Rect, title: &str, active: bool) {
+    if host.width == 0 || host.height == 0 {
+        return;
+    }
+    let style = if active {
+        Style::default()
+            .fg(CLR_HEADER_FG)
+            .bg(CLR_MENU_BAR_BG)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+            .fg(CLR_PANEL_BORDER_DIM)
+            .bg(CLR_MENU_BAR_BG)
+    };
+    let header = Rect {
+        x: host.x,
+        y: host.y,
+        width: host.width,
+        height: 1,
+    };
+    f.render_widget(
+        Paragraph::new(truncate_str(title, header.width as usize)).style(style),
+        header,
+    );
+}
+
 pub fn kitty_image_area(v: &Viewer, area: Rect) -> Option<Rect> {
     if !v.is_image_mode() {
         return None;
@@ -249,9 +275,21 @@ pub(super) fn render_viewer(
         // Embedded (quick-preview): no footer row, use full area for content
         (Rect::default(), area)
     };
-    let area = viewer_area(v, viewer_host);
-    if show_footer && !v.zoomed && v.viewer_plugin.is_none() {
-        render_viewer_backdrop(f, viewer_host, area);
+    let full_width_header =
+        show_footer && quick_preview_label.is_none() && !v.zoomed && v.viewer_plugin.is_none();
+    let panel_host = if full_width_header {
+        Rect {
+            x: viewer_host.x,
+            y: viewer_host.y.saturating_add(1),
+            width: viewer_host.width,
+            height: viewer_host.height.saturating_sub(1),
+        }
+    } else {
+        viewer_host
+    };
+    let area = viewer_area(v, panel_host);
+    if full_width_header {
+        render_viewer_backdrop(f, panel_host, area);
     }
     let file_name = v.path.file_name().unwrap_or_default().to_string_lossy();
     let match_info = if !v.search.is_empty() {
@@ -347,6 +385,14 @@ pub(super) fn render_viewer(
                 ),
             )
         }
+    } else if full_width_header {
+        (
+            Style::default()
+                .fg(CLR_PANEL_BORDER)
+                .add_modifier(Modifier::BOLD),
+            BorderType::Thick,
+            Span::raw(String::new()),
+        )
     } else if active {
         (
             Style::default()
@@ -362,6 +408,9 @@ pub(super) fn render_viewer(
             Span::raw(title.clone()),
         )
     };
+    if full_width_header {
+        render_viewer_full_width_header(f, viewer_host, &title, active);
+    }
     let block = Block::default()
         .title(title_span)
         .borders(Borders::ALL)
