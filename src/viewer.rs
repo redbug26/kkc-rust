@@ -1935,7 +1935,8 @@ pub fn render_kitty_image<W: Write>(out: &mut W, viewer: &Viewer, area: Rect) ->
                 let png_payload = if rendered.format.eq_ignore_ascii_case("png") {
                     Some(rendered.data)
                 } else if rendered.format.eq_ignore_ascii_case("rgb") {
-                    let rgb = image::RgbImage::from_raw(rendered.width, rendered.height, rendered.data);
+                    let rgb =
+                        image::RgbImage::from_raw(rendered.width, rendered.height, rendered.data);
                     rgb.and_then(|rgb_img| {
                         let dyn_img = image::DynamicImage::ImageRgb8(rgb_img);
                         let mut out = Cursor::new(Vec::new());

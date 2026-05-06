@@ -2565,33 +2565,42 @@ fn handle_enter(app: &mut App) -> Result<()> {
             entry.path.clone()
         };
         // Check registered openers first, using FileID MIME types.
-        let mime_type = crate::idf::probe_path(&launch_path)
-            .map(|info| info.mime_type)
-            .unwrap_or_else(|| "application/octet-stream".to_string());
-        let openers = app.config.openers_for_mime(&mime_type).to_vec();
+        let mime_types = crate::idf::probe_path(&launch_path)
+            .map(|info| info.mime_types)
+            .filter(|mime_types| !mime_types.is_empty())
+            .unwrap_or_else(|| vec!["application/octet-stream".to_string()]);
         let mut actions = Vec::new();
-        for opener in openers {
-            let display_label =
-                match crate::plugins::store_application_launch_args_for_command(&opener) {
-                    Some(Some(args)) => {
-                        let program = split_command_args(&opener)
-                            .first()
-                            .cloned()
-                            .unwrap_or_else(|| opener.clone());
-                        if args.trim().is_empty() {
-                            program
-                        } else {
-                            format!("{} {}", program, args)
+        let mut seen_openers: Vec<String> = Vec::new();
+        for mime_type in &mime_types {
+            for opener in app.config.openers_for_mime(mime_type) {
+                if seen_openers.iter().any(|existing| existing == opener) {
+                    continue;
+                }
+                seen_openers.push(opener.clone());
+                let display_label =
+                    match crate::plugins::store_application_launch_args_for_command(opener) {
+                        Some(Some(args)) => {
+                            let program = split_command_args(opener)
+                                .first()
+                                .cloned()
+                                .unwrap_or_else(|| opener.clone());
+                            if args.trim().is_empty() {
+                                program
+                            } else {
+                                format!("{} {}", program, args)
+                            }
                         }
-                    }
-                    _ => opener.clone(),
-                };
-            actions.push(OpenerActionItem {
-                category: "Associations",
-                label: display_label,
-                detail: mime_type.clone(),
-                kind: OpenerActionKind::Association { command: opener },
-            });
+                        _ => opener.clone(),
+                    };
+                actions.push(OpenerActionItem {
+                    category: "Associations",
+                    label: display_label,
+                    detail: mime_type.clone(),
+                    kind: OpenerActionKind::Association {
+                        command: opener.clone(),
+                    },
+                });
+            }
         }
         if supports_archive_navigation(&launch_path) {
             actions.push(OpenerActionItem {
@@ -4505,7 +4514,7 @@ fn default_assoc_mime_type(app: &App) -> Option<String> {
     }
 
     crate::idf::probe_path(&entry.path)
-        .map(|info| info.mime_type)
+        .and_then(|info| info.mime_types.into_iter().next())
         .filter(|mime_type| !mime_type.trim().is_empty())
 }
 

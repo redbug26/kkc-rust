@@ -82,8 +82,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
         "startup: App::new completed in {:.3} ms",
         app_new_start.elapsed().as_secs_f64() * 1000.0
     ));
-    let mut last_kitty_image: Option<(PathBuf, ratatui::layout::Rect, bool, Option<String>)> =
-        None;
+    let mut last_kitty_image: Option<(PathBuf, ratatui::layout::Rect, bool, Option<String>)> = None;
     let mut first_draw_logged = false;
     let mut startup_ready_logged = false;
     let mut last_user_activity = Instant::now();
@@ -162,15 +161,14 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
                     // Quick-preview: only render image when no modal overlay is shown
                     if viewer::embedded_graphics_supported() {
                         app.quick_preview.as_ref().and_then(|v| {
-                            ui::kitty_image_area_quick_preview(&app, term_area)
-                                .map(|rect| {
-                                    (
-                                        v.path.clone(),
-                                        rect,
-                                        v.zoomed,
-                                        v.plugin_state.get("page").cloned(),
-                                    )
-                                })
+                            ui::kitty_image_area_quick_preview(&app, term_area).map(|rect| {
+                                (
+                                    v.path.clone(),
+                                    rect,
+                                    v.zoomed,
+                                    v.plugin_state.get("page").cloned(),
+                                )
+                            })
                         })
                     } else {
                         None

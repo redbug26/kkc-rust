@@ -578,16 +578,16 @@ pub fn viewer_plugins_for_path(path: &Path) -> Vec<String> {
         .get()
         .and_then(|registry| {
             let reg = registry.read().ok()?;
-            let mime_type = path_mime_type(path);
+            let mime_types = path_mime_types(path);
             let names = reg
                 .viewer_plugins
                 .iter()
-                .filter(|p| p.supports_path(path, mime_type.as_deref()))
+                .filter(|p| p.supports_path(path, mime_types.as_deref()))
                 .map(|p| p.name.clone())
                 .chain(
                     reg.viewer_rust_plugins
                         .iter()
-                        .filter(|p| p.supports_path(path, mime_type.as_deref()))
+                        .filter(|p| p.supports_path(path, mime_types.as_deref()))
                         .map(|p| p.name.clone()),
                 )
                 .collect::<Vec<_>>();
@@ -2791,15 +2791,15 @@ impl PluginRegistry {
     }
 
     fn default_viewer_plugin_for_path(&self, path: &Path) -> Option<&str> {
-        let mime_type = path_mime_type(path);
+        let mime_types = path_mime_types(path);
         self.viewer_plugins
             .iter()
-            .find(|plugin| plugin.supports_path(path, mime_type.as_deref()))
+            .find(|plugin| plugin.supports_path(path, mime_types.as_deref()))
             .map(|plugin| plugin.name.as_str())
             .or_else(|| {
                 self.viewer_rust_plugins
                     .iter()
-                    .find(|plugin| plugin.supports_path(path, mime_type.as_deref()))
+                    .find(|plugin| plugin.supports_path(path, mime_types.as_deref()))
                     .map(|plugin| plugin.name.as_str())
             })
     }
@@ -2815,25 +2815,25 @@ impl PluginRegistry {
     }
 
     fn supports_archive(&self, path: &Path) -> bool {
-        let mime_type = path_mime_type(path);
+        let mime_types = path_mime_types(path);
         self.archive_plugins
             .iter()
-            .any(|plugin| plugin.supports_path(path, mime_type.as_deref()))
+            .any(|plugin| plugin.supports_path(path, mime_types.as_deref()))
     }
 
     fn supports_add_files(&self, path: &Path) -> bool {
-        let mime_type = path_mime_type(path);
+        let mime_types = path_mime_types(path);
         self.archive_plugins
             .iter()
-            .any(|plugin| plugin.supports_path(path, mime_type.as_deref()) && plugin.can_add_files)
+            .any(|plugin| plugin.supports_path(path, mime_types.as_deref()) && plugin.can_add_files)
     }
 
     fn extract_archive(&self, path: &Path, destination: &Path) -> Result<bool> {
-        let mime_type = path_mime_type(path);
+        let mime_types = path_mime_types(path);
         let Some(plugin) = self
             .archive_plugins
             .iter()
-            .find(|plugin| plugin.supports_path(path, mime_type.as_deref()))
+            .find(|plugin| plugin.supports_path(path, mime_types.as_deref()))
         else {
             return Ok(false);
         };
@@ -2843,9 +2843,9 @@ impl PluginRegistry {
     }
 
     fn add_files(&self, path: &Path, sources: &[PathBuf]) -> Result<bool> {
-        let mime_type = path_mime_type(path);
+        let mime_types = path_mime_types(path);
         let Some(plugin) = self.archive_plugins.iter().find(|plugin| {
-            plugin.supports_path(path, mime_type.as_deref()) && plugin.can_add_files
+            plugin.supports_path(path, mime_types.as_deref()) && plugin.can_add_files
         }) else {
             return Ok(false);
         };
@@ -3054,8 +3054,8 @@ impl PluginRegistry {
 }
 
 impl ArchivePlugin {
-    fn supports_path(&self, path: &Path, mime_type: Option<&str>) -> bool {
-        supports_path_mime_or_legacy_ext(path, mime_type, &self.mime_types, &self.extensions)
+    fn supports_path(&self, path: &Path, path_mime_types: Option<&[String]>) -> bool {
+        supports_path_mime_or_legacy_ext(path, path_mime_types, &self.mime_types, &self.extensions)
     }
 
     fn support_labels(&self) -> Vec<String> {
@@ -3143,8 +3143,8 @@ impl ViewerPlugin {
         self.modes.iter().any(|candidate| candidate == mode)
     }
 
-    fn supports_path(&self, path: &Path, mime_type: Option<&str>) -> bool {
-        supports_path_mime_or_legacy_ext(path, mime_type, &self.mime_types, &self.extensions)
+    fn supports_path(&self, path: &Path, path_mime_types: Option<&[String]>) -> bool {
+        supports_path_mime_or_legacy_ext(path, path_mime_types, &self.mime_types, &self.extensions)
     }
 
     fn highlight_lines(
@@ -3286,8 +3286,8 @@ impl crate::viewer_plugins::ViewerRustPluginInfo {
         self.modes.iter().any(|candidate| candidate == mode)
     }
 
-    fn supports_path(&self, path: &Path, mime_type: Option<&str>) -> bool {
-        supports_path_mime_or_legacy_ext(path, mime_type, &self.mime_types, &self.extensions)
+    fn supports_path(&self, path: &Path, path_mime_types: Option<&[String]>) -> bool {
+        supports_path_mime_or_legacy_ext(path, path_mime_types, &self.mime_types, &self.extensions)
     }
 }
 
@@ -3451,18 +3451,25 @@ fn lua_span_to_viewer_span(span: Table) -> mlua::Result<ViewerSpan> {
     })
 }
 
-fn path_mime_type(path: &Path) -> Option<String> {
-    crate::idf::probe_path(path).map(|info| info.mime_type.to_ascii_lowercase())
+fn path_mime_types(path: &Path) -> Option<Vec<String>> {
+    crate::idf::probe_path(path).map(|info| {
+        info.mime_types
+            .into_iter()
+            .map(|mime_type| mime_type.to_ascii_lowercase())
+            .collect()
+    })
 }
 
 fn supports_path_mime_or_legacy_ext(
     path: &Path,
-    mime_type: Option<&str>,
+    path_mime_types: Option<&[String]>,
     mime_types: &[String],
     extensions: &[String],
 ) -> bool {
-    if let Some(mime_type) = mime_type
-        && mime_types.iter().any(|candidate| candidate == mime_type)
+    if let Some(path_mime_types) = path_mime_types
+        && path_mime_types
+            .iter()
+            .any(|mime_type| mime_types.iter().any(|candidate| candidate == mime_type))
     {
         return true;
     }

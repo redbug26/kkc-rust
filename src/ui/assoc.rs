@@ -42,10 +42,7 @@ pub(super) fn render_opener(f: &mut Frame, s: &OpenerState, area: Rect, preferre
         });
     }
 
-    let mime_type = crate::idf::probe_path(&s.path)
-        .map(|info| info.mime_type)
-        .unwrap_or_else(|| "application/octet-stream".to_string());
-    let title = format!(" Open {} ", mime_type);
+    let title = " Run with... ";
     let hint = "  ↑↓ Select  Enter Open  Esc Close";
     let max_label_width = matches
         .iter()

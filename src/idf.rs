@@ -20,7 +20,7 @@ pub enum IdfKind {
 #[derive(Debug, Clone)]
 pub struct IdInfo {
     pub format: String,
-    pub mime_type: String,
+    pub mime_types: Vec<String>,
     pub detail: String,
     pub kind: IdfKind,
     pub title: Option<String>,
@@ -45,7 +45,7 @@ pub fn probe_path(path: &Path) -> Option<IdInfo> {
     if meta.is_dir() {
         return Some(IdInfo {
             format: "Directory".into(),
-            mime_type: "inode/directory".into(),
+            mime_types: vec!["inode/directory".into()],
             detail: path
                 .file_name()
                 .unwrap_or_default()
@@ -98,7 +98,16 @@ pub fn render_idf_card(path: &Path) -> Option<String> {
         out.push_str(&format!("Title: {}\n", clean_field(title)));
     }
     out.push_str(&format!("Type: {}\n", clean_field(&info.format)));
-    out.push_str(&format!("Mime: {}\n", clean_field(&info.mime_type)));
+    match info.mime_types.as_slice() {
+        [] => {}
+        [mime_type] => out.push_str(&format!("Mime: {}\n", clean_field(mime_type))),
+        mime_types => {
+            out.push_str("Mime types:\n");
+            for mime_type in mime_types {
+                out.push_str(&format!("  {}\n", clean_field(mime_type)));
+            }
+        }
+    }
     if let Some(composer) = info.composer.as_ref().filter(|s| !s.is_empty()) {
         out.push_str(&format!("Composer: {}\n", clean_field(composer)));
     }
@@ -203,7 +212,15 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         } else {
             IdfKind::Archive
         };
-        Some(info(mime_type, path, kind, None, None, vec![]))
+        Some(info_with_mime_types(
+            mime_type,
+            &["application/zip"],
+            path,
+            kind,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(b"7z\xBC\xAF\x27\x1C") {
         Some(info(
             "application/x-7z-compressed",
@@ -841,11 +858,31 @@ fn info(
     composer: Option<String>,
     extra: Vec<String>,
 ) -> IdInfo {
+    info_with_mime_types(mime_type, &[], path, kind, title, composer, extra)
+}
+
+fn info_with_mime_types(
+    mime_type: &str,
+    additional_mime_types: &[&str],
+    path: &Path,
+    kind: IdfKind,
+    title: Option<String>,
+    composer: Option<String>,
+    extra: Vec<String>,
+) -> IdInfo {
+    let mut mime_types = Vec::with_capacity(additional_mime_types.len() + 1);
+    mime_types.push(mime_type.to_string());
+    for additional in additional_mime_types {
+        if !mime_types.iter().any(|existing| existing == additional) {
+            mime_types.push((*additional).to_string());
+        }
+    }
+
     IdInfo {
         format: format_from_mime_type(mime_type)
             .unwrap_or("Unknown file")
             .into(),
-        mime_type: mime_type.into(),
+        mime_types,
         detail: path
             .file_name()
             .unwrap_or_default()
@@ -859,9 +896,10 @@ fn info(
 }
 
 fn fallback_info(path: &Path) -> IdInfo {
+    let mime_type = fallback_mime_type(path);
     IdInfo {
         format: "Unknown file".into(),
-        mime_type: fallback_mime_type(path),
+        mime_types: vec![mime_type],
         detail: path
             .file_name()
             .unwrap_or_default()
@@ -3051,8 +3089,15 @@ mod tests {
             .expect("probe should not fail")
             .expect("docx should be detected");
         assert_eq!(
-            info.mime_type,
+            info.mime_types[0],
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        );
+        assert_eq!(
+            info.mime_types,
+            vec![
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "application/zip"
+            ]
         );
         assert_eq!(info.format, "Microsoft Word document");
         assert_eq!(info.kind, IdfKind::Other);
@@ -3076,7 +3121,8 @@ mod tests {
         let info = probe_file(&path)
             .expect("probe should not fail")
             .expect("zip should be detected");
-        assert_eq!(info.mime_type, "application/zip");
+        assert_eq!(info.mime_types[0], "application/zip");
+        assert_eq!(info.mime_types, vec!["application/zip"]);
         assert_eq!(info.format, "ZIP archive");
         assert_eq!(info.kind, IdfKind::Archive);
 
@@ -3114,7 +3160,11 @@ mod tests {
         let info = probe_file(&path)
             .expect("probe should not fail")
             .expect("epub should be detected");
-        assert_eq!(info.mime_type, "application/epub+zip");
+        assert_eq!(info.mime_types[0], "application/epub+zip");
+        assert_eq!(
+            info.mime_types,
+            vec!["application/epub+zip", "application/zip"]
+        );
         assert_eq!(info.kind, IdfKind::Archive);
 
         let _ = fs::remove_file(path);
@@ -3158,7 +3208,7 @@ mod tests {
             let info = probe_file(&path)
                 .expect("probe should not fail")
                 .expect("sample should be detected");
-            assert_eq!(info.mime_type, mime_type);
+            assert_eq!(info.mime_types[0], mime_type);
             assert_eq!(info.format, format);
         }
 
@@ -3177,7 +3227,7 @@ mod tests {
         let info = probe_file(&path)
             .expect("probe should not fail")
             .expect("pdf should be detected");
-        assert_eq!(info.mime_type, "application/pdf");
+        assert_eq!(info.mime_types[0], "application/pdf");
         assert_eq!(info.format, "PDF document");
         assert!(
             info.extra
@@ -3208,7 +3258,7 @@ mod tests {
         let info = probe_file(&path)
             .expect("probe should not fail")
             .expect("jpeg should be detected");
-        assert_eq!(info.mime_type, "image/jpeg");
+        assert_eq!(info.mime_types[0], "image/jpeg");
         assert!(
             info.extra
                 .iter()
@@ -3261,7 +3311,7 @@ mod tests {
         let info = probe_file(&path)
             .expect("probe should not fail")
             .expect("jpeg should be detected");
-        assert_eq!(info.mime_type, "image/jpeg");
+        assert_eq!(info.mime_types[0], "image/jpeg");
         assert!(info.extra.iter().any(|line| {
             line.contains("Creator: gd-jpeg v1.0 (using IJG JPEG v80), quality = 75.")
         }));
@@ -3422,7 +3472,7 @@ mod tests {
         let info = probe_file(&path)
             .expect("probe should not fail")
             .expect("tiff should be detected");
-        assert_eq!(info.mime_type, "image/tiff");
+        assert_eq!(info.mime_types[0], "image/tiff");
         assert!(
             info.extra
                 .iter()
@@ -3662,7 +3712,7 @@ mod tests {
         let dsk_info = probe_file(&dsk_path)
             .expect("probe dsk should not fail")
             .expect("dsk should be detected");
-        assert_eq!(dsk_info.mime_type, "application/x-amstrad-cpc-dsk");
+        assert_eq!(dsk_info.mime_types[0], "application/x-amstrad-cpc-dsk");
         assert_eq!(dsk_info.format, "Amstrad CPC DSK image");
 
         let d64_path = root.join("disk.d64");
@@ -3670,7 +3720,7 @@ mod tests {
         let d64_info = probe_file(&d64_path)
             .expect("probe d64 should not fail")
             .expect("d64 should be detected");
-        assert_eq!(d64_info.mime_type, "application/x-c64-d64");
+        assert_eq!(d64_info.mime_types[0], "application/x-c64-d64");
         assert_eq!(d64_info.format, "Commodore 64 D64 disk image");
 
         let _ = fs::remove_dir_all(root);
