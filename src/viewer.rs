@@ -26,7 +26,8 @@ mod viewer_search;
 
 use self::viewer_decode::{
     AnsiCanvasMode, AnsiLine, ansi_screen_lines_with_canvas, byte_to_display_char,
-    detect_ansi_canvas_mode, detect_mode, hex_line, preproc_op_label, preprocess_bytes, text_lines,
+    detect_ansi_canvas_mode, detect_mode, hex_column_width, hex_line, preproc_op_label,
+    preprocess_bytes, text_lines,
 };
 use self::viewer_render::{pad_visible, slice_visible};
 use self::viewer_search::parse_hex_query;
@@ -1371,8 +1372,8 @@ impl Viewer {
     ) -> Vec<Line<'static>> {
         // Compute bytes-per-row from the available panel width and cache it so that
         // hex_line_count() and scroll arithmetic stay consistent across frames.
-        // Formula: total line width = 8 (offset) + 2 + (bpr*3-1) + 2 + bpr = 11 + 4*bpr
-        let bpr = ((selected_width.saturating_sub(11)) / 4).max(1).min(16);
+        // Layout: 8 offset + 2 spaces + grouped hex + 2 spaces + ASCII.
+        let bpr = hex_bytes_per_row_for_width(selected_width);
         self.hex_bytes_per_row.set(bpr);
         let end = start.saturating_add(height).min(self.hex_line_count());
         (start..end)
@@ -1737,25 +1738,37 @@ struct StyledSegment {
     style: Style,
 }
 
+fn hex_bytes_per_row_for_width(width: usize) -> usize {
+    let mut bpr = 4;
+    loop {
+        let next = bpr + 4;
+        let next_width = 8 + 2 + hex_column_width(next) + 2 + next;
+        if next_width > width {
+            return bpr;
+        }
+        bpr = next;
+    }
+}
+
 fn hex_line_segments(
     offset: usize,
     chunk: &[u8],
     bpr: usize,
     encoding: EncodingMode,
 ) -> Vec<StyledSegment> {
-    let pad = bpr.saturating_mul(3).saturating_sub(1).max(1);
+    let pad = hex_column_width(bpr);
     let mut segments = vec![StyledSegment {
         text: format!("{:08X}  ", offset),
         style: Style::default(),
     }];
 
-    let not_printable_style = Style::default().fg(Color::Cyan);
+    let printable_style = Style::default().fg(Color::Cyan);
 
     for (idx, &byte) in chunk.iter().enumerate() {
         let style = if (0x20..=0x7f).contains(&byte) {
-            Style::default()
+            printable_style
         } else {
-            not_printable_style
+            Style::default()
         };
         segments.push(StyledSegment {
             text: format!("{:02X}", byte),
@@ -1763,13 +1776,17 @@ fn hex_line_segments(
         });
         if idx + 1 < chunk.len() {
             segments.push(StyledSegment {
-                text: " ".to_string(),
+                text: if (idx + 1) % 4 == 0 {
+                    "  ".to_string()
+                } else {
+                    " ".to_string()
+                },
                 style: Style::default(),
             });
         }
     }
 
-    let hex_width = chunk.len().saturating_mul(3).saturating_sub(1);
+    let hex_width = hex_column_width(chunk.len());
     let padding = pad.saturating_sub(hex_width);
     if padding > 0 {
         segments.push(StyledSegment {
@@ -1789,9 +1806,9 @@ fn hex_line_segments(
             byte_to_display_char(byte, encoding)
         };
         let style = if (0x20..=0x7f).contains(&byte) {
-            Style::default()
+            printable_style
         } else {
-            not_printable_style
+            Style::default()
         };
         segments.push(StyledSegment {
             text: ch.to_string(),

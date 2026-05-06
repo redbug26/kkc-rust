@@ -424,11 +424,7 @@ pub(super) fn ansi_screen_lines_with_canvas(
 }
 
 pub(super) fn hex_line(offset: usize, chunk: &[u8], bpr: usize, encoding: EncodingMode) -> String {
-    let hex = chunk
-        .iter()
-        .map(|b| format!("{:02X}", b))
-        .collect::<Vec<_>>()
-        .join(" ");
+    let hex = grouped_hex_bytes(chunk);
     let ascii: String = chunk
         .iter()
         .map(|&b| {
@@ -439,8 +435,30 @@ pub(super) fn hex_line(offset: usize, chunk: &[u8], bpr: usize, encoding: Encodi
             }
         })
         .collect();
-    let pad = bpr.saturating_mul(3).saturating_sub(1).max(1);
+    let pad = hex_column_width(bpr);
     format!("{:08X}  {:<width$}  {}", offset, hex, ascii, width = pad)
+}
+
+pub(super) fn hex_column_width(byte_count: usize) -> usize {
+    if byte_count == 0 {
+        0
+    } else {
+        byte_count * 3 - 1 + (byte_count - 1) / 4
+    }
+}
+
+fn grouped_hex_bytes(chunk: &[u8]) -> String {
+    let mut out = String::new();
+    for (idx, byte) in chunk.iter().enumerate() {
+        if idx > 0 {
+            out.push(' ');
+            if idx % 4 == 0 {
+                out.push(' ');
+            }
+        }
+        out.push_str(&format!("{:02X}", byte));
+    }
+    out
 }
 
 fn wrap_ansi_cursor(
@@ -1326,6 +1344,12 @@ mod tests {
         let lines = ansi_screen_lines(input, LineFeedMode::UnixLf, &[], EncodingMode::Plain);
         let plain = lines.iter().map(AnsiLine::plain_text).collect::<Vec<_>>();
         assert_eq!(plain, vec!["AC".to_string()]);
+    }
+
+    #[test]
+    fn hex_line_groups_hex_bytes_by_four() {
+        let line = hex_line(0, &[0, 1, 2, 3, 4, 5, 6, 7], 8, EncodingMode::Plain);
+        assert!(line.starts_with("00000000  00 01 02 03  04 05 06 07  "));
     }
 
     #[test]
