@@ -150,8 +150,8 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
                 AppMode::Viewer(v) | AppMode::ViewerSearching(v) | AppMode::ViewerMenu(v, _) => {
                     ui::kitty_image_area(v, term_area).map(|rect| (v.path.clone(), rect, v.zoomed))
                 }
-                _ => {
-                    // Quick-preview: use the inactive panel area
+                AppMode::Browse => {
+                    // Quick-preview: only render image when no modal overlay is shown
                     if viewer::embedded_graphics_supported() {
                         app.quick_preview.as_ref().and_then(|v| {
                             ui::kitty_image_area_quick_preview(&app, term_area)
@@ -160,6 +160,12 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
                     } else {
                         None
                     }
+                }
+                _ => {
+                    // Any other mode (DirBookmarks, QuickSearch, CommandPalette, etc.)
+                    // is a modal overlay — suppress the image so it doesn't bleed
+                    // through the overlay drawn by the TUI.
+                    None
                 }
             }
         } else {

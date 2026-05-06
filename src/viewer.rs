@@ -1927,7 +1927,7 @@ pub fn render_kitty_image<W: Write>(out: &mut W, viewer: &Viewer, area: Rect) ->
         if first {
             write!(
                 out,
-                "\x1b_Ga=T,f=100,i=1,c={},r={},m={};{}\x1b\\",
+                "\x1b_Ga=T,f=100,q=2,i=1,c={},r={},m={};{}\x1b\\",
                 fit.width,
                 fit.height,
                 usize::from(chunks.peek().is_some()),
@@ -1937,7 +1937,7 @@ pub fn render_kitty_image<W: Write>(out: &mut W, viewer: &Viewer, area: Rect) ->
         } else {
             write!(
                 out,
-                "\x1b_Gm={};{}\x1b\\",
+                "\x1b_Gq=2,m={};{}\x1b\\",
                 usize::from(chunks.peek().is_some()),
                 payload,
             )?;

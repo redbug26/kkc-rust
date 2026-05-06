@@ -1348,7 +1348,13 @@ impl App {
     }
 
     pub fn move_prev_bookmark(&mut self) {
-        if self.bookmark_match_pos > 0 {
+        let len = self.filtered_bookmark_items().len();
+        if len == 0 {
+            return;
+        }
+        if self.bookmark_match_pos == 0 {
+            self.bookmark_match_pos = len - 1;
+        } else {
             self.bookmark_match_pos -= 1;
         }
         self.sync_bookmark_cursor();
@@ -1356,7 +1362,12 @@ impl App {
 
     pub fn move_next_bookmark(&mut self) {
         let len = self.filtered_bookmark_items().len();
-        if self.bookmark_match_pos + 1 < len {
+        if len == 0 {
+            return;
+        }
+        if self.bookmark_match_pos + 1 >= len {
+            self.bookmark_match_pos = 0;
+        } else {
             self.bookmark_match_pos += 1;
         }
         self.sync_bookmark_cursor();
