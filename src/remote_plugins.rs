@@ -51,13 +51,17 @@ pub fn discover_remote_rust_plugins(plugins_dir: &Path) -> Result<Vec<RemoteRust
     let mut plugins = Vec::new();
     for manifest_info in manifests {
         let manifest = read_manifest(&manifest_info.dir.join("plugin.toml"))?;
-        let Some(library_path) =
-            resolve_remote_library_path(&manifest_info.dir, &manifest.remote.as_ref().expect("remote section").library)
-        else {
+        let Some(library_path) = resolve_remote_library_path(
+            &manifest_info.dir,
+            &manifest.remote.as_ref().expect("remote section").library,
+        ) else {
             crate::viewer::debug_log(&format!(
                 "startup: native remote plugin '{}' has no built library at {}",
                 manifest.plugin.id,
-                manifest_info.dir.join(&manifest.remote.as_ref().expect("remote section").library).display()
+                manifest_info
+                    .dir
+                    .join(&manifest.remote.as_ref().expect("remote section").library)
+                    .display()
             ));
             continue;
         };
@@ -152,7 +156,12 @@ pub fn debug_log_remote_plugin_library_status(plugin_dir: &Path) -> Result<()> {
         return Ok(());
     }
 
-    let configured = manifest.remote.as_ref().expect("remote section").library.clone();
+    let configured = manifest
+        .remote
+        .as_ref()
+        .expect("remote section")
+        .library
+        .clone();
     let candidates = candidate_remote_library_paths(plugin_dir, &configured);
     if let Some(found) = candidates.iter().find(|p| p.is_file()) {
         crate::viewer::debug_log(&format!(
@@ -180,9 +189,10 @@ pub fn load_remote_plugin(plugin_id: &str) -> Result<RemotePluginModRef> {
     for manifest_info in discover_remote_rust_plugin_manifests(&plugins_dir)? {
         if manifest_info.id == plugin_id {
             let manifest = read_manifest(&manifest_info.dir.join("plugin.toml"))?;
-            let Some(library_path) =
-                resolve_remote_library_path(&manifest_info.dir, &manifest.remote.as_ref().expect("remote section").library)
-            else {
+            let Some(library_path) = resolve_remote_library_path(
+                &manifest_info.dir,
+                &manifest.remote.as_ref().expect("remote section").library,
+            ) else {
                 return Err(not_found_error(
                     plugin_id,
                     &manifest_info.dir,
@@ -263,7 +273,10 @@ fn read_manifest(path: &Path) -> Result<NativePluginManifest> {
     }
     if let Some(ref r) = manifest.remote {
         if r.library.trim().is_empty() {
-            return Err(anyhow!("{} contains an empty remote.library", path.display()));
+            return Err(anyhow!(
+                "{} contains an empty remote.library",
+                path.display()
+            ));
         }
     }
     Ok(manifest)

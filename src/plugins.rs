@@ -2204,7 +2204,9 @@ fn extract_plugin_bundle(path: &Path, plugins_dir: &Path) -> Result<PathBuf> {
     }
     if !has_plugin_lua && !is_native_rust_plugin_dir(&temp_dir)? {
         let _ = fs::remove_dir_all(&temp_dir);
-        bail!("Plugin bundle contains plugin.toml but is not a valid native plugin (remote-rust/viewer-rust)");
+        bail!(
+            "Plugin bundle contains plugin.toml but is not a valid native plugin (remote-rust/viewer-rust)"
+        );
     }
 
     if install_dir.exists() {

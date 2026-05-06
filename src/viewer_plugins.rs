@@ -53,13 +53,17 @@ pub fn discover_viewer_rust_plugins(plugins_dir: &Path) -> Result<Vec<ViewerRust
     let mut plugins = Vec::new();
     for manifest_info in manifests {
         let manifest = read_manifest(&manifest_info.dir.join("plugin.toml"))?;
-        let Some(library_path) =
-            resolve_viewer_library_path(&manifest_info.dir, &manifest.viewer.as_ref().expect("viewer section").library)
-        else {
+        let Some(library_path) = resolve_viewer_library_path(
+            &manifest_info.dir,
+            &manifest.viewer.as_ref().expect("viewer section").library,
+        ) else {
             crate::viewer::debug_log(&format!(
                 "startup: native viewer plugin '{}' has no built library at {}",
                 manifest.plugin.id,
-                manifest_info.dir.join(&manifest.viewer.as_ref().expect("viewer section").library).display()
+                manifest_info
+                    .dir
+                    .join(&manifest.viewer.as_ref().expect("viewer section").library)
+                    .display()
             ));
             continue;
         };
@@ -194,7 +198,12 @@ pub fn debug_log_viewer_plugin_library_status(plugin_dir: &Path) -> Result<()> {
         return Ok(());
     }
 
-    let configured = manifest.viewer.as_ref().expect("viewer section").library.clone();
+    let configured = manifest
+        .viewer
+        .as_ref()
+        .expect("viewer section")
+        .library
+        .clone();
     let candidates = candidate_viewer_library_paths(plugin_dir, &configured);
     if let Some(found) = candidates.iter().find(|p| p.is_file()) {
         crate::viewer::debug_log(&format!(
@@ -221,9 +230,10 @@ pub fn load_viewer_plugin(plugin_id: &str) -> Result<ViewerPluginModRef> {
     for manifest_info in discover_viewer_rust_plugin_manifests(&plugins_dir)? {
         if manifest_info.id == plugin_id {
             let manifest = read_manifest(&manifest_info.dir.join("plugin.toml"))?;
-            let Some(library_path) =
-                resolve_viewer_library_path(&manifest_info.dir, &manifest.viewer.as_ref().expect("viewer section").library)
-            else {
+            let Some(library_path) = resolve_viewer_library_path(
+                &manifest_info.dir,
+                &manifest.viewer.as_ref().expect("viewer section").library,
+            ) else {
                 return Err(not_found_error(
                     plugin_id,
                     &manifest_info.dir,
@@ -304,7 +314,10 @@ fn read_manifest(path: &Path) -> Result<NativePluginManifest> {
     }
     if let Some(ref v) = manifest.viewer {
         if v.library.trim().is_empty() {
-            return Err(anyhow!("{} contains an empty viewer.library", path.display()));
+            return Err(anyhow!(
+                "{} contains an empty viewer.library",
+                path.display()
+            ));
         }
     }
     Ok(manifest)

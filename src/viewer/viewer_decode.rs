@@ -48,12 +48,30 @@ impl AnsiCanvasMode {
 }
 
 pub(super) fn detect_ansi_canvas_mode(data: &[u8]) -> AnsiCanvasMode {
-    let data = strip_dos_eof(strip_utf8_bom(data));
-    if ansi_cursor_targets_large_canvas(data) || data_has_more_than_fixed_rows(data) {
+    let data = strip_utf8_bom(data);
+    if sauce_declares_large_canvas(data) || ansi_cursor_targets_large_canvas(strip_dos_eof(data)) {
         AnsiCanvasMode::Unbounded
     } else {
         AnsiCanvasMode::Fixed80x25
     }
+}
+
+fn sauce_declares_large_canvas(data: &[u8]) -> bool {
+    let data = data.strip_suffix(&[0x1A]).unwrap_or(data);
+    if data.len() < 128 {
+        return false;
+    }
+    let record = &data[data.len() - 128..];
+    if &record[..5] != b"SAUCE" {
+        return false;
+    }
+    let data_type = record[94];
+    if data_type != 1 {
+        return false;
+    }
+    let width = u16::from_le_bytes([record[96], record[97]]) as usize;
+    let height = u16::from_le_bytes([record[98], record[99]]) as usize;
+    width > ANSI_SCREEN_COLUMNS || height > ANSI_SCREEN_ROWS
 }
 
 fn ansi_cursor_targets_large_canvas(data: &[u8]) -> bool {
@@ -95,28 +113,6 @@ fn ansi_cursor_targets_large_canvas(data: &[u8]) -> bool {
             _ => {}
         }
         i += 2 + consumed;
-    }
-    false
-}
-
-fn data_has_more_than_fixed_rows(data: &[u8]) -> bool {
-    let mut row_count = 1usize;
-    let mut i = 0usize;
-    while i < data.len() {
-        match data[i] {
-            b'\r' => {
-                row_count += 1;
-                if i + 1 < data.len() && data[i + 1] == b'\n' {
-                    i += 1;
-                }
-            }
-            b'\n' => row_count += 1,
-            _ => {}
-        }
-        if row_count > ANSI_SCREEN_ROWS {
-            return true;
-        }
-        i += 1;
     }
     false
 }
@@ -1197,12 +1193,26 @@ mod tests {
     }
 
     #[test]
-    fn detect_ansi_canvas_mode_uses_unbounded_for_many_rows() {
+    fn detect_ansi_canvas_mode_ignores_many_physical_rows_without_large_targets() {
         let input = ["X"; ANSI_SCREEN_ROWS + 1].join("\n");
         assert_eq!(
             detect_ansi_canvas_mode(input.as_bytes()),
-            AnsiCanvasMode::Unbounded
+            AnsiCanvasMode::Fixed80x25
         );
+    }
+
+    #[test]
+    fn detect_ansi_canvas_mode_uses_unbounded_for_large_sauce_dimensions() {
+        let mut input = b"ART".to_vec();
+        input.push(0x1A);
+        let mut sauce = [0u8; 128];
+        sauce[..7].copy_from_slice(b"SAUCE00");
+        sauce[94] = 1;
+        sauce[95] = 1;
+        sauce[96..98].copy_from_slice(&(ANSI_SCREEN_COLUMNS as u16 + 1).to_le_bytes());
+        sauce[98..100].copy_from_slice(&(ANSI_SCREEN_ROWS as u16).to_le_bytes());
+        input.extend_from_slice(&sauce);
+        assert_eq!(detect_ansi_canvas_mode(&input), AnsiCanvasMode::Unbounded);
     }
 
     #[test]
