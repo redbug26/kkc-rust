@@ -137,17 +137,31 @@ fn looks_like_image(path: &Path, data: &[u8]) -> bool {
         .to_ascii_lowercase();
     matches!(
         ext.as_str(),
-        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp"
+        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "heic" | "heif"
     ) || data.starts_with(b"\x89PNG\r\n\x1a\n")
         || data.starts_with(&[0xFF, 0xD8, 0xFF])
         || data.starts_with(b"GIF87a")
         || data.starts_with(b"GIF89a")
         || data.starts_with(b"BM")
         || (data.len() >= 12 && &data[..4] == b"RIFF" && &data[8..12] == b"WEBP")
+        || is_heif(data)
+}
+
+fn is_heif(data: &[u8]) -> bool {
+    if data.len() < 12 || data.get(4..8) != Some(b"ftyp") {
+        return false;
+    }
+
+    data[8..].chunks_exact(4).take(16).any(|brand| {
+        matches!(
+            brand,
+            b"heic" | b"heix" | b"hevc" | b"hevx" | b"mif1" | b"msf1"
+        )
+    })
 }
 
 fn contains_ansi_escape(data: &[u8]) -> bool {
-    let check = &data[..data.len().min(65536)];
+    let check = &data[..data.len().min(64)];
     check.windows(2).any(|w| w == [0x1b, b'['])
 }
 
@@ -1170,6 +1184,12 @@ mod tests {
     fn detect_mode_prefers_esc_bracket_over_binary_heuristic() {
         let input = b"\x1b[2J\x1b[31mANSI\x1b[0m\x00\x01\x02\x03";
         assert_eq!(detect_mode(Path::new("art.dat"), input), ViewMode::Ansi);
+    }
+
+    #[test]
+    fn detect_mode_treats_heic_as_image_before_ansi_scan() {
+        let input = b"\x00\x00\x00\x28ftypheic\x00\x00\x00\x00mif1MiHE\x1b[31m";
+        assert_eq!(detect_mode(Path::new("photo.heic"), input), ViewMode::Image);
     }
 
     #[test]

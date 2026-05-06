@@ -2107,9 +2107,18 @@ fn detect_image_info(path: &Path, data: &[u8]) -> Option<ImageInfo> {
             decoded_rgba: OnceLock::new(),
         });
     }
+    if is_heif_image(path, data) {
+        return Some(ImageInfo {
+            format: "HEIC",
+            width: None,
+            height: None,
+            kitty_png: OnceLock::new(),
+            decoded_rgba: OnceLock::new(),
+        });
+    }
     if matches!(
         ext.as_str(),
-        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp"
+        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "heic" | "heif"
     ) {
         return Some(ImageInfo {
             format: match ext.as_str() {
@@ -2118,6 +2127,7 @@ fn detect_image_info(path: &Path, data: &[u8]) -> Option<ImageInfo> {
                 "gif" => "GIF",
                 "bmp" => "BMP",
                 "webp" => "WEBP",
+                "heic" | "heif" => "HEIC",
                 _ => "Image",
             },
             width: None,
@@ -2127,6 +2137,28 @@ fn detect_image_info(path: &Path, data: &[u8]) -> Option<ImageInfo> {
         });
     }
     None
+}
+
+fn is_heif_image(path: &Path, data: &[u8]) -> bool {
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    matches!(ext.as_str(), "heic" | "heif") || is_heif_file_type_box(data)
+}
+
+fn is_heif_file_type_box(data: &[u8]) -> bool {
+    if data.len() < 12 || data.get(4..8) != Some(b"ftyp") {
+        return false;
+    }
+
+    data[8..].chunks_exact(4).take(16).any(|brand| {
+        matches!(
+            brand,
+            b"heic" | b"heix" | b"hevc" | b"hevx" | b"mif1" | b"msf1"
+        )
+    })
 }
 
 fn default_encoding_for_mode(mode: ViewMode) -> EncodingMode {

@@ -543,6 +543,15 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             image_info_lines(0, 0, &data, ImageExifContainer::Tiff),
         ))
+    } else if is_heif(&data, &ext) {
+        Some(info(
+            "image/heic",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(b"8BPS") {
         Some(info(
             "image/vnd.adobe.photoshop",
@@ -974,6 +983,7 @@ fn format_from_mime_type(mime_type: &str) -> Option<&'static str> {
         "image/jpeg" => Some("JPEG bitmap"),
         "image/bmp" => Some("BMP bitmap"),
         "image/tiff" => Some("TIFF bitmap"),
+        "image/heic" => Some("HEIC bitmap"),
         "image/vnd.adobe.photoshop" => Some("Photoshop bitmap"),
         "image/x-tga" => Some("TGA bitmap"),
         "audio/wav" => Some("WAV sample"),
@@ -2670,6 +2680,23 @@ fn is_json(data: &[u8], ext: &str) -> bool {
     trimmed.starts_with('{') || trimmed.starts_with('[')
 }
 
+fn is_heif(data: &[u8], ext: &str) -> bool {
+    matches!(ext, "heic" | "heif") || is_heif_file_type_box(data)
+}
+
+fn is_heif_file_type_box(data: &[u8]) -> bool {
+    if data.len() < 12 || data.get(4..8) != Some(b"ftyp") {
+        return false;
+    }
+
+    data[8..].chunks_exact(4).take(16).any(|brand| {
+        matches!(
+            brand,
+            b"heic" | b"heix" | b"hevc" | b"hevx" | b"mif1" | b"msf1"
+        )
+    })
+}
+
 fn is_svg(data: &[u8], ext: &str) -> bool {
     if ext != "svg" {
         return false;
@@ -3478,6 +3505,25 @@ mod tests {
                 .iter()
                 .any(|line| line.contains("TIFF header: Little-endian, v42, IFD0 @ 8"))
         );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn heic_file_type_box_is_detected_as_image() {
+        let path = std::env::temp_dir().join(format!("kkc-idf-heic-{}.heic", std::process::id()));
+        fs::write(
+            &path,
+            b"\x00\x00\x00\x28ftypheic\x00\x00\x00\x00mif1MiHEMiPrmiaf",
+        )
+        .expect("write heic");
+
+        let info = probe_file(&path)
+            .expect("probe should not fail")
+            .expect("heic should be detected");
+        assert_eq!(info.mime_types[0], "image/heic");
+        assert_eq!(info.format, "HEIC bitmap");
+        assert_eq!(info.kind, IdfKind::Bitmap);
 
         let _ = fs::remove_file(path);
     }
