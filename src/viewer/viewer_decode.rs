@@ -1041,7 +1041,7 @@ pub(super) fn preprocess_bytes(data: &[u8], preproc_ops: &[PreprocOp]) -> Vec<u8
     out
 }
 
-fn byte_to_display_char(b: u8, encoding: EncodingMode) -> char {
+pub(super) fn byte_to_display_char(b: u8, encoding: EncodingMode) -> char {
     if b == b'\n' {
         return '\n';
     }

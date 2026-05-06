@@ -25,8 +25,8 @@ mod viewer_render;
 mod viewer_search;
 
 use self::viewer_decode::{
-    AnsiCanvasMode, AnsiLine, ansi_screen_lines_with_canvas, detect_ansi_canvas_mode, detect_mode,
-    hex_line, preproc_op_label, preprocess_bytes, text_lines,
+    AnsiCanvasMode, AnsiLine, ansi_screen_lines_with_canvas, byte_to_display_char,
+    detect_ansi_canvas_mode, detect_mode, hex_line, preproc_op_label, preprocess_bytes, text_lines,
 };
 use self::viewer_render::{pad_visible, slice_visible};
 use self::viewer_search::parse_hex_query;
@@ -1377,14 +1377,23 @@ impl Viewer {
         let end = start.saturating_add(height).min(self.hex_line_count());
         (start..end)
             .map(|idx| {
-                let line = self.hex_plain_line_at(idx);
-                let display = if self.wrap {
-                    line
+                let offset = idx.saturating_mul(bpr);
+                if offset >= self.raw.len() {
+                    return Line::from(Span::raw(String::new()));
+                }
+                let end = offset.saturating_add(bpr).min(self.raw.len());
+                let chunk = preprocess_bytes(&self.raw[offset..end], &self.preproc_ops);
+                let segments = hex_line_segments(offset, &chunk, bpr, self.encoding);
+                if self.wrap {
+                    Line::from(
+                        segments
+                            .into_iter()
+                            .map(|segment| Span::styled(segment.text, segment.style))
+                            .collect::<Vec<_>>(),
+                    )
                 } else {
-                    let shifted = slice_visible(&line, self.hscroll, selected_width);
-                    pad_visible(&shifted, selected_width)
-                };
-                Line::from(Span::raw(display))
+                    line_from_styled_segments(segments, self.hscroll, selected_width)
+                }
             })
             .collect()
     }
@@ -1722,6 +1731,119 @@ impl Viewer {
     }
 }
 
+#[derive(Debug)]
+struct StyledSegment {
+    text: String,
+    style: Style,
+}
+
+fn hex_line_segments(
+    offset: usize,
+    chunk: &[u8],
+    bpr: usize,
+    encoding: EncodingMode,
+) -> Vec<StyledSegment> {
+    let pad = bpr.saturating_mul(3).saturating_sub(1).max(1);
+    let mut segments = vec![StyledSegment {
+        text: format!("{:08X}  ", offset),
+        style: Style::default(),
+    }];
+
+    let printable_style = Style::default().fg(Color::Green);
+
+    for (idx, &byte) in chunk.iter().enumerate() {
+        let style = if (0x20..=0x7f).contains(&byte) {
+            printable_style
+        } else {
+            Style::default()
+        };
+        segments.push(StyledSegment {
+            text: format!("{:02X}", byte),
+            style,
+        });
+        if idx + 1 < chunk.len() {
+            segments.push(StyledSegment {
+                text: " ".to_string(),
+                style: Style::default(),
+            });
+        }
+    }
+
+    let hex_width = chunk.len().saturating_mul(3).saturating_sub(1);
+    let padding = pad.saturating_sub(hex_width);
+    if padding > 0 {
+        segments.push(StyledSegment {
+            text: " ".repeat(padding),
+            style: Style::default(),
+        });
+    }
+    segments.push(StyledSegment {
+        text: "  ".to_string(),
+        style: Style::default(),
+    });
+
+    for &byte in chunk {
+        let ch = if byte < 0x20 || byte == 0x7f {
+            '.'
+        } else {
+            byte_to_display_char(byte, encoding)
+        };
+        let style = if (0x20..=0x7f).contains(&byte) {
+            printable_style
+        } else {
+            Style::default()
+        };
+        segments.push(StyledSegment {
+            text: ch.to_string(),
+            style,
+        });
+    }
+
+    segments
+}
+
+fn line_from_styled_segments(
+    segments: Vec<StyledSegment>,
+    hscroll: usize,
+    width: usize,
+) -> Line<'static> {
+    if width == 0 {
+        return Line::from(Span::raw(String::new()));
+    }
+
+    let mut skip = hscroll;
+    let mut remaining = width;
+    let mut spans = Vec::new();
+
+    for segment in segments {
+        if remaining == 0 {
+            break;
+        }
+
+        let segment_width = segment.text.chars().count();
+        if skip >= segment_width {
+            skip -= segment_width;
+            continue;
+        }
+
+        let visible = segment
+            .text
+            .chars()
+            .skip(skip)
+            .take(remaining)
+            .collect::<String>();
+        skip = 0;
+        remaining = remaining.saturating_sub(visible.chars().count());
+        spans.push(Span::styled(visible, segment.style));
+    }
+
+    if remaining > 0 {
+        spans.push(Span::raw(" ".repeat(remaining)));
+    }
+
+    Line::from(spans)
+}
+
 fn ordered_mouse_points(a: MouseTextPoint, b: MouseTextPoint) -> (MouseTextPoint, MouseTextPoint) {
     if (a.row, a.column) <= (b.row, b.column) {
         (a, b)
@@ -1868,6 +1990,10 @@ pub fn kitty_graphics_supported() -> bool {
         )
 }
 
+pub fn ghostty_supported() -> bool {
+    matches!(env::var("TERM_PROGRAM").ok().as_deref(), Some("ghostty"))
+}
+
 pub fn iterm2_supported() -> bool {
     matches!(env::var("TERM_PROGRAM").ok().as_deref(), Some("iTerm.app"))
 }
@@ -1990,9 +2116,10 @@ fn render_terminal_png<W: Write>(out: &mut W, payload: &[u8], fit: Rect) -> Resu
         if first {
             write!(
                 out,
-                "\x1b_Ga=T,f=100,q=2,i=1,c={},r={},m={};{}\x1b\\",
+                "\x1b_Ga=T,f=100,q=2,i=1,c={},r={},{}m={};{}\x1b\\",
                 fit.width,
                 fit.height,
+                if ghostty_supported() { "z=-1," } else { "" },
                 usize::from(chunks.peek().is_some()),
                 encoded,
             )?;
