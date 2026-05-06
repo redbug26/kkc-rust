@@ -135,6 +135,7 @@ impl AnsiLine {
 #[derive(Debug, Clone, Copy)]
 struct AnsiState {
     style: AnsiCellStyle,
+    palette: [(u8, u8, u8); 16],
     saved_row: usize,
     saved_col: usize,
     insert_mode: bool,
@@ -144,6 +145,7 @@ impl Default for AnsiState {
     fn default() -> Self {
         Self {
             style: AnsiCellStyle::default(),
+            palette: DOS_PALETTE,
             saved_row: 0,
             saved_col: 0,
             insert_mode: false,
@@ -190,7 +192,10 @@ pub(super) fn ansi_screen_lines(
                     continue;
                 }
                 b']' => {
-                    i += 2 + osc_len(&data[i + 2..]);
+                    let consumed = osc_len(&data[i + 2..]);
+                    let payload_len = string_control_payload_len(&data[i + 2..], consumed);
+                    apply_osc(&data[i + 2..i + 2 + payload_len], &mut state);
+                    i += 2 + consumed;
                     continue;
                 }
                 b'P' | b'X' | b'^' | b'_' => {
@@ -400,6 +405,23 @@ fn osc_len(data: &[u8]) -> usize {
     string_control_len(data)
 }
 
+fn string_control_payload_len(data: &[u8], consumed: usize) -> usize {
+    if consumed == 0 {
+        return 0;
+    }
+    if consumed <= data.len() && data[consumed - 1] == 0x07 {
+        return consumed - 1;
+    }
+    if consumed >= 2
+        && consumed <= data.len()
+        && data[consumed - 2] == 0x1b
+        && data[consumed - 1] == b'\\'
+    {
+        return consumed - 2;
+    }
+    consumed.min(data.len())
+}
+
 fn string_control_len(data: &[u8]) -> usize {
     let mut i = 0usize;
     while i < data.len() {
@@ -412,6 +434,69 @@ fn string_control_len(data: &[u8]) -> usize {
         i += 1;
     }
     data.len()
+}
+
+fn apply_osc(data: &[u8], state: &mut AnsiState) {
+    let Some(rest) = data.strip_prefix(b"4;") else {
+        return;
+    };
+    apply_osc_palette(rest, state);
+}
+
+fn apply_osc_palette(data: &[u8], state: &mut AnsiState) {
+    let Ok(data) = std::str::from_utf8(data) else {
+        return;
+    };
+    let parts = data.split(';').collect::<Vec<_>>();
+    let mut i = 0usize;
+    while i + 1 < parts.len() {
+        let Ok(index) = parts[i].parse::<usize>() else {
+            i += 2;
+            continue;
+        };
+        if index >= state.palette.len() {
+            i += 2;
+            continue;
+        }
+
+        let Some(rgb) = parse_osc_rgb(parts[i + 1]) else {
+            i += 2;
+            continue;
+        };
+        let old_color = palette_color(&state.palette, index);
+        state.palette[index] = rgb;
+        let new_color = palette_color(&state.palette, index);
+        if state.style.fg == old_color {
+            state.style.fg = new_color;
+        }
+        if state.style.bg == old_color {
+            state.style.bg = new_color;
+        }
+        i += 2;
+    }
+}
+
+fn parse_osc_rgb(value: &str) -> Option<(u8, u8, u8)> {
+    let rgb = value
+        .strip_prefix("rgb:")
+        .or_else(|| value.strip_prefix("RGB:"))?;
+    let mut parts = rgb.split('/');
+    let r = parse_osc_hex_component(parts.next()?)?;
+    let g = parse_osc_hex_component(parts.next()?)?;
+    let b = parse_osc_hex_component(parts.next()?)?;
+    parts.next().is_none().then_some((r, g, b))
+}
+
+fn parse_osc_hex_component(value: &str) -> Option<u8> {
+    if value.is_empty() || value.len() > 4 || !value.is_ascii() {
+        return None;
+    }
+    let value = if value.len() == 1 {
+        [value, value].concat()
+    } else {
+        value[..2.min(value.len())].to_string()
+    };
+    u8::from_str_radix(&value, 16).ok()
 }
 
 fn ensure_row(lines: &mut Vec<AnsiLine>, row: usize, max_rows: usize) {
@@ -467,7 +552,7 @@ fn apply_csi(
     };
 
     match final_byte as char {
-        'm' => apply_sgr(params, &mut state.style),
+        'm' => apply_sgr(params, state),
         'H' | 'f' => {
             *row = n(0, 1).saturating_sub(1).min(max_rows - 1);
             *col = n(1, 1).saturating_sub(1).min(ANSI_SCREEN_COLUMNS - 1);
@@ -605,15 +690,17 @@ fn apply_csi(
     }
 }
 
-fn apply_sgr(params: &[i32], style: &mut AnsiCellStyle) {
+fn apply_sgr(params: &[i32], state: &mut AnsiState) {
     let params = if params.is_empty() { &[0][..] } else { params };
+    let palette = state.palette;
+    let style = &mut state.style;
     let mut i = 0usize;
     while i < params.len() {
         match params[i] {
-            0 => *style = AnsiCellStyle::default(),
+            0 => *style = default_style_for_palette(&palette),
             1 => {
                 style.modifier.insert(Modifier::BOLD);
-                style.fg = bright_ansi_color(style.fg);
+                style.fg = bright_ansi_color(style.fg, &palette);
             }
             2 => style.modifier.insert(Modifier::DIM),
             3 => style.modifier.insert(Modifier::ITALIC),
@@ -636,15 +723,16 @@ fn apply_sgr(params: &[i32], style: &mut AnsiCellStyle) {
                 style.fg = ansi_16_color(
                     params[i] as u8 - 30,
                     style.modifier.contains(Modifier::BOLD),
+                    &palette,
                 );
             }
-            40..=47 => style.bg = ansi_16_color(params[i] as u8 - 40, false),
-            90..=97 => style.fg = ansi_16_color(params[i] as u8 - 90, true),
-            100..=107 => style.bg = ansi_16_color(params[i] as u8 - 100, true),
-            39 => style.fg = dos_palette_color(7),
-            49 => style.bg = dos_palette_color(0),
+            40..=47 => style.bg = ansi_16_color(params[i] as u8 - 40, false, &palette),
+            90..=97 => style.fg = ansi_16_color(params[i] as u8 - 90, true, &palette),
+            100..=107 => style.bg = ansi_16_color(params[i] as u8 - 100, true, &palette),
+            39 => style.fg = palette_color(&palette, 7),
+            49 => style.bg = palette_color(&palette, 0),
             38 | 48 => {
-                if let Some((color, consumed)) = parse_extended_color(&params[i + 1..]) {
+                if let Some((color, consumed)) = parse_extended_color(&params[i + 1..], &palette) {
                     if params[i] == 38 {
                         style.fg = color;
                     } else {
@@ -659,11 +747,11 @@ fn apply_sgr(params: &[i32], style: &mut AnsiCellStyle) {
     }
 }
 
-fn parse_extended_color(params: &[i32]) -> Option<(Color, usize)> {
+fn parse_extended_color(params: &[i32], palette: &[(u8, u8, u8); 16]) -> Option<(Color, usize)> {
     match params.first().copied()? {
         5 => {
             let idx = *params.get(1)? as u8;
-            Some((ansi_256_color(idx), 2))
+            Some((ansi_256_color(idx, palette), 2))
         }
         2 => {
             let r = (*params.get(1)?).clamp(0, 255) as u8;
@@ -675,28 +763,40 @@ fn parse_extended_color(params: &[i32]) -> Option<(Color, usize)> {
     }
 }
 
-fn ansi_16_color(idx: u8, bright: bool) -> Color {
+fn default_style_for_palette(palette: &[(u8, u8, u8); 16]) -> AnsiCellStyle {
+    AnsiCellStyle {
+        fg: palette_color(palette, 7),
+        bg: palette_color(palette, 0),
+        modifier: Modifier::empty(),
+    }
+}
+
+fn ansi_16_color(idx: u8, bright: bool, palette: &[(u8, u8, u8); 16]) -> Color {
     let palette_index = DOS_ANSI_TO_PALETTE[idx as usize % 8] + if bright { 8 } else { 0 };
-    dos_palette_color(palette_index)
+    palette_color(palette, palette_index)
 }
 
 fn dos_palette_color(idx: usize) -> Color {
-    let (r, g, b) = DOS_PALETTE[idx % DOS_PALETTE.len()];
+    palette_color(&DOS_PALETTE, idx)
+}
+
+fn palette_color(palette: &[(u8, u8, u8); 16], idx: usize) -> Color {
+    let (r, g, b) = palette[idx % palette.len()];
     Color::Rgb(r, g, b)
 }
 
-fn bright_ansi_color(color: Color) -> Color {
+fn bright_ansi_color(color: Color, palette: &[(u8, u8, u8); 16]) -> Color {
     for sgr_idx in 0..8 {
-        if color == ansi_16_color(sgr_idx, false) {
-            return ansi_16_color(sgr_idx, true);
+        if color == ansi_16_color(sgr_idx, false, palette) {
+            return ansi_16_color(sgr_idx, true, palette);
         }
     }
     color
 }
 
-fn ansi_256_color(idx: u8) -> Color {
+fn ansi_256_color(idx: u8, palette: &[(u8, u8, u8); 16]) -> Color {
     if idx < 16 {
-        return ansi_16_color(idx % 8, idx >= 8);
+        return ansi_16_color(idx % 8, idx >= 8, palette);
     }
     if idx < 232 {
         let n = idx - 16;
@@ -999,6 +1099,21 @@ mod tests {
         let lines = ansi_screen_lines(input, LineFeedMode::UnixLf, &[], EncodingMode::Plain);
         assert_eq!(lines[0].cells[0].style.bg, Color::Rgb(0, 0, 0xAA));
         assert_eq!(lines[0].cells[1].style.bg, Color::Rgb(0xFF, 0xFF, 0x55));
+    }
+
+    #[test]
+    fn ansi_screen_lines_applies_osc_4_palette_colors() {
+        let input = b"\x1b]4;4;rgb:10/38/28;1;rgb:86/92/C7\x07\x1b[31mR\x1b[34mB";
+        let lines = ansi_screen_lines(input, LineFeedMode::UnixLf, &[], EncodingMode::Plain);
+        assert_eq!(lines[0].cells[0].style.fg, Color::Rgb(0x10, 0x38, 0x28));
+        assert_eq!(lines[0].cells[1].style.fg, Color::Rgb(0x86, 0x92, 0xC7));
+    }
+
+    #[test]
+    fn ansi_screen_lines_applies_osc_4_with_st_terminator() {
+        let input = b"\x1b]4;7;rgb:82/92/7D\x1b\\\x1b[0mW";
+        let lines = ansi_screen_lines(input, LineFeedMode::UnixLf, &[], EncodingMode::Plain);
+        assert_eq!(lines[0].cells[0].style.fg, Color::Rgb(0x82, 0x92, 0x7D));
     }
 
     #[test]
