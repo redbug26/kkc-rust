@@ -25,8 +25,8 @@ mod viewer_render;
 mod viewer_search;
 
 use self::viewer_decode::{
-    AnsiLine, ansi_screen_lines, detect_mode, hex_line, preproc_op_label, preprocess_bytes,
-    text_lines,
+    AnsiCanvasMode, AnsiLine, ansi_screen_lines_with_canvas, detect_ansi_canvas_mode, detect_mode,
+    hex_line, preproc_op_label, preprocess_bytes, text_lines,
 };
 use self::viewer_render::{pad_visible, slice_visible};
 use self::viewer_search::parse_hex_query;
@@ -112,6 +112,7 @@ pub struct Viewer {
     pub save_position: bool,
     pub encoding: EncodingMode,
     pub line_feed: LineFeedMode,
+    ansi_canvas_mode: AnsiCanvasMode,
     pub mask: MaskKind,
     pub mask_enabled: bool,
     pub preproc_ops: Vec<PreprocOp>,
@@ -256,6 +257,7 @@ impl Viewer {
             save_position: false,
             encoding: EncodingMode::Plain,
             line_feed: LineFeedMode::UnixLf,
+            ansi_canvas_mode: AnsiCanvasMode::Fixed80x25,
             mask: MaskKind::Auto,
             mask_enabled: false,
             preproc_ops: Vec::new(),
@@ -307,6 +309,11 @@ impl Viewer {
         let image = detect_image_info(path, &raw);
         let mode = detect_mode(path, &raw);
         let encoding = default_encoding_for_mode(mode);
+        let ansi_canvas_mode = if matches!(mode, ViewMode::Ansi) {
+            detect_ansi_canvas_mode(&raw)
+        } else {
+            AnsiCanvasMode::Fixed80x25
+        };
         let mut viewer = Self {
             path: path.to_path_buf(),
             raw,
@@ -324,6 +331,7 @@ impl Viewer {
             save_position: true,
             encoding,
             line_feed,
+            ansi_canvas_mode,
             mask: MaskKind::Auto,
             mask_enabled: true,
             preproc_ops: Vec::new(),
@@ -418,6 +426,13 @@ impl Viewer {
         }
     }
 
+    pub fn ansi_canvas_label(&self) -> &'static str {
+        match self.ansi_canvas_mode {
+            AnsiCanvasMode::Fixed80x25 => "80x25",
+            AnsiCanvasMode::Unbounded => "Free",
+        }
+    }
+
     pub fn line_count(&self) -> usize {
         if let Some(count) = self.plugin_document_line_count() {
             return count.max(1);
@@ -468,6 +483,20 @@ impl Viewer {
     pub fn set_encoding(&mut self, mode: EncodingMode) {
         self.encoding = mode;
         self.rebuild_decoded_lines();
+        self.rebuild_matches();
+    }
+
+    pub fn toggle_ansi_canvas_mode(&mut self) {
+        if !matches!(self.mode, ViewMode::Ansi) {
+            return;
+        }
+        self.ansi_canvas_mode = match self.ansi_canvas_mode {
+            AnsiCanvasMode::Fixed80x25 => AnsiCanvasMode::Unbounded,
+            AnsiCanvasMode::Unbounded => AnsiCanvasMode::Fixed80x25,
+        };
+        self.rebuild_decoded_lines();
+        self.scroll = 0;
+        self.hscroll = 0;
         self.rebuild_matches();
     }
 
@@ -1609,11 +1638,12 @@ impl Viewer {
             ViewMode::Hex => {}
             ViewMode::Ansi => {
                 if self.ansi_screen_lines.is_empty() {
-                    self.ansi_screen_lines = ansi_screen_lines(
+                    self.ansi_screen_lines = ansi_screen_lines_with_canvas(
                         &self.raw,
                         self.line_feed,
                         &self.preproc_ops,
                         self.encoding,
+                        self.ansi_canvas_mode,
                     );
                     self.ansi_lines = self
                         .ansi_screen_lines

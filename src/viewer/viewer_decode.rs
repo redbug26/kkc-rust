@@ -25,6 +25,102 @@ const DOS_PALETTE: [(u8, u8, u8); 16] = [
     (0xFF, 0xFF, 0xFF), // 15: White
 ];
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum AnsiCanvasMode {
+    Fixed80x25,
+    Unbounded,
+}
+
+impl AnsiCanvasMode {
+    fn columns(self) -> Option<usize> {
+        match self {
+            Self::Fixed80x25 => Some(ANSI_SCREEN_COLUMNS),
+            Self::Unbounded => None,
+        }
+    }
+
+    fn rows(self) -> Option<usize> {
+        match self {
+            Self::Fixed80x25 => Some(ANSI_SCREEN_ROWS),
+            Self::Unbounded => None,
+        }
+    }
+}
+
+pub(super) fn detect_ansi_canvas_mode(data: &[u8]) -> AnsiCanvasMode {
+    let data = strip_dos_eof(strip_utf8_bom(data));
+    if ansi_cursor_targets_large_canvas(data) || data_has_more_than_fixed_rows(data) {
+        AnsiCanvasMode::Unbounded
+    } else {
+        AnsiCanvasMode::Fixed80x25
+    }
+}
+
+fn ansi_cursor_targets_large_canvas(data: &[u8]) -> bool {
+    let mut i = 0usize;
+    while i + 2 < data.len() {
+        if data[i] != 0x1b || data[i + 1] != b'[' {
+            i += 1;
+            continue;
+        }
+        let Some((final_byte, params, consumed)) = parse_csi(&data[i + 2..]) else {
+            break;
+        };
+        match final_byte as char {
+            'H' | 'f' => {
+                let row = params
+                    .first()
+                    .copied()
+                    .filter(|value| *value > 0)
+                    .unwrap_or(1);
+                let col = params
+                    .get(1)
+                    .copied()
+                    .filter(|value| *value > 0)
+                    .unwrap_or(1);
+                if row as usize > ANSI_SCREEN_ROWS || col as usize > ANSI_SCREEN_COLUMNS {
+                    return true;
+                }
+            }
+            'G' => {
+                let col = params
+                    .first()
+                    .copied()
+                    .filter(|value| *value > 0)
+                    .unwrap_or(1);
+                if col as usize > ANSI_SCREEN_COLUMNS {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+        i += 2 + consumed;
+    }
+    false
+}
+
+fn data_has_more_than_fixed_rows(data: &[u8]) -> bool {
+    let mut row_count = 1usize;
+    let mut i = 0usize;
+    while i < data.len() {
+        match data[i] {
+            b'\r' => {
+                row_count += 1;
+                if i + 1 < data.len() && data[i + 1] == b'\n' {
+                    i += 1;
+                }
+            }
+            b'\n' => row_count += 1,
+            _ => {}
+        }
+        if row_count > ANSI_SCREEN_ROWS {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
 pub(super) fn detect_mode(path: &Path, data: &[u8]) -> ViewMode {
     if looks_like_image(path, data) {
         ViewMode::Image
@@ -153,15 +249,34 @@ impl Default for AnsiState {
     }
 }
 
+#[cfg(test)]
 pub(super) fn ansi_screen_lines(
     data: &[u8],
     line_feed: LineFeedMode,
     preproc_ops: &[PreprocOp],
     encoding: EncodingMode,
 ) -> Vec<AnsiLine> {
+    ansi_screen_lines_with_canvas(
+        data,
+        line_feed,
+        preproc_ops,
+        encoding,
+        AnsiCanvasMode::Fixed80x25,
+    )
+}
+
+pub(super) fn ansi_screen_lines_with_canvas(
+    data: &[u8],
+    line_feed: LineFeedMode,
+    preproc_ops: &[PreprocOp],
+    encoding: EncodingMode,
+    canvas: AnsiCanvasMode,
+) -> Vec<AnsiLine> {
     let processed = preprocess_bytes(data, preproc_ops);
     let data = strip_utf8_bom(&processed);
     let data = strip_dos_eof(data);
+    let screen_columns = canvas.columns();
+    let screen_rows = canvas.rows();
     let mut lines = vec![AnsiLine { cells: Vec::new() }];
     let mut state = AnsiState::default();
     let mut row = 0usize;
@@ -186,7 +301,8 @@ pub(super) fn ansi_screen_lines(
                         &mut row,
                         &mut col,
                         &mut state,
-                        ANSI_SCREEN_ROWS,
+                        screen_columns,
+                        screen_rows,
                     );
                     i += 2 + consumed;
                     continue;
@@ -213,9 +329,9 @@ pub(super) fn ansi_screen_lines(
                     continue;
                 }
                 b'u' => {
-                    row = state.saved_row.min(ANSI_SCREEN_ROWS - 1);
-                    col = state.saved_col.min(ANSI_SCREEN_COLUMNS - 1);
-                    ensure_row(&mut lines, row, ANSI_SCREEN_ROWS);
+                    row = clamp_to_screen(state.saved_row, screen_rows);
+                    col = clamp_to_screen(state.saved_col, screen_columns);
+                    ensure_row(&mut lines, row, screen_rows);
                     i += 2;
                     continue;
                 }
@@ -229,7 +345,7 @@ pub(super) fn ansi_screen_lines(
         match b {
             b'\r' => {
                 if matches!(line_feed, LineFeedMode::MacCr) {
-                    line_feed_ansi_cursor(&mut lines, &mut row, ANSI_SCREEN_ROWS);
+                    line_feed_ansi_cursor(&mut lines, &mut row, screen_rows);
                 }
                 col = 0;
                 i += 1;
@@ -239,7 +355,7 @@ pub(super) fn ansi_screen_lines(
                     line_feed,
                     LineFeedMode::DosCrLf | LineFeedMode::UnixLf | LineFeedMode::Mixed
                 ) {
-                    line_feed_ansi_cursor(&mut lines, &mut row, ANSI_SCREEN_ROWS);
+                    line_feed_ansi_cursor(&mut lines, &mut row, screen_rows);
                 }
                 i += 1;
             }
@@ -250,13 +366,7 @@ pub(super) fn ansi_screen_lines(
             b'\t' => {
                 let next = ((col / 8) + 1) * 8;
                 while col < next {
-                    wrap_ansi_cursor(
-                        &mut lines,
-                        &mut row,
-                        &mut col,
-                        ANSI_SCREEN_COLUMNS,
-                        ANSI_SCREEN_ROWS,
-                    );
+                    wrap_ansi_cursor(&mut lines, &mut row, &mut col, screen_columns, screen_rows);
                     put_ansi_cell(
                         &mut lines,
                         row,
@@ -264,7 +374,7 @@ pub(super) fn ansi_screen_lines(
                         ' ',
                         state.style,
                         state.insert_mode,
-                        ANSI_SCREEN_ROWS,
+                        screen_rows,
                     );
                     col += 1;
                 }
@@ -279,13 +389,7 @@ pub(super) fn ansi_screen_lines(
                     EncodingMode::Cp437 => (byte_to_display_char(b, encoding), 1),
                 };
                 if !matches!(ch, '\0') {
-                    wrap_ansi_cursor(
-                        &mut lines,
-                        &mut row,
-                        &mut col,
-                        ANSI_SCREEN_COLUMNS,
-                        ANSI_SCREEN_ROWS,
-                    );
+                    wrap_ansi_cursor(&mut lines, &mut row, &mut col, screen_columns, screen_rows);
                     put_ansi_cell(
                         &mut lines,
                         row,
@@ -293,7 +397,7 @@ pub(super) fn ansi_screen_lines(
                         ch,
                         state.style,
                         state.insert_mode,
-                        ANSI_SCREEN_ROWS,
+                        screen_rows,
                     );
                     col += UnicodeWidthChar::width(ch).unwrap_or(1).max(1);
                 }
@@ -333,9 +437,12 @@ fn wrap_ansi_cursor(
     lines: &mut Vec<AnsiLine>,
     row: &mut usize,
     col: &mut usize,
-    screen_columns: usize,
-    screen_rows: usize,
+    screen_columns: Option<usize>,
+    screen_rows: Option<usize>,
 ) {
+    let Some(screen_columns) = screen_columns else {
+        return;
+    };
     if *col < screen_columns {
         return;
     }
@@ -343,10 +450,15 @@ fn wrap_ansi_cursor(
     line_feed_ansi_cursor(lines, row, screen_rows);
 }
 
-fn line_feed_ansi_cursor(lines: &mut Vec<AnsiLine>, row: &mut usize, screen_rows: usize) {
+fn line_feed_ansi_cursor(lines: &mut Vec<AnsiLine>, row: &mut usize, screen_rows: Option<usize>) {
+    let Some(screen_rows) = screen_rows else {
+        *row += 1;
+        ensure_row(lines, *row, None);
+        return;
+    };
     if *row + 1 < screen_rows {
         *row += 1;
-        ensure_row(lines, *row, screen_rows);
+        ensure_row(lines, *row, Some(screen_rows));
         return;
     }
     scroll_screen_up(lines, screen_rows);
@@ -354,7 +466,7 @@ fn line_feed_ansi_cursor(lines: &mut Vec<AnsiLine>, row: &mut usize, screen_rows
 }
 
 fn scroll_screen_up(lines: &mut Vec<AnsiLine>, screen_rows: usize) {
-    ensure_row(lines, screen_rows.saturating_sub(1), screen_rows);
+    ensure_row(lines, screen_rows.saturating_sub(1), Some(screen_rows));
     if !lines.is_empty() {
         lines.remove(0);
     }
@@ -499,8 +611,13 @@ fn parse_osc_hex_component(value: &str) -> Option<u8> {
     u8::from_str_radix(&value, 16).ok()
 }
 
-fn ensure_row(lines: &mut Vec<AnsiLine>, row: usize, max_rows: usize) {
-    while lines.len() <= row && lines.len() < max_rows {
+fn clamp_to_screen(value: usize, max: Option<usize>) -> usize {
+    max.map(|max| value.min(max.saturating_sub(1)))
+        .unwrap_or(value)
+}
+
+fn ensure_row(lines: &mut Vec<AnsiLine>, row: usize, max_rows: Option<usize>) {
+    while lines.len() <= row && max_rows.is_none_or(|max_rows| lines.len() < max_rows) {
         lines.push(AnsiLine { cells: Vec::new() });
     }
 }
@@ -512,7 +629,7 @@ fn put_ansi_cell(
     ch: char,
     style: AnsiCellStyle,
     insert_mode: bool,
-    max_rows: usize,
+    max_rows: Option<usize>,
 ) {
     ensure_row(lines, row, max_rows);
     let Some(line) = lines.get_mut(row) else {
@@ -540,7 +657,8 @@ fn apply_csi(
     row: &mut usize,
     col: &mut usize,
     state: &mut AnsiState,
-    max_rows: usize,
+    screen_columns: Option<usize>,
+    max_rows: Option<usize>,
 ) {
     let n = |idx: usize, default: i32| -> usize {
         params
@@ -554,13 +672,13 @@ fn apply_csi(
     match final_byte as char {
         'm' => apply_sgr(params, state),
         'H' | 'f' => {
-            *row = n(0, 1).saturating_sub(1).min(max_rows - 1);
-            *col = n(1, 1).saturating_sub(1).min(ANSI_SCREEN_COLUMNS - 1);
+            *row = clamp_to_screen(n(0, 1).saturating_sub(1), max_rows);
+            *col = clamp_to_screen(n(1, 1).saturating_sub(1), screen_columns);
             ensure_row(lines, *row, max_rows);
         }
         'A' => *row = row.saturating_sub(n(0, 1)),
         'B' => {
-            *row = (*row + n(0, 1)).min(max_rows - 1);
+            *row = clamp_to_screen(*row + n(0, 1), max_rows);
             ensure_row(lines, *row, max_rows);
         }
         'C' => *col += n(0, 1),
@@ -605,7 +723,7 @@ fn apply_csi(
             }
         }
         'E' => {
-            *row = (*row + n(0, 1)).min(max_rows - 1);
+            *row = clamp_to_screen(*row + n(0, 1), max_rows);
             *col = 0;
             ensure_row(lines, *row, max_rows);
         }
@@ -613,7 +731,7 @@ fn apply_csi(
             *row = row.saturating_sub(n(0, 1));
             *col = 0;
         }
-        'G' => *col = n(0, 1).saturating_sub(1).min(ANSI_SCREEN_COLUMNS - 1),
+        'G' => *col = clamp_to_screen(n(0, 1).saturating_sub(1), screen_columns),
         'J' => match params.first().copied().unwrap_or(0) {
             2 | 3 => {
                 lines.clear();
@@ -672,7 +790,7 @@ fn apply_csi(
             state.saved_col = *col;
         }
         'u' => {
-            *row = state.saved_row.min(max_rows - 1);
+            *row = clamp_to_screen(state.saved_row, max_rows);
             *col = state.saved_col;
             ensure_row(lines, *row, max_rows);
         }
@@ -1059,6 +1177,35 @@ mod tests {
     }
 
     #[test]
+    fn detect_ansi_canvas_mode_keeps_classic_canvas_by_default() {
+        assert_eq!(
+            detect_ansi_canvas_mode(b"\x1b[25;80HOK"),
+            AnsiCanvasMode::Fixed80x25
+        );
+    }
+
+    #[test]
+    fn detect_ansi_canvas_mode_uses_unbounded_for_large_cursor_targets() {
+        assert_eq!(
+            detect_ansi_canvas_mode(b"\x1b[26;1HLOW"),
+            AnsiCanvasMode::Unbounded
+        );
+        assert_eq!(
+            detect_ansi_canvas_mode(b"\x1b[1;81HWIDE"),
+            AnsiCanvasMode::Unbounded
+        );
+    }
+
+    #[test]
+    fn detect_ansi_canvas_mode_uses_unbounded_for_many_rows() {
+        let input = ["X"; ANSI_SCREEN_ROWS + 1].join("\n");
+        assert_eq!(
+            detect_ansi_canvas_mode(input.as_bytes()),
+            AnsiCanvasMode::Unbounded
+        );
+    }
+
+    #[test]
     fn ansi_screen_lines_applies_cursor_positioning() {
         let input = b"A\x1b[2;4HB";
         let lines = ansi_screen_lines(input, LineFeedMode::UnixLf, &[], EncodingMode::Plain);
@@ -1168,5 +1315,35 @@ mod tests {
         assert_eq!(plain[0], "");
         assert_eq!(plain[23], format!("{}A", " ".repeat(79)));
         assert_eq!(plain[24], "B");
+    }
+
+    #[test]
+    fn ansi_screen_lines_unbounded_does_not_wrap_at_eighty_columns() {
+        let input = b"\x1b[1;80HAB";
+        let lines = ansi_screen_lines_with_canvas(
+            input,
+            LineFeedMode::UnixLf,
+            &[],
+            EncodingMode::Plain,
+            AnsiCanvasMode::Unbounded,
+        );
+        let plain = lines.iter().map(AnsiLine::plain_text).collect::<Vec<_>>();
+        assert_eq!(plain, vec![format!("{}AB", " ".repeat(79))]);
+    }
+
+    #[test]
+    fn ansi_screen_lines_unbounded_does_not_scroll_at_twenty_five_rows() {
+        let input = b"\x1b[1;1HTOP\x1b[25;80HAB";
+        let lines = ansi_screen_lines_with_canvas(
+            input,
+            LineFeedMode::UnixLf,
+            &[],
+            EncodingMode::Plain,
+            AnsiCanvasMode::Unbounded,
+        );
+        let plain = lines.iter().map(AnsiLine::plain_text).collect::<Vec<_>>();
+        assert_eq!(plain.len(), ANSI_SCREEN_ROWS);
+        assert_eq!(plain[0], "TOP");
+        assert_eq!(plain[24], format!("{}AB", " ".repeat(79)));
     }
 }

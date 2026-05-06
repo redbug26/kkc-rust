@@ -17,7 +17,7 @@ pub(crate) fn viewer_footer_shortcuts(v: &Viewer) -> Vec<FooterShortcut> {
             },
         ]
     } else {
-        vec![
+        let mut shortcuts = vec![
             FooterShortcut {
                 label: "F10:Close",
                 key: KeyCode::F(10),
@@ -54,11 +54,18 @@ pub(crate) fn viewer_footer_shortcuts(v: &Viewer) -> Vec<FooterShortcut> {
                 label: "F9:Syntax",
                 key: KeyCode::F(9),
             },
-            FooterShortcut {
-                label: "g:Goto",
-                key: KeyCode::Char('g'),
-            },
-        ]
+        ];
+        if matches!(v.mode, ViewMode::Ansi) {
+            shortcuts.push(FooterShortcut {
+                label: "a:Canvas",
+                key: KeyCode::Char('a'),
+            });
+        }
+        shortcuts.push(FooterShortcut {
+            label: "g:Goto",
+            key: KeyCode::Char('g'),
+        });
+        shortcuts
     }
 }
 
@@ -214,6 +221,11 @@ pub(super) fn render_viewer(
     } else {
         String::new()
     };
+    let ansi_canvas_info = if matches!(v.mode, ViewMode::Ansi) {
+        format!(" Canvas:{} ", v.ansi_canvas_label())
+    } else {
+        String::new()
+    };
     let plugin_info = v
         .viewer_plugin
         .as_ref()
@@ -229,7 +241,7 @@ pub(super) fn render_viewer(
         String::new()
     };
     let title = format!(
-        " {} [{}] {}/{}{}{}{}{}{}{}{}{}{} ",
+        " {} [{}] {}/{}{}{}{}{}{}{}{}{}{}{} ",
         file_name,
         v.mode_label(),
         v.scroll + 1,
@@ -239,6 +251,7 @@ pub(super) fn render_viewer(
         pre_info,
         enc_info,
         mask_info,
+        ansi_canvas_info,
         plugin_info,
         zoom_info,
         col_info,

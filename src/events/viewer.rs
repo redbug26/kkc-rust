@@ -196,6 +196,7 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
             KeyCode::End => v.goto_end(page_size),
             KeyCode::Left => v.scroll_left(8),
             KeyCode::Right => v.scroll_right(8),
+            KeyCode::Char('a') if matches!(v.mode, ViewMode::Ansi) => v.toggle_ansi_canvas_mode(),
             KeyCode::Char('n') => v.search_next(),
             KeyCode::Char('N') => v.search_prev(),
             _ => {}
