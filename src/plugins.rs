@@ -12,7 +12,6 @@ use std::rc::Rc;
 use std::sync::{OnceLock, RwLock};
 use zip::ZipArchive;
 
-const BUNDLED_LHA_LZH_PLUGIN: &str = include_str!("../assets/plugins/lha_lzh/plugin.lua");
 const BUNDLED_PDF_FILE_PLUGIN: &str = include_str!("../assets/plugins/pdf_file/plugin.lua");
 const BUNDLED_HTML_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/html_viewer/plugin.lua");
 const BUNDLED_EML_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/eml_viewer/plugin.lua");
@@ -24,7 +23,6 @@ const BUNDLED_MARKDOWN_VIEWER_PLUGIN: &str =
 const BUNDLED_TEXT_SYNTAX_PLUGIN: &str = include_str!("../assets/plugins/text_syntax/plugin.lua");
 const BUNDLED_GIT_ACTION_PLUGIN: &str = include_str!("../assets/plugins/git_action/plugin.lua");
 const BUNDLED_PLUGIN_DIRS: &[&str] = &[
-    "lha_lzh",
     "pdf_file",
     "html_viewer",
     "eml_viewer",
@@ -1992,9 +1990,6 @@ fn ensure_plugins_dir() -> Result<PathBuf> {
 }
 
 fn install_bundled_plugins(plugins_dir: &Path) -> Result<()> {
-    let lha_dir = plugins_dir.join("lha_lzh");
-    fs::create_dir_all(&lha_dir)?;
-    write_bundled_file(&lha_dir.join("plugin.lua"), BUNDLED_LHA_LZH_PLUGIN)?;
 
     let pdf_dir = plugins_dir.join("pdf_file");
     fs::create_dir_all(&pdf_dir)?;

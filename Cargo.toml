@@ -38,6 +38,8 @@ unarc-rs = "0.6.1"
 smb = ["dep:pavao"]
 
 [profile.release]
-opt-level = 3
+opt-level = "z"
 strip = true
 lto = true
+codegen-units = 1
+panic = "abort"
