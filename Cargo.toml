@@ -32,6 +32,7 @@ libc = "0.2"
 abi_stable = "0.11.3"
 kkc-plugin-api = { path = "crates/kkc-plugin-api" }
 arboard = "3"
+unarc-rs = "0.6.1"
 
 [features]
 smb = ["dep:pavao"]

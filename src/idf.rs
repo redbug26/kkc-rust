@@ -163,6 +163,11 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         .and_then(|s| s.to_str())
         .map(|s| s.to_ascii_lowercase())
         .unwrap_or_default();
+    let file_name_lower = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_ascii_lowercase())
+        .unwrap_or_default();
     // Most format magic bytes are in the first few hundred bytes.
     // The deepest probe is ISO9660 at offset 0x8001 (32 769 B), so 64 KB
     // is always sufficient.  Capping the read here avoids stalling the UI
@@ -208,6 +213,23 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             vec![],
         ))
+    } else if data.len() >= 14 && data.get(7..14) == Some(b"**ACE**") {
+        Some(info(
+            "application/x-ace-compressed",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.len() >= 2 && data[0] == 0x1a && (1..=11).contains(&data[1]) {
+        Some(info("application/x-arc", path, IdfKind::Archive, None, None, vec![]))
+    } else if data.starts_with(b"ZOO ") {
+        Some(info("application/x-zoo", path, IdfKind::Archive, None, None, vec![]))
+    } else if data.starts_with(b"HLSQZ") {
+        Some(info("application/x-sqz", path, IdfKind::Archive, None, None, vec![]))
+    } else if data.starts_with(&[0x76, 0xff]) || data.starts_with(&[0xfa, 0xff]) {
+        Some(info("application/x-sq", path, IdfKind::Archive, None, None, vec![]))
     } else if data.starts_with(&[0x1F, 0x8B]) {
         if ext == "vgz" {
             Some(info(
@@ -217,6 +239,15 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
                 None,
                 None,
                 vec![" VGZ (gzip-compressed VGM)".into()],
+            ))
+        } else if ext == "tgz" || file_name_lower.ends_with(".tar.gz") {
+            Some(info(
+                "application/x-compressed-tar",
+                path,
+                IdfKind::Archive,
+                None,
+                None,
+                vec![],
             ))
         } else {
             Some(info(
@@ -229,14 +260,45 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             ))
         }
     } else if data.starts_with(b"BZh") {
-        Some(info(
-            "application/x-bzip2",
-            path,
-            IdfKind::Archive,
-            None,
-            None,
-            vec![],
-        ))
+        if ext == "tbz" || ext == "tbz2" || file_name_lower.ends_with(".tar.bz2") {
+            Some(info(
+                "application/x-bzip-compressed-tar",
+                path,
+                IdfKind::Archive,
+                None,
+                None,
+                vec![],
+            ))
+        } else {
+            Some(info(
+                "application/x-bzip2",
+                path,
+                IdfKind::Archive,
+                None,
+                None,
+                vec![],
+            ))
+        }
+    } else if data.starts_with(&[0x1f, 0x9d]) {
+        if file_name_lower.ends_with(".tar.z") {
+            Some(info(
+                "application/x-tarz",
+                path,
+                IdfKind::Archive,
+                None,
+                None,
+                vec![],
+            ))
+        } else {
+            Some(info(
+                "application/x-unix-compress",
+                path,
+                IdfKind::Archive,
+                None,
+                None,
+                vec![],
+            ))
+        }
     } else if data.starts_with(&[0xFD, b'7', b'z', b'X', b'Z', 0x00]) {
         Some(info(
             "application/x-xz",
@@ -281,6 +343,22 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             lha_first_name(&data),
             None,
             lha_lines(&data),
+        ))
+    } else if data.starts_with(b"UC2\x1a") || data.starts_with(b"UE2") {
+        Some(info("application/x-uc2", path, IdfKind::Archive, None, None, vec![]))
+    } else if data.starts_with(b"ICE!")
+        || data.starts_with(b"Ice!")
+        || data.starts_with(b"TMM!")
+        || data.starts_with(b"TSM!")
+        || data.starts_with(b"SHE!")
+    {
+        Some(info(
+            "application/x-packice",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
         ))
     } else if data.starts_with(b"Vgm ") {
         Some(info(
@@ -698,6 +776,8 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             vec![],
         ))
+    } else if let Some(mime_type) = archive_mime_type_from_extension(path, &ext) {
+        Some(info(mime_type, path, IdfKind::Archive, None, None, vec![]))
     } else if matches!(ext.as_str(), "htm" | "html") || looks_like_html(&data) {
         Some(info(
             "text/html",
@@ -772,10 +852,24 @@ fn format_from_mime_type(mime_type: &str) -> Option<&'static str> {
     match mime_type {
         "application/zip" => Some("ZIP archive"),
         "application/x-7z-compressed" => Some("7-Zip archive"),
+        "application/x-ace-compressed" => Some("ACE archive"),
+        "application/x-arc" => Some("ARC/PAK archive"),
+        "application/x-zoo" => Some("ZOO archive"),
+        "application/x-sq" => Some("SQ/SQ2 squeezed archive"),
+        "application/x-sqz" => Some("SQZ archive"),
         "application/gzip" => Some("GZip archive"),
+        "application/x-unix-compress" => Some("Unix Z compressed file"),
         "application/x-bzip2" => Some("BZip2 archive"),
         "application/x-xz" => Some("XZ archive"),
         "application/x-arj" => Some("ARJ archive"),
+        "application/x-uc2" => Some("UC2 archive"),
+        "application/x-packice" => Some("Pack-Ice compressed file"),
+        "application/x-ice-compressed" => Some("ICE compressed file"),
+        "application/x-ha" => Some("HA archive"),
+        "application/x-hyp" => Some("HYP archive"),
+        "application/x-compressed-tar" => Some("TGZ archive"),
+        "application/x-bzip-compressed-tar" => Some("TBZ archive"),
+        "application/x-tarz" => Some("TAR.Z archive"),
         "application/vnd.ms-cab-compressed" => Some("CAB archive"),
         "application/zstd" => Some("Zstandard archive"),
         "application/x-lzh-compressed" => Some("LHA/LZH archive"),
@@ -849,6 +943,34 @@ fn format_from_mime_type(mime_type: &str) -> Option<&'static str> {
         "application/mbox" => Some("Mbox mailbox"),
         "text/html" => Some("HTML document"),
         "text/plain" => Some("Text file"),
+        _ => None,
+    }
+}
+
+fn archive_mime_type_from_extension(path: &Path, ext: &str) -> Option<&'static str> {
+    let name = path.file_name()?.to_str()?.to_ascii_lowercase();
+    if name.ends_with(".tar.gz") || ext == "tgz" {
+        return Some("application/x-compressed-tar");
+    }
+    if name.ends_with(".tar.bz2") || ext == "tbz" || ext == "tbz2" {
+        return Some("application/x-bzip-compressed-tar");
+    }
+    if name.ends_with(".tar.z") {
+        return Some("application/x-tarz");
+    }
+
+    match ext {
+        "ace" => Some("application/x-ace-compressed"),
+        "arc" | "pak" => Some("application/x-arc"),
+        "zoo" => Some("application/x-zoo"),
+        "sq" | "sq2" | "qqq" => Some("application/x-sq"),
+        "sqz" => Some("application/x-sqz"),
+        "z" => Some("application/x-unix-compress"),
+        "hyp" => Some("application/x-hyp"),
+        "ha" => Some("application/x-ha"),
+        "uc2" | "ue2" => Some("application/x-uc2"),
+        "ice" => Some("application/x-ice-compressed"),
+        "pi9" => Some("application/x-packice"),
         _ => None,
     }
 }
