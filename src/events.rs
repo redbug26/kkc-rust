@@ -2972,11 +2972,16 @@ fn handle_quicksearch(app: &mut App, key: KeyEvent) -> Result<bool> {
             app.active_panel_mut().qs_match_pos = 0;
             app.mode = AppMode::Browse;
         }
-        // Navigate UP in the filtered list
+        // Navigate UP in the filtered list (with wrap-around)
         KeyCode::Up => {
+            let matches_len = app.active_panel().quicksearch_matches().len();
             let p = app.active_panel_mut();
-            if p.qs_match_pos > 0 {
-                p.qs_match_pos -= 1;
+            if matches_len > 0 {
+                if p.qs_match_pos > 0 {
+                    p.qs_match_pos -= 1;
+                } else {
+                    p.qs_match_pos = matches_len - 1;
+                }
             }
             let entry_idx = app
                 .active_panel()
@@ -2988,12 +2993,50 @@ fn handle_quicksearch(app: &mut App, key: KeyEvent) -> Result<bool> {
                 refresh_preview = true;
             }
         }
-        // Navigate DOWN in the filtered list
+        // Navigate DOWN in the filtered list (with wrap-around)
         KeyCode::Down => {
             let matches_len = app.active_panel().quicksearch_matches().len();
             let p = app.active_panel_mut();
-            if p.qs_match_pos + 1 < matches_len {
-                p.qs_match_pos += 1;
+            if matches_len > 0 {
+                if p.qs_match_pos + 1 < matches_len {
+                    p.qs_match_pos += 1;
+                } else {
+                    p.qs_match_pos = 0;
+                }
+            }
+            let entry_idx = app
+                .active_panel()
+                .quicksearch_matches()
+                .get(app.active_panel().qs_match_pos)
+                .copied();
+            if let Some(idx) = entry_idx {
+                app.active_panel_mut().cursor = idx;
+                refresh_preview = true;
+            }
+        }
+        // Page Up: jump up 10 items
+        KeyCode::PageUp => {
+            let matches_len = app.active_panel().quicksearch_matches().len();
+            let p = app.active_panel_mut();
+            if matches_len > 0 {
+                p.qs_match_pos = p.qs_match_pos.saturating_sub(10).min(matches_len - 1);
+            }
+            let entry_idx = app
+                .active_panel()
+                .quicksearch_matches()
+                .get(app.active_panel().qs_match_pos)
+                .copied();
+            if let Some(idx) = entry_idx {
+                app.active_panel_mut().cursor = idx;
+                refresh_preview = true;
+            }
+        }
+        // Page Down: jump down 10 items
+        KeyCode::PageDown => {
+            let matches_len = app.active_panel().quicksearch_matches().len();
+            let p = app.active_panel_mut();
+            if matches_len > 0 {
+                p.qs_match_pos = (p.qs_match_pos + 10).min(matches_len - 1);
             }
             let entry_idx = app
                 .active_panel()
