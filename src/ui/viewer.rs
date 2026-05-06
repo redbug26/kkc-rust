@@ -101,6 +101,67 @@ pub(crate) fn viewer_area(v: &Viewer, area: Rect) -> Rect {
     }
 }
 
+fn render_viewer_backdrop(f: &mut Frame, host: Rect, panel: Rect) {
+    if host.width == 0 || host.height == 0 {
+        return;
+    }
+
+    let bg = Color::Rgb(24, 31, 38);
+    let pattern_dim = Style::default().fg(Color::Rgb(43, 60, 68)).bg(bg);
+    let pattern_hi = Style::default().fg(Color::Rgb(76, 96, 92)).bg(bg);
+    let mut lines = Vec::with_capacity(host.height as usize);
+    for y in 0..host.height as usize {
+        let mut spans = Vec::new();
+        for x in 0..host.width as usize {
+            let ch = match ((x + y * 2) % 17, (x * 3 + y) % 23) {
+                (0, _) => '·',
+                (_, 0) => '╱',
+                _ => ' ',
+            };
+            let style = if ch == '╱' { pattern_hi } else { pattern_dim };
+            spans.push(Span::styled(ch.to_string(), style));
+        }
+        lines.push(Line::from(spans));
+    }
+    f.render_widget(Paragraph::new(lines).style(Style::default().bg(bg)), host);
+
+    let halo_x = panel.x.saturating_sub(1).max(host.x);
+    let halo_y = panel.y.saturating_sub(1).max(host.y);
+    let halo = Rect {
+        x: halo_x,
+        y: halo_y,
+        width: panel
+            .width
+            .saturating_add(2)
+            .min(host.right().saturating_sub(halo_x)),
+        height: panel
+            .height
+            .saturating_add(2)
+            .min(host.bottom().saturating_sub(halo_y)),
+    };
+    if halo.width > 0 && halo.height > 0 {
+        f.render_widget(
+            Block::default().style(Style::default().bg(Color::Rgb(43, 58, 56))),
+            halo,
+        );
+    }
+
+    let shadow_x = panel.x.saturating_add(1).min(host.right());
+    let shadow_y = panel.y.saturating_add(1).min(host.bottom());
+    let shadow = Rect {
+        x: shadow_x,
+        y: shadow_y,
+        width: panel.width.min(host.right().saturating_sub(shadow_x)),
+        height: panel.height.min(host.bottom().saturating_sub(shadow_y)),
+    };
+    if shadow.width > 0 && shadow.height > 0 {
+        f.render_widget(
+            Block::default().style(Style::default().bg(Color::Rgb(14, 18, 22))),
+            shadow,
+        );
+    }
+}
+
 pub fn kitty_image_area(v: &Viewer, area: Rect) -> Option<Rect> {
     if !v.is_image_mode() {
         return None;
@@ -189,6 +250,9 @@ pub(super) fn render_viewer(
         (Rect::default(), area)
     };
     let area = viewer_area(v, viewer_host);
+    if show_footer && !v.zoomed && v.viewer_plugin.is_none() {
+        render_viewer_backdrop(f, viewer_host, area);
+    }
     let file_name = v.path.file_name().unwrap_or_default().to_string_lossy();
     let match_info = if !v.search.is_empty() {
         format!(" [{}/{}]", v.match_pos + 1, v.matches.len())
