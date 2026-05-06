@@ -5,6 +5,25 @@ use unicode_width::UnicodeWidthChar;
 
 const ANSI_SCREEN_COLUMNS: usize = 80;
 const ANSI_SCREEN_ROWS: usize = 25;
+const DOS_ANSI_TO_PALETTE: [usize; 8] = [0, 4, 2, 6, 1, 5, 3, 7];
+const DOS_PALETTE: [(u8, u8, u8); 16] = [
+    (0x00, 0x00, 0x00), //  0: Black
+    (0x00, 0x00, 0xAA), //  1: Blue
+    (0x00, 0xAA, 0x00), //  2: Green
+    (0x00, 0xAA, 0xAA), //  3: Cyan
+    (0xAA, 0x00, 0x00), //  4: Red
+    (0xAA, 0x00, 0xAA), //  5: Magenta
+    (0xAA, 0x55, 0x00), //  6: Brown
+    (0xAA, 0xAA, 0xAA), //  7: Light gray
+    (0x55, 0x55, 0x55), //  8: Dark gray
+    (0x55, 0x55, 0xFF), //  9: Light blue
+    (0x55, 0xFF, 0x55), // 10: Light green
+    (0x55, 0xFF, 0xFF), // 11: Light cyan
+    (0xFF, 0x55, 0x55), // 12: Light red
+    (0xFF, 0x55, 0xFF), // 13: Light magenta
+    (0xFF, 0xFF, 0x55), // 14: Yellow
+    (0xFF, 0xFF, 0xFF), // 15: White
+];
 
 pub(super) fn detect_mode(path: &Path, data: &[u8]) -> ViewMode {
     if looks_like_image(path, data) {
@@ -80,8 +99,8 @@ pub(super) struct AnsiCellStyle {
 impl Default for AnsiCellStyle {
     fn default() -> Self {
         Self {
-            fg: Color::White,
-            bg: Color::Black,
+            fg: dos_palette_color(7),
+            bg: dos_palette_color(0),
             modifier: Modifier::empty(),
         }
     }
@@ -622,8 +641,8 @@ fn apply_sgr(params: &[i32], style: &mut AnsiCellStyle) {
             40..=47 => style.bg = ansi_16_color(params[i] as u8 - 40, false),
             90..=97 => style.fg = ansi_16_color(params[i] as u8 - 90, true),
             100..=107 => style.bg = ansi_16_color(params[i] as u8 - 100, true),
-            39 => style.fg = Color::White,
-            49 => style.bg = Color::Black,
+            39 => style.fg = dos_palette_color(7),
+            49 => style.bg = dos_palette_color(0),
             38 | 48 => {
                 if let Some((color, consumed)) = parse_extended_color(&params[i + 1..]) {
                     if params[i] == 38 {
@@ -657,39 +676,22 @@ fn parse_extended_color(params: &[i32]) -> Option<(Color, usize)> {
 }
 
 fn ansi_16_color(idx: u8, bright: bool) -> Color {
-    match (idx, bright) {
-        (0, false) => Color::Black,
-        (1, false) => Color::Red,
-        (2, false) => Color::Green,
-        (3, false) => Color::Yellow,
-        (4, false) => Color::Blue,
-        (5, false) => Color::Magenta,
-        (6, false) => Color::Cyan,
-        (7, false) => Color::Gray,
-        (0, true) => Color::DarkGray,
-        (1, true) => Color::LightRed,
-        (2, true) => Color::LightGreen,
-        (3, true) => Color::LightYellow,
-        (4, true) => Color::LightBlue,
-        (5, true) => Color::LightMagenta,
-        (6, true) => Color::LightCyan,
-        (7, true) => Color::White,
-        _ => Color::White,
-    }
+    let palette_index = DOS_ANSI_TO_PALETTE[idx as usize % 8] + if bright { 8 } else { 0 };
+    dos_palette_color(palette_index)
+}
+
+fn dos_palette_color(idx: usize) -> Color {
+    let (r, g, b) = DOS_PALETTE[idx % DOS_PALETTE.len()];
+    Color::Rgb(r, g, b)
 }
 
 fn bright_ansi_color(color: Color) -> Color {
-    match color {
-        Color::Black => Color::DarkGray,
-        Color::Red => Color::LightRed,
-        Color::Green => Color::LightGreen,
-        Color::Yellow => Color::LightYellow,
-        Color::Blue => Color::LightBlue,
-        Color::Magenta => Color::LightMagenta,
-        Color::Cyan => Color::LightCyan,
-        Color::Gray => Color::White,
-        other => other,
+    for sgr_idx in 0..8 {
+        if color == ansi_16_color(sgr_idx, false) {
+            return ansi_16_color(sgr_idx, true);
+        }
     }
+    color
 }
 
 fn ansi_256_color(idx: u8) -> Color {
@@ -969,16 +971,34 @@ mod tests {
         let input = b"\x1b[31mR\x1b[0mW";
         let lines = ansi_screen_lines(input, LineFeedMode::UnixLf, &[], EncodingMode::Plain);
         assert_eq!(lines[0].cells[0].ch, 'R');
-        assert_eq!(lines[0].cells[0].style.fg, Color::Red);
+        assert_eq!(lines[0].cells[0].style.fg, Color::Rgb(0xAA, 0, 0));
         assert_eq!(lines[0].cells[1].ch, 'W');
-        assert_eq!(lines[0].cells[1].style.fg, Color::White);
+        assert_eq!(lines[0].cells[1].style.fg, Color::Rgb(0xAA, 0xAA, 0xAA));
     }
 
     #[test]
     fn ansi_screen_lines_maps_bold_to_bright_foreground() {
         let input = b"\x1b[1;31mR";
         let lines = ansi_screen_lines(input, LineFeedMode::UnixLf, &[], EncodingMode::Plain);
-        assert_eq!(lines[0].cells[0].style.fg, Color::LightRed);
+        assert_eq!(lines[0].cells[0].style.fg, Color::Rgb(0xFF, 0x55, 0x55));
+    }
+
+    #[test]
+    fn ansi_screen_lines_uses_dos_vga_palette_order() {
+        let input = b"\x1b[31mR\x1b[34mB\x1b[33mY\x1b[1;33m!";
+        let lines = ansi_screen_lines(input, LineFeedMode::UnixLf, &[], EncodingMode::Plain);
+        assert_eq!(lines[0].cells[0].style.fg, Color::Rgb(0xAA, 0, 0));
+        assert_eq!(lines[0].cells[1].style.fg, Color::Rgb(0, 0, 0xAA));
+        assert_eq!(lines[0].cells[2].style.fg, Color::Rgb(0xAA, 0x55, 0));
+        assert_eq!(lines[0].cells[3].style.fg, Color::Rgb(0xFF, 0xFF, 0x55));
+    }
+
+    #[test]
+    fn ansi_screen_lines_uses_dos_vga_background_colors() {
+        let input = b"\x1b[44mB\x1b[103mY";
+        let lines = ansi_screen_lines(input, LineFeedMode::UnixLf, &[], EncodingMode::Plain);
+        assert_eq!(lines[0].cells[0].style.bg, Color::Rgb(0, 0, 0xAA));
+        assert_eq!(lines[0].cells[1].style.bg, Color::Rgb(0xFF, 0xFF, 0x55));
     }
 
     #[test]
