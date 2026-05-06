@@ -1749,13 +1749,13 @@ fn hex_line_segments(
         style: Style::default(),
     }];
 
-    let printable_style = Style::default().fg(Color::Green);
+    let not_printable_style = Style::default().fg(Color::Cyan);
 
     for (idx, &byte) in chunk.iter().enumerate() {
         let style = if (0x20..=0x7f).contains(&byte) {
-            printable_style
-        } else {
             Style::default()
+        } else {
+            not_printable_style
         };
         segments.push(StyledSegment {
             text: format!("{:02X}", byte),
@@ -1789,9 +1789,9 @@ fn hex_line_segments(
             byte_to_display_char(byte, encoding)
         };
         let style = if (0x20..=0x7f).contains(&byte) {
-            printable_style
-        } else {
             Style::default()
+        } else {
+            not_printable_style
         };
         segments.push(StyledSegment {
             text: ch.to_string(),
