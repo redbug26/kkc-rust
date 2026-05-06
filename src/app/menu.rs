@@ -243,6 +243,11 @@ impl StoreInstallPaletteState {
     }
 
     pub fn has_update(&self, item: &crate::plugins::StorePluginInfo) -> bool {
+        if matches!(item.item_kind, crate::plugins::StoreItemKind::Application)
+            && item.version == "?"
+        {
+            return false;
+        }
         self.installed_version_for(item)
             .map(|v| v != item.version)
             .unwrap_or(false)
@@ -349,6 +354,9 @@ fn store_item_has_update(
     installed_app_versions: &HashMap<String, String>,
 ) -> bool {
     if matches!(item.item_kind, crate::plugins::StoreItemKind::Application) {
+        if item.version == "?" {
+            return false;
+        }
         return installed_app_versions
             .get(&item.id)
             .map(|installed| installed != &item.version)
