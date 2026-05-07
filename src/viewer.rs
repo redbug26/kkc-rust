@@ -4,6 +4,7 @@ use crossterm::{
     queue,
     terminal::{size as terminal_size, window_size},
 };
+use image::imageops::FilterType;
 use image::{ImageFormat, ImageReader};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -155,8 +156,20 @@ pub struct ImageInfo {
     pub format: &'static str,
     pub width: Option<u32>,
     pub height: Option<u32>,
-    kitty_png: OnceLock<Option<Vec<u8>>>,
+    kitty_png_payloads: RefCell<HashMap<(u32, u32), Option<Vec<u8>>>>,
     decoded_rgba: OnceLock<Option<(u32, u32, Vec<u8>)>>,
+}
+
+impl ImageInfo {
+    fn new(format: &'static str, width: Option<u32>, height: Option<u32>) -> Self {
+        Self {
+            format,
+            width,
+            height,
+            kitty_png_payloads: RefCell::new(HashMap::new()),
+            decoded_rgba: OnceLock::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2152,9 +2165,19 @@ pub fn render_kitty_image<W: Write>(out: &mut W, viewer: &Viewer, area: Rect) ->
     let fit = fit_image_to_area(area, image.width, image.height);
     queue!(out, MoveTo(fit.x, fit.y))?;
 
-    let payload = image
-        .kitty_png
-        .get_or_init(|| build_kitty_png_payload(&viewer.raw, image.format).ok());
+    let target_px = image_payload_target_px(fit);
+    let cache_key = if image.format == "PNG" {
+        (0, 0)
+    } else {
+        target_px.unwrap_or((0, 0))
+    };
+    let payload = {
+        let mut cache = image.kitty_png_payloads.borrow_mut();
+        cache
+            .entry(cache_key)
+            .or_insert_with(|| build_kitty_png_payload(&viewer.raw, image.format, target_px).ok())
+            .clone()
+    };
     let Some(payload) = payload.as_ref() else {
         return Ok(());
     };
@@ -2210,16 +2233,7 @@ fn fit_image_to_area(area: Rect, image_width: Option<u32>, image_height: Option<
         return area;
     };
 
-    let (cell_px_w, cell_px_h) = window_size()
-        .ok()
-        .filter(|ws| ws.columns > 0 && ws.rows > 0 && ws.width > 0 && ws.height > 0)
-        .map(|ws| {
-            (
-                (ws.width as f32 / ws.columns as f32).max(1.0),
-                (ws.height as f32 / ws.rows as f32).max(1.0),
-            )
-        })
-        .unwrap_or((8.0, 16.0));
+    let (cell_px_w, cell_px_h) = terminal_cell_px_size();
 
     let max_px_w = area.width as f32 * cell_px_w;
     let max_px_h = area.height as f32 * cell_px_h;
@@ -2243,6 +2257,30 @@ fn fit_image_to_area(area: Rect, image_width: Option<u32>, image_height: Option<
     }
 }
 
+fn image_payload_target_px(fit: Rect) -> Option<(u32, u32)> {
+    if fit.width == 0 || fit.height == 0 {
+        return None;
+    }
+    let (cell_px_w, cell_px_h) = terminal_cell_px_size();
+    Some((
+        ((fit.width as f32 * cell_px_w).round() as u32).max(1),
+        ((fit.height as f32 * cell_px_h).round() as u32).max(1),
+    ))
+}
+
+fn terminal_cell_px_size() -> (f32, f32) {
+    window_size()
+        .ok()
+        .filter(|ws| ws.columns > 0 && ws.rows > 0 && ws.width > 0 && ws.height > 0)
+        .map(|ws| {
+            (
+                (ws.width as f32 / ws.columns as f32).max(1.0),
+                (ws.height as f32 / ws.rows as f32).max(1.0),
+            )
+        })
+        .unwrap_or((8.0, 16.0))
+}
+
 fn detect_image_info(path: &Path, data: &[u8]) -> Option<ImageInfo> {
     let ext = path
         .extension()
@@ -2252,68 +2290,33 @@ fn detect_image_info(path: &Path, data: &[u8]) -> Option<ImageInfo> {
 
     if data.starts_with(b"\x89PNG\r\n\x1a\n") {
         let (width, height) = png_dimensions(data);
-        return Some(ImageInfo {
-            format: "PNG",
-            width,
-            height,
-            kitty_png: OnceLock::new(),
-            decoded_rgba: OnceLock::new(),
-        });
+        return Some(ImageInfo::new("PNG", width, height));
     }
     if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
         let (width, height) = jpeg_dimensions(data);
-        return Some(ImageInfo {
-            format: "JPEG",
-            width,
-            height,
-            kitty_png: OnceLock::new(),
-            decoded_rgba: OnceLock::new(),
-        });
+        return Some(ImageInfo::new("JPEG", width, height));
     }
     if data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a") {
         let (width, height) = gif_dimensions(data);
-        return Some(ImageInfo {
-            format: "GIF",
-            width,
-            height,
-            kitty_png: OnceLock::new(),
-            decoded_rgba: OnceLock::new(),
-        });
+        return Some(ImageInfo::new("GIF", width, height));
     }
     if data.starts_with(b"BM") {
         let (width, height) = bmp_dimensions(data);
-        return Some(ImageInfo {
-            format: "BMP",
-            width,
-            height,
-            kitty_png: OnceLock::new(),
-            decoded_rgba: OnceLock::new(),
-        });
+        return Some(ImageInfo::new("BMP", width, height));
     }
     if data.len() >= 12 && &data[..4] == b"RIFF" && &data[8..12] == b"WEBP" {
-        return Some(ImageInfo {
-            format: "WEBP",
-            width: None,
-            height: None,
-            kitty_png: OnceLock::new(),
-            decoded_rgba: OnceLock::new(),
-        });
+        let (width, height) = webp_dimensions(data);
+        return Some(ImageInfo::new("WEBP", width, height));
     }
     if is_heif_image(path, data) {
-        return Some(ImageInfo {
-            format: "HEIC",
-            width: None,
-            height: None,
-            kitty_png: OnceLock::new(),
-            decoded_rgba: OnceLock::new(),
-        });
+        return Some(ImageInfo::new("HEIC", None, None));
     }
     if matches!(
         ext.as_str(),
         "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "heic" | "heif"
     ) {
-        return Some(ImageInfo {
-            format: match ext.as_str() {
+        return Some(ImageInfo::new(
+            match ext.as_str() {
                 "png" => "PNG",
                 "jpg" | "jpeg" => "JPEG",
                 "gif" => "GIF",
@@ -2322,11 +2325,9 @@ fn detect_image_info(path: &Path, data: &[u8]) -> Option<ImageInfo> {
                 "heic" | "heif" => "HEIC",
                 _ => "Image",
             },
-            width: None,
-            height: None,
-            kitty_png: OnceLock::new(),
-            decoded_rgba: OnceLock::new(),
-        });
+            None,
+            None,
+        ));
     }
     None
 }
@@ -2360,7 +2361,11 @@ fn default_encoding_for_mode(mode: ViewMode) -> EncodingMode {
     }
 }
 
-fn build_kitty_png_payload(raw: &[u8], format: &'static str) -> Result<Vec<u8>> {
+fn build_kitty_png_payload(
+    raw: &[u8],
+    format: &'static str,
+    target_px: Option<(u32, u32)>,
+) -> Result<Vec<u8>> {
     if format == "PNG" {
         return Ok(raw.to_vec());
     }
@@ -2368,7 +2373,14 @@ fn build_kitty_png_payload(raw: &[u8], format: &'static str) -> Result<Vec<u8>> 
     let guessed = ImageReader::new(Cursor::new(raw))
         .with_guessed_format()
         .context("guessing image format")?;
-    let image = guessed.decode().context("decoding image for viewer")?;
+    let mut image = guessed.decode().context("decoding image for viewer")?;
+    if let Some((target_w, target_h)) = target_px.filter(|(w, h)| *w > 0 && *h > 0) {
+        let img_w = image.width();
+        let img_h = image.height();
+        if img_w > target_w || img_h > target_h {
+            image = image.resize(target_w, target_h, FilterType::Triangle);
+        }
+    }
     let mut out = Cursor::new(Vec::new());
     image
         .write_to(&mut out, ImageFormat::Png)
@@ -2401,6 +2413,41 @@ fn bmp_dimensions(data: &[u8]) -> (Option<u32>, Option<u32>) {
     let width = u32::from_le_bytes([data[18], data[19], data[20], data[21]]);
     let height = u32::from_le_bytes([data[22], data[23], data[24], data[25]]);
     (Some(width), Some(height))
+}
+
+fn webp_dimensions(data: &[u8]) -> (Option<u32>, Option<u32>) {
+    let Some((w, h)) = webp_size(data) else {
+        return (None, None);
+    };
+    (Some(w), Some(h))
+}
+
+fn webp_size(data: &[u8]) -> Option<(u32, u32)> {
+    if data.len() < 30 || data.get(..4)? != b"RIFF" || data.get(8..12)? != b"WEBP" {
+        return None;
+    }
+    match data.get(12..16)? {
+        b"VP8 " => {
+            let w = u16::from_le_bytes(data.get(26..28)?.try_into().ok()?) as u32 & 0x3fff;
+            let h = u16::from_le_bytes(data.get(28..30)?.try_into().ok()?) as u32 & 0x3fff;
+            Some((w, h))
+        }
+        b"VP8L" => {
+            let b0 = *data.get(21)? as u32;
+            let b1 = *data.get(22)? as u32;
+            let b2 = *data.get(23)? as u32;
+            let b3 = *data.get(24)? as u32;
+            let w = 1 + (b0 | ((b1 & 0x3f) << 8));
+            let h = 1 + ((b1 >> 6) | (b2 << 2) | ((b3 & 0x0f) << 10));
+            Some((w, h))
+        }
+        b"VP8X" => {
+            let w = 1 + u32::from_le_bytes([data[24], data[25], data[26], 0]);
+            let h = 1 + u32::from_le_bytes([data[27], data[28], data[29], 0]);
+            Some((w, h))
+        }
+        _ => None,
+    }
 }
 
 fn jpeg_dimensions(data: &[u8]) -> (Option<u32>, Option<u32>) {
@@ -2461,5 +2508,22 @@ mod tests {
             default_encoding_for_mode(ViewMode::Text),
             EncodingMode::Plain
         );
+    }
+
+    #[test]
+    fn webp_dimensions_are_detected_from_vp8x_header() {
+        let mut data = vec![0u8; 30];
+        data[0..4].copy_from_slice(b"RIFF");
+        data[8..12].copy_from_slice(b"WEBP");
+        data[12..16].copy_from_slice(b"VP8X");
+        let width_minus_one = 1919u32.to_le_bytes();
+        let height_minus_one = 1079u32.to_le_bytes();
+        data[24..27].copy_from_slice(&width_minus_one[..3]);
+        data[27..30].copy_from_slice(&height_minus_one[..3]);
+
+        let image = detect_image_info(Path::new("photo.webp"), &data).unwrap();
+        assert_eq!(image.format, "WEBP");
+        assert_eq!(image.width, Some(1920));
+        assert_eq!(image.height, Some(1080));
     }
 }
