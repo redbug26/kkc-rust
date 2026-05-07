@@ -352,6 +352,14 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
         fn_name: "about",
         action: MenuAction::About,
     },
+    PaletteEntry {
+        category: "Help",
+        label: "KKC information",
+        shortname: "Info",
+        shortcut: None,
+        fn_name: "system_info",
+        action: MenuAction::SystemInfo,
+    },
     // ── Tabs ─────────────────────────────────────────────────────────────
     PaletteEntry {
         category: "Tabs",

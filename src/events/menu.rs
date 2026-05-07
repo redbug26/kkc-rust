@@ -342,6 +342,15 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
         MenuAction::About => {
             app.mode = AppMode::About(crate::about::AboutState::new());
         }
+        MenuAction::SystemInfo => {
+            let text = crate::system_info::render_system_info(app);
+            let path = std::path::Path::new("KKC information");
+            app.mode = AppMode::Viewer(crate::viewer::Viewer::placeholder(
+                path,
+                &text,
+                app.config.viewer.word_wrap,
+            ));
+        }
         MenuAction::NewTab => {
             app.new_active_tab();
         }

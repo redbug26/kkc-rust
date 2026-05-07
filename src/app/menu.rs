@@ -65,6 +65,7 @@ pub enum MenuAction {
     Associations,
     Help,
     About,
+    SystemInfo,
     NewTab,
     CloseTab,
     NextTab,

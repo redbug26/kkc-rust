@@ -561,23 +561,9 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             tga_lines(&data),
         ))
     } else if data.starts_with(b"wOFF") {
-        Some(info(
-            "font/woff",
-            path,
-            IdfKind::Other,
-            None,
-            None,
-            vec![],
-        ))
+        Some(info("font/woff", path, IdfKind::Other, None, None, vec![]))
     } else if data.starts_with(b"wOF2") {
-        Some(info(
-            "font/woff2",
-            path,
-            IdfKind::Other,
-            None,
-            None,
-            vec![],
-        ))
+        Some(info("font/woff2", path, IdfKind::Other, None, None, vec![]))
     } else if data.starts_with(b"SQLite format 3\0") {
         Some(info(
             "application/x-sqlite3",
@@ -2816,7 +2802,10 @@ fn parse_id3v2_tags(data: &[u8]) -> Option<Id3Tags> {
         if id == b"\0\0\0\0" {
             break;
         }
-        if !id.iter().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit()) {
+        if !id
+            .iter()
+            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+        {
             break;
         }
         let frame_size = if major == 4 {
@@ -3904,7 +3893,11 @@ mod tests {
         assert_eq!(info.title.as_deref(), Some("Demo Song"));
         assert_eq!(info.composer.as_deref(), Some("Demo Artist"));
         assert!(info.extra.iter().any(|line| line.contains("ID3: ID3v1")));
-        assert!(info.extra.iter().any(|line| line.contains("Album: Demo Album")));
+        assert!(
+            info.extra
+                .iter()
+                .any(|line| line.contains("Album: Demo Album"))
+        );
         assert!(info.extra.iter().any(|line| line.contains("Year: 1999")));
         assert!(info.extra.iter().any(|line| line.contains("Track: 7")));
 
@@ -3913,14 +3906,19 @@ mod tests {
 
     #[test]
     fn mp3_detected_by_frame_header_without_id3() {
-        let path = std::env::temp_dir().join(format!("kkc-idf-mp3-frame-{}.mp3", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("kkc-idf-mp3-frame-{}.mp3", std::process::id()));
         fs::write(&path, [0xff, 0xfb, 0x90, 0x64, 0, 1, 2, 3, 4]).expect("write mp3");
 
         let info = probe_file(&path)
             .expect("probe should not fail")
             .expect("mp3 should be detected");
         assert_eq!(info.mime_types[0], "audio/mpeg");
-        assert!(info.extra.iter().any(|line| line.contains("MPEG audio stream")));
+        assert!(
+            info.extra
+                .iter()
+                .any(|line| line.contains("MPEG audio stream"))
+        );
 
         let _ = fs::remove_file(path);
     }
@@ -3960,8 +3958,7 @@ mod tests {
 
     #[test]
     fn woff2_fonts_are_detected() {
-        let path =
-            std::env::temp_dir().join(format!("kkc-idf-woff2-{}.woff2", std::process::id()));
+        let path = std::env::temp_dir().join(format!("kkc-idf-woff2-{}.woff2", std::process::id()));
         fs::write(&path, b"wOF2\x00\x01\x00\x00\x00\x00\x00\x2c").expect("write woff2");
 
         let info = probe_file(&path)

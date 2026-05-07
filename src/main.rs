@@ -18,6 +18,7 @@ mod plugins;
 mod remote;
 mod remote_plugins;
 mod search;
+mod system_info;
 mod terminal;
 mod tree_mode;
 mod ui;
