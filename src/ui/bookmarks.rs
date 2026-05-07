@@ -533,17 +533,18 @@ pub(super) fn render_viewer_plugin_palette(
     let qs_pos = state.match_pos;
     let total = matches.len();
 
-    let palette_w = ((area.width as u32 * 62 / 100) as u16)
-        .max(50)
+    let palette_w = ((area.width as u32 * 74 / 100) as u16)
+        .max(56)
+        .min(96)
         .min(area.width.saturating_sub(4));
-    let visible_items = (total as u16).min(14);
-    let palette_h = (1 + 1 + visible_items.max(3) + 2).min(area.height.saturating_sub(3));
+    let visible_items = (total as u16).min(12);
+    let palette_h = (1 + 1 + 1 + visible_items.max(4) + 2).min(area.height.saturating_sub(3));
 
     let popup = clamp_rect(
         area,
         Rect {
             x: (area.width.saturating_sub(palette_w)) / 2 + area.x,
-            y: area.y + 2,
+            y: area.y + area.height.saturating_sub(palette_h) / 3,
             width: palette_w,
             height: palette_h,
         },
@@ -629,13 +630,87 @@ pub(super) fn render_viewer_plugin_palette(
         return;
     }
 
-    let list_h = list_area.height as usize;
+    if list_area.height < 2 {
+        return;
+    }
+
+    let header_area = Rect {
+        x: list_area.x,
+        y: list_area.y,
+        width: list_area.width,
+        height: 1,
+    };
+    let rows_area = Rect {
+        x: list_area.x,
+        y: list_area.y + 1,
+        width: list_area.width,
+        height: list_area.height.saturating_sub(1),
+    };
+
+    let row_w = list_area.width as usize;
+    let content_w = row_w.saturating_sub(2);
+    let ext_w = if content_w >= 48 {
+        (content_w / 4).clamp(10, 18)
+    } else {
+        0
+    };
+    let name_w = if ext_w > 0 {
+        (content_w / 3)
+            .clamp(14, 28)
+            .min(content_w.saturating_sub(ext_w + 2))
+    } else {
+        content_w
+    };
+    let desc_w = content_w.saturating_sub(name_w + if ext_w > 0 { ext_w + 2 } else { 0 });
+
+    let mut header_spans = vec![
+        Span::styled("  ", Style::default().fg(CLR_HEADER_FG).bg(CLR_HEADER_BG)),
+        Span::styled(
+            truncate_str("Plugin", name_w),
+            Style::default()
+                .fg(CLR_HEADER_FG)
+                .bg(CLR_HEADER_BG)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ];
+    if ext_w > 0 {
+        header_spans.push(Span::styled(
+            "  ",
+            Style::default().fg(CLR_HEADER_FG).bg(CLR_HEADER_BG),
+        ));
+        header_spans.push(Span::styled(
+            truncate_str("Extensions", ext_w),
+            Style::default()
+                .fg(CLR_HEADER_FG)
+                .bg(CLR_HEADER_BG)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+    if desc_w > 0 {
+        header_spans.push(Span::styled(
+            "  ",
+            Style::default().fg(CLR_HEADER_FG).bg(CLR_HEADER_BG),
+        ));
+        header_spans.push(Span::styled(
+            truncate_str("Description", desc_w),
+            Style::default()
+                .fg(CLR_HEADER_FG)
+                .bg(CLR_HEADER_BG)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+    safe_render_widget(
+        f,
+        Paragraph::new(Line::from(header_spans)).style(Style::default().bg(CLR_HEADER_BG)),
+        header_area,
+    );
+
+    let list_h = rows_area.height as usize;
     let scroll = if qs_pos >= list_h {
         qs_pos - list_h + 1
     } else {
         0
     };
-    let tokens: Vec<String> = query.split_whitespace().map(|t| t.to_lowercase()).collect();
 
     let items: Vec<ListItem> = matches
         .iter()
@@ -651,21 +726,33 @@ pub(super) fn render_viewer_plugin_palette(
                 (CLR_QS_BG, CLR_QS_LIST_FG, CLR_QS_MATCH_HI)
             };
 
-            let mut spans = vec![Span::styled("   ", Style::default().fg(fg).bg(bg))];
-            let name = highlight_tokens(&plugin.name, &tokens, fg, bg, hi);
-            spans.extend(name.spans);
-            if !plugin.description.is_empty() {
+            let marker = if is_sel { "\u{25b6} " } else { "  " };
+            let mut spans = vec![Span::styled(marker, Style::default().fg(hi).bg(bg))];
+            spans.push(Span::styled(
+                truncate_str(&plugin.name, name_w),
+                Style::default().fg(fg).bg(bg),
+            ));
+            if ext_w > 0 {
                 spans.push(Span::styled("  ", Style::default().fg(fg).bg(bg)));
+                let extensions = if plugin.extensions.is_empty() {
+                    "-".to_owned()
+                } else {
+                    plugin.extensions.join(",")
+                };
                 spans.push(Span::styled(
-                    truncate_str(&plugin.description, 42),
-                    Style::default().fg(Color::Gray).bg(bg),
+                    truncate_str(&extensions, ext_w),
+                    Style::default()
+                        .fg(if is_sel { fg } else { CLR_DATA })
+                        .bg(bg),
                 ));
             }
-            if !plugin.extensions.is_empty() {
+            if desc_w > 0 {
                 spans.push(Span::styled("  ", Style::default().fg(fg).bg(bg)));
                 spans.push(Span::styled(
-                    plugin.extensions.join(","),
-                    Style::default().fg(Color::DarkGray).bg(bg),
+                    truncate_str(&plugin.description, desc_w),
+                    Style::default()
+                        .fg(if is_sel { fg } else { Color::Gray })
+                        .bg(bg),
                 ));
             }
 
@@ -674,21 +761,21 @@ pub(super) fn render_viewer_plugin_palette(
         .collect();
 
     let (render_area, sb_area) = if total > list_h {
-        let list_w = list_area.width.saturating_sub(1);
+        let list_w = rows_area.width.saturating_sub(1);
         (
             Rect {
                 width: list_w,
-                ..list_area
+                ..rows_area
             },
             Some(Rect {
-                x: list_area.x + list_w,
-                y: list_area.y,
+                x: rows_area.x + list_w,
+                y: rows_area.y,
                 width: 1,
-                height: list_area.height,
+                height: rows_area.height,
             }),
         )
     } else {
-        (list_area, None)
+        (rows_area, None)
     };
 
     safe_render_widget(

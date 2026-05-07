@@ -5,6 +5,7 @@ mod cloud_status;
 mod config;
 mod copy;
 mod events;
+mod file_cache;
 mod file_icons;
 mod file_ops;
 mod file_types;
@@ -24,13 +25,15 @@ mod viewer;
 mod viewer_plugins;
 
 use anyhow::Result;
-use app::{App, AppMode};
+use app::{App, AppMode, MenuAction, palette_label_for_action};
 use config::Config;
 use crossterm::{
     cursor::MoveTo,
     event::{self, DisableMouseCapture, EnableMouseCapture},
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{
+        EnterAlternateScreen, LeaveAlternateScreen, SetTitle, disable_raw_mode, enable_raw_mode,
+    },
 };
 use ratatui::{Terminal, backend::CrosstermBackend, layout::Rect};
 use std::io::{self, Stdout, Write};
@@ -57,6 +60,84 @@ fn teardown_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Resul
     )?;
     terminal.show_cursor()?;
     Ok(())
+}
+
+fn sanitize_title_component(value: &str) -> String {
+    value.chars().filter(|ch| !ch.is_control()).collect()
+}
+
+fn short_path_for_title(path: &str) -> String {
+    let mut out = path.to_string();
+    if let Some(home) = directories::UserDirs::new()
+        .map(|u| u.home_dir().to_string_lossy().into_owned())
+        .filter(|home| !home.is_empty())
+    {
+        if out == home {
+            out = "~".to_string();
+        } else {
+            let home_prefix = format!("{home}/");
+            if out.starts_with(&home_prefix) {
+                out = format!("~/{}", &out[home_prefix.len()..]);
+            }
+        }
+    }
+
+    let visible_len = out.chars().count();
+    if visible_len <= 56 {
+        return out;
+    }
+
+    let parts: Vec<&str> = out.split('/').filter(|part| !part.is_empty()).collect();
+    if parts.len() < 2 {
+        return out;
+    }
+    let tail = format!("{}/{}", parts[parts.len() - 2], parts[parts.len() - 1]);
+
+    if let Some((scheme, rest)) = out.split_once("://") {
+        let host = rest.split('/').next().unwrap_or(rest);
+        return format!("{scheme}://{host}/.../{tail}");
+    }
+
+    format!(".../{tail}")
+}
+
+fn short_file_for_title(path: &std::path::Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| path.to_string_lossy().into_owned())
+}
+
+fn compose_window_title(app: &App) -> String {
+    match &app.mode {
+        AppMode::Browse | AppMode::QuickSearch => {
+            let panel_path = short_path_for_title(&app.active_panel().display_path());
+            format!("KKC - {}", sanitize_title_component(&panel_path))
+        }
+        AppMode::Viewer(v)
+        | AppMode::ViewerSearching(v)
+        | AppMode::ViewerGotoLine(v, _)
+        | AppMode::ViewerGoto(v, _)
+        | AppMode::ViewerMenu(v, _)
+        | AppMode::ViewerPluginPalette(v, _) => {
+            let file = short_file_for_title(&v.path);
+            let label = palette_label_for_action(MenuAction::ViewFile);
+            format!("KKC - {} - {}", label, sanitize_title_component(&file))
+        }
+        AppMode::Opener(state) => {
+            let file = short_file_for_title(&state.path);
+            let label = palette_label_for_action(MenuAction::OpenInOs);
+            format!("KKC - {} - {}", label, sanitize_title_component(&file))
+        }
+        _ => {
+            let label = app
+                .last_menu_action
+                .map(palette_label_for_action)
+                .filter(|label| !label.is_empty())
+                .unwrap_or("KKC");
+            format!("KKC - {}", sanitize_title_component(label))
+        }
+    }
 }
 
 fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
@@ -86,9 +167,16 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
     let mut first_draw_logged = false;
     let mut startup_ready_logged = false;
     let mut last_user_activity = Instant::now();
+    let mut last_window_title = String::new();
 
     loop {
         app.poll_background_tasks();
+
+        let window_title = compose_window_title(&app);
+        if window_title != last_window_title {
+            execute!(terminal.backend_mut(), SetTitle(window_title.clone()))?;
+            last_window_title = window_title;
+        }
 
         if app.config.screensaver_idle_minutes > 0
             && !matches!(
@@ -300,6 +388,10 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
 fn main() -> Result<()> {
     let mut terminal = setup_terminal()?;
     let result = run(&mut terminal);
+    let _ = execute!(
+        terminal.backend_mut(),
+        SetTitle("See you soon, space cowboy..."),
+    );
     teardown_terminal(&mut terminal)?;
 
     if let Err(ref e) = result {

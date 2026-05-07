@@ -181,6 +181,9 @@ fn mnemonics_for_labels(labels: &[String]) -> Vec<Option<char>> {
 }
 
 pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<bool> {
+    if action != MenuAction::Separator {
+        app.last_menu_action = Some(action);
+    }
     match action {
         MenuAction::OpenMenu => {
             let mut ms = crate::app::MenuState::new();

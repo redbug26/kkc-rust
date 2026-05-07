@@ -40,7 +40,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     },
     PaletteEntry {
         category: "Interface",
-        label: "Open menu",
+        label: "Menu",
         shortname: "Menu",
         shortcut: Some("F2"),
         fn_name: "open_menu",

@@ -1,6 +1,10 @@
 local kkc = require("kkc")
 
 local MAX_LINES = 20000
+local MAX_INPUT_BYTES = 8 * 1024 * 1024
+local PREVIEW_INPUT_BYTES = 256 * 1024
+local MAX_TOKENS = MAX_LINES * 2
+local PREVIEW_MAX_TOKENS = 3000
 
 local function span(text, fg, bold)
     return { text = text, fg = fg or "white", bg = "black", bold = bold or false }
@@ -84,14 +88,26 @@ local function push_wrapped(lines, spans, width, wrap)
     end
 end
 
-local function read_all(path)
+local function read_limited(path, max_bytes)
     local file, err = io.open(path, "rb")
     if not file then
         return nil, err
     end
-    local data = file:read("*a")
+
+    local size = nil
+    if file:seek("end") then
+        size = file:seek()
+        file:seek("set")
+    end
+
+    max_bytes = max_bytes or MAX_INPUT_BYTES
+    local read_size = size and math.min(size, max_bytes) or max_bytes
+    local data = file:read(read_size)
     file:close()
-    return data
+    if not data then
+        return ""
+    end
+    return data, nil, size and size > #data, size
 end
 
 local function trim(text)
@@ -213,18 +229,30 @@ local function parse_tag(inner)
     }
 end
 
-local function parse_xml(input)
+local function parse_xml(input, max_tokens)
     local tokens = {}
     local errors = {}
     local pos = 1
     input = strip_bom(input)
+    max_tokens = max_tokens or MAX_TOKENS
+
+    local function push_token(token)
+        if #tokens >= max_tokens then
+            if #errors == 0 or errors[#errors] ~= "Stopped parsing after token limit" then
+                table.insert(errors, "Stopped parsing after token limit")
+            end
+            return false
+        end
+        table.insert(tokens, token)
+        return true
+    end
 
     while pos <= #input do
         local next_lt = input:find("<", pos, true)
         if not next_lt then
             local text = normalize_space(input:sub(pos))
             if text ~= "" then
-                table.insert(tokens, { kind = "text", text = text })
+                push_token({ kind = "text", text = text })
             end
             break
         end
@@ -232,7 +260,9 @@ local function parse_xml(input)
         if next_lt > pos then
             local text = normalize_space(input:sub(pos, next_lt - 1))
             if text ~= "" then
-                table.insert(tokens, { kind = "text", text = text })
+                if not push_token({ kind = "text", text = text }) then
+                    break
+                end
             end
         end
 
@@ -242,7 +272,9 @@ local function parse_xml(input)
                 table.insert(errors, "Unclosed comment at byte " .. next_lt)
                 break
             end
-            table.insert(tokens, { kind = "comment", text = input:sub(next_lt + 4, end_pos - 1) })
+            if not push_token({ kind = "comment", text = input:sub(next_lt + 4, end_pos - 1) }) then
+                break
+            end
             pos = end_pos + 3
         elseif starts_with(input, next_lt, "<![CDATA[") then
             local end_pos = input:find("]]>", next_lt + 9, true)
@@ -250,7 +282,9 @@ local function parse_xml(input)
                 table.insert(errors, "Unclosed CDATA at byte " .. next_lt)
                 break
             end
-            table.insert(tokens, { kind = "cdata", text = input:sub(next_lt + 9, end_pos - 1) })
+            if not push_token({ kind = "cdata", text = input:sub(next_lt + 9, end_pos - 1) }) then
+                break
+            end
             pos = end_pos + 3
         elseif starts_with(input, next_lt, "<?") then
             local end_pos = input:find("?>", next_lt + 2, true)
@@ -258,7 +292,9 @@ local function parse_xml(input)
                 table.insert(errors, "Unclosed processing instruction at byte " .. next_lt)
                 break
             end
-            table.insert(tokens, { kind = "pi", text = trim(input:sub(next_lt + 2, end_pos - 1)) })
+            if not push_token({ kind = "pi", text = trim(input:sub(next_lt + 2, end_pos - 1)) }) then
+                break
+            end
             pos = end_pos + 2
         elseif starts_with(input, next_lt, "<!") then
             local end_pos = find_markup_end(input, next_lt + 2)
@@ -266,7 +302,9 @@ local function parse_xml(input)
                 table.insert(errors, "Unclosed declaration at byte " .. next_lt)
                 break
             end
-            table.insert(tokens, { kind = "declaration", text = trim(input:sub(next_lt + 2, end_pos - 1)) })
+            if not push_token({ kind = "declaration", text = trim(input:sub(next_lt + 2, end_pos - 1)) }) then
+                break
+            end
             pos = end_pos + 1
         else
             local end_pos = find_markup_end(input, next_lt + 1)
@@ -274,7 +312,9 @@ local function parse_xml(input)
                 table.insert(errors, "Unclosed tag at byte " .. next_lt)
                 break
             end
-            table.insert(tokens, parse_tag(input:sub(next_lt + 1, end_pos - 1)))
+            if not push_token(parse_tag(input:sub(next_lt + 1, end_pos - 1))) then
+                break
+            end
             pos = end_pos + 1
         end
     end
@@ -373,16 +413,20 @@ local function render_xml(path, mode, state, width)
         return nil
     end
 
-    local data, err = read_all(path)
+    state = state or {}
+    local preview = state.__preview == "1"
+    local state_max_bytes = tonumber(state.__preview_max_bytes)
+    local max_bytes = preview and (state_max_bytes or PREVIEW_INPUT_BYTES) or MAX_INPUT_BYTES
+    local max_tokens = preview and PREVIEW_MAX_TOKENS or MAX_TOKENS
+    local data, err, truncated, file_size = read_limited(path, max_bytes)
     if not data then
         return {
             { span("XML: " .. tostring(err), "red", true) },
         }
     end
 
-    state = state or {}
     local wrap = state.wrap ~= "0"
-    local tokens, errors = parse_xml(data)
+    local tokens, errors = parse_xml(data, max_tokens)
     local stats = collect_stats(tokens, errors)
     local lines = {}
     push_line(lines, {
@@ -391,6 +435,8 @@ local function render_xml(path, mode, state, width)
         span(stats.root, "white", true),
         span("  nodes: " .. tostring(stats.nodes), "gray"),
         span("  depth: " .. tostring(stats.depth), "gray"),
+        preview and span("  preview", "yellow") or span("", "gray"),
+        truncated and span("  partial: " .. tostring(#data) .. "/" .. tostring(file_size) .. " bytes", "yellow") or span("", "gray"),
         span("  wrap: ", "gray"),
         span(wrap and "on" or "off", wrap and "lightgreen" or "yellow"),
         span("  [F2/w] wrap", "gray"),
@@ -428,6 +474,8 @@ local function handle_xml_key(_path, mode, key, state)
             consumed = true,
             state = {
                 wrap = wrap and "0" or "1",
+                __preview = state.__preview,
+                __preview_max_bytes = state.__preview_max_bytes,
             },
         }
     end

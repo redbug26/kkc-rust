@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::{DateTime, Local};
 use std::collections::HashMap;
 use std::fs;
-use std::io::{Cursor, Read, Seek, SeekFrom};
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use zip::ZipArchive;
@@ -183,24 +183,14 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
     // when the cursor lands on a large unrecognised file for the first time.
     const MAX_PROBE_BYTES: usize = 64 * 1024;
     const PDF_PROBE_BYTES: usize = 8 * 1024;
-    let (data, file_len) = {
-        use std::io::Read;
-        let mut file = std::fs::File::open(path)?;
-        let file_len = file
-            .metadata()
-            .map(|m| m.len() as usize)
-            .unwrap_or(MAX_PROBE_BYTES);
-        let max_probe = if ext == "pdf" {
-            PDF_PROBE_BYTES
-        } else {
-            MAX_PROBE_BYTES
-        };
-        let cap = file_len.min(max_probe);
-        let mut buf = vec![0u8; cap];
-        let n = file.read(&mut buf)?;
-        buf.truncate(n);
-        (buf, file_len)
+    let max_probe = if ext == "pdf" {
+        PDF_PROBE_BYTES
+    } else {
+        MAX_PROBE_BYTES
     };
+    let probe = crate::file_cache::read_prefix(path, max_probe)?;
+    let data = probe.bytes;
+    let file_len = probe.file_len as usize;
 
     let info = if data.starts_with(b"PK\x03\x04")
         || data.starts_with(b"PK\x05\x06")
@@ -587,6 +577,15 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             None,
             vec![],
+        ))
+    } else if data.starts_with(b"SQLite format 3\0") {
+        Some(info(
+            "application/x-sqlite3",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            sqlite_lines(&data),
         ))
     } else if data.starts_with(b"RIFF") && data.get(8..12) == Some(b"WAVE") {
         Some(wav_info(path, &data))
@@ -2568,6 +2567,46 @@ fn ogg_lines(data: &[u8]) -> Vec<String> {
     }
 }
 
+fn sqlite_lines(data: &[u8]) -> Vec<String> {
+    if data.len() < 100 {
+        return Vec::new();
+    }
+
+    let page_size = match u16::from_be_bytes([data[16], data[17]]) {
+        1 => 65_536,
+        value => value as u32,
+    };
+    let write_version = sqlite_journal_mode(data[18]);
+    let read_version = sqlite_journal_mode(data[19]);
+    let page_count = u32::from_be_bytes([data[28], data[29], data[30], data[31]]);
+    let schema_version = u32::from_be_bytes([data[40], data[41], data[42], data[43]]);
+    let user_version = u32::from_be_bytes([data[60], data[61], data[62], data[63]]);
+
+    let mut out = vec![format!(" Page size {} bytes", page_size)];
+    if page_count > 0 {
+        out.push(format!(" {} page(s)", page_count));
+    }
+    out.push(format!(
+        " Journal write/read {}/{}",
+        write_version, read_version
+    ));
+    if schema_version > 0 {
+        out.push(format!(" Schema version {}", schema_version));
+    }
+    if user_version > 0 {
+        out.push(format!(" User version {}", user_version));
+    }
+    out
+}
+
+fn sqlite_journal_mode(value: u8) -> &'static str {
+    match value {
+        1 => "legacy",
+        2 => "wal",
+        _ => "?",
+    }
+}
+
 fn is_tar(data: &[u8]) -> bool {
     data.len() > 262 && &data[257..262] == b"ustar"
 }
@@ -2878,15 +2917,11 @@ fn decode_utf16_bytes(raw: &[u8], little_endian: bool) -> Option<String> {
 }
 
 fn read_id3v1_tags(path: &Path) -> Option<Id3Tags> {
-    let mut file = fs::File::open(path).ok()?;
-    let len = file.metadata().ok()?.len();
-    if len < 128 {
+    let tail = crate::file_cache::read_tail(path, 128).ok()?;
+    if tail.file_len < 128 {
         return None;
     }
-    file.seek(SeekFrom::End(-128)).ok()?;
-    let mut tail = [0u8; 128];
-    file.read_exact(&mut tail).ok()?;
-    parse_id3v1_tags(&tail)
+    parse_id3v1_tags(&tail.bytes)
 }
 
 fn parse_id3v1_tags(tag: &[u8]) -> Option<Id3Tags> {
@@ -3934,6 +3969,32 @@ mod tests {
             .expect("woff2 should be detected");
         assert_eq!(info.mime_types[0], "font/woff2");
         assert_eq!(info.format, "WOFF2 font");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn sqlite_databases_are_detected() {
+        let path =
+            std::env::temp_dir().join(format!("kkc-idf-sqlite-{}.sqlite", std::process::id()));
+        let mut data = vec![0u8; 100];
+        data[..16].copy_from_slice(b"SQLite format 3\0");
+        data[16..18].copy_from_slice(&4096u16.to_be_bytes());
+        data[18] = 1;
+        data[19] = 1;
+        data[28..32].copy_from_slice(&7u32.to_be_bytes());
+        data[40..44].copy_from_slice(&3u32.to_be_bytes());
+        data[60..64].copy_from_slice(&42u32.to_be_bytes());
+        fs::write(&path, data).expect("write sqlite");
+
+        let info = probe_file(&path)
+            .expect("probe should not fail")
+            .expect("sqlite should be detected");
+        assert_eq!(info.mime_types[0], "application/x-sqlite3");
+        assert_eq!(info.format, "SQLite database");
+        assert_eq!(info.kind, IdfKind::Other);
+        assert!(info.extra.iter().any(|line| line.contains("4096 bytes")));
+        assert!(info.extra.iter().any(|line| line.contains("7 page(s)")));
 
         let _ = fs::remove_file(path);
     }

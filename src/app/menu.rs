@@ -452,16 +452,23 @@ impl ViewerPluginPaletteState {
     }
 
     pub fn move_prev(&mut self) {
-        self.match_pos = self.match_pos.saturating_sub(1);
-        self.clamp_match();
+        let len = self.filtered_indices().len();
+        if len == 0 {
+            self.match_pos = 0;
+        } else if self.match_pos == 0 {
+            self.match_pos = len - 1;
+        } else {
+            self.match_pos -= 1;
+        }
     }
 
     pub fn move_next(&mut self) {
         let len = self.filtered_indices().len();
-        if self.match_pos + 1 < len {
-            self.match_pos += 1;
+        if len == 0 {
+            self.match_pos = 0;
+        } else {
+            self.match_pos = (self.match_pos + 1) % len;
         }
-        self.clamp_match();
     }
 
     fn clamp_match(&mut self) {

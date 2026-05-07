@@ -876,6 +876,8 @@ pub struct App {
     pub palette_recent: Vec<String>,
     /// Center-column buttons shown between the two panels.
     pub center_buttons: Vec<MenuAction>,
+    /// Last command action executed via menu/palette/shortcuts.
+    pub last_menu_action: Option<MenuAction>,
 }
 
 pub fn default_center_button_actions() -> Vec<MenuAction> {
@@ -1017,6 +1019,7 @@ impl App {
             quick_preview_forced_mode: None,
             palette_recent,
             center_buttons: default_center_button_actions(),
+            last_menu_action: None,
         };
 
         match app.config.panel_view_type {

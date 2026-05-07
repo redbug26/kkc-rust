@@ -133,6 +133,7 @@ struct PluginDocumentCacheKey {
     mode: &'static str,
     state: Vec<(String, String)>,
     width: usize,
+    height: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -280,9 +281,13 @@ impl Viewer {
     /// Used by quick-preview so that large files don't stall the UI on every
     /// cursor movement.
     pub fn open_preview(path: &Path, wrap: bool) -> Result<Self> {
-        const MAX_QUICK_PREVIEW_BYTES: usize = 512 * 1024 * 8; // 4 MB
-        debug_log(&format!("open_preview: {} (limit=4 MB)", path.display()));
-        Self::open_with_limit(path, wrap, Some(MAX_QUICK_PREVIEW_BYTES))
+        let max_bytes = quick_preview_read_limit(path);
+        debug_log(&format!(
+            "open_preview: {} (limit={} KB)",
+            path.display(),
+            max_bytes / 1024
+        ));
+        Self::open_with_limit(path, wrap, Some(max_bytes))
     }
 
     fn open_with_limit(path: &Path, wrap: bool, max_bytes: Option<usize>) -> Result<Self> {
@@ -291,21 +296,9 @@ impl Viewer {
             path.display(),
             max_bytes
         ));
-        let raw = if let Some(limit) = max_bytes {
-            use std::io::Read;
-            let mut file =
-                std::fs::File::open(path).with_context(|| format!("Reading {}", path.display()))?;
-            let file_len = file.metadata().map(|m| m.len() as usize).unwrap_or(limit);
-            let cap = file_len.min(limit);
-            let mut buf = vec![0u8; cap];
-            let n = file
-                .read(&mut buf)
-                .with_context(|| format!("Reading {}", path.display()))?;
-            buf.truncate(n);
-            buf
-        } else {
-            fs::read(path).with_context(|| format!("Reading {}", path.display()))?
-        };
+        let raw = crate::file_cache::read_file(path, max_bytes)
+            .with_context(|| format!("Reading {}", path.display()))?
+            .bytes;
         let line_feed = LineFeedMode::Mixed;
         let image = detect_image_info(path, &raw);
         let mode = detect_mode(path, &raw);
@@ -351,6 +344,12 @@ impl Viewer {
         }
         if let Some(plugin_name) = crate::plugins::default_viewer_plugin_for_path(path) {
             viewer.set_viewer_plugin(plugin_name);
+        }
+        if let Some(limit) = max_bytes {
+            viewer.plugin_state.insert("__preview".into(), "1".into());
+            viewer
+                .plugin_state
+                .insert("__preview_max_bytes".into(), limit.to_string());
         }
         if max_bytes.is_none() {
             viewer.restore_position();
@@ -1580,6 +1579,24 @@ impl Viewer {
     fn ensure_plugin_document_cache(&self, width: usize) -> Option<()> {
         let mode = self.viewer_mode_key()?;
         let plugin_name = self.viewer_plugin.as_deref()?;
+        let height = if mode == "image" {
+            self.cached_plugin_document_height()
+        } else {
+            0
+        };
+        let key = PluginDocumentCacheKey {
+            plugin_name: plugin_name.to_string(),
+            mode,
+            state: plugin_state_cache_key(&self.plugin_state),
+            width,
+            height,
+        };
+
+        if let Some(cache) = self.plugin_document_cache.borrow().as_ref()
+            && cache.key == key
+        {
+            return Some(());
+        }
 
         let lines = if mode == "image" {
             let image = crate::plugins::render_viewer_document_image(
@@ -1587,7 +1604,7 @@ impl Viewer {
                 plugin_name,
                 &self.plugin_state,
                 width,
-                self.cached_plugin_document_height(),
+                height,
             )?;
             image.overlay_lines
         } else {
@@ -1599,18 +1616,6 @@ impl Viewer {
                 width,
             )?
         };
-
-        let key = PluginDocumentCacheKey {
-            plugin_name: plugin_name.to_string(),
-            mode,
-            state: plugin_state_cache_key(&self.plugin_state),
-            width,
-        };
-        if let Some(cache) = self.plugin_document_cache.borrow().as_ref() {
-            if cache.key == key {
-                return Some(());
-            }
-        }
 
         *self.plugin_document_cache.borrow_mut() = Some(PluginDocumentCache { key, lines });
         Some(())
@@ -2034,6 +2039,49 @@ pub fn clear_kitty_images<W: Write>(out: &mut W, area: Option<Rect>) -> Result<(
     write!(out, "\x1b_Ga=d,d=A\x1b\\")?;
     out.flush()?;
     Ok(())
+}
+
+fn quick_preview_read_limit(path: &Path) -> usize {
+    const TEXT_PREVIEW_BYTES: usize = 256 * 1024;
+    const GENERAL_PREVIEW_BYTES: usize = 4 * 1024 * 1024;
+
+    let ext = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+        .unwrap_or_default();
+
+    if matches!(
+        ext.as_str(),
+        "xml"
+            | "xhtml"
+            | "svg"
+            | "plist"
+            | "rss"
+            | "atom"
+            | "json"
+            | "jsonl"
+            | "csv"
+            | "tsv"
+            | "md"
+            | "markdown"
+            | "html"
+            | "htm"
+            | "txt"
+            | "log"
+            | "toml"
+            | "yaml"
+            | "yml"
+            | "rs"
+            | "lua"
+            | "js"
+            | "ts"
+            | "css"
+    ) {
+        TEXT_PREVIEW_BYTES
+    } else {
+        GENERAL_PREVIEW_BYTES
+    }
 }
 
 fn rgba_at(pixels: &[u8], width: usize, x: usize, y: usize) -> [u8; 4] {
