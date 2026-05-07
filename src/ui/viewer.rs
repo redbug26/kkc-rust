@@ -188,6 +188,30 @@ fn render_viewer_full_width_header(f: &mut Frame, host: Rect, title: &str, activ
     );
 }
 
+fn line_with_default_bg(mut line: Line<'static>, bg: Color) -> Line<'static> {
+    if line.style.bg.is_none() {
+        line.style.bg = Some(bg);
+    }
+    for span in &mut line.spans {
+        if span.style.bg.is_none() {
+            span.style.bg = Some(bg);
+        }
+    }
+    line
+}
+
+fn render_solid_bg(f: &mut Frame, area: Rect, bg: Color) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let style = Style::default().bg(bg);
+    let lines = (0..area.height)
+        .map(|_| Line::from(Span::styled(" ".repeat(area.width as usize), style)))
+        .collect::<Vec<_>>();
+    f.render_widget(Paragraph::new(lines).style(style), area);
+}
+
 pub fn kitty_image_area(v: &Viewer, area: Rect) -> Option<Rect> {
     if !v.is_image_mode() {
         return None;
@@ -366,22 +390,24 @@ pub(super) fn render_viewer(
             (
                 Style::default()
                     .fg(CLR_HEADER_FG)
+                    .bg(Color::Black)
                     .add_modifier(Modifier::BOLD),
                 BorderType::Thick,
                 Span::styled(
                     format!(" {} ", label),
                     Style::default()
                         .fg(CLR_HEADER_FG)
+                        .bg(Color::Black)
                         .add_modifier(Modifier::BOLD),
                 ),
             )
         } else {
             (
-                Style::default().fg(CLR_PANEL_BORDER_DIM),
+                Style::default().fg(CLR_PANEL_BORDER_DIM).bg(Color::Black),
                 BorderType::Rounded,
                 Span::styled(
                     format!(" {} ", label),
-                    Style::default().fg(CLR_PANEL_BORDER_DIM),
+                    Style::default().fg(CLR_PANEL_BORDER_DIM).bg(Color::Black),
                 ),
             )
         }
@@ -389,39 +415,41 @@ pub(super) fn render_viewer(
         (
             Style::default()
                 .fg(CLR_PANEL_BORDER)
+                .bg(Color::Black)
                 .add_modifier(Modifier::BOLD),
             BorderType::Thick,
-            Span::raw(String::new()),
+            Span::styled(String::new(), Style::default().bg(Color::Black)),
         )
     } else if active {
         (
             Style::default()
                 .fg(CLR_PANEL_BORDER)
+                .bg(Color::Black)
                 .add_modifier(Modifier::BOLD),
             BorderType::Thick,
-            Span::raw(title.clone()),
+            Span::styled(title.clone(), Style::default().bg(Color::Black)),
         )
     } else {
         (
-            Style::default().fg(CLR_PANEL_BORDER_DIM),
+            Style::default().fg(CLR_PANEL_BORDER_DIM).bg(Color::Black),
             BorderType::Rounded,
-            Span::raw(title.clone()),
+            Span::styled(title.clone(), Style::default().bg(Color::Black)),
         )
     };
     if full_width_header {
         render_viewer_full_width_header(f, viewer_host, &title, active);
     }
+    f.render_widget(Clear, area);
+    render_solid_bg(f, area, Color::Black);
     let block = Block::default()
         .title(title_span)
         .borders(Borders::ALL)
         .border_type(border_type)
-        .border_style(border_style);
+        .border_style(border_style)
+        .style(Style::default().bg(Color::Black));
     let inner = block.inner(area);
     f.render_widget(block, area);
-    f.render_widget(
-        Block::default().style(Style::default().bg(Color::Black)),
-        inner,
-    );
+    render_solid_bg(f, inner, Color::Black);
 
     let use_graphics_protocol = if quick_preview_label.is_some() {
         crate::viewer::embedded_graphics_supported()
@@ -525,7 +553,7 @@ pub(super) fn render_viewer(
                 line
             };
 
-            if ln_width > 0 {
+            let rendered_line = if ln_width > 0 {
                 let num_str = format!("{:>width$}\u{2502} ", abs_idx + 1, width = ln_digits);
                 let mut spans = vec![Span::styled(
                     num_str,
@@ -535,7 +563,8 @@ pub(super) fn render_viewer(
                 Line::from(spans)
             } else {
                 content_line
-            }
+            };
+            line_with_default_bg(rendered_line, Color::Black)
         })
         .collect();
 
