@@ -188,11 +188,19 @@ fn render_viewer_full_width_header(f: &mut Frame, host: Rect, title: &str, activ
     );
 }
 
-fn line_with_default_bg(mut line: Line<'static>, bg: Color) -> Line<'static> {
+fn line_with_default_viewer_style(mut line: Line<'static>) -> Line<'static> {
+    let fg = Color::White;
+    let bg = Color::Black;
+    if line.style.fg.is_none() {
+        line.style.fg = Some(fg);
+    }
     if line.style.bg.is_none() {
         line.style.bg = Some(bg);
     }
     for span in &mut line.spans {
+        if span.style.fg.is_none() {
+            span.style.fg = Some(fg);
+        }
         if span.style.bg.is_none() {
             span.style.bg = Some(bg);
         }
@@ -390,24 +398,22 @@ pub(super) fn render_viewer(
             (
                 Style::default()
                     .fg(CLR_HEADER_FG)
-                    .bg(Color::Black)
                     .add_modifier(Modifier::BOLD),
                 BorderType::Thick,
                 Span::styled(
                     format!(" {} ", label),
                     Style::default()
                         .fg(CLR_HEADER_FG)
-                        .bg(Color::Black)
                         .add_modifier(Modifier::BOLD),
                 ),
             )
         } else {
             (
-                Style::default().fg(CLR_PANEL_BORDER_DIM).bg(Color::Black),
+                Style::default().fg(CLR_PANEL_BORDER_DIM),
                 BorderType::Rounded,
                 Span::styled(
                     format!(" {} ", label),
-                    Style::default().fg(CLR_PANEL_BORDER_DIM).bg(Color::Black),
+                    Style::default().fg(CLR_PANEL_BORDER_DIM),
                 ),
             )
         }
@@ -415,38 +421,33 @@ pub(super) fn render_viewer(
         (
             Style::default()
                 .fg(CLR_PANEL_BORDER)
-                .bg(Color::Black)
                 .add_modifier(Modifier::BOLD),
             BorderType::Thick,
-            Span::styled(String::new(), Style::default().bg(Color::Black)),
+            Span::raw(String::new()),
         )
     } else if active {
         (
             Style::default()
                 .fg(CLR_PANEL_BORDER)
-                .bg(Color::Black)
                 .add_modifier(Modifier::BOLD),
             BorderType::Thick,
-            Span::styled(title.clone(), Style::default().bg(Color::Black)),
+            Span::raw(title.clone()),
         )
     } else {
         (
-            Style::default().fg(CLR_PANEL_BORDER_DIM).bg(Color::Black),
+            Style::default().fg(CLR_PANEL_BORDER_DIM),
             BorderType::Rounded,
-            Span::styled(title.clone(), Style::default().bg(Color::Black)),
+            Span::raw(title.clone()),
         )
     };
     if full_width_header {
         render_viewer_full_width_header(f, viewer_host, &title, active);
     }
-    f.render_widget(Clear, area);
-    render_solid_bg(f, area, Color::Black);
     let block = Block::default()
         .title(title_span)
         .borders(Borders::ALL)
         .border_type(border_type)
-        .border_style(border_style)
-        .style(Style::default().bg(Color::Black));
+        .border_style(border_style);
     let inner = block.inner(area);
     f.render_widget(block, area);
     render_solid_bg(f, inner, Color::Black);
@@ -564,7 +565,7 @@ pub(super) fn render_viewer(
             } else {
                 content_line
             };
-            line_with_default_bg(rendered_line, Color::Black)
+            line_with_default_viewer_style(rendered_line)
         })
         .collect();
 
