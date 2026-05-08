@@ -17,6 +17,7 @@ use crate::app::{
     OpenerState, RemoteEditKind, TextInputState,
 };
 use crate::archive::supports_archive_navigation;
+use crate::compare::{jump_to_compare_search_match, rebuild_compare_panel_state};
 use crate::copy::CopyDialogState;
 use crate::remote::{
     RemoteKind, RemoteSource, download_to_temp, join_remote, load_profiles,
@@ -150,6 +151,7 @@ fn handle_key_mode(app: &mut App, key: KeyEvent) -> Option<Result<bool>> {
         AppMode::CopyDialog(_) => Some(handle_copy_dialog(app, key)),
         AppMode::CopyProgress(_) => Some(handle_copy_progress(app, key)),
         AppMode::SearchPanel(_) => Some(handle_search(app, key)),
+        AppMode::ComparePanel(_) => Some(handle_compare_panel(app, key)),
         AppMode::TreeView(_) => Some(handle_tree_view(app, key)),
         AppMode::DirBookmarks => Some(handle_dir_bookmarks(app, key)),
         AppMode::QuickSearch => Some(handle_quicksearch(app, key)),
@@ -3840,6 +3842,117 @@ fn handle_tree_view(app: &mut App, key: KeyEvent) -> Result<bool> {
                 }
                 app.mode = AppMode::Browse;
                 app.enter_dir(dir)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(false)
+}
+
+fn handle_compare_panel(app: &mut App, key: KeyEvent) -> Result<bool> {
+    if let AppMode::ComparePanel(state) = &mut app.mode
+        && state.search_active
+    {
+        match key.code {
+            KeyCode::Esc => {
+                state.search_active = false;
+                return Ok(false);
+            }
+            KeyCode::Enter => {
+                let _ = jump_to_compare_search_match(state, true, true);
+                state.search_active = false;
+                return Ok(false);
+            }
+            KeyCode::Up => {
+                let _ = jump_to_compare_search_match(state, false, false);
+                return Ok(false);
+            }
+            KeyCode::Down => {
+                let _ = jump_to_compare_search_match(state, true, false);
+                return Ok(false);
+            }
+            _ => {
+                let pasted = handle_text_input_paste(state, key);
+                let edited = pasted || handle_text_input_edit_key(state, key);
+                if edited {
+                    let _ = jump_to_compare_search_match(state, true, true);
+                    return Ok(false);
+                }
+            }
+        }
+    }
+
+    match key.code {
+        KeyCode::Esc | KeyCode::Enter => {
+            app.mode = AppMode::Browse;
+        }
+        KeyCode::Char('/') => {
+            if let AppMode::ComparePanel(state) = &mut app.mode {
+                state.search_active = true;
+                state.search_cursor = state.search_query.len();
+            }
+        }
+        KeyCode::Char('n') => {
+            if let AppMode::ComparePanel(state) = &mut app.mode {
+                let _ = jump_to_compare_search_match(state, true, false);
+            }
+        }
+        KeyCode::Char('N') => {
+            if let AppMode::ComparePanel(state) = &mut app.mode {
+                let _ = jump_to_compare_search_match(state, false, false);
+            }
+        }
+        KeyCode::Char('d') | KeyCode::Char('D') => {
+            if let AppMode::ComparePanel(state) = &mut app.mode {
+                state.show_only_differences = !state.show_only_differences;
+                rebuild_compare_panel_state(state);
+            }
+        }
+        KeyCode::Char('w') | KeyCode::Char('W') => {
+            if let AppMode::ComparePanel(state) = &mut app.mode {
+                state.ignore_whitespace = !state.ignore_whitespace;
+                rebuild_compare_panel_state(state);
+            }
+        }
+        KeyCode::Char('l') | KeyCode::Char('L') => {
+            if let AppMode::ComparePanel(state) = &mut app.mode {
+                state.ignore_crlf = !state.ignore_crlf;
+                rebuild_compare_panel_state(state);
+            }
+        }
+        KeyCode::Up => {
+            if let AppMode::ComparePanel(state) = &mut app.mode {
+                state.move_prev();
+            }
+        }
+        KeyCode::Down => {
+            if let AppMode::ComparePanel(state) = &mut app.mode {
+                state.move_next();
+            }
+        }
+        KeyCode::PageUp => {
+            if let AppMode::ComparePanel(state) = &mut app.mode {
+                for _ in 0..10 {
+                    state.move_prev();
+                }
+            }
+        }
+        KeyCode::PageDown => {
+            if let AppMode::ComparePanel(state) = &mut app.mode {
+                for _ in 0..10 {
+                    state.move_next();
+                }
+            }
+        }
+        KeyCode::Home => {
+            if let AppMode::ComparePanel(state) = &mut app.mode {
+                state.cursor = 0;
+                state.scroll = 0;
+            }
+        }
+        KeyCode::End => {
+            if let AppMode::ComparePanel(state) = &mut app.mode {
+                state.cursor = state.rows.len().saturating_sub(1);
             }
         }
         _ => {}

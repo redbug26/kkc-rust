@@ -27,6 +27,7 @@ use self::panel_tabs::{PanelTabs, panel_config_for_save, restore_panel_side};
 pub use self::remote_edit::{RemoteEditKind, RemoteEditState};
 pub use self::shortcuts::{ShortcutPanelState, normalize_shortcut, shortcut_from_key_event};
 use crate::about::AboutState;
+use crate::compare::CompareBuffer;
 use crate::config::{ActivePanelSide, Config, PanelConfig, PanelViewType, SortMode};
 use crate::copy::{
     CopyDestination, CopyDialogState, CopyJob, CopyProgressState, CopyScanTask, CopySource,
@@ -106,6 +107,8 @@ pub enum AppMode {
     ViewerPluginPalette(Viewer, ViewerPluginPaletteState),
     /// Search panel (Alt-F7).
     SearchPanel(SearchState),
+    /// Friendly side-by-side comparison panel for left/right files.
+    ComparePanel(ComparePanelState),
     /// Cached user-directory tree browser.
     TreeView(TreeViewState),
     /// Confirmation dialog.
@@ -173,6 +176,84 @@ pub struct ActionPaletteState {
     pub actions: Vec<crate::plugins::ActionItem>,
     pub cwd: PathBuf,
     pub cursor: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompareRowKind {
+    Equal,
+    Added,
+    Removed,
+    Changed,
+}
+
+#[derive(Debug, Clone)]
+pub struct CompareRow {
+    pub kind: CompareRowKind,
+    pub left_no: Option<usize>,
+    pub right_no: Option<usize>,
+    pub left_text: String,
+    pub right_text: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ComparePanelState {
+    pub left_label: String,
+    pub right_label: String,
+    pub left_buffer: CompareBuffer,
+    pub right_buffer: CompareBuffer,
+    pub show_only_differences: bool,
+    pub ignore_whitespace: bool,
+    pub ignore_crlf: bool,
+    pub summary: String,
+    pub message: Option<String>,
+    pub rows: Vec<CompareRow>,
+    pub cursor: usize,
+    pub scroll: usize,
+    pub search_query: String,
+    pub search_cursor: usize,
+    pub search_active: bool,
+}
+
+impl ComparePanelState {
+    pub fn move_prev(&mut self) {
+        if self.rows.is_empty() {
+            self.cursor = 0;
+            self.scroll = 0;
+            return;
+        }
+        self.cursor = if self.cursor == 0 {
+            self.rows.len() - 1
+        } else {
+            self.cursor - 1
+        };
+    }
+
+    pub fn move_next(&mut self) {
+        if self.rows.is_empty() {
+            self.cursor = 0;
+            self.scroll = 0;
+            return;
+        }
+        self.cursor = (self.cursor + 1) % self.rows.len();
+    }
+}
+
+impl TextInputState for ComparePanelState {
+    fn value(&self) -> &String {
+        &self.search_query
+    }
+
+    fn value_mut(&mut self) -> &mut String {
+        &mut self.search_query
+    }
+
+    fn cursor(&self) -> usize {
+        self.search_cursor
+    }
+
+    fn cursor_mut(&mut self) -> &mut usize {
+        &mut self.search_cursor
+    }
 }
 
 impl ActionPaletteState {

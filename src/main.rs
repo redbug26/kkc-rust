@@ -3,6 +3,7 @@ mod app;
 mod archive;
 mod cloud_status;
 mod config;
+mod compare;
 mod copy;
 mod events;
 mod file_cache;

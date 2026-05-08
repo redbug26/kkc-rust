@@ -1,6 +1,7 @@
 mod assoc;
 mod bookmarks;
 mod command_palette;
+mod compare;
 mod config;
 mod confirm;
 mod copy;
@@ -48,16 +49,18 @@ use self::viewer::{
 
 pub(crate) use self::command_palette::command_palette_shortcuts;
 use self::command_palette::render_command_palette;
+use self::compare::render_compare_panel;
 use self::panel::{render_center_buttons, render_panel_or_file_id};
 pub(crate) use self::plugins::plugins_shortcuts;
 use self::plugins::render_plugins;
 pub(crate) use self::shortcuts::shortcut_panel_shortcuts;
 use crate::app::{
-    ActionPaletteState, ActivePanel, App, AppMode, AssocEditorState, BookmarkListItem, ConfigState,
-    ConfirmAction, ConfirmDialog, InputDialog, MENU_DATA, MENU_HEADERS, MenuAction, MenuState,
-    OpenerState, PluginsState, RemoteConnectState, RemoteConnectingState, RemoteEditKind,
-    RemoteEditState, SearchState, StoreInstallPaletteState, ViewerGotoState, ViewerMenuKind,
-    ViewerMenuState, ViewerPluginPaletteState,
+    ActionPaletteState, ActivePanel, App, AppMode, AssocEditorState, BookmarkListItem,
+    ComparePanelState, ConfigState, ConfirmAction, ConfirmDialog, InputDialog, MENU_DATA,
+    MENU_HEADERS, MenuAction, MenuState, OpenerState, PluginsState, RemoteConnectState,
+    RemoteConnectingState, RemoteEditKind, RemoteEditState, SearchState,
+    StoreInstallPaletteState, ViewerGotoState, ViewerMenuKind, ViewerMenuState,
+    ViewerPluginPaletteState,
 };
 use crate::config::SortMode;
 use crate::copy::{CopyDialogState, CopyProgressState};
@@ -298,6 +301,7 @@ pub fn render(f: &mut Frame, app: &App) {
         AppMode::CopyDialog(state) => render_copy_dialog(f, state, f.area()),
         AppMode::CopyProgress(state) => render_copy_progress(f, state, f.area()),
         AppMode::SearchPanel(s) => render_search(f, s, f.area()),
+        AppMode::ComparePanel(s) => render_compare_panel(f, s, f.area()),
         AppMode::TreeView(s) => render_tree_view(f, s, f.area()),
         AppMode::DirBookmarks => render_dir_bookmarks(f, app, f.area()),
         AppMode::Config(cs) => render_config(f, cs, f.area()),

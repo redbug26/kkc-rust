@@ -3,6 +3,7 @@ use crate::app::{
     App, AppMode, AssocEditorState, ConfigState, InputAction, InputDialog, MENU_DATA, MENU_HEADERS,
     MenuAction, PluginsState, StoreInstallPaletteState,
 };
+use crate::compare::{build_compare_panel_state, load_compare_buffer};
 use crate::config::SortMode;
 use anyhow::{Result, anyhow};
 use crossterm::event::{KeyCode, KeyEvent};
@@ -376,6 +377,7 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
                     let output = std::process::Command::new("diff")
                         .args([
                             "-u",
+                            "--color",
                             "--label",
                             left_label.as_str(),
                             "--label",
@@ -415,6 +417,59 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
                         app.config.viewer.word_wrap,
                     ));
                 }
+                Err(e) => app.notify(format!("Cannot compare files: {}", e)),
+            }
+        }
+        MenuAction::ComparePanelInternal => {
+            let Some(left_entry) = app.left.current_entry().cloned() else {
+                app.notify("No selected file in left panel");
+                return Ok(false);
+            };
+            let Some(right_entry) = app.right.current_entry().cloned() else {
+                app.notify("No selected file in right panel");
+                return Ok(false);
+            };
+
+            if matches!(left_entry.name.as_str(), ".." | "[disconnect]")
+                || matches!(right_entry.name.as_str(), ".." | "[disconnect]")
+            {
+                app.notify("Select one file in each panel");
+                return Ok(false);
+            }
+            if left_entry.is_dir || right_entry.is_dir {
+                app.notify("Compare panel requires files in both panels");
+                return Ok(false);
+            }
+
+            let left_label = app.left.display_path();
+            let right_label = app.right.display_path();
+            let left_remote = app.left.remote_profile();
+            let right_remote = app.right.remote_profile();
+
+            let comparison = (|| -> Result<crate::app::ComparePanelState> {
+                let (left_path, left_temp) =
+                    materialize_compare_path(app, left_entry.clone(), left_remote, "left")?;
+                let (right_path, right_temp) =
+                    materialize_compare_path(app, right_entry.clone(), right_remote, "right")?;
+
+                let result = app.run_with_busy("Building compare panel...", |_| {
+                    let left_buffer = load_compare_buffer(&left_path)?;
+                    let right_buffer = load_compare_buffer(&right_path)?;
+                    Ok(build_compare_panel_state(
+                        left_label.clone(),
+                        right_label.clone(),
+                        left_buffer,
+                        right_buffer,
+                    ))
+                });
+
+                cleanup_compare_temp(&left_path, left_temp);
+                cleanup_compare_temp(&right_path, right_temp);
+                result
+            })();
+
+            match comparison {
+                Ok(state) => app.mode = AppMode::ComparePanel(state),
                 Err(e) => app.notify(format!("Cannot compare files: {}", e)),
             }
         }

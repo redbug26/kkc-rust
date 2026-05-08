@@ -264,11 +264,19 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     },
     PaletteEntry {
         category: "Tools",
-        label: "Compare left/right files",
+        label: "Compare files (with diff)",
         shortname: "Compare",
         shortcut: None,
-        fn_name: "compare_panel_files",
+        fn_name: "compare_panel_diff",
         action: MenuAction::ComparePanelFiles,
+    },
+    PaletteEntry {
+        category: "Tools",
+        label: "Compare files",
+        shortname: "CmpPanel",
+        shortcut: None,
+        fn_name: "compare_panel",
+        action: MenuAction::ComparePanelInternal,
     },
     PaletteEntry {
         category: "Tools",
