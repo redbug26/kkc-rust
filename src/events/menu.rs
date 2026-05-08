@@ -4,8 +4,30 @@ use crate::app::{
     MenuAction, PluginsState, StoreInstallPaletteState,
 };
 use crate::config::SortMode;
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use crossterm::event::{KeyCode, KeyEvent};
+
+fn materialize_compare_path(
+    app: &mut App,
+    entry: crate::panel::Entry,
+    remote_profile: Option<crate::remote::RemoteProfile>,
+    side: &str,
+) -> Result<(std::path::PathBuf, bool)> {
+    if let Some(profile) = remote_profile {
+        let downloaded = app.run_with_busy(&format!("Remote: downloading {side} file..."), |_| {
+            crate::remote::download_to_temp(&profile, &entry.path.to_string_lossy(), false)
+        })?;
+        Ok((downloaded, true))
+    } else {
+        Ok((entry.path, false))
+    }
+}
+
+fn cleanup_compare_temp(path: &std::path::Path, is_temp: bool) {
+    if is_temp {
+        let _ = std::fs::remove_file(path);
+    }
+}
 
 pub(super) fn handle_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
     let (bar_pos, open, item_pos) = {
@@ -316,6 +338,84 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
 
             if let Err(e) = app.enter_archive(entry.path.clone()) {
                 app.notify(format!("Cannot enter archive: {}", e));
+            }
+        }
+        MenuAction::ComparePanelFiles => {
+            let Some(left_entry) = app.left.current_entry().cloned() else {
+                app.notify("No selected file in left panel");
+                return Ok(false);
+            };
+            let Some(right_entry) = app.right.current_entry().cloned() else {
+                app.notify("No selected file in right panel");
+                return Ok(false);
+            };
+
+            if matches!(left_entry.name.as_str(), ".." | "[disconnect]")
+                || matches!(right_entry.name.as_str(), ".." | "[disconnect]")
+            {
+                app.notify("Select one file in each panel");
+                return Ok(false);
+            }
+            if left_entry.is_dir || right_entry.is_dir {
+                app.notify("Compare requires files in both panels");
+                return Ok(false);
+            }
+
+            let left_label = app.left.display_path();
+            let right_label = app.right.display_path();
+            let left_remote = app.left.remote_profile();
+            let right_remote = app.right.remote_profile();
+
+            let comparison = (|| -> Result<String> {
+                let (left_path, left_temp) =
+                    materialize_compare_path(app, left_entry.clone(), left_remote, "left")?;
+                let (right_path, right_temp) =
+                    materialize_compare_path(app, right_entry.clone(), right_remote, "right")?;
+
+                let result = app.run_with_busy("Comparing files...", |_| {
+                    let output = std::process::Command::new("diff")
+                        .args([
+                            "-u",
+                            "--label",
+                            left_label.as_str(),
+                            "--label",
+                            right_label.as_str(),
+                        ])
+                        .arg(&left_path)
+                        .arg(&right_path)
+                        .output()
+                        .map_err(|err| anyhow!(err))?;
+
+                    let text = if output.status.success() {
+                        format!(
+                            "Files are identical\n\nleft: {}\nright: {}\n",
+                            left_label, right_label
+                        )
+                    } else if output.status.code() == Some(1) {
+                        String::from_utf8_lossy(&output.stdout).to_string()
+                    } else {
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        return Err(anyhow!("diff failed: {}", stderr.trim()));
+                    };
+
+                    Ok(text)
+                });
+
+                cleanup_compare_temp(&left_path, left_temp);
+                cleanup_compare_temp(&right_path, right_temp);
+                result
+            })();
+
+            match comparison {
+                Ok(text) => {
+                    let path = std::path::Path::new("Left/Right Compare");
+                    app.mode = AppMode::Viewer(crate::viewer::Viewer::placeholder(
+                        path,
+                        &text,
+                        app.config.viewer.word_wrap,
+                    ));
+                }
+                Err(e) => app.notify(format!("Cannot compare files: {}", e)),
             }
         }
         MenuAction::InstallPluginFromStore => {

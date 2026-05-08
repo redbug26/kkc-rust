@@ -264,6 +264,14 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     },
     PaletteEntry {
         category: "Tools",
+        label: "Compare left/right files",
+        shortname: "Compare",
+        shortcut: None,
+        fn_name: "compare_panel_files",
+        action: MenuAction::ComparePanelFiles,
+    },
+    PaletteEntry {
+        category: "Tools",
         label: "Install plugin from store…",
         shortname: "Store",
         shortcut: None,

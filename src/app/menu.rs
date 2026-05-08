@@ -78,6 +78,7 @@ pub enum MenuAction {
     DebugLog,
     DownloadCloudFile,
     EnterArchivePlugin,
+    ComparePanelFiles,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
