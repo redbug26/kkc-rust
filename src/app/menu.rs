@@ -77,6 +77,7 @@ pub enum MenuAction {
     QuickPreview,
     DebugLog,
     DownloadCloudFile,
+    EnterArchivePlugin,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

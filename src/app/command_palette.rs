@@ -256,6 +256,14 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     },
     PaletteEntry {
         category: "Tools",
+        label: "Enter archive",
+        shortname: "ArcPlug",
+        shortcut: None,
+        fn_name: "enter_archive_plugin",
+        action: MenuAction::EnterArchivePlugin,
+    },
+    PaletteEntry {
+        category: "Tools",
         label: "Install plugin from store…",
         shortname: "Store",
         shortcut: None,

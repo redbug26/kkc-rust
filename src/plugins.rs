@@ -22,6 +22,7 @@ const BUNDLED_MARKDOWN_VIEWER_PLUGIN: &str =
     include_str!("../assets/plugins/markdown_viewer/plugin.lua");
 const BUNDLED_TEXT_SYNTAX_PLUGIN: &str = include_str!("../assets/plugins/text_syntax/plugin.lua");
 const BUNDLED_GIT_ACTION_PLUGIN: &str = include_str!("../assets/plugins/git_action/plugin.lua");
+const BUNDLED_GIT_COMMITS_PLUGIN: &str = include_str!("../assets/plugins/git_commits/plugin.lua");
 const BUNDLED_PLUGIN_DIRS: &[&str] = &[
     "pdf_file",
     "html_viewer",
@@ -32,6 +33,7 @@ const BUNDLED_PLUGIN_DIRS: &[&str] = &[
     "markdown_viewer",
     "text_syntax",
     "git_action",
+    "git_commits",
 ];
 
 static PLUGINS: OnceLock<RwLock<PluginRegistry>> = OnceLock::new();
@@ -2144,6 +2146,13 @@ fn install_bundled_plugins(plugins_dir: &Path) -> Result<()> {
         BUNDLED_GIT_ACTION_PLUGIN,
     )?;
 
+    let git_commits_dir = plugins_dir.join("git_commits");
+    fs::create_dir_all(&git_commits_dir)?;
+    write_bundled_file(
+        &git_commits_dir.join("plugin.lua"),
+        BUNDLED_GIT_COMMITS_PLUGIN,
+    )?;
+
     Ok(())
 }
 
@@ -3478,10 +3487,20 @@ fn supports_path_mime_or_legacy_ext(
         return false;
     }
 
-    let Some(ext) = path.extension().and_then(|ext| ext.to_str()) else {
+    let ext = if let Some(ext) = path.extension().and_then(|ext| ext.to_str()) {
+        ext.to_ascii_lowercase()
+    } else if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
+        if let Some(hidden_ext) = name.strip_prefix('.') {
+            if hidden_ext.is_empty() {
+                return false;
+            }
+            hidden_ext.to_ascii_lowercase()
+        } else {
+            return false;
+        }
+    } else {
         return false;
     };
-    let ext = ext.to_ascii_lowercase();
     extensions.iter().any(|candidate| candidate == &ext)
 }
 
@@ -3927,6 +3946,45 @@ mod tests {
         assert_eq!(plugins.len(), 1);
         assert_eq!(plugins[0].name, "git_action");
         assert_eq!(plugins[0].version, "1.0.0");
+    }
+
+    #[test]
+    fn bundled_git_commits_plugin_registers() {
+        let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("plugins")
+            .join("git_commits")
+            .join("plugin.lua");
+
+        let plugins = inspect_plugin(&script).expect("plugin should load");
+
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(plugins[0].name, "git_commits");
+        assert_eq!(plugins[0].version, "1.0.0");
+        assert_eq!(plugins[0].mime_types, Vec::<String>::new());
+        assert_eq!(plugins[0].extensions, vec!["git"]);
+    }
+
+    #[test]
+    fn extension_matching_accepts_dot_directory_name() {
+        let path = Path::new("/tmp/repo/.git");
+        assert!(supports_path_mime_or_legacy_ext(
+            path,
+            None,
+            &[],
+            &["git".to_string()]
+        ));
+    }
+
+    #[test]
+    fn extension_matching_rejects_unrelated_dot_directory_name() {
+        let path = Path::new("/tmp/repo/.config");
+        assert!(!supports_path_mime_or_legacy_ext(
+            path,
+            None,
+            &[],
+            &["git".to_string()]
+        ));
     }
 
     #[test]

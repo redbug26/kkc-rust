@@ -293,6 +293,31 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
         MenuAction::TreeView => {
             app.open_tree_view();
         }
+        MenuAction::EnterArchivePlugin => {
+            let Some(entry) = app.active_panel().current_entry().cloned() else {
+                app.notify("No selected entry");
+                return Ok(false);
+            };
+
+            if entry.name == ".." || entry.name == "[disconnect]" {
+                app.notify("Select a file or directory");
+                return Ok(false);
+            }
+
+            if app.active_panel().is_remote_view() {
+                app.notify("Archive plugin entry is only available on local files/directories");
+                return Ok(false);
+            }
+
+            if !crate::archive::supports_archive_navigation(&entry.path) {
+                app.notify("Selected entry is not handled by an archive plugin");
+                return Ok(false);
+            }
+
+            if let Err(e) = app.enter_archive(entry.path.clone()) {
+                app.notify(format!("Cannot enter archive: {}", e));
+            }
+        }
         MenuAction::InstallPluginFromStore => {
             let index_path = crate::plugins::store_index_path();
             match StoreInstallPaletteState::load(index_path.clone()) {
