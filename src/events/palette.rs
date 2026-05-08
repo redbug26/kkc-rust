@@ -2,14 +2,70 @@
 
 use super::fx_shortcut;
 use super::menu::execute_menu_action;
-use crate::app::{App, AppMode, PALETTE_DATA, PALETTE_SEP, StoreDetectChoice};
+use crate::app::{App, AppMode, PALETTE_DATA, PALETTE_SEP, StoreDetectChoice, shortcut_from_key_event};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 pub(super) fn handle_command_palette(app: &mut App, key: KeyEvent) -> Result<bool> {
+    let mut state = match std::mem::replace(&mut app.mode, AppMode::Browse) {
+        AppMode::CommandPalette(state) => state,
+        other => {
+            app.mode = other;
+            return Ok(false);
+        }
+    };
+
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     let alt = key.modifiers.contains(KeyModifiers::ALT);
     let fn_key = fx_shortcut(key);
+
+    if state.capture {
+        match key.code {
+            KeyCode::Esc => {
+                state.capture = false;
+            }
+            KeyCode::Char('r') | KeyCode::Char('R') if key.modifiers.is_empty() => {
+                if let Some(entry) = state.selected_palette_index().and_then(|idx| PALETTE_DATA.get(idx))
+                {
+                    app.reset_shortcut_for_fn(entry.fn_name);
+                    match app.save_config() {
+                        Ok(_) => app.set_status(format!("Shortcut reset: {}", entry.label)),
+                        Err(e) => app.set_status(format!("Save error: {}", e)),
+                    }
+                }
+                state.capture = false;
+            }
+            KeyCode::Backspace | KeyCode::Delete => {
+                if let Some(entry) = state.selected_palette_index().and_then(|idx| PALETTE_DATA.get(idx))
+                {
+                    app.set_shortcut_for_fn(entry.fn_name, None);
+                    match app.save_config() {
+                        Ok(_) => app.set_status(format!("Shortcut removed: {}", entry.label)),
+                        Err(e) => app.set_status(format!("Save error: {}", e)),
+                    }
+                }
+                state.capture = false;
+            }
+            _ => {
+                if let Some(shortcut) = shortcut_from_key_event(key)
+                    && let Some(entry) = state.selected_palette_index().and_then(|idx| PALETTE_DATA.get(idx))
+                {
+                    app.set_shortcut_for_fn(entry.fn_name, Some(shortcut.clone()));
+                    match app.save_config() {
+                        Ok(_) => app.set_status(format!(
+                            "Shortcut saved: {} -> {}",
+                            entry.label, shortcut
+                        )),
+                        Err(e) => app.set_status(format!("Save error: {}", e)),
+                    }
+                    state.capture = false;
+                }
+            }
+        }
+
+        app.mode = AppMode::CommandPalette(state);
+        return Ok(false);
+    }
 
     match key.code {
         KeyCode::Esc => {
@@ -18,15 +74,23 @@ pub(super) fn handle_command_palette(app: &mut App, key: KeyEvent) -> Result<boo
         _ if fn_key == Some(10) => {
             app.mode = AppMode::Browse;
         }
+        KeyCode::F(4) => {
+            if state.selected_palette_index().is_some() {
+                state.capture = true;
+                app.mode = AppMode::CommandPalette(state);
+            } else {
+                app.mode = AppMode::CommandPalette(state);
+            }
+        }
+
         KeyCode::Up => {
-            if let AppMode::CommandPalette(ref mut s) = app.mode {
-                let indices = s.filtered_indices();
+            let indices = state.filtered_indices();
                 let len = indices.len();
                 if len > 0 {
-                    let mut pos = if s.match_pos == 0 {
+                    let mut pos = if state.match_pos == 0 {
                         len - 1
                     } else {
-                        s.match_pos - 1
+                        state.match_pos - 1
                     };
                     // Skip over any separator sentinels.
                     let mut guard = 0;
@@ -34,53 +98,40 @@ pub(super) fn handle_command_palette(app: &mut App, key: KeyEvent) -> Result<boo
                         pos = if pos == 0 { len - 1 } else { pos - 1 };
                         guard += 1;
                     }
-                    s.match_pos = pos;
+                    state.match_pos = pos;
                 }
-            }
+            app.mode = AppMode::CommandPalette(state);
         }
         KeyCode::Down => {
-            if let AppMode::CommandPalette(ref mut s) = app.mode {
-                let indices = s.filtered_indices();
+            let indices = state.filtered_indices();
                 let len = indices.len();
                 if len > 0 {
-                    let mut pos = (s.match_pos + 1) % len;
+                    let mut pos = (state.match_pos + 1) % len;
                     // Skip over any separator sentinels.
                     let mut guard = 0;
                     while indices.get(pos).copied() == Some(PALETTE_SEP) && guard < len {
                         pos = (pos + 1) % len;
                         guard += 1;
                     }
-                    s.match_pos = pos;
+                    state.match_pos = pos;
                 }
-            }
+            app.mode = AppMode::CommandPalette(state);
         }
         KeyCode::Backspace => {
-            if let AppMode::CommandPalette(ref mut s) = app.mode {
-                s.query.pop();
-                s.match_pos = 0;
-            }
+            state.query.pop();
+            state.match_pos = 0;
+            state.clamp_match();
+            app.mode = AppMode::CommandPalette(state);
         }
         KeyCode::Char(ch) if !ctrl && !alt => {
-            if let AppMode::CommandPalette(ref mut s) = app.mode {
-                s.query.push(ch);
-                s.match_pos = 0;
-            }
+            state.query.push(ch);
+            state.match_pos = 0;
+            state.clamp_match();
+            app.mode = AppMode::CommandPalette(state);
         }
         KeyCode::Enter => {
-            let (action, data_idx) = if let AppMode::CommandPalette(ref s) = app.mode {
-                let indices = s.filtered_indices();
-                if let Some(&i) = indices.get(s.match_pos) {
-                    if i != PALETTE_SEP {
-                        (PALETTE_DATA.get(i).map(|e| e.action), Some(i))
-                    } else {
-                        (None, None)
-                    }
-                } else {
-                    (None, None)
-                }
-            } else {
-                (None, None)
-            };
+            let data_idx = state.selected_palette_index();
+            let action = data_idx.and_then(|i| PALETTE_DATA.get(i).map(|e| e.action));
 
             // Record in recents: deduplicate then prepend, cap at 5.
             if let Some(idx) = data_idx {
@@ -95,7 +146,9 @@ pub(super) fn handle_command_palette(app: &mut App, key: KeyEvent) -> Result<boo
                 return execute_menu_action(app, action);
             }
         }
-        _ => {}
+        _ => {
+            app.mode = AppMode::CommandPalette(state);
+        }
     }
     Ok(false)
 }
@@ -249,3 +302,4 @@ pub(super) fn handle_store_install_palette(app: &mut App, key: KeyEvent) -> Resu
     app.mode = AppMode::StoreInstallPalette(state);
     Ok(false)
 }
+

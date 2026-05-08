@@ -12,21 +12,42 @@ const CLR_RECENT_STAR: Color = Color::Rgb(255, 190, 60);
 // Width reserved for right-aligned shortcut column (e.g. "Ctrl+F1" = 7 + padding)
 const SHORT_W: usize = 11;
 
-pub(crate) fn command_palette_shortcuts() -> Vec<FooterShortcut> {
-    vec![
-        FooterShortcut {
-            label: " \u{23ce} :Run",
-            key: KeyCode::Enter,
-        },
-        FooterShortcut {
-            label: "UpDown:Navigate",
-            key: KeyCode::Null,
-        },
-        FooterShortcut {
-            label: " \u{238B} :Close",
-            key: KeyCode::Esc,
-        },
-    ]
+pub(crate) fn command_palette_shortcuts(capture: bool) -> Vec<FooterShortcut> {
+    if capture {
+        vec![
+            FooterShortcut {
+                label: "Press key",
+                key: KeyCode::Null,
+            },
+            FooterShortcut {
+                label: " \u{232B} :Clear",
+                key: KeyCode::Delete,
+            },
+            FooterShortcut {
+                label: "R:Default",
+                key: KeyCode::Char('r'),
+            },
+            FooterShortcut {
+                label: " \u{238B} :Cancel",
+                key: KeyCode::Esc,
+            },
+        ]
+    } else {
+        vec![
+            FooterShortcut {
+                label: " \u{23ce} :Run",
+                key: KeyCode::Enter,
+            },
+            FooterShortcut {
+                label: "F4:Set Shortcut",
+                key: KeyCode::F(4),
+            },
+            FooterShortcut {
+                label: " \u{238B} :Close",
+                key: KeyCode::Esc,
+            },
+        ]
+    }
 }
 
 pub(super) fn render_command_palette(
@@ -57,7 +78,11 @@ pub(super) fn render_command_palette(
 
     safe_render_widget(f, Clear, popup);
     let block = Block::default()
-        .title("  Command Palette  ")
+        .title(if s.capture {
+            "  Command Palette - press a shortcut key  "
+        } else {
+            "  Command Palette  "
+        })
         .borders(Borders::ALL)
         .border_style(Style::default().fg(CLR_QS_BORDER))
         .style(Style::default().bg(CLR_QS_BG));
@@ -83,7 +108,11 @@ pub(super) fn render_command_palette(
     };
     let hint_w = count_hint.len() as u16;
     let input_inner_w = inner.width.saturating_sub(hint_w) as usize;
-    let input_text = format!(" \u{2315} {}\u{2581}", s.query);
+    let input_text = if s.capture {
+        " Shortcut capture active\u{2581}".to_string()
+    } else {
+        format!(" \u{2315} {}\u{2581}", s.query)
+    };
 
     let input_row = Line::from(vec![
         Span::styled(
@@ -255,6 +284,6 @@ pub(super) fn render_command_palette(
         width: inner.width,
         height: 1,
     };
-    let hint_items = footer_shortcut_items(&command_palette_shortcuts());
+    let hint_items = footer_shortcut_items(&command_palette_shortcuts(s.capture));
     render_shortcut_bar(f, hint_area, &hint_items, secondary_shortcut_bar_style());
 }

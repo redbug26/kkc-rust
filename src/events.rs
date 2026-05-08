@@ -1,11 +1,9 @@
 mod menu;
 mod palette;
-mod shortcuts;
 mod viewer;
 
 use self::menu::handle_menu;
 use self::palette::{handle_command_palette, handle_store_install_palette};
-use self::shortcuts::handle_shortcut_panel;
 use self::viewer::{
     handle_mouse_viewer, handle_viewer, handle_viewer_goto, handle_viewer_goto_line,
     handle_viewer_menu, handle_viewer_plugin_palette, handle_viewer_searching,
@@ -160,7 +158,6 @@ fn handle_key_mode(app: &mut App, key: KeyEvent) -> Option<Result<bool>> {
         AppMode::Plugins(_) => Some(handle_plugins(app, key)),
         AppMode::ActionPalette(_) => Some(handle_action_palette(app, key)),
         AppMode::CommandPalette(_) => Some(handle_command_palette(app, key)),
-        AppMode::ShortcutPanel(_) => Some(handle_shortcut_panel(app, key)),
         AppMode::StoreInstallPalette(_) => Some(handle_store_install_palette(app, key)),
         AppMode::Opener(_) => Some(handle_opener(app, key)),
         AppMode::AssocEditor(_) => Some(handle_assoc_editor(app, key)),
@@ -203,7 +200,6 @@ fn handle_mouse(app: &mut App, mouse: MouseEvent) -> Result<bool> {
         AppMode::RemoteConnecting(_) => handle_mouse_remote_connecting(app, mouse),
         AppMode::DirBookmarks => handle_mouse_dir_bookmarks(app, mouse),
         AppMode::Plugins(_) => handle_mouse_plugins(app, mouse),
-        AppMode::ShortcutPanel(_) => handle_mouse_shortcut_panel(app, mouse),
         AppMode::CommandPalette(_) => handle_mouse_command_palette(app, mouse),
         AppMode::Help(_) => handle_mouse_help(app, mouse),
         AppMode::SearchPanel(_) => handle_mouse_search_panel(app, mouse),
@@ -506,74 +502,6 @@ fn handle_mouse_dir_bookmarks(app: &mut App, mouse: MouseEvent) -> Result<bool> 
     Ok(false)
 }
 
-fn handle_mouse_shortcut_panel(app: &mut App, mouse: MouseEvent) -> Result<bool> {
-    let Some(area) = terminal_rect() else {
-        return Ok(false);
-    };
-    if handle_status_copy_click(app, mouse, area) {
-        return Ok(false);
-    }
-
-    let AppMode::ShortcutPanel(state) = &app.mode else {
-        return Ok(false);
-    };
-    let (_popup, _inner, list_area, hint_area) =
-        shortcut_panel_rect(area, state.filtered_indices().len());
-
-    match mouse.kind {
-        MouseEventKind::Down(MouseButton::Left) => {
-            if point_in_rect(mouse.column, mouse.row, hint_area)
-                && let Some(key) = crate::ui::footer_shortcut_key_at_column(
-                    &crate::ui::shortcut_panel_shortcuts(),
-                    hint_area.x,
-                    mouse.column,
-                )
-            {
-                return handle_shortcut_panel(app, KeyEvent::from(key));
-            }
-
-            if point_in_rect(mouse.column, mouse.row, list_area) {
-                let row = (mouse.row - list_area.y) as usize;
-                let list_h = list_area.height as usize;
-                let current = if let AppMode::ShortcutPanel(s) = &app.mode {
-                    s.cursor
-                } else {
-                    0
-                };
-                let scroll = if current >= list_h {
-                    current - list_h + 1
-                } else {
-                    0
-                };
-                let clicked = scroll + row;
-                if let AppMode::ShortcutPanel(ref mut s) = app.mode {
-                    let total = s.filtered_indices().len();
-                    if total > 0 {
-                        let same = s.cursor == clicked;
-                        s.cursor = clicked.min(total.saturating_sub(1));
-                        if same {
-                            return handle_shortcut_panel(app, KeyEvent::from(KeyCode::Enter));
-                        }
-                    }
-                }
-            }
-        }
-        MouseEventKind::ScrollUp => {
-            if point_in_rect(mouse.column, mouse.row, list_area) {
-                return handle_shortcut_panel(app, KeyEvent::from(KeyCode::Up));
-            }
-        }
-        MouseEventKind::ScrollDown => {
-            if point_in_rect(mouse.column, mouse.row, list_area) {
-                return handle_shortcut_panel(app, KeyEvent::from(KeyCode::Down));
-            }
-        }
-        _ => {}
-    }
-
-    Ok(false)
-}
-
 fn handle_mouse_plugins(app: &mut App, mouse: MouseEvent) -> Result<bool> {
     let Some(area) = terminal_rect() else {
         return Ok(false);
@@ -666,7 +594,9 @@ fn handle_mouse_command_palette(app: &mut App, mouse: MouseEvent) -> Result<bool
         MouseEventKind::Down(MouseButton::Left) => {
             if point_in_rect(mouse.column, mouse.row, hint_area)
                 && let Some(key) = crate::ui::footer_shortcut_key_at_column(
-                    &crate::ui::command_palette_shortcuts(),
+                    &crate::ui::command_palette_shortcuts(
+                        matches!(&app.mode, AppMode::CommandPalette(s) if s.capture),
+                    ),
                     hint_area.x,
                     mouse.column,
                 )
@@ -2027,35 +1957,6 @@ fn dir_bookmarks_rect(area: Rect, bookmark_count: usize) -> (Rect, Rect, Rect, R
             y: (area.height.saturating_sub(height)) / 2 + area.y,
             width,
             height,
-        },
-    );
-    let inner = inset_rect(popup, 1, 1);
-    let list_area = Rect {
-        x: inner.x,
-        y: inner.y + 2,
-        width: inner.width,
-        height: inner.height.saturating_sub(3),
-    };
-    let hint_area = Rect {
-        x: inner.x,
-        y: inner.y + inner.height.saturating_sub(1),
-        width: inner.width,
-        height: 1,
-    };
-    (popup, inner, list_area, hint_area)
-}
-
-fn shortcut_panel_rect(area: Rect, total: usize) -> (Rect, Rect, Rect, Rect) {
-    let w = area.width.saturating_sub(4).min(86).max(58);
-    let visible = (total as u16).min(20).max(4);
-    let h = (visible + 5).min(area.height.saturating_sub(3)).max(9);
-    let popup = clamp_rect_local(
-        area,
-        Rect {
-            x: area.x + area.width.saturating_sub(w) / 2,
-            y: area.y + 2,
-            width: w,
-            height: h,
         },
     );
     let inner = inset_rect(popup, 1, 1);

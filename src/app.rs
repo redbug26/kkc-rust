@@ -4,11 +4,10 @@ mod helpers;
 mod menu;
 mod panel_tabs;
 mod remote_edit;
-mod shortcuts;
 
 pub use self::command_palette::{
     CommandPaletteState, PALETTE_DATA, PALETTE_SEP, palette_label_for_action,
-    palette_shortname_for_action,
+    palette_shortname_for_action, shortcut_from_key_event,
 };
 pub use self::dialogs::{
     AssocInputAction, AssocInputDialog, ConfirmAction, ConfirmDialog, InputAction, InputDialog,
@@ -25,7 +24,6 @@ pub use self::menu::{
 };
 use self::panel_tabs::{PanelTabs, panel_config_for_save, restore_panel_side};
 pub use self::remote_edit::{RemoteEditKind, RemoteEditState};
-pub use self::shortcuts::{ShortcutPanelState, normalize_shortcut, shortcut_from_key_event};
 use crate::about::AboutState;
 use crate::compare::CompareBuffer;
 use crate::config::{ActivePanelSide, Config, PanelConfig, PanelViewType, SortMode};
@@ -131,8 +129,6 @@ pub enum AppMode {
     ActionPalette(ActionPaletteState),
     /// Command palette (Ctrl-P) – searchable list of all menu commands.
     CommandPalette(CommandPaletteState),
-    /// Keyboard shortcut management panel.
-    ShortcutPanel(ShortcutPanelState),
     /// Store plugin install palette with searchable plugin list.
     StoreInstallPalette(StoreInstallPaletteState),
     /// Choose from multiple registered openers.

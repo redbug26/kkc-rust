@@ -10,7 +10,6 @@ mod panel;
 mod plugins;
 mod remote;
 mod search;
-mod shortcuts;
 mod terminal;
 mod tree_view;
 mod viewer;
@@ -37,7 +36,6 @@ use self::remote::{
 };
 use self::search::render_search;
 pub(crate) use self::search::search_panel_shortcuts;
-use self::shortcuts::render_shortcut_panel;
 use self::terminal::render_terminal;
 use self::tree_view::render_tree_view;
 pub(crate) use self::viewer::viewer_area;
@@ -53,7 +51,6 @@ use self::compare::render_compare_panel;
 use self::panel::{render_center_buttons, render_panel_or_file_id};
 pub(crate) use self::plugins::plugins_shortcuts;
 use self::plugins::render_plugins;
-pub(crate) use self::shortcuts::shortcut_panel_shortcuts;
 use crate::app::{
     ActionPaletteState, ActivePanel, App, AppMode, AssocEditorState, BookmarkListItem,
     ComparePanelState, ConfigState, ConfirmAction, ConfirmDialog, InputDialog, MENU_DATA,
@@ -308,7 +305,6 @@ pub fn render(f: &mut Frame, app: &App) {
         AppMode::Plugins(s) => render_plugins(f, s, f.area()),
         AppMode::ActionPalette(s) => render_action_palette(f, s, f.area()),
         AppMode::CommandPalette(s) => render_command_palette(f, app, s, f.area()),
-        AppMode::ShortcutPanel(s) => render_shortcut_panel(f, app, s, f.area()),
         AppMode::StoreInstallPalette(s) => render_store_install_palette(f, s, f.area()),
         AppMode::Opener(s) => {
             let active_panel_area = if left_active {
