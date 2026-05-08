@@ -42,28 +42,67 @@ pub(crate) fn store_install_shortcuts(state: &StoreInstallPaletteState) -> Vec<F
             },
         ]
     } else {
-        vec![
-            FooterShortcut {
-                label: " \u{23ce} :Install",
-                key: KeyCode::Enter,
-            },
+        let selected = state
+            .filtered_indices()
+            .get(state.match_pos)
+            .and_then(|idx| state.items.get(*idx));
+
+        let mut shortcuts = vec![FooterShortcut {
+            label: "Ctrl+I:Installed",
+            key: KeyCode::Char('i'),
+        }];
+
+        if let Some(item) = selected {
+            if item.from_store {
+                shortcuts.push(FooterShortcut {
+                    label: " \u{23ce} :Install",
+                    key: KeyCode::Enter,
+                });
+            }
+            if matches!(item.item_kind, crate::plugins::StoreItemKind::Plugin) {
+                shortcuts.push(FooterShortcut {
+                    label: "Ctrl+O:OpenDir",
+                    key: KeyCode::Char('o'),
+                });
+            }
+
+            let uninstallable = match item.item_kind {
+                crate::plugins::StoreItemKind::Plugin => state
+                    .plugin_install_dir_for(item)
+                    .map(|dir| crate::plugins::plugin_can_remove(&dir, &state.plugins_dir))
+                    .unwrap_or(false),
+                crate::plugins::StoreItemKind::Application => item.uninstall_method.is_some(),
+            };
+            if uninstallable {
+                shortcuts.push(FooterShortcut {
+                    label: "Del:Uninstall",
+                    key: KeyCode::Delete,
+                });
+            }
+
+            if matches!(item.item_kind, crate::plugins::StoreItemKind::Plugin)
+                && item.from_store
+                && state.has_update(item)
+            {
+                shortcuts.push(FooterShortcut {
+                    label: "Ctrl+U:Update",
+                    key: KeyCode::Char('u'),
+                });
+            }
+        }
+
+        shortcuts.extend([
             FooterShortcut {
                 label: "Ctrl+D:Detect",
                 key: KeyCode::Char('d'),
             },
             FooterShortcut {
-                label: "Ctrl+U:Update",
-                key: KeyCode::Char('u'),
-            },
-            FooterShortcut {
                 label: "Ctrl+R:Refresh",
                 key: KeyCode::Char('r'),
-            },
-            FooterShortcut {
-                label: " \u{238B} :Close",
-                key: KeyCode::Esc,
-            },
-        ]
+            }
+        ]);
+
+        shortcuts
     }
 }
 
@@ -824,7 +863,7 @@ pub(super) fn render_store_install_palette(
     safe_render_widget(f, Clear, popup);
 
     let block = Block::default()
-        .title(" Plugin Store ")
+        .title(" Store ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG))
         .style(Style::default().bg(CLR_APP_BG));
@@ -836,15 +875,32 @@ pub(super) fn render_store_install_palette(
     }
 
     let count_hint = if !state.query.is_empty() && total > 0 {
-        format!(" {}/{} ", state.match_pos + 1, total)
+        format!(
+            " {}/{}{} ",
+            state.match_pos + 1,
+            total,
+            if state.installed_only { " INST" } else { "" }
+        )
     } else if !state.query.is_empty() {
-        " 0/0 ".to_owned()
+        format!(" 0/0{} ", if state.installed_only { " INST" } else { "" })
     } else {
-        format!(" {} ", state.items.len())
+        format!(
+            " {}{} ",
+            total,
+            if state.installed_only { " INST" } else { "" }
+        )
     };
     let hint_w = count_hint.len() as u16;
     let input_inner_w = inner.width.saturating_sub(hint_w) as usize;
-    let input_text = format!(" \u{2315} {}\u{2581}", state.query);
+    let input_text = format!(
+        " \u{2315} {}{}\u{2581}",
+        state.query,
+        if state.installed_only {
+            "  [installed only]"
+        } else {
+            ""
+        }
+    );
     let input_row = Line::from(vec![
         Span::styled(
             truncate_str(&input_text, input_inner_w),
@@ -994,11 +1050,6 @@ pub(super) fn render_store_install_palette(
     );
 
     let list_h = (body.height.saturating_sub(1)) as usize;
-    let scroll = if total == 0 || state.match_pos < list_h {
-        0
-    } else {
-        state.match_pos.saturating_sub(list_h - 1)
-    };
 
     if total == 0 {
         let msg = if state.query.is_empty() {
@@ -1019,12 +1070,82 @@ pub(super) fn render_store_install_palette(
         return;
     }
 
-    for (match_row, idx) in (scroll..).zip(0..list_h) {
-        if match_row >= total {
+    enum StoreListRow {
+        GroupHeader(String),
+        Item(usize),
+    }
+
+    let mut rows: Vec<StoreListRow> = Vec::new();
+    let mut last_group_key: Option<String> = None;
+    for (match_row, item_idx) in matches.iter().enumerate() {
+        let plugin = &state.items[*item_idx];
+        let current_group_key = format!(
+            "{}:{}",
+            match plugin.item_kind {
+                crate::plugins::StoreItemKind::Plugin => "plugin",
+                crate::plugins::StoreItemKind::Application => "application",
+            },
+            plugin.plugin_type.to_lowercase()
+        );
+        if last_group_key
+            .as_ref()
+            .map(|g| g != &current_group_key)
+            .unwrap_or(true)
+        {
+            let header_text = format!(
+                "  [{}] {}",
+                match plugin.item_kind {
+                    crate::plugins::StoreItemKind::Plugin => "Plugin",
+                    crate::plugins::StoreItemKind::Application => "Application",
+                },
+                plugin.plugin_type
+            );
+            rows.push(StoreListRow::GroupHeader(truncate_str(
+                &header_text,
+                left_area.width as usize,
+            )));
+            last_group_key = Some(current_group_key);
+        }
+        rows.push(StoreListRow::Item(match_row));
+    }
+
+    let selected_display_row = rows
+        .iter()
+        .position(|row| matches!(row, StoreListRow::Item(pos) if *pos == state.match_pos))
+        .unwrap_or(0);
+    let scroll = if rows.is_empty() || selected_display_row < list_h {
+        0
+    } else {
+        selected_display_row.saturating_sub(list_h - 1)
+    };
+
+    for (display_row, idx) in (scroll..).zip(0..list_h) {
+        if display_row >= rows.len() {
             break;
         }
-        let plugin = &state.items[matches[match_row]];
         let row_y = left_area.y + 1 + idx as u16;
+        let StoreListRow::Item(match_row) = rows[display_row] else {
+            if let StoreListRow::GroupHeader(ref label) = rows[display_row] {
+                safe_render_widget(
+                    f,
+                    Paragraph::new(label.clone()).style(
+                        Style::default()
+                            .fg(Color::Rgb(92, 74, 36))
+                            .bg(Color::Rgb(223, 210, 178))
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Rect {
+                        x: left_area.x,
+                        y: row_y,
+                        width: left_area.width,
+                        height: 1,
+                    },
+                );
+            }
+            continue;
+        };
+
+        let plugin = &state.items[matches[match_row]];
         let selected = state.match_pos == match_row;
         let installed = state.is_installed(plugin);
         let has_update = state.has_update(plugin);
@@ -1048,25 +1169,20 @@ pub(super) fn render_store_install_palette(
         };
 
         let status = if has_update {
-            "[UPDATE]"
+            "[Update]"
         } else if !has_compatible_method {
-            "[NO METHOD]"
+            "[No Method]"
         } else if installed {
-            "[INSTALLED]"
+            "[Installed]"
         } else {
-            "[NEW]"
-        };
-        let kind = match plugin.item_kind {
-            crate::plugins::StoreItemKind::Plugin => "P",
-            crate::plugins::StoreItemKind::Application => "A",
+            "[New]"
         };
         let icon = if selected { "▶ " } else { "  " };
         let available = (left_area.width as usize).saturating_sub(3);
-        let name_w = available.saturating_sub(status.len() + kind.len() + 2);
+        let name_w = available.saturating_sub(status.len());
         let text = format!(
-            "{icon}{:<name_w$} {} {}",
+            "{icon}{:<name_w$} {}",
             truncate_str(&plugin.name, name_w),
-            kind,
             status,
         );
         safe_render_widget(
@@ -1156,6 +1272,7 @@ pub(super) fn render_store_install_palette(
     };
     push_kv("Kind :", kind_label, &mut row);
     push_kv("Type :", &plugin.plugin_type, &mut row);
+    push_kv("Source :", &plugin.source_label, &mut row);
     push_kv("Version :", &plugin.version, &mut row);
     push_kv("Id :", &plugin.id, &mut row);
 
@@ -1180,6 +1297,9 @@ pub(super) fn render_store_install_palette(
     }
     if let Some(bin) = plugin.install_bin.as_deref() {
         push_kv("Binary :", bin, &mut row);
+    }
+    if !plugin.mime_types.is_empty() {
+        push_kv("MIME :", &plugin.mime_types.join(", "), &mut row);
     }
 
     if !plugin.install_methods.is_empty() && row < detail_h {

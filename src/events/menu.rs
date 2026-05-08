@@ -503,13 +503,6 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
             let cs = ConfigState::from_config(&app.config);
             app.mode = AppMode::Config(cs);
         }
-        MenuAction::Shortcuts => {
-            app.mode = AppMode::CommandPalette(crate::app::CommandPaletteState {
-                recent: app.palette_recent.clone(),
-                ..Default::default()
-            });
-            app.set_status("Command palette: F4 set shortcut, Delete clear, F6 default");
-        }
         MenuAction::Plugins => {
             app.mode = AppMode::Plugins(PluginsState::load());
         }

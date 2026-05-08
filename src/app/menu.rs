@@ -59,7 +59,6 @@ pub enum MenuAction {
     DirBookmarks,
     ToggleFBar,
     SaveConfig,
-    Shortcuts,
     Setup,
     Plugins,
     Associations,
@@ -154,8 +153,10 @@ pub struct StoreInstallPaletteState {
     pub index_path: PathBuf,
     pub index_info: crate::plugins::StoreIndexInfo,
     pub items: Vec<crate::plugins::StorePluginInfo>,
+    pub plugins_dir: PathBuf,
     pub installed_versions: HashMap<String, String>,
     pub installed_app_versions: HashMap<String, String>,
+    pub installed_only: bool,
     pub query: String,
     pub match_pos: usize,
     pub progress: Option<StoreInstallProgress>,
@@ -165,20 +166,63 @@ pub struct StoreInstallPaletteState {
 impl StoreInstallPaletteState {
     pub fn load(index_path: PathBuf) -> anyhow::Result<Self> {
         let installed_versions = crate::plugins::installed_plugin_versions_by_dir();
+        let plugins_dir = crate::plugins::plugins_dir().unwrap_or_default();
         let installed_app_versions = crate::plugins::load_store_applications()
             .unwrap_or_default()
             .into_iter()
             .map(|app| (app.id, app.version))
             .collect::<HashMap<_, _>>();
         let (mut items, index_info) = crate::plugins::list_store_plugins_with_info(&index_path)?;
-        items.sort_by(|a, b| {
-            let a_update =
-                { store_item_has_update(a, &installed_versions, &installed_app_versions) };
-            let b_update =
-                { store_item_has_update(b, &installed_versions, &installed_app_versions) };
 
-            b_update
-                .cmp(&a_update)
+        let mut known_plugin_dirs = items
+            .iter()
+            .filter(|item| matches!(item.item_kind, crate::plugins::StoreItemKind::Plugin))
+            .map(|item| crate::plugins::store_plugin_install_dir_name(&item.id))
+            .collect::<std::collections::HashSet<_>>();
+
+        for plugin in crate::plugins::plugin_infos() {
+            let Some(dir_name) = plugin
+                .dir
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| name.to_string())
+            else {
+                continue;
+            };
+            if !known_plugin_dirs.insert(dir_name.clone()) {
+                continue;
+            }
+
+            let source_label = if plugins_dir.as_os_str().is_empty() {
+                "external".to_string()
+            } else {
+                crate::plugins::plugin_source_label(&plugin.dir, &plugins_dir).to_string()
+            };
+            items.push(crate::plugins::StorePluginInfo {
+                id: dir_name,
+                name: plugin.name,
+                version: plugin.version,
+                plugin_type: plugin.kind,
+                description: plugin.description,
+                item_kind: crate::plugins::StoreItemKind::Plugin,
+                source_label,
+                from_store: false,
+                local_dir: Some(plugin.dir),
+                install_method: None,
+                install_bin: None,
+                uninstall_method: None,
+                uninstall_package: None,
+                install_methods: Vec::new(),
+                mime_types: Vec::new(),
+                wait_for_key_after_exit: false,
+                launch_args: None,
+            });
+        }
+
+        items.sort_by(|a, b| {
+            item_kind_rank(a)
+                .cmp(&item_kind_rank(b))
+                .then_with(|| a.plugin_type.to_lowercase().cmp(&b.plugin_type.to_lowercase()))
                 .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
                 .then_with(|| a.id.cmp(&b.id))
         });
@@ -187,8 +231,10 @@ impl StoreInstallPaletteState {
             items,
             index_path,
             index_info,
+            plugins_dir,
             installed_versions,
             installed_app_versions,
+            installed_only: false,
             query: String::new(),
             match_pos: 0,
             progress: None,
@@ -228,7 +274,30 @@ impl StoreInstallPaletteState {
     }
 
     pub fn install_dir_name_for(&self, item: &crate::plugins::StorePluginInfo) -> String {
+        if let Some(dir_name) = item
+            .local_dir
+            .as_ref()
+            .and_then(|path| path.file_name())
+            .and_then(|name| name.to_str())
+            .map(|s| s.to_string())
+        {
+            return dir_name;
+        }
         crate::plugins::store_plugin_install_dir_name(&item.id)
+    }
+
+    pub fn plugin_install_dir_for(&self, item: &crate::plugins::StorePluginInfo) -> Option<PathBuf> {
+        if !matches!(item.item_kind, crate::plugins::StoreItemKind::Plugin) {
+            return None;
+        }
+        if let Some(dir) = item.local_dir.clone() {
+            return Some(dir);
+        }
+        Some(self.plugins_dir.join(self.install_dir_name_for(item)))
+    }
+
+    pub fn can_install(&self, item: &crate::plugins::StorePluginInfo) -> bool {
+        item.from_store
     }
 
     pub fn installed_version_for(&self, item: &crate::plugins::StorePluginInfo) -> Option<&str> {
@@ -258,8 +327,17 @@ impl StoreInstallPaletteState {
     }
 
     pub fn filtered_indices(&self) -> Vec<usize> {
+        let matches_installed = |item: &crate::plugins::StorePluginInfo| {
+            !self.installed_only || self.is_installed(item)
+        };
+
         if self.query.trim().is_empty() {
-            return (0..self.items.len()).collect();
+            return self
+                .items
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, item)| matches_installed(item).then_some(idx))
+                .collect();
         }
 
         let tokens: Vec<String> = self
@@ -278,6 +356,9 @@ impl StoreInstallPaletteState {
         let mut contains = Vec::new();
 
         for (idx, item) in self.items.iter().enumerate() {
+            if !matches_installed(item) {
+                continue;
+            }
             let searchable = format!(
                 "{} {} {} {} {} {} {}",
                 item.id,
@@ -289,7 +370,11 @@ impl StoreInstallPaletteState {
                     crate::plugins::StoreItemKind::Plugin => "plugin",
                     crate::plugins::StoreItemKind::Application => "application app",
                 },
-                item.install_method.as_deref().unwrap_or_default(),
+                format!(
+                    "{} {}",
+                    item.install_method.as_deref().unwrap_or_default(),
+                    item.source_label
+                ),
             );
             let lowered = searchable.to_lowercase();
             if !rest.iter().all(|token| lowered.contains(token.as_str())) {
@@ -310,6 +395,12 @@ impl StoreInstallPaletteState {
 
     pub fn append_query(&mut self, ch: char) {
         self.query.push(ch);
+        self.match_pos = 0;
+        self.clamp_match();
+    }
+
+    pub fn toggle_installed_only(&mut self) {
+        self.installed_only = !self.installed_only;
         self.match_pos = 0;
         self.clamp_match();
     }
@@ -352,25 +443,11 @@ impl StoreInstallPaletteState {
     }
 }
 
-fn store_item_has_update(
-    item: &crate::plugins::StorePluginInfo,
-    installed_versions: &HashMap<String, String>,
-    installed_app_versions: &HashMap<String, String>,
-) -> bool {
-    if matches!(item.item_kind, crate::plugins::StoreItemKind::Application) {
-        if item.version == "?" {
-            return false;
-        }
-        return installed_app_versions
-            .get(&item.id)
-            .map(|installed| installed != &item.version)
-            .unwrap_or(false);
+fn item_kind_rank(item: &crate::plugins::StorePluginInfo) -> u8 {
+    match item.item_kind {
+        crate::plugins::StoreItemKind::Plugin => 0,
+        crate::plugins::StoreItemKind::Application => 1,
     }
-    let dir = crate::plugins::store_plugin_install_dir_name(&item.id);
-    installed_versions
-        .get(&dir)
-        .map(|installed| installed != &item.version)
-        .unwrap_or(false)
 }
 
 fn format_store_generated_at(value: &str) -> String {
@@ -596,7 +673,6 @@ pub static MENU_DATA: &[&[MenuEntry]] = &[
     ],
     &[
         MenuAction::Setup,
-        MenuAction::Shortcuts,
         MenuAction::Plugins,
         MenuAction::Associations,
         MenuAction::ToggleFBar,

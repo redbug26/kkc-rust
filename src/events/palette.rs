@@ -230,9 +230,24 @@ pub(super) fn handle_store_install_palette(app: &mut App, key: KeyEvent) -> Resu
         KeyCode::Char('r') | KeyCode::Char('R') if ctrl && !alt => {
             let index_path = state.index_path.clone();
             let query = state.query.clone();
+            let selected_id = state
+                .filtered_indices()
+                .get(state.match_pos)
+                .and_then(|idx| state.items.get(*idx))
+                .map(|item| item.id.clone());
+            let installed_only = state.installed_only;
             match crate::app::StoreInstallPaletteState::load(index_path.clone()) {
                 Ok(mut refreshed) => {
                     refreshed.query = query;
+                    refreshed.installed_only = installed_only;
+                    if let Some(selected_id) = selected_id
+                        && let Some(pos) = refreshed
+                            .filtered_indices()
+                            .iter()
+                            .position(|idx| refreshed.items[*idx].id == selected_id)
+                    {
+                        refreshed.match_pos = pos;
+                    }
                     refreshed.clamp_match();
                     app.notify(format!("Store index refreshed: {}", index_path.display()));
                     app.mode = AppMode::StoreInstallPalette(refreshed);
@@ -252,6 +267,11 @@ pub(super) fn handle_store_install_palette(app: &mut App, key: KeyEvent) -> Resu
             app.open_store_detection_dialog(state);
             return Ok(false);
         }
+        KeyCode::Char('i') | KeyCode::Char('I') if ctrl && !alt => {
+            state.toggle_installed_only();
+            app.mode = AppMode::StoreInstallPalette(state);
+            return Ok(false);
+        }
         KeyCode::Char('u') | KeyCode::Char('U') if ctrl && !alt => {
             let selected = state
                 .filtered_indices()
@@ -261,6 +281,11 @@ pub(super) fn handle_store_install_palette(app: &mut App, key: KeyEvent) -> Resu
             if let Some(item) = selected {
                 if matches!(item.item_kind, crate::plugins::StoreItemKind::Application) {
                     app.notify("Application updates are handled by the system package manager");
+                    app.mode = AppMode::StoreInstallPalette(state);
+                    return Ok(false);
+                }
+                if !item.from_store {
+                    app.notify("Selected item is local-only and cannot be updated from store");
                     app.mode = AppMode::StoreInstallPalette(state);
                     return Ok(false);
                 }
@@ -275,6 +300,94 @@ pub(super) fn handle_store_install_palette(app: &mut App, key: KeyEvent) -> Resu
                 return Ok(false);
             }
         }
+        KeyCode::Char('o') | KeyCode::Char('O') if ctrl && !alt => {
+            let selected = state
+                .filtered_indices()
+                .get(state.match_pos)
+                .and_then(|idx| state.items.get(*idx))
+                .cloned();
+            if let Some(item) = selected {
+                if let Some(dir) = state.plugin_install_dir_for(&item) {
+                    if dir.is_dir() {
+                        app.mode = AppMode::Browse;
+                        if let Err(e) = app.enter_dir(dir.clone()) {
+                            app.set_status(format!("Cannot enter install directory: {}", e));
+                        } else {
+                            app.set_status(format!("Install directory: {}", dir.display()));
+                        }
+                    } else {
+                        app.notify("Install directory is not available");
+                        app.mode = AppMode::StoreInstallPalette(state);
+                    }
+                } else {
+                    app.notify("Open directory is only available for plugins");
+                    app.mode = AppMode::StoreInstallPalette(state);
+                }
+                return Ok(false);
+            }
+        }
+        KeyCode::Delete => {
+            let selected = state
+                .filtered_indices()
+                .get(state.match_pos)
+                .and_then(|idx| state.items.get(*idx))
+                .cloned();
+
+            if let Some(item) = selected {
+                let query = state.query.clone();
+                let selected_id = item.id.clone();
+                let installed_only = state.installed_only;
+                let index_path = state.index_path.clone();
+
+                let result = match item.item_kind {
+                    crate::plugins::StoreItemKind::Plugin => {
+                        if let Some(dir) = state.plugin_install_dir_for(&item) {
+                            crate::plugins::remove_plugin(&dir)
+                        } else {
+                            Err(anyhow::anyhow!("Plugin install directory is unavailable"))
+                        }
+                    }
+                    crate::plugins::StoreItemKind::Application => {
+                        crate::plugins::uninstall_store_application(&item)
+                    }
+                };
+
+                match result {
+                    Ok(()) => {
+                        if matches!(item.item_kind, crate::plugins::StoreItemKind::Application) {
+                            let _ = crate::plugins::remove_store_application(&item.id);
+                            let _ = app.save_config();
+                        }
+                        app.reload_panels();
+                        match crate::app::StoreInstallPaletteState::load(index_path) {
+                            Ok(mut refreshed) => {
+                                refreshed.query = query;
+                                refreshed.installed_only = installed_only;
+                                if let Some(pos) = refreshed
+                                    .filtered_indices()
+                                    .iter()
+                                    .position(|idx| refreshed.items[*idx].id == selected_id)
+                                {
+                                    refreshed.match_pos = pos;
+                                }
+                                refreshed.clamp_match();
+                                app.notify(format!("Removed: {}", item.name));
+                                app.mode = AppMode::StoreInstallPalette(refreshed);
+                            }
+                            Err(e) => {
+                                app.notify(format!("Refresh after uninstall failed: {}", e));
+                                app.mode = AppMode::Browse;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        app.notify(format!("Cannot remove item: {}", e));
+                        app.mode = AppMode::StoreInstallPalette(state);
+                    }
+                }
+                return Ok(false);
+            }
+        }
         KeyCode::Char(ch) if !ctrl && !alt && !ch.is_control() => state.append_query(ch),
         KeyCode::Enter => {
             let selected = state
@@ -283,6 +396,11 @@ pub(super) fn handle_store_install_palette(app: &mut App, key: KeyEvent) -> Resu
                 .and_then(|idx| state.items.get(*idx))
                 .cloned();
             if let Some(item) = selected {
+                if !state.can_install(&item) {
+                    app.notify("Selected item is local-only; no store install action available");
+                    app.mode = AppMode::StoreInstallPalette(state);
+                    return Ok(false);
+                }
                 let index_path = state.index_path.clone();
                 let is_application =
                     matches!(item.item_kind, crate::plugins::StoreItemKind::Application);

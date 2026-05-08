@@ -284,7 +284,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     },
     PaletteEntry {
         category: "Tools",
-        label: "Install plugin from store…",
+        label: "Store",
         shortname: "Store",
         shortcut: None,
         fn_name: "install_plugin_from_store",

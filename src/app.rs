@@ -1940,19 +1940,19 @@ impl App {
                         ));
                     }
                 } else {
-                    self.notify(format!("Plugin installed: {}", installed_name));
                     self.reload_panels();
-                    let mut plugins = PluginsState::load();
-                    if let Some(pos) = plugins.plugins.iter().position(|p| {
-                        p.dir
-                            .file_name()
-                            .and_then(|name| name.to_str())
-                            .map(|name| name == installed_name)
-                            .unwrap_or(false)
-                    }) {
-                        plugins.cursor = pos;
+                    let mut state = StoreInstallPaletteState::load(index_path)
+                        .unwrap_or_else(|_| self.current_store_state_without_progress());
+                    if let Some(pos) = state
+                        .filtered_indices()
+                        .iter()
+                        .position(|idx| state.items[*idx].id == item.id)
+                    {
+                        state.match_pos = pos;
                     }
-                    self.mode = AppMode::Plugins(plugins);
+                    state.clamp_match();
+                    self.mode = AppMode::StoreInstallPalette(state);
+                    self.notify(format!("Plugin installed: {}", installed_name));
                 }
             }
             Err(err) => {
@@ -2022,8 +2022,10 @@ impl App {
                     index_path: crate::plugins::store_index_path(),
                     index_info: crate::plugins::StoreIndexInfo::default(),
                     items: Vec::new(),
+                    plugins_dir: PathBuf::new(),
                     installed_versions: std::collections::HashMap::new(),
                     installed_app_versions: std::collections::HashMap::new(),
+                    installed_only: false,
                     query: String::new(),
                     match_pos: 0,
                     progress: None,

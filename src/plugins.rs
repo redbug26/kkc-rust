@@ -133,8 +133,13 @@ pub struct StorePluginInfo {
     pub plugin_type: String,
     pub description: String,
     pub item_kind: StoreItemKind,
+    pub source_label: String,
+    pub from_store: bool,
+    pub local_dir: Option<PathBuf>,
     pub install_method: Option<String>,
     pub install_bin: Option<String>,
+    pub uninstall_method: Option<String>,
+    pub uninstall_package: Option<String>,
     pub install_methods: Vec<String>,
     pub mime_types: Vec<String>,
     pub wait_for_key_after_exit: bool,
@@ -673,8 +678,13 @@ pub fn list_store_plugins_with_info(
             plugin_type: p.plugin_type.unwrap_or_else(|| "other".to_string()),
             description: p.description.unwrap_or_default(),
             item_kind: StoreItemKind::Plugin,
+            source_label: "store".to_string(),
+            from_store: true,
+            local_dir: None,
             install_method: None,
             install_bin: None,
+            uninstall_method: None,
+            uninstall_package: None,
             install_methods: Vec::new(),
             mime_types: Vec::new(),
             wait_for_key_after_exit: false,
@@ -698,8 +708,19 @@ pub fn list_store_plugins_with_info(
                 .unwrap_or_else(|| "application".to_string()),
             description: app.description.unwrap_or_default(),
             item_kind: StoreItemKind::Application,
+            source_label: "store".to_string(),
+            from_store: true,
+            local_dir: None,
             install_method: compatible_install.map(store_install_method_summary),
             install_bin: compatible_install.and_then(|method| method.bin.clone()),
+            uninstall_method: compatible_install.map(|method| method.method.clone()),
+            uninstall_package: compatible_install.and_then(|method| {
+                method
+                    .crate_name
+                    .as_ref()
+                    .cloned()
+                    .or_else(|| method.package.as_ref().cloned())
+            }),
             install_methods: app
                 .install
                 .iter()
@@ -1491,8 +1512,13 @@ pub fn missing_remembered_store_applications(
                 plugin_type: "application".to_string(),
                 description: "Remembered application missing from current store index".to_string(),
                 item_kind: StoreItemKind::Application,
+                source_label: "remembered".to_string(),
+                from_store: false,
+                local_dir: None,
                 install_method: None,
                 install_bin: Some(stored.bin),
+                uninstall_method: None,
+                uninstall_package: None,
                 install_methods: Vec::new(),
                 mime_types: stored.mime_types,
                 wait_for_key_after_exit: stored.wait_for_key_after_exit,
@@ -1525,6 +1551,121 @@ pub fn store_application_launch_args_for_command(command: &str) -> Option<Option
             }
         })
     })
+}
+
+pub fn uninstall_store_application(item: &StorePluginInfo) -> Result<()> {
+    if !matches!(item.item_kind, StoreItemKind::Application) {
+        bail!("Only store applications can be uninstalled with this command");
+    }
+
+    let method = item
+        .uninstall_method
+        .as_deref()
+        .ok_or_else(|| anyhow!("No uninstall method available for '{}'", item.name))?;
+
+    match method {
+        "cargo" => {
+            let package = item
+                .uninstall_package
+                .as_deref()
+                .ok_or_else(|| anyhow!("Cargo uninstall requires a crate/package name"))?;
+            run_install_command(&item.id, "cargo", &["uninstall", package], &[])
+        }
+        "brew" => {
+            let package = item
+                .uninstall_package
+                .as_deref()
+                .ok_or_else(|| anyhow!("Brew uninstall requires a package name"))?;
+            run_install_command(&item.id, "brew", &["uninstall", package], &[])
+        }
+        "apt" => {
+            let package = item
+                .uninstall_package
+                .as_deref()
+                .ok_or_else(|| anyhow!("Apt uninstall requires a package name"))?;
+            let cmd = if command_exists("apt-get") {
+                "apt-get"
+            } else {
+                "apt"
+            };
+            if !command_exists(cmd) {
+                bail!("Install method 'apt' is not available on PATH");
+            }
+            if !is_unix_root() && command_exists("sudo") {
+                run_install_command(
+                    &item.id,
+                    "sudo",
+                    &[cmd, "remove", "-y", package],
+                    &[],
+                )
+            } else {
+                run_install_command(&item.id, cmd, &["remove", "-y", package], &[])
+            }
+        }
+        "dnf" => {
+            let package = item
+                .uninstall_package
+                .as_deref()
+                .ok_or_else(|| anyhow!("Dnf uninstall requires a package name"))?;
+            if !is_unix_root() && command_exists("sudo") {
+                run_install_command(
+                    &item.id,
+                    "sudo",
+                    &["dnf", "remove", "-y", package],
+                    &[],
+                )
+            } else {
+                run_install_command(&item.id, "dnf", &["remove", "-y", package], &[])
+            }
+        }
+        "pacman" => {
+            let package = item
+                .uninstall_package
+                .as_deref()
+                .ok_or_else(|| anyhow!("Pacman uninstall requires a package name"))?;
+            if !is_unix_root() && command_exists("sudo") {
+                run_install_command(
+                    &item.id,
+                    "sudo",
+                    &["pacman", "-R", "--noconfirm", package],
+                    &[],
+                )
+            } else {
+                run_install_command(
+                    &item.id,
+                    "pacman",
+                    &["-R", "--noconfirm", package],
+                    &[],
+                )
+            }
+        }
+        "winget" => {
+            let package = item
+                .uninstall_package
+                .as_deref()
+                .ok_or_else(|| anyhow!("Winget uninstall requires a package name"))?;
+            run_install_command(&item.id, "winget", &["uninstall", package], &[])
+        }
+        "scoop" => {
+            let package = item
+                .uninstall_package
+                .as_deref()
+                .ok_or_else(|| anyhow!("Scoop uninstall requires a package name"))?;
+            run_install_command(&item.id, "scoop", &["uninstall", package], &[])
+        }
+        "script" | "manual" => {
+            bail!(
+                "Uninstall for '{}' is managed outside kkc (method: {})",
+                item.name,
+                method
+            );
+        }
+        other => bail!(
+            "Unsupported uninstall method '{}' for '{}'",
+            other,
+            item.name
+        ),
+    }
 }
 
 fn first_command_token(command: &str) -> Option<String> {
