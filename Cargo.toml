@@ -23,6 +23,7 @@ unicode-width = "0.2"
 open = "5"
 base64 = "0.13"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp"] }
+jpeg-decoder = "0.3"
 font8x8 = { version = "0.2", features = ["unicode"] }
 mlua = { version = "0.10", features = ["lua54", "vendored", "error-send"] }
 zip = { version = "8.5.1", default-features = false, features = ["deflate-flate2-zlib-rs"] }

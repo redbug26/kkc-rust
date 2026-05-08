@@ -6,6 +6,7 @@ use crossterm::{
 };
 use image::imageops::FilterType;
 use image::{ImageFormat, ImageReader};
+use jpeg_decoder::{Decoder as JpegDecoder, PixelFormat as JpegPixelFormat};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -2166,6 +2167,11 @@ pub fn render_kitty_image<W: Write>(out: &mut W, viewer: &Viewer, area: Rect) ->
     queue!(out, MoveTo(fit.x, fit.y))?;
 
     let target_px = image_payload_target_px(fit);
+    let is_preview = viewer
+        .plugin_state
+        .get("__preview")
+        .map(|value| value == "1")
+        .unwrap_or(false);
     let cache_key = if image.format == "PNG" {
         (0, 0)
     } else {
@@ -2175,7 +2181,9 @@ pub fn render_kitty_image<W: Write>(out: &mut W, viewer: &Viewer, area: Rect) ->
         let mut cache = image.kitty_png_payloads.borrow_mut();
         cache
             .entry(cache_key)
-            .or_insert_with(|| build_kitty_png_payload(&viewer.raw, image.format, target_px).ok())
+            .or_insert_with(|| {
+                build_kitty_png_payload(&viewer.raw, image.format, target_px, is_preview).ok()
+            })
             .clone()
     };
     let Some(payload) = payload.as_ref() else {
@@ -2365,26 +2373,186 @@ fn build_kitty_png_payload(
     raw: &[u8],
     format: &'static str,
     target_px: Option<(u32, u32)>,
+    is_preview: bool,
 ) -> Result<Vec<u8>> {
+    use std::time::Instant;
+
+    const PREVIEW_MAX_WIDTH: u32 = 800;
+    const PREVIEW_MAX_HEIGHT: u32 = 600;
+
+    let t0 = Instant::now();
+    debug_log(&format!(
+        "build_kitty_png_payload: start format={} bytes={} target_px={:?} is_preview={}",
+        format,
+        raw.len(),
+        target_px,
+        is_preview
+    ));
+
     if format == "PNG" {
+        debug_log(&format!(
+            "build_kitty_png_payload: fast-path PNG passthrough in {} ms",
+            t0.elapsed().as_millis()
+        ));
         return Ok(raw.to_vec());
     }
 
+    let (target_w, target_h) = target_px
+        .filter(|(w, h)| *w > 0 && *h > 0)
+        .map(|(w, h)| (w.min(PREVIEW_MAX_WIDTH), h.min(PREVIEW_MAX_HEIGHT)))
+        .unwrap_or((PREVIEW_MAX_WIDTH, PREVIEW_MAX_HEIGHT));
+
+    debug_log(&format!(
+        "build_kitty_png_payload: target dims {}x{}",
+        target_w, target_h
+    ));
+
+    if format == "JPEG" {
+        let t_jpeg_preview = Instant::now();
+        match build_preview_jpeg_png_payload(raw, target_w, target_h) {
+            Ok(payload) => {
+                debug_log(&format!(
+                    "build_kitty_png_payload: preview JPEG fast-path success ({} bytes) in {} ms",
+                    payload.len(),
+                    t_jpeg_preview.elapsed().as_millis()
+                ));
+                debug_log(&format!(
+                    "build_kitty_png_payload: total {} ms",
+                    t0.elapsed().as_millis()
+                ));
+                return Ok(payload);
+            }
+            Err(err) => {
+                debug_log(&format!(
+                    "build_kitty_png_payload: preview JPEG fast-path failed, fallback to image crate: {}",
+                    err
+                ));
+            }
+        }
+    }
+
+    let t_guess = Instant::now();
     let guessed = ImageReader::new(Cursor::new(raw))
         .with_guessed_format()
         .context("guessing image format")?;
+    debug_log(&format!(
+        "build_kitty_png_payload: guessed format in {} ms",
+        t_guess.elapsed().as_millis()
+    ));
+
+    let t_decode = Instant::now();
     let mut image = guessed.decode().context("decoding image for viewer")?;
-    if let Some((target_w, target_h)) = target_px.filter(|(w, h)| *w > 0 && *h > 0) {
-        let img_w = image.width();
-        let img_h = image.height();
-        if img_w > target_w || img_h > target_h {
-            image = image.resize(target_w, target_h, FilterType::Triangle);
-        }
+    debug_log(&format!(
+        "build_kitty_png_payload: decoded image {}x{} in {} ms",
+        image.width(),
+        image.height(),
+        t_decode.elapsed().as_millis()
+    ));
+
+    let img_w = image.width();
+    let img_h = image.height();
+    if img_w > target_w || img_h > target_h {
+        let t_resize = Instant::now();
+        image = image.resize(target_w, target_h, FilterType::Nearest);
+        debug_log(&format!(
+            "build_kitty_png_payload: resized {}x{} -> {}x{} in {} ms",
+            img_w,
+            img_h,
+            image.width(),
+            image.height(),
+            t_resize.elapsed().as_millis()
+        ));
+    } else {
+        debug_log("build_kitty_png_payload: resize skipped");
     }
+
+    let t_encode = Instant::now();
     let mut out = Cursor::new(Vec::new());
     image
         .write_to(&mut out, ImageFormat::Png)
         .context("encoding PNG for kitty graphics")?;
+    debug_log(&format!(
+        "build_kitty_png_payload: encoded PNG ({} bytes) in {} ms",
+        out.get_ref().len(),
+        t_encode.elapsed().as_millis()
+    ));
+    debug_log(&format!(
+        "build_kitty_png_payload: total {} ms",
+        t0.elapsed().as_millis()
+    ));
+    Ok(out.into_inner())
+}
+
+fn build_preview_jpeg_png_payload(raw: &[u8], target_w: u32, target_h: u32) -> Result<Vec<u8>> {
+    use std::time::Instant;
+
+    let t0 = Instant::now();
+    let mut decoder = JpegDecoder::new(Cursor::new(raw));
+    decoder.read_info().context("jpeg read_info")?;
+
+    let info = decoder
+        .info()
+        .context("jpeg info unavailable after read_info")?;
+    debug_log(&format!(
+        "build_preview_jpeg_png_payload: source {}x{}",
+        info.width, info.height
+    ));
+
+    let t_scale = Instant::now();
+    let scaled_dims = decoder
+        .scale(target_w as u16, target_h as u16)
+        .context("jpeg decoder scale")?;
+    debug_log(&format!(
+        "build_preview_jpeg_png_payload: scale configured to {:?} in {} ms",
+        scaled_dims,
+        t_scale.elapsed().as_millis()
+    ));
+
+    let t_decode = Instant::now();
+    let pixels = decoder.decode().context("jpeg decode")?;
+    debug_log(&format!(
+        "build_preview_jpeg_png_payload: decoded {} bytes in {} ms",
+        pixels.len(),
+        t_decode.elapsed().as_millis()
+    ));
+
+    let out_info = decoder
+        .info()
+        .context("jpeg info unavailable after decode")?;
+    let out_w = out_info.width as u32;
+    let out_h = out_info.height as u32;
+
+    let dyn_img = match out_info.pixel_format {
+        JpegPixelFormat::L8 => {
+            let gray = image::GrayImage::from_raw(out_w, out_h, pixels)
+                .context("invalid grayscale jpeg output buffer")?;
+            image::DynamicImage::ImageLuma8(gray)
+        }
+        JpegPixelFormat::RGB24 => {
+            let rgb = image::RgbImage::from_raw(out_w, out_h, pixels)
+                .context("invalid rgb jpeg output buffer")?;
+            image::DynamicImage::ImageRgb8(rgb)
+        }
+        other => return Err(anyhow::anyhow!("unsupported jpeg pixel format: {:?}", other)),
+    };
+
+    let t_encode = Instant::now();
+    let mut out = Cursor::new(Vec::new());
+    dyn_img
+        .write_to(&mut out, ImageFormat::Png)
+        .context("encoding preview JPEG as PNG")?;
+    debug_log(&format!(
+        "build_preview_jpeg_png_payload: encoded PNG {}x{} ({} bytes) in {} ms",
+        out_w,
+        out_h,
+        out.get_ref().len(),
+        t_encode.elapsed().as_millis()
+    ));
+    debug_log(&format!(
+        "build_preview_jpeg_png_payload: total {} ms",
+        t0.elapsed().as_millis()
+    ));
+
     Ok(out.into_inner())
 }
 
