@@ -721,6 +721,18 @@ enum StoreInstallMessage {
     Finished(std::result::Result<String, String>),
 }
 
+#[derive(Debug)]
+struct QuickPreviewTask {
+    rx: Receiver<QuickPreviewMessage>,
+    request_id: u64,
+    path: PathBuf,
+}
+
+#[derive(Debug)]
+enum QuickPreviewMessage {
+    Loaded(std::result::Result<Viewer, String>),
+}
+
 impl AssocEditorState {
     pub fn from_config(cfg: &crate::config::Config) -> Self {
         let mut assocs = cfg
@@ -856,6 +868,8 @@ pub struct App {
     copy_task: Option<CopyTask>,
     store_install_task: Option<StoreInstallTask>,
     store_install_queue: VecDeque<crate::plugins::StorePluginInfo>,
+    quick_preview_task: Option<QuickPreviewTask>,
+    quick_preview_request_id: u64,
     /// Set to true after spawning an external program so the main loop can
     /// call terminal.clear() before the next draw.
     pub needs_clear: bool,
@@ -1006,6 +1020,8 @@ impl App {
             copy_task: None,
             store_install_task: None,
             store_install_queue: VecDeque::new(),
+            quick_preview_task: None,
+            quick_preview_request_id: 0,
             needs_clear: false,
             capture_gif: false,
             terminal: TerminalState {
@@ -1030,28 +1046,7 @@ impl App {
             PanelViewType::QuickPreview => {
                 let preview_start = std::time::Instant::now();
                 if let Some(entry) = app.active_panel().current_entry().cloned() {
-                    if entry.is_dir || entry.name == ".." {
-                        let mut v =
-                            Viewer::placeholder(&entry.path, "Folder", app.config.viewer.word_wrap);
-                        v.zoomed = true;
-                        app.quick_preview = Some(v);
-                    } else if entry.cloud_only {
-                        let mut v = Viewer::placeholder(
-                            &entry.path,
-                            "Cloud-only file\nPreview disabled to avoid downloading it.",
-                            app.config.viewer.word_wrap,
-                        );
-                        v.zoomed = true;
-                        app.quick_preview = Some(v);
-                    } else if let Ok(mut v) =
-                        Viewer::open_preview(&entry.path, app.config.viewer.word_wrap)
-                    {
-                        v.zoomed = true;
-                        if let Some(mode) = app.quick_preview_forced_mode {
-                            v.set_mode(mode);
-                        }
-                        app.quick_preview = Some(v);
-                    }
+                    app.start_quick_preview_for_entry(entry);
                 }
                 crate::viewer::debug_log(&format!(
                     "startup: restored quick preview in {:.3} ms",
@@ -1661,6 +1656,7 @@ impl App {
         self.poll_search();
         self.poll_tree_view();
         self.poll_store_install();
+        self.poll_quick_preview();
         // Auto-clear status bar text after 30 seconds.
         if let Some(set_at) = self.status.set_at {
             if set_at.elapsed() >= std::time::Duration::from_secs(30) {
@@ -1887,6 +1883,53 @@ impl App {
                     state.progress = None;
                 }
                 self.notify(format!("Store install error: {}", err));
+            }
+        }
+    }
+
+    fn poll_quick_preview(&mut self) {
+        let Some(task) = &self.quick_preview_task else {
+            return;
+        };
+
+        let message = match task.rx.try_recv() {
+            Ok(message) => Some((task.request_id, task.path.clone(), message)),
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => Some((
+                task.request_id,
+                task.path.clone(),
+                QuickPreviewMessage::Loaded(Err("Preview worker disconnected".to_string())),
+            )),
+        };
+
+        let Some((request_id, path, QuickPreviewMessage::Loaded(result))) = message else {
+            return;
+        };
+
+        self.quick_preview_task = None;
+        if request_id != self.quick_preview_request_id {
+            return;
+        }
+        if self.quick_preview.as_ref().map(|v| v.path.as_path()) != Some(path.as_path()) {
+            return;
+        }
+
+        match result {
+            Ok(mut viewer) => {
+                viewer.zoomed = true;
+                if let Some(mode) = self.quick_preview_forced_mode {
+                    viewer.set_mode(mode);
+                }
+                self.quick_preview = Some(viewer);
+            }
+            Err(err) => {
+                let mut viewer = Viewer::placeholder(
+                    &path,
+                    &format!("Cannot open preview\n{err}"),
+                    self.config.viewer.word_wrap,
+                );
+                viewer.zoomed = true;
+                self.quick_preview = Some(viewer);
             }
         }
     }
@@ -2629,13 +2672,15 @@ impl App {
     }
 
     pub fn close_quick_preview(&mut self) {
+        self.quick_preview_request_id = self.quick_preview_request_id.wrapping_add(1);
+        self.quick_preview_task = None;
         self.quick_preview = None;
         self.quick_preview_active = false;
         self.quick_preview_forced_mode = None;
     }
 
     pub fn toggle_quick_preview(&mut self) -> Result<()> {
-        if self.quick_preview.is_some() {
+        if self.quick_preview.is_some() || self.quick_preview_task.is_some() {
             self.close_quick_preview();
             return Ok(());
         }
@@ -2647,64 +2692,63 @@ impl App {
         self.file_id_active = false;
         self.file_id_scroll = 0;
 
-        let mut v = if entry.is_dir || entry.name == ".." {
-            Viewer::placeholder(&entry.path, "Folder", self.config.viewer.word_wrap)
-        } else if entry.cloud_only {
-            Viewer::placeholder(
-                &entry.path,
-                "Cloud-only file\nPreview disabled to avoid downloading it.",
-                self.config.viewer.word_wrap,
-            )
-        } else {
-            Viewer::open_preview(&entry.path, self.config.viewer.word_wrap)?
-        };
-        v.zoomed = true;
-        if let Some(mode) = self.quick_preview_forced_mode
-            && !(entry.is_dir || entry.name == "..")
-        {
-            v.set_mode(mode);
-        }
-        self.quick_preview = Some(v);
+        self.start_quick_preview_for_entry(entry);
         Ok(())
     }
 
     /// Refresh the quick-preview viewer when the cursor moves to a new file.
-    /// Does nothing if quick_preview is None. Clears the preview for dirs.
+    /// Does nothing if quick preview is disabled.
     pub fn refresh_quick_preview(&mut self) {
-        if self.quick_preview.is_none() {
+        if self.quick_preview.is_none() && self.quick_preview_task.is_none() {
             return;
         }
-        let wrap = self.config.viewer.word_wrap;
         match self.active_panel().current_entry().cloned() {
-            Some(entry) if entry.is_dir || entry.name == ".." => {
-                let mut v = Viewer::placeholder(&entry.path, "Folder", wrap);
-                v.zoomed = true;
-                self.quick_preview = Some(v);
-            }
-            Some(entry) if entry.cloud_only => {
-                let mut v = Viewer::placeholder(
-                    &entry.path,
-                    "Cloud-only file\nPreview disabled to avoid downloading it.",
-                    wrap,
-                );
-                v.zoomed = true;
-                self.quick_preview = Some(v);
-            }
-            Some(entry) => {
-                if let Ok(mut v) = Viewer::open_preview(&entry.path, wrap) {
-                    v.zoomed = true;
-                    if let Some(mode) = self.quick_preview_forced_mode {
-                        v.set_mode(mode);
-                    }
-                    self.quick_preview = Some(v);
-                }
-                // On failure keep the previous preview (better than blank)
-            }
+            Some(entry) => self.start_quick_preview_for_entry(entry),
             None => {
+                self.quick_preview_request_id = self.quick_preview_request_id.wrapping_add(1);
+                self.quick_preview_task = None;
                 self.quick_preview = None;
                 self.quick_preview_active = false;
             }
         }
+    }
+
+    fn start_quick_preview_for_entry(&mut self, entry: crate::panel::Entry) {
+        self.quick_preview_request_id = self.quick_preview_request_id.wrapping_add(1);
+        self.quick_preview_task = None;
+
+        let wrap = self.config.viewer.word_wrap;
+        let mut viewer = if entry.is_dir || entry.name == ".." {
+            Viewer::placeholder(&entry.path, "Folder", wrap)
+        } else if entry.cloud_only {
+            Viewer::placeholder(
+                &entry.path,
+                "Cloud-only file\nPreview disabled to avoid downloading it.",
+                wrap,
+            )
+        } else {
+            Viewer::placeholder(&entry.path, "Loading preview...", wrap)
+        };
+        viewer.zoomed = true;
+        self.quick_preview = Some(viewer);
+
+        if entry.is_dir || entry.name == ".." || entry.cloud_only {
+            return;
+        }
+
+        let request_id = self.quick_preview_request_id;
+        let path = entry.path;
+        let worker_path = path.clone();
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let result = Viewer::open_preview(&worker_path, wrap).map_err(|err| err.to_string());
+            let _ = tx.send(QuickPreviewMessage::Loaded(result));
+        });
+        self.quick_preview_task = Some(QuickPreviewTask {
+            rx,
+            request_id,
+            path,
+        });
     }
 
     /// Scroll the quick-preview viewer up one line.

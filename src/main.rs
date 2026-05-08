@@ -39,7 +39,10 @@ use crossterm::{
 use ratatui::{Terminal, backend::CrosstermBackend, layout::Rect};
 use std::io::{self, Stdout, Write};
 use std::path::PathBuf;
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::time::{Duration, Instant};
+
+type QuickPreviewImageTask = (PathBuf, (u32, u32), Receiver<Option<Vec<u8>>>);
 
 fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
     enable_raw_mode()?;
@@ -169,9 +172,29 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
     let mut startup_ready_logged = false;
     let mut last_user_activity = Instant::now();
     let mut last_window_title = String::new();
+    let mut quick_preview_image_task: Option<QuickPreviewImageTask> = None;
 
     loop {
         app.poll_background_tasks();
+
+        if let Some((path, cache_key, rx)) = &quick_preview_image_task {
+            match rx.try_recv() {
+                Ok(payload) => {
+                    if let Some(viewer) = app
+                        .quick_preview
+                        .as_ref()
+                        .filter(|viewer| viewer.path == *path)
+                    {
+                        viewer::insert_kitty_png_payload(viewer, *cache_key, payload);
+                    }
+                    quick_preview_image_task = None;
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {
+                    quick_preview_image_task = None;
+                }
+            }
+        }
 
         let window_title = compose_window_title(&app);
         if window_title != last_window_title {
@@ -250,13 +273,38 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
                     // Quick-preview: only render image when no modal overlay is shown
                     if viewer::embedded_graphics_supported() {
                         app.quick_preview.as_ref().and_then(|v| {
-                            ui::kitty_image_area_quick_preview(&app, term_area).map(|rect| {
-                                (
+                            ui::kitty_image_area_quick_preview(&app, term_area).and_then(|rect| {
+                                if viewer::cached_kitty_png_payload(v, rect).is_none()
+                                    && let Some(request) =
+                                        viewer::kitty_image_payload_request(v, rect)
+                                {
+                                    let already_running = quick_preview_image_task
+                                        .as_ref()
+                                        .map(|(path, cache_key, _)| {
+                                            *path == request.path && *cache_key == request.cache_key
+                                        })
+                                        .unwrap_or(false);
+                                    if !already_running {
+                                        let path = request.path.clone();
+                                        let cache_key = request.cache_key;
+                                        let (tx, rx) = mpsc::channel();
+                                        std::thread::spawn(move || {
+                                            let payload =
+                                                viewer::build_kitty_png_payload_for_request(
+                                                    &request,
+                                                );
+                                            let _ = tx.send(payload);
+                                        });
+                                        quick_preview_image_task = Some((path, cache_key, rx));
+                                    }
+                                    return None;
+                                }
+                                Some((
                                     v.path.clone(),
                                     rect,
                                     v.zoomed,
                                     v.plugin_state.get("page").cloned(),
-                                )
+                                ))
                             })
                         })
                     } else {
@@ -333,14 +381,22 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
                         _ => app.quick_preview.as_ref().filter(|v| v.path == *path),
                     };
                     if let Some(v) = v_opt {
-                        viewer::render_kitty_image(terminal.backend_mut(), v, *rect)?;
-                        execute!(
-                            terminal.backend_mut(),
-                            MoveTo(0, term_area.height.saturating_sub(1))
-                        )?;
-                        terminal.backend_mut().flush()?;
-                        if !startup_ready_logged {
-                            viewer::debug_log("startup: kitty image rendered after first draw");
+                        let rendered =
+                            if matches!(app.mode, AppMode::Browse) && v.image_info().is_some() {
+                                viewer::render_cached_kitty_image(terminal.backend_mut(), v, *rect)?
+                            } else {
+                                viewer::render_kitty_image(terminal.backend_mut(), v, *rect)?;
+                                true
+                            };
+                        if rendered {
+                            execute!(
+                                terminal.backend_mut(),
+                                MoveTo(0, term_area.height.saturating_sub(1))
+                            )?;
+                            terminal.backend_mut().flush()?;
+                            if !startup_ready_logged {
+                                viewer::debug_log("startup: kitty image rendered after first draw");
+                            }
                         }
                     }
                 }

@@ -161,6 +161,16 @@ pub struct ImageInfo {
     decoded_rgba: OnceLock<Option<(u32, u32, Vec<u8>)>>,
 }
 
+#[derive(Debug, Clone)]
+pub struct KittyImagePayloadRequest {
+    pub path: PathBuf,
+    pub raw: Vec<u8>,
+    pub format: &'static str,
+    pub target_px: Option<(u32, u32)>,
+    pub is_preview: bool,
+    pub cache_key: (u32, u32),
+}
+
 impl ImageInfo {
     fn new(format: &'static str, width: Option<u32>, height: Option<u32>) -> Self {
         Self {
@@ -2192,6 +2202,95 @@ pub fn render_kitty_image<W: Write>(out: &mut W, viewer: &Viewer, area: Rect) ->
     render_terminal_png(out, payload, fit)
 }
 
+pub fn render_cached_kitty_image<W: Write>(
+    out: &mut W,
+    viewer: &Viewer,
+    area: Rect,
+) -> Result<bool> {
+    if !viewer.is_image_mode() || area.width == 0 || area.height == 0 {
+        return Ok(false);
+    }
+
+    let Some(image) = viewer.image_info() else {
+        return Ok(false);
+    };
+    let fit = fit_image_to_area(area, image.width, image.height);
+    let Some(payload) = cached_kitty_png_payload(viewer, area).flatten() else {
+        return Ok(false);
+    };
+    queue!(out, MoveTo(fit.x, fit.y))?;
+    render_terminal_png(out, &payload, fit)?;
+    Ok(true)
+}
+
+pub fn cached_kitty_png_payload(viewer: &Viewer, area: Rect) -> Option<Option<Vec<u8>>> {
+    let image = viewer.image_info()?;
+    let cache_key = kitty_payload_cache_key(viewer, area)?;
+    image.kitty_png_payloads.borrow().get(&cache_key).cloned()
+}
+
+pub fn insert_kitty_png_payload(
+    viewer: &Viewer,
+    cache_key: (u32, u32),
+    payload: Option<Vec<u8>>,
+) -> bool {
+    let Some(image) = viewer.image_info() else {
+        return false;
+    };
+    image
+        .kitty_png_payloads
+        .borrow_mut()
+        .insert(cache_key, payload);
+    true
+}
+
+pub fn kitty_image_payload_request(
+    viewer: &Viewer,
+    area: Rect,
+) -> Option<KittyImagePayloadRequest> {
+    if !viewer.is_image_mode() || area.width == 0 || area.height == 0 {
+        return None;
+    }
+    let image = viewer.image_info()?;
+    let fit = fit_image_to_area(area, image.width, image.height);
+    let target_px = image_payload_target_px(fit);
+    let cache_key = kitty_payload_cache_key(viewer, area)?;
+    let is_preview = viewer
+        .plugin_state
+        .get("__preview")
+        .map(|value| value == "1")
+        .unwrap_or(false);
+    Some(KittyImagePayloadRequest {
+        path: viewer.path.clone(),
+        raw: viewer.raw.clone(),
+        format: image.format,
+        target_px,
+        is_preview,
+        cache_key,
+    })
+}
+
+pub fn build_kitty_png_payload_for_request(request: &KittyImagePayloadRequest) -> Option<Vec<u8>> {
+    build_kitty_png_payload(
+        &request.raw,
+        request.format,
+        request.target_px,
+        request.is_preview,
+    )
+    .ok()
+}
+
+fn kitty_payload_cache_key(viewer: &Viewer, area: Rect) -> Option<(u32, u32)> {
+    let image = viewer.image_info()?;
+    let fit = fit_image_to_area(area, image.width, image.height);
+    let target_px = image_payload_target_px(fit);
+    Some(if image.format == "PNG" {
+        (0, 0)
+    } else {
+        target_px.unwrap_or((0, 0))
+    })
+}
+
 fn render_terminal_png<W: Write>(out: &mut W, payload: &[u8], fit: Rect) -> Result<()> {
     if iterm2_supported() {
         let encoded = base64::encode(payload);
@@ -2533,7 +2632,12 @@ fn build_preview_jpeg_png_payload(raw: &[u8], target_w: u32, target_h: u32) -> R
                 .context("invalid rgb jpeg output buffer")?;
             image::DynamicImage::ImageRgb8(rgb)
         }
-        other => return Err(anyhow::anyhow!("unsupported jpeg pixel format: {:?}", other)),
+        other => {
+            return Err(anyhow::anyhow!(
+                "unsupported jpeg pixel format: {:?}",
+                other
+            ));
+        }
     };
 
     let t_encode = Instant::now();
