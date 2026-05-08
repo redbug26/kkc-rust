@@ -6,7 +6,7 @@ mod panel_tabs;
 mod remote_edit;
 
 pub use self::command_palette::{
-    CommandPaletteState, PALETTE_DATA, PALETTE_SEP, palette_label_for_action,
+    CommandPaletteState, PALETTE_DATA, PALETTE_SEP, normalize_shortcut, palette_label_for_action,
     palette_shortname_for_action, shortcut_from_key_event,
 };
 pub use self::dialogs::{

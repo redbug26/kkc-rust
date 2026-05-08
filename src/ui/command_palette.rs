@@ -5,6 +5,7 @@ use crate::app::{App, CommandPaletteState, PALETTE_DATA, PALETTE_SEP};
 
 // Accent colour for shortcuts and dim colour for fn_name.
 const CLR_SHORTCUT: Color = Color::Rgb(100, 195, 220);
+const CLR_SHORTCUT_CHANGED: Color = Color::Rgb(255, 196, 92);
 const CLR_CATEGORY: Color = Color::Rgb(140, 140, 140);
 const CLR_FN_NAME: Color = Color::Rgb(90, 90, 90);
 const CLR_MARKER: Color = Color::Rgb(255, 220, 80);
@@ -253,7 +254,22 @@ pub(super) fn render_command_palette(
         let shortcut = app
             .effective_shortcut_for(entry.fn_name, entry.shortcut)
             .unwrap_or_default();
+        let default_shortcut = entry
+            .shortcut
+            .map(crate::app::normalize_shortcut)
+            .unwrap_or_default();
+        let shortcut_changed = shortcut != default_shortcut;
         let shortcut_str = format!("{:>width$}", shortcut, width = SHORT_W);
+        let fn_fg = if !selected && shortcut_changed {
+            CLR_SHORTCUT_CHANGED
+        } else {
+            fn_fg
+        };
+        let shortcut_fg = if !selected && shortcut_changed {
+            CLR_SHORTCUT_CHANGED
+        } else {
+            short_fg
+        };
 
         let spans = vec![
             Span::styled(marker_str, Style::default().fg(marker_color).bg(row_bg)),
@@ -262,7 +278,7 @@ pub(super) fn render_command_palette(
             Span::styled(label_shown, Style::default().fg(label_fg).bg(row_bg)),
             Span::styled(fn_text, Style::default().fg(fn_fg).bg(row_bg)),
             Span::styled(padding, Style::default().bg(row_bg)),
-            Span::styled(shortcut_str, Style::default().fg(short_fg).bg(row_bg)),
+            Span::styled(shortcut_str, Style::default().fg(shortcut_fg).bg(row_bg)),
         ];
 
         safe_render_widget(
