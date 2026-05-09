@@ -14,7 +14,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear as RatatuiClear, Paragraph},
 };
-use crate::ui::{FooterShortcut, ShortcutBarStyle, footer_shortcut_items, render_shortcut_bar};
+use crate::ui::{ShortcutBarItem, ShortcutBarStyle, render_shortcut_bar};
 use serde::Deserialize;
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
@@ -591,6 +591,7 @@ fn run_lua_app(
         call_table_function_if_exists(&app_table, "draw", ())?;
 
         let lua_lines = graphics.borrow().render_lines();
+        let shortcut_items = lua_shortcut_items(&app_table)?;
         let title_str = app_title.clone();
 
         terminal.draw(|f| {
@@ -668,53 +669,14 @@ fn run_lua_app(
                 );
             }
 
-            // Git Lua app footer rendered with KKC native shortcut bar renderer.
-            if descriptor.manifest.app.id == "git_repo" && inner.height > 0 {
+            // Generic Lua footer shortcuts rendered with KKC native shortcut bar renderer.
+            if !shortcut_items.is_empty() && inner.height > 0 {
                 let footer_area = Rect {
                     x: inner.x,
                     y: inner.y + inner.height.saturating_sub(1),
                     width: inner.width,
                     height: 1,
                 };
-                let shortcuts = vec![
-                    FooterShortcut {
-                        label: "F2:Toggle",
-                        key: KeyCode::F(2),
-                    },
-                    FooterShortcut {
-                        label: "F3:ToggleAll",
-                        key: KeyCode::F(3),
-                    },
-                    FooterShortcut {
-                        label: "F4:DiffMode",
-                        key: KeyCode::F(4),
-                    },
-                    FooterShortcut {
-                        label: "F5:Refresh",
-                        key: KeyCode::F(5),
-                    },
-                    FooterShortcut {
-                        label: "F6:Diff",
-                        key: KeyCode::F(6),
-                    },
-                    FooterShortcut {
-                        label: "F7:Commit",
-                        key: KeyCode::F(7),
-                    },
-                    FooterShortcut {
-                        label: "F8:Pull",
-                        key: KeyCode::F(8),
-                    },
-                    FooterShortcut {
-                        label: "F9:Push",
-                        key: KeyCode::F(9),
-                    },
-                    FooterShortcut {
-                        label: "Esc:Quit",
-                        key: KeyCode::Esc,
-                    },
-                ];
-                let items = footer_shortcut_items(&shortcuts);
                 let style = ShortcutBarStyle {
                     key_fg: Color::Rgb(230, 238, 255),
                     key_bg: Color::Rgb(52, 73, 110),
@@ -723,7 +685,7 @@ fn run_lua_app(
                     bar_bg: Color::Rgb(22, 26, 40),
                     sep_fg: Color::Rgb(88, 104, 136),
                 };
-                render_shortcut_bar(f, footer_area, &items, style);
+                render_shortcut_bar(f, footer_area, &shortcut_items, style);
             }
         })?;
     }
@@ -1218,6 +1180,39 @@ where
         func.call::<()>(args)?;
     }
     Ok(())
+}
+
+fn lua_shortcut_items(app_table: &Table) -> Result<Vec<ShortcutBarItem>> {
+    let value: Value = app_table.get("shortcuts")?;
+    let Value::Function(func) = value else {
+        return Ok(Vec::new());
+    };
+
+    let returned: Value = func.call(())?;
+    let Value::Table(tbl) = returned else {
+        return Ok(Vec::new());
+    };
+
+    let mut out = Vec::new();
+    for value in tbl.sequence_values::<String>() {
+        let raw = value?;
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Some((key, label)) = trimmed.split_once(':') {
+            out.push(ShortcutBarItem {
+                key: key.trim().to_string(),
+                label: label.trim().to_string(),
+            });
+        } else {
+            out.push(ShortcutBarItem {
+                key: trimmed.to_string(),
+                label: String::new(),
+            });
+        }
+    }
+    Ok(out)
 }
 
 fn is_quit_key(key: &KeyEvent) -> bool {

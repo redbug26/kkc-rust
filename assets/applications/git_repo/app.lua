@@ -283,6 +283,27 @@ local function git_commit(msg)
     refresh_status()
 end
 
+function app.shortcuts()
+    if commit_mode then
+        return {
+            "Enter:Commit",
+            "F7:Commit",
+            "Bksp:Delete",
+            "Esc:Cancel",
+        }
+    end
+    return {
+        "F2:Toggle",
+        "F3:ToggleAll",
+        "F4:DiffMode",
+        "F5:Refresh",
+        "F6:Diff",
+        "F7:Commit",
+        "F8:Pull",
+        "F9:Push"
+    }
+end
+
 function app.init()
     repo_cwd = "."
     if type(kkc.get_cwd) == "function" then
@@ -390,13 +411,6 @@ function app.draw()
     g.color(0xFFFF99, 0x000000)
     g.text(1, h - 2, truncate("Info: " .. info_line, w))
     g.text(1, h - 1, truncate("Last: " .. output_line, w))
-
-    g.color(0x99CCFF, 0x000000)
-    if not commit_mode then
-        g.text(1, h, truncate("Tab Focus  Enter/F2 Toggle  F3 ToggleAll  F4 DiffMode  F5 Refresh  F6 Diff  F7 Commit  F8 Pull  F9 Push  Esc Quit", w))
-    else
-        g.text(1, h, truncate("Enter/F7 Validate  Esc Cancel  Backspace Delete", w))
-    end
 
     g.reset()
 end
