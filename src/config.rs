@@ -1,3 +1,4 @@
+use crate::screen_transition::ScreenTransitionEffect;
 use anyhow::{Context, Result};
 use chrono::Local;
 use directories::ProjectDirs;
@@ -272,6 +273,33 @@ pub struct ShortcutOverride {
     pub shortcut: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransitionConfig {
+    /// Enable screen transitions for the screensaver and application exit.
+    #[serde(default = "t")]
+    pub enabled: bool,
+    /// Number of frames used by screen transitions.
+    #[serde(default = "transition_frames_default")]
+    pub frames: u16,
+    /// Transition effect used when entering/leaving the screensaver.
+    #[serde(default = "transition_effect_default")]
+    pub screensaver_effect: String,
+    /// Transition effect used when quitting the application.
+    #[serde(default = "transition_effect_default")]
+    pub quit_effect: String,
+}
+
+impl Default for TransitionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            frames: transition_frames_default(),
+            screensaver_effect: transition_effect_default(),
+            quit_effect: transition_quit_effect_default(),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Main config
 // ---------------------------------------------------------------------------
@@ -309,9 +337,8 @@ pub struct Config {
     /// Set to 0 to disable auto screensaver.
     #[serde(default = "screensaver_idle_minutes_default")]
     pub screensaver_idle_minutes: u64,
-    /// Enable screen transitions for the screensaver and application exit.
-    #[serde(default = "t")]
-    pub transitions_enabled: bool,
+    #[serde(default)]
+    pub transition: TransitionConfig,
     /// Color-code files by type category.
     #[serde(default = "t")]
     pub color_by_type: bool,
@@ -398,7 +425,7 @@ impl Default for Config {
             insert_moves_down: true,
             select_dirs: false,
             screensaver_idle_minutes: screensaver_idle_minutes_default(),
-            transitions_enabled: true,
+            transition: TransitionConfig::default(),
             color_by_type: true,
             show_cloud_icons: true,
             show_file_icons: false,
@@ -443,6 +470,10 @@ impl Config {
             // Migration path for configs written during the sectioned-save
             // refactor where root keys were accidentally emitted under [viewer].
             if let Ok(raw) = toml::from_str::<toml::Value>(&text) {
+                if raw.get("transition").and_then(|v| v.as_table()).is_none() {
+                    
+                }
+
                 if let Some(viewer) = raw.get("viewer").and_then(|v| v.as_table()) {
                     if cfg.bookmarks == default_bookmarks() {
                         if let Some(arr) = viewer.get("bookmarks").and_then(|v| v.as_array()) {
@@ -554,10 +585,6 @@ impl Config {
             "screensaver_idle_minutes = {}\n",
             self.screensaver_idle_minutes
         ));
-        out.push_str(&format!(
-            "transitions_enabled = {}\n",
-            self.transitions_enabled
-        ));
         out.push('\n');
 
         // ─── Display ──────────────────────────────────────────────────────
@@ -614,6 +641,20 @@ impl Config {
         })
         .context("Serialising panels config")?;
         out.push_str(&tail);
+
+        // ─── Transition ───────────────────────────────────────────────────
+        out.push_str("\n# \u{2500}\u{2500}\u{2500} Transition \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\n");
+        out.push_str("[transition]\n");
+        out.push_str(&format!("enabled = {}\n", self.transition.enabled));
+        out.push_str(&format!("frames = {}\n", self.transition.frames));
+        out.push_str(&format!(
+            "screensaver_effect = \"{}\"\n",
+            self.transition.screensaver_effect
+        ));
+        out.push_str(&format!(
+            "quit_effect = \"{}\"\n",
+            self.transition.quit_effect
+        ));
 
         Ok(out)
     }
@@ -788,6 +829,18 @@ const fn screensaver_idle_minutes_default() -> u64 {
     15
 }
 
+const fn transition_frames_default() -> u16 {
+    48
+}
+
+fn transition_effect_default() -> String {
+    ScreenTransitionEffect::Plasma.as_config_name().to_string()
+}
+
+fn transition_quit_effect_default() -> String {
+    ScreenTransitionEffect::Melt.as_config_name().to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -801,7 +854,10 @@ mod tests {
         cfg.insert_moves_down = false;
         cfg.select_dirs = true;
         cfg.screensaver_idle_minutes = 42;
-        cfg.transitions_enabled = false;
+        cfg.transition.enabled = false;
+        cfg.transition.frames = 96;
+        cfg.transition.screensaver_effect = "tunnel".into();
+        cfg.transition.quit_effect = "melt".into();
         cfg.show_fkey_bar = false;
         cfg.color_by_type = false;
         cfg.show_cloud_icons = false;
@@ -821,6 +877,12 @@ mod tests {
         }];
 
         let text = cfg.to_toml_string().expect("serialize config");
+        assert!(text.contains("[transition]\n"));
+        assert!(text.contains("enabled = false\n"));
+        assert!(text.contains("frames = 96\n"));
+        assert!(text.contains("screensaver_effect = \"tunnel\"\n"));
+        assert!(text.contains("quit_effect = \"melt\"\n"));
+
         let parsed: Config = toml::from_str(&text).expect("parse saved config");
 
         assert!(!parsed.confirm_exit);
@@ -828,7 +890,10 @@ mod tests {
         assert!(!parsed.show_cloud_icons);
         assert!(!parsed.show_file_icons);
         assert_eq!(parsed.screensaver_idle_minutes, 42);
-        assert!(!parsed.transitions_enabled);
+        assert!(!parsed.transition.enabled);
+        assert_eq!(parsed.transition.frames, 96);
+        assert_eq!(parsed.transition.screensaver_effect, "tunnel");
+        assert_eq!(parsed.transition.quit_effect, "melt");
         assert!(!parsed.viewer.word_wrap);
         assert_eq!(parsed.viewer.tab_width, 8);
         assert_eq!(parsed.editor, "vim");

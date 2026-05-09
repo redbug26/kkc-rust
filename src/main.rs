@@ -42,12 +42,11 @@ use ratatui::{Terminal, backend::CrosstermBackend, buffer::Buffer, layout::Rect}
 use screen_transition::{ScreenTransition, ScreenTransitionDirection, ScreenTransitionEffect};
 use std::io::{self, Stdout, Write};
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
 type QuickPreviewImageTask = (PathBuf, (u32, u32), Receiver<Option<Vec<u8>>>);
-
-const SCREENSAVER_TRANSITION_FRAMES: u16 = 18;
 
 fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
     enable_raw_mode()?;
@@ -149,16 +148,22 @@ fn compose_window_title(app: &App) -> String {
     }
 }
 
-fn screensaver_transition_effect() -> ScreenTransitionEffect {
-    ScreenTransitionEffect::ALL[12]
+fn transition_frames(app: &App) -> u16 {
+    app.config.transition.frames.max(1)
 }
 
-fn exit_transition_effect() -> ScreenTransitionEffect {
-    ScreenTransitionEffect::Plasma
+fn screensaver_transition_effect(app: &App) -> ScreenTransitionEffect {
+    ScreenTransitionEffect::from_str(&app.config.transition.screensaver_effect)
+        .unwrap_or(ScreenTransitionEffect::Plasma)
+}
+
+fn exit_transition_effect(app: &App) -> ScreenTransitionEffect {
+    ScreenTransitionEffect::from_str(&app.config.transition.quit_effect)
+        .unwrap_or(ScreenTransitionEffect::Melt)
 }
 
 fn transitions_enabled(app: &App) -> bool {
-    app.config.transitions_enabled
+    app.config.transition.enabled
 }
 
 fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
@@ -237,8 +242,8 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
             if last_user_activity.elapsed() >= timeout && !quit_after_transition {
                 if transitions_enabled(&app) && active_transition.is_none() {
                     active_transition = Some(ScreenTransition::to_black(
-                        screensaver_transition_effect(),
-                        SCREENSAVER_TRANSITION_FRAMES,
+                        screensaver_transition_effect(&app),
+                        transition_frames(&app),
                         last_frame.clone(),
                     ));
                 } else if !transitions_enabled(&app) {
@@ -496,8 +501,8 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
                 Ok(true) => {
                     if transitions_enabled(&app) {
                         active_transition = Some(ScreenTransition::to_black(
-                            exit_transition_effect(),
-                            SCREENSAVER_TRANSITION_FRAMES,
+                            exit_transition_effect(&app),
+                            transition_frames(&app),
                             last_frame.clone(),
                         ));
                         quit_after_transition = true;
@@ -512,15 +517,15 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
 
                     if was_screensaver && matches!(app.mode, AppMode::Browse) {
                         active_transition = Some(ScreenTransition::from_black(
-                            screensaver_transition_effect(),
-                            SCREENSAVER_TRANSITION_FRAMES,
+                            screensaver_transition_effect(&app),
+                            transition_frames(&app),
                         ));
                     } else if !was_screensaver && matches!(app.mode, AppMode::MatrixScreensaver(_))
                     {
                         app.mode = AppMode::Browse;
                         active_transition = Some(ScreenTransition::to_black(
-                            screensaver_transition_effect(),
-                            SCREENSAVER_TRANSITION_FRAMES,
+                            screensaver_transition_effect(&app),
+                            transition_frames(&app),
                             last_frame.clone(),
                         ));
                     }

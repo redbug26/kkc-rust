@@ -4,6 +4,7 @@ use ratatui::{
     layout::{Position, Rect},
     style::{Color, Modifier},
 };
+use std::str::FromStr;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum ScreenTransitionEffect {
@@ -42,6 +43,51 @@ impl ScreenTransitionEffect {
         Self::Tunnel,
         Self::Melt,
     ];
+
+    pub const fn as_config_name(self) -> &'static str {
+        match self {
+            Self::Dither => "dither",
+            Self::WipeDown => "wipe_down",
+            Self::WipeUp => "wipe_up",
+            Self::WipeRight => "wipe_right",
+            Self::WipeLeft => "wipe_left",
+            Self::DiagonalBands => "diagonal_bands",
+            Self::Checkerboard => "checkerboard",
+            Self::VerticalBlinds => "vertical_blinds",
+            Self::HorizontalBlinds => "horizontal_blinds",
+            Self::Radial => "radial",
+            Self::Diamond => "diamond",
+            Self::Spiral => "spiral",
+            Self::Plasma => "plasma",
+            Self::Tunnel => "tunnel",
+            Self::Melt => "melt",
+        }
+    }
+}
+
+impl FromStr for ScreenTransitionEffect {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let normalized = normalize_effect_name(value);
+
+        for effect in Self::ALL {
+            if normalized == normalize_effect_name(effect.as_config_name()) {
+                return Ok(effect);
+            }
+        }
+
+        Err(())
+    }
+}
+
+fn normalize_effect_name(value: &str) -> String {
+    value
+        .trim()
+        .chars()
+        .filter(|ch| !ch.is_ascii_whitespace() && *ch != '-' && *ch != '_')
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -384,6 +430,23 @@ mod tests {
         let copied = target.cell(Position::new(1, 0)).expect("target cell");
         assert_eq!(copied.symbol(), "X");
         assert_eq!(copied.fg, Color::Green);
+    }
+
+    #[test]
+    fn effect_names_parse_flexibly() {
+        assert_eq!(
+            "plasma".parse::<ScreenTransitionEffect>(),
+            Ok(ScreenTransitionEffect::Plasma)
+        );
+        assert_eq!(
+            "Diagonal Bands".parse::<ScreenTransitionEffect>(),
+            Ok(ScreenTransitionEffect::DiagonalBands)
+        );
+        assert_eq!(
+            "wipe-left".parse::<ScreenTransitionEffect>(),
+            Ok(ScreenTransitionEffect::WipeLeft)
+        );
+        assert!("not_real".parse::<ScreenTransitionEffect>().is_err());
     }
 
     #[test]
