@@ -2708,10 +2708,7 @@ fn inspect_plugins(
 fn load_lua_plugin_manifest(plugin_dir: &Path) -> Result<LuaPluginManifestPlugin> {
     let manifest_path = plugin_dir.join("plugin.toml");
     if !manifest_path.is_file() {
-        bail!(
-            "Lua plugin manifest not found: {}",
-            manifest_path.display()
-        );
+        bail!("Lua plugin manifest not found: {}", manifest_path.display());
     }
     let text = fs::read_to_string(&manifest_path)
         .with_context(|| format!("Reading {}", manifest_path.display()))?;
@@ -4129,10 +4126,8 @@ mod tests {
 
     #[test]
     fn lua_plugin_without_manifest_is_rejected() {
-        let plugin_dir = std::env::temp_dir().join(format!(
-            "kkc-missing-manifest-{}",
-            std::process::id()
-        ));
+        let plugin_dir =
+            std::env::temp_dir().join(format!("kkc-missing-manifest-{}", std::process::id()));
         let _ = fs::remove_dir_all(&plugin_dir);
         fs::create_dir_all(&plugin_dir).expect("create plugin dir");
         fs::write(
@@ -4152,9 +4147,7 @@ kkc.register_archive_plugin({
         .expect("write plugin lua");
 
         let err = inspect_plugin(&plugin_dir.join("plugin.lua")).expect_err("missing manifest");
-        assert!(err
-            .to_string()
-            .contains("Lua plugin manifest not found"));
+        assert!(err.to_string().contains("Lua plugin manifest not found"));
 
         let _ = fs::remove_dir_all(&plugin_dir);
     }

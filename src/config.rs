@@ -470,9 +470,7 @@ impl Config {
             // Migration path for configs written during the sectioned-save
             // refactor where root keys were accidentally emitted under [viewer].
             if let Ok(raw) = toml::from_str::<toml::Value>(&text) {
-                if raw.get("transition").and_then(|v| v.as_table()).is_none() {
-                    
-                }
+                if raw.get("transition").and_then(|v| v.as_table()).is_none() {}
 
                 if let Some(viewer) = raw.get("viewer").and_then(|v| v.as_table()) {
                     if cfg.bookmarks == default_bookmarks() {
