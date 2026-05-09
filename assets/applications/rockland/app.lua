@@ -287,8 +287,8 @@ local function map_set0(col0, row0, object)
 end
 
 local function place_object_line(object, row0, col0, length, direction)
-    local ldx = {0, 1, 1, 1, 0, -1, -1, -1}
-    local ldy = {-1, -1, 0, 1, 1, 1, 0, -1}
+    local ldx = { 0, 1, 1, 1, 0, -1, -1, -1 }
+    local ldy = { -1, -1, 0, 1, 1, 1, 0, -1 }
     local dx = ldx[direction + 1] or 0
     local dy = ldy[direction + 1] or 0
 
@@ -717,7 +717,6 @@ local function update_amoeba(x, y)
         or cell(x + 1, y) == OBJ.SPACE or cell(x + 1, y) == OBJ.DIRT
         or cell(x, y - 1) == OBJ.SPACE or cell(x, y - 1) == OBJ.DIRT
         or cell(x - 1, y) == OBJ.SPACE or cell(x - 1, y) == OBJ.DIRT then
-
         amoeba_enclosed = false
 
         local chance_mask = amoeba_slow ~= 0 and 31 or 3
@@ -1255,6 +1254,25 @@ function app.update(dt)
         player_action_cooldown = math.max(0, player_action_cooldown - dt)
     end
 
+    -- Poll directional keys every frame for smooth, responsive movement.
+    -- Uses key.is_down() which reflects the real hardware key state tracked
+    -- by KKC, independent of OS terminal repeat settings.
+    if player_action_cooldown <= 0 then
+        local acted = false
+        if key.is_down(key.LEFT) then
+            acted = move_player(-1, 0)
+        elseif key.is_down(key.RIGHT) then
+            acted = move_player(1, 0)
+        elseif key.is_down(key.UP) then
+            acted = move_player(0, -1)
+        elseif key.is_down(key.DOWN) then
+            acted = move_player(0, 1)
+        end
+        if acted then
+            player_action_cooldown = PLAYER_ACTION_INTERVAL
+        end
+    end
+
     if sec_acc >= 1.0 then
         sec_acc = sec_acc - 1.0
         if timer_s > 0 then
@@ -1288,10 +1306,12 @@ function app.update(dt)
         end
         step = (step + 1) % STEPMAX
     end
-
 end
 
-function app.keypressed(k)
+-- keydown: fires once per physical key press.
+-- Used for instantaneous discrete actions (menu, restart, dig-in-place).
+-- Continuous directional movement is handled in update() via key.is_down().
+function app.keydown(k)
     if k == key.ESC then
         kkc.quit()
         return
@@ -1371,32 +1391,21 @@ function app.keypressed(k)
         return
     end
 
-    if player_action_cooldown > 0 then
-        return
-    end
-
-    local acted = false
-
-    if k == key.LEFT then
-        acted = move_player(-1, 0)
-    elseif k == key.RIGHT then
-        acted = move_player(1, 0)
-    elseif k == key.UP then
-        acted = move_player(0, -1)
-    elseif k == key.DOWN then
-        acted = move_player(0, 1)
-    elseif k == "char:h" or k == "char:H" then
-        acted = dig_only(-1, 0)
-    elseif k == "char:l" or k == "char:L" then
-        acted = dig_only(1, 0)
-    elseif k == "char:k" or k == "char:K" then
-        acted = dig_only(0, -1)
-    elseif k == "char:j" or k == "char:J" then
-        acted = dig_only(0, 1)
-    end
-
-    if acted then
-        player_action_cooldown = PLAYER_ACTION_INTERVAL
+    -- Dig-in-place actions (vi-style keys): discrete press, one action per keydown.
+    if player_action_cooldown <= 0 then
+        local acted = false
+        if k == "char:h" or k == "char:H" then
+            acted = dig_only(-1, 0)
+        elseif k == "char:l" or k == "char:L" then
+            acted = dig_only(1, 0)
+        elseif k == "char:k" or k == "char:K" then
+            acted = dig_only(0, -1)
+        elseif k == "char:j" or k == "char:J" then
+            acted = dig_only(0, 1)
+        end
+        if acted then
+            player_action_cooldown = PLAYER_ACTION_INTERVAL
+        end
     end
 end
 
@@ -1415,7 +1424,8 @@ function app.draw()
         g.text(math.max(2, math.floor((W - 38) / 2)), 9, "Playdate C rules ported to Lua runtime")
         g.text(math.max(2, math.floor((W - 28) / 2)), 10, "Explosions, magic, amoeba")
         g.color(0xA5D6A7, 0x000000)
-        g.text(math.max(2, math.floor((W - 34) / 2)), 12, string.format("Level %s (%02d)  Difficulty %d", cave_letter(menu_level), menu_level, menu_difficulty + 1))
+        g.text(math.max(2, math.floor((W - 34) / 2)), 12,
+            string.format("Level %s (%02d)  Difficulty %d", cave_letter(menu_level), menu_level, menu_difficulty + 1))
         g.color(0xCFD8DC, 0x000000)
         g.text(math.max(2, math.floor((W - 38) / 2)), 14, "Use arrows to change, Enter to start")
         return

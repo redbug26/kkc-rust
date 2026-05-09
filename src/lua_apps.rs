@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, anyhow, bail};
 use crossterm::{
     cursor::{Hide, Show},
-    event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind},
+    event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind},
     execute,
     terminal::{self},
 };
@@ -436,6 +436,7 @@ fn run_lua_app(
     let (width, height) = terminal::size().unwrap_or((80, 24));
     let graphics = Rc::new(RefCell::new(GraphicsBuffer::new(width, height)));
     let should_quit = Rc::new(Cell::new(false));
+    let key_state: Rc<RefCell<HashSet<String>>> = Rc::new(RefCell::new(HashSet::new()));
     let start_time = Instant::now();
     let launch_cwd = cwd
         .map(Path::to_path_buf)
@@ -448,6 +449,7 @@ fn run_lua_app(
         args,
         Rc::clone(&graphics),
         Rc::clone(&should_quit),
+        Rc::clone(&key_state),
         start_time,
         launch_cwd,
     )?;
@@ -515,6 +517,23 @@ fn run_lua_app(
     // Hide the cursor but don't enter alternate screen so KKC content is visible behind.
     let mut stdout = io::stdout();
     execute!(stdout, Hide)?;
+
+    // ── Enhanced keyboard protocol ──────────────────────────────────────────
+    // Enables distinct Press / Release / Repeat events on supporting terminals
+    // (kitty, WezTerm, foot, …). Falls back silently on terminals that do not.
+    let enhanced_keyboard = crossterm::terminal::supports_keyboard_enhancement()
+        .unwrap_or(false)
+        && execute!(
+            io::stdout(),
+            crossterm::event::PushKeyboardEnhancementFlags(
+                crossterm::event::KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                    | crossterm::event::KeyboardEnhancementFlags::REPORT_EVENT_TYPES,
+            )
+        )
+        .is_ok();
+    // Receive focus-gained / focus-lost events so we can clear key state.
+    let _ = execute!(io::stdout(), crossterm::event::EnableFocusChange);
+
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
@@ -558,24 +577,66 @@ fn run_lua_app(
                 match event::read()? {
                     Event::Key(key) => {
                         // F5 to toggle zoom (full-screen vs floating window)
-                        if matches!(key.code, KeyCode::F(5)) {
+                        if matches!(key.code, KeyCode::F(5))
+                            && key.kind != KeyEventKind::Release
+                        {
                             zoomed = !zoomed;
                             resized = true;
-                        } else if is_quit_key(&key) {
+                        } else if is_quit_key(&key)
+                            && key.kind != KeyEventKind::Release
+                        {
+                            key_state.borrow_mut().clear();
                             should_quit.set(true);
                             continue;
                         } else if let Some(name) = key_name(&key) {
-                            call_table_function_if_exists(&app_table, "keypressed", name)?;
+                            match key.kind {
+                                KeyEventKind::Press => {
+                                    // Track key as held and notify app.
+                                    key_state.borrow_mut().insert(name.clone());
+                                    call_table_function_if_exists(
+                                        &app_table, "keydown", name.clone(),
+                                    )?;
+                                    call_table_function_if_exists(
+                                        &app_table, "keypressed", name,
+                                    )?;
+                                }
+                                KeyEventKind::Release => {
+                                    key_state.borrow_mut().remove(&name);
+                                    call_table_function_if_exists(
+                                        &app_table, "keyup", name,
+                                    )?;
+                                }
+                                KeyEventKind::Repeat => {
+                                    // OS-level terminal repeat: forward only to text-style
+                                    // apps via keypressed. Does not change key state
+                                    // (already inserted on initial Press).
+                                    call_table_function_if_exists(
+                                        &app_table, "keypressed", name,
+                                    )?;
+                                }
+                            }
                         }
                     }
                     Event::Mouse(mouse) => {
                         dispatch_mouse_event(&app_table, mouse)?;
                     }
                     Event::Resize(new_w, new_h) => {
-                        let inner =
-                            lua_app_inner_area(Rect::new(0, 0, new_w, new_h), zoomed, app_width, app_height);
+                        let inner = lua_app_inner_area(
+                            Rect::new(0, 0, new_w, new_h),
+                            zoomed,
+                            app_width,
+                            app_height,
+                        );
                         graphics.borrow_mut().resize(inner.width, inner.height);
                         resized = true;
+                    }
+                    Event::FocusLost => {
+                        // Clear all held keys to avoid "stuck" keys when losing focus.
+                        key_state.borrow_mut().clear();
+                        call_table_function_if_exists(&app_table, "focuslost", ())?;
+                    }
+                    Event::FocusGained => {
+                        call_table_function_if_exists(&app_table, "focusgained", ())?;
                     }
                     _ => {}
                 }
@@ -703,7 +764,11 @@ fn run_lua_app(
     }
 
     // ── Teardown ───────────────────────────────────────────────────────────
-    // Just restore the cursor; raw mode and screen content handled by KKC.
+    key_state.borrow_mut().clear();
+    if enhanced_keyboard {
+        let _ = execute!(io::stdout(), crossterm::event::PopKeyboardEnhancementFlags);
+    }
+    let _ = execute!(io::stdout(), crossterm::event::DisableFocusChange);
     execute!(terminal.backend_mut(), Show)?;
     Ok(())
 }
@@ -739,6 +804,7 @@ fn install_lua_app_modules(
     args: &[String],
     graphics: Rc<RefCell<GraphicsBuffer>>,
     should_quit: Rc<Cell<bool>>,
+    key_state: Rc<RefCell<HashSet<String>>>,
     start_time: Instant,
     launch_cwd: PathBuf,
 ) -> Result<()> {
@@ -935,6 +1001,7 @@ fn install_lua_app_modules(
     })?;
     preload.set("kkc-graphics", graphics_mod)?;
 
+    let key_state_for_mod = Rc::clone(&key_state);
     let key_mod = lua.create_function(move |lua, ()| {
         let t = lua.create_table()?;
         t.set("LEFT", "left")?;
@@ -944,6 +1011,13 @@ fn install_lua_app_modules(
         t.set("SPACE", "space")?;
         t.set("ENTER", "enter")?;
         t.set("ESC", "esc")?;
+        // is_down(name) — returns true if the named key is currently held.
+        // Works with the same key names as keydown / keyup callbacks.
+        let ks = Rc::clone(&key_state_for_mod);
+        t.set(
+            "is_down",
+            lua.create_function(move |_, name: String| Ok(ks.borrow().contains(&name)))?,
+        )?;
         Ok(t)
     })?;
     preload.set("kkc-key", key_mod)?;
