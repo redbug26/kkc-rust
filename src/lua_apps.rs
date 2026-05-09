@@ -1237,7 +1237,7 @@ fn key_name(key: &KeyEvent) -> Option<String> {
         KeyCode::Insert => Some("insert".to_string()),
         KeyCode::F(n) => Some(format!("f{}", n)),
         KeyCode::Char(' ') => Some("space".to_string()),
-        KeyCode::Char(c) => Some(format!("char:{}", c.to_ascii_lowercase())),
+        KeyCode::Char(c) => Some(format!("char:{}", c)),
         _ => None,
     }
 }
