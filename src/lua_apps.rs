@@ -17,7 +17,7 @@ use ratatui::{
 use crate::ui::{ShortcutBarItem, ShortcutBarStyle, render_shortcut_bar};
 use serde::Deserialize;
 use std::cell::{Cell, RefCell};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -436,7 +436,7 @@ fn run_lua_app(
     let (width, height) = terminal::size().unwrap_or((80, 24));
     let graphics = Rc::new(RefCell::new(GraphicsBuffer::new(width, height)));
     let should_quit = Rc::new(Cell::new(false));
-    let key_state: Rc<RefCell<HashSet<String>>> = Rc::new(RefCell::new(HashSet::new()));
+    let key_state: Rc<RefCell<HashMap<String, Instant>>> = Rc::new(RefCell::new(HashMap::new()));
     let start_time = Instant::now();
     let launch_cwd = cwd
         .map(Path::to_path_buf)
@@ -589,13 +589,32 @@ fn run_lua_app(
                             should_quit.set(true);
                             continue;
                         } else if let Some(name) = key_name(&key) {
+                            // Timeout for key-held state: must be longer than the OS
+                            // repeat interval (~30-35 ms on macOS) so held keys stay
+                            // "down" between repeat events, but short enough that a
+                            // released key expires quickly.
+                            // Terminal.app never sends Release events, so expiry is the
+                            // only mechanism that clears held state there.
+                            const HOLD_TIMEOUT_MS: u128 = 200;
+                            let now_ts = Instant::now();
                             match key.kind {
                                 KeyEventKind::Press => {
-                                    // Track key as held and notify app.
-                                    key_state.borrow_mut().insert(name.clone());
-                                    call_table_function_if_exists(
-                                        &app_table, "keydown", name.clone(),
-                                    )?;
+                                    // Determine if this is a genuine new press or a
+                                    // terminal that reports repeats as Press (e.g. Apple
+                                    // Terminal.app). A key is "new" if it was absent or
+                                    // its last-seen timestamp has expired.
+                                    let is_new = {
+                                        let ks = key_state.borrow();
+                                        ks.get(&name)
+                                            .map(|t| now_ts.duration_since(*t).as_millis() >= HOLD_TIMEOUT_MS)
+                                            .unwrap_or(true)
+                                    };
+                                    key_state.borrow_mut().insert(name.clone(), now_ts);
+                                    if is_new {
+                                        call_table_function_if_exists(
+                                            &app_table, "keydown", name.clone(),
+                                        )?;
+                                    }
                                     call_table_function_if_exists(
                                         &app_table, "keypressed", name,
                                     )?;
@@ -607,9 +626,9 @@ fn run_lua_app(
                                     )?;
                                 }
                                 KeyEventKind::Repeat => {
-                                    // OS-level terminal repeat: forward only to text-style
-                                    // apps via keypressed. Does not change key state
-                                    // (already inserted on initial Press).
+                                    // True repeat (enhanced protocol terminals):
+                                    // refresh timestamp to keep key marked as held.
+                                    key_state.borrow_mut().insert(name.clone(), now_ts);
                                     call_table_function_if_exists(
                                         &app_table, "keypressed", name,
                                     )?;
@@ -804,7 +823,7 @@ fn install_lua_app_modules(
     args: &[String],
     graphics: Rc<RefCell<GraphicsBuffer>>,
     should_quit: Rc<Cell<bool>>,
-    key_state: Rc<RefCell<HashSet<String>>>,
+    key_state: Rc<RefCell<HashMap<String, Instant>>>,
     start_time: Instant,
     launch_cwd: PathBuf,
 ) -> Result<()> {
@@ -1011,12 +1030,25 @@ fn install_lua_app_modules(
         t.set("SPACE", "space")?;
         t.set("ENTER", "enter")?;
         t.set("ESC", "esc")?;
+        t.set(
+            "HAS_RELEASE_EVENTS",
+            crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false),
+        )?;
         // is_down(name) — returns true if the named key is currently held.
         // Works with the same key names as keydown / keyup callbacks.
         let ks = Rc::clone(&key_state_for_mod);
         t.set(
             "is_down",
-            lua.create_function(move |_, name: String| Ok(ks.borrow().contains(&name)))?,
+            lua.create_function(move |_, name: String| {
+                const HOLD_TIMEOUT_MS: u128 = 200;
+                let now = Instant::now();
+                let held = ks
+                    .borrow()
+                    .get(&name)
+                    .map(|t| now.duration_since(*t).as_millis() < HOLD_TIMEOUT_MS)
+                    .unwrap_or(false);
+                Ok(held)
+            })?,
         )?;
         Ok(t)
     })?;

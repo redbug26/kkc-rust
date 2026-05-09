@@ -19,6 +19,7 @@ local SPRITE_H = 3
 local CAM_DEADZONE_X = 3
 local CAM_DEADZONE_Y = 2
 local PLAYER_ACTION_INTERVAL = 0.08
+local MOVEMENT_USES_POLLING = key.HAS_RELEASE_EVENTS == true
 
 local OBJ = {
     SPACE = 0,
@@ -79,8 +80,8 @@ local exit_x, exit_y = 2, 2
 local step = 0
 local tick_acc = 0
 local sec_acc = 0
-local cam_x = 1
-local cam_y = 1
+local cam_cx = 1  -- camera position in character coords (1-based)
+local cam_cy = 1
 
 local timer_s = 0
 local required_diamonds = 0
@@ -466,8 +467,8 @@ local function decode_cave(level_data, diff)
     for i = #early, 1, -1 do
         table.insert(reveal_order, 1, early[i])
     end
-    cam_x = math.max(1, math.min(CAVE_W, rx))
-    cam_y = math.max(1, math.min(CAVE_H, ry))
+        cam_cx = (rx - 1) * SPRITE_W + 1
+        cam_cy = (ry - 1) * SPRITE_H + 1
 end
 
 local function current_cave_index()
@@ -1028,49 +1029,78 @@ local function tile_sprite(c, x, y)
     return { " " .. s .. "  ", " " .. s .. "  ", " " .. s .. "  " }
 end
 
-local function update_camera(view_tiles_w, view_tiles_h)
-    local min_x = 1
-    local min_y = 1
-    local max_x = math.max(1, CAVE_W - view_tiles_w + 1)
-    local max_y = math.max(1, CAVE_H - view_tiles_h + 1)
+-- Camera position is in character coords (1-based).
+-- Dead zones are in chars: CAM_DEADZONE_* tiles × SPRITE size.
+local function update_camera(view_chars_w, view_chars_h)
+    local map_chars_w = CAVE_W * SPRITE_W
+    local map_chars_h = CAVE_H * SPRITE_H
+    local min_cx = 1
+    local min_cy = 1
+    local max_cx = math.max(1, map_chars_w - view_chars_w + 1)
+    local max_cy = math.max(1, map_chars_h - view_chars_h + 1)
 
-    if cam_x < min_x then cam_x = min_x end
-    if cam_y < min_y then cam_y = min_y end
-    if cam_x > max_x then cam_x = max_x end
-    if cam_y > max_y then cam_y = max_y end
+    cam_cx = math.max(min_cx, math.min(max_cx, cam_cx))
+    cam_cy = math.max(min_cy, math.min(max_cy, cam_cy))
 
-    local dzx = math.min(CAM_DEADZONE_X, math.max(0, math.floor((view_tiles_w - 1) / 2)))
-    local dzy = math.min(CAM_DEADZONE_Y, math.max(0, math.floor((view_tiles_h - 1) / 2)))
+    local pmx = 0
+    local pmy = 0
+    if state == "playing" and in_bounds(rx, ry) then
+        pmx = math.max(-1, math.min(1, motion_dx[ry][rx]))
+        pmy = math.max(-1, math.min(1, motion_dy[ry][rx]))
+    end
+    local player_cx = (rx - 1) * SPRITE_W + 1 + pmx
+    local player_cy = (ry - 1) * SPRITE_H + 1 + pmy
 
-    local left_bound = cam_x + dzx
-    local right_bound = cam_x + view_tiles_w - dzx - 1
-    local top_bound = cam_y + dzy
-    local bottom_bound = cam_y + view_tiles_h - dzy - 1
+    local dzx = CAM_DEADZONE_X * SPRITE_W
+    local dzy = CAM_DEADZONE_Y * SPRITE_H
 
-    if rx < left_bound then
-        cam_x = rx - dzx
-    elseif rx > right_bound then
-        cam_x = rx - (view_tiles_w - dzx - 1)
+    local left_bound  = cam_cx + dzx
+    local right_bound = cam_cx + view_chars_w - dzx - 1
+    local top_bound   = cam_cy + dzy
+    local bot_bound   = cam_cy + view_chars_h - dzy - 1
+
+    -- Calculate target camera position based on dead zone
+    local target_cx = cam_cx
+    local target_cy = cam_cy
+    if player_cx < left_bound then
+        target_cx = player_cx - dzx
+    elseif player_cx > right_bound then
+        target_cx = player_cx - (view_chars_w - dzx - 1)
+    end
+    if player_cy < top_bound then
+        target_cy = player_cy - dzy
+    elseif player_cy > bot_bound then
+        target_cy = player_cy - (view_chars_h - dzy - 1)
     end
 
-    if ry < top_bound then
-        cam_y = ry - dzy
-    elseif ry > bottom_bound then
-        cam_y = ry - (view_tiles_h - dzy - 1)
+    -- Ease camera toward target (max 1 char per frame) for smooth scrolling
+    if target_cx > cam_cx then
+        cam_cx = math.min(target_cx, cam_cx + 1)
+    elseif target_cx < cam_cx then
+        cam_cx = math.max(target_cx, cam_cx - 1)
+    end
+    if target_cy > cam_cy then
+        cam_cy = math.min(target_cy, cam_cy + 1)
+    elseif target_cy < cam_cy then
+        cam_cy = math.max(target_cy, cam_cy - 1)
     end
 
-    if cam_x < min_x then cam_x = min_x end
-    if cam_y < min_y then cam_y = min_y end
-    if cam_x > max_x then cam_x = max_x end
-    if cam_y > max_y then cam_y = max_y end
+    cam_cx = math.max(min_cx, math.min(max_cx, cam_cx))
+    cam_cy = math.max(min_cy, math.min(max_cy, cam_cy))
 end
 
-local function draw_sprite_shifted(px, py, sprite, ox, oy)
+-- Draw a sprite with per-row vertical clipping to stay within [clip_top, clip_bot].
+-- Horizontal spillover is handled by the graphics buffer edge clipping and the
+-- border-last overdraw in draw_map.
+local function draw_sprite_in_box(px, py, sprite, clip_top, clip_bot, ox, oy)
     local x = px + ox
     local y = py + oy
-    g.text(x, y, sprite[1])
-    g.text(x, y + 1, sprite[2])
-    g.text(x, y + 2, sprite[3])
+    for row = 0, SPRITE_H - 1 do
+        local sy = y + row
+        if sy >= clip_top and sy <= clip_bot then
+            g.text(x, sy, sprite[row + 1])
+        end
+    end
 end
 
 local function draw_hud()
@@ -1102,53 +1132,87 @@ local function draw_map()
     local view_tiles_w = math.max(5, math.min(CAVE_W, math.floor((avail_w - 2) / SPRITE_W)))
     local view_tiles_h = math.max(4, math.min(CAVE_H, math.floor((avail_h - 2) / SPRITE_H)))
 
-    local pixel_w = view_tiles_w * SPRITE_W
-    local pixel_h = view_tiles_h * SPRITE_H
+        local view_chars_w = view_tiles_w * SPRITE_W
+        local view_chars_h = view_tiles_h * SPRITE_H
 
-    local left = math.max(2, math.floor((W - (pixel_w + 2)) / 2))
+        local left = math.max(2, math.floor((W - (view_chars_w + 2)) / 2))
 
-    update_camera(view_tiles_w, view_tiles_h)
+        update_camera(view_chars_w, view_chars_h)
 
-    g.color(0xECEFF1, 0x000000)
-    g.text(left, top, "┌" .. string.rep("─", pixel_w) .. "┐")
-    for y = 1, pixel_h do
-        g.text(left, top + y, "│" .. string.rep(" ", pixel_w) .. "│")
-    end
-    g.text(left, top + pixel_h + 1, "└" .. string.rep("─", pixel_w) .. "┘")
+        -- Sub-tile character offset into the first visible tile (0..SPRITE-1)
+        local sub_x = (cam_cx - 1) % SPRITE_W
+        local sub_y = (cam_cy - 1) % SPRITE_H
 
-    for vy = 1, view_tiles_h do
-        for vx = 1, view_tiles_w do
-            local mx = cam_x + vx - 1
-            local my = cam_y + vy - 1
-            local c = cell(mx, my)
-            if state == "level_intro" and not reveal_mask[my][mx] then
-                c = OBJ.TITANIUMWALL
+        -- First tile to draw in map coordinates (1-based)
+        local first_tx = math.floor((cam_cx - 1) / SPRITE_W) + 1
+        local first_ty = math.floor((cam_cy - 1) / SPRITE_H) + 1
+
+        -- Extra tile column/row when sub-offset > 0 (partial tile at left/top edge)
+        local draw_cols = view_tiles_w + (sub_x > 0 and 1 or 0)
+        local draw_rows = view_tiles_h + (sub_y > 0 and 1 or 0)
+
+        -- Vertical clip bounds: tile rows must stay within the box interior
+        local clip_top = top + 1
+        local clip_bot = top + view_chars_h
+
+        -- Pre-clear interior so no ghost chars appear between frames
+        g.color(0x000000, 0x000000)
+        g["box"](left + 1, clip_top, view_chars_w, view_chars_h, " ")
+
+        -- Draw tiles; horizontal spillover is masked by the border drawn below
+        for vy = 1, draw_rows do
+            for vx = 1, draw_cols do
+                local mx = first_tx + vx - 1
+                local my = first_ty + vy - 1
+                local c = cell(mx, my)
+                if state == "level_intro" and in_bounds(mx, my) and not reveal_mask[my][mx] then
+                    c = OBJ.TITANIUMWALL
+                end
+                local sprite = tile_sprite(c, mx, my)
+                local px = left + 1 + (vx - 1) * SPRITE_W - sub_x
+                local py = top + 1 + (vy - 1) * SPRITE_H - sub_y
+                g.color(tile_color(c), tile_bg(c))
+                local ox = 0
+                local oy = 0
+                if state == "playing" and in_bounds(mx, my) then
+                    ox = math.max(-1, math.min(1, motion_dx[my][mx]))
+                    oy = math.max(-1, math.min(1, motion_dy[my][mx]))
+                end
+                draw_sprite_in_box(px, py, sprite, clip_top, clip_bot, ox, oy)
             end
-            local sprite = tile_sprite(c, mx, my)
-            local px = left + 1 + (vx - 1) * SPRITE_W
-            local py = top + 1 + (vy - 1) * SPRITE_H
-
-            g.color(tile_color(c), tile_bg(c))
-            local ox = 0
-            local oy = 0
-            if state == "playing" and in_bounds(mx, my) then
-                ox = math.max(-1, math.min(1, motion_dx[my][mx]))
-                oy = math.max(-1, math.min(1, motion_dy[my][mx]))
-            end
-            draw_sprite_shifted(px, py, sprite, ox, oy)
         end
-    end
 
-    if state == "dead" then
-        local msg = "GAME OVER"
-        local hint = dead_reason ~= "" and dead_reason or "Press R"
-        local cx = left + 1 + math.floor((pixel_w - #msg) / 2)
-        local cy = top + 1 + math.floor(pixel_h / 2)
-        g.color(0xEF9A9A, 0x000000)
-        g.text(cx, cy, msg)
-        g.color(0xCFD8DC, 0x000000)
-        g.text(left + 1 + math.floor((pixel_w - #hint) / 2), cy + 1, hint)
-    end
+        -- Clear horizontal spillover outside the box to hide partial tiles leaking there
+        local spill = SPRITE_W + 1
+        g.color(0x000000, 0x000000)
+        for row = clip_top, clip_bot do
+            for col = math.max(1, left - spill + 1), left - 1 do
+                g.put(col, row, " ")
+            end
+            for col = left + view_chars_w + 2, math.min(W, left + view_chars_w + spill) do
+                g.put(col, row, " ")
+            end
+        end
+
+        -- Draw border LAST so it overwrites tile chars that bled onto border columns
+        g.color(0xECEFF1, 0x000000)
+        g.text(left, top, "┌" .. string.rep("─", view_chars_w) .. "┐")
+        for row = 1, view_chars_h do
+            g.text(left, top + row, "│")
+            g.text(left + view_chars_w + 1, top + row, "│")
+        end
+        g.text(left, top + view_chars_h + 1, "└" .. string.rep("─", view_chars_w) .. "┘")
+
+        if state == "dead" then
+            local msg = "GAME OVER"
+            local hint = dead_reason ~= "" and dead_reason or "Press R"
+            local cx = left + 1 + math.floor((view_chars_w - #msg) / 2)
+            local cy = top + 1 + math.floor(view_chars_h / 2)
+            g.color(0xEF9A9A, 0x000000)
+            g.text(cx, cy, msg)
+            g.color(0xCFD8DC, 0x000000)
+            g.text(left + 1 + math.floor((view_chars_w - #hint) / 2), cy + 1, hint)
+        end
 end
 
 function app.init(ctx)
@@ -1169,8 +1233,8 @@ function app.init(ctx)
     message = "Choose level and difficulty"
     dead_reason = ""
     hero_dir = "stand"
-    cam_x = 1
-    cam_y = 1
+    cam_cx = 1
+    cam_cy = 1
     player_action_cooldown = 0
     map = new_grid(OBJ.TITANIUMWALL)
     processed = new_grid(false)
@@ -1254,10 +1318,7 @@ function app.update(dt)
         player_action_cooldown = math.max(0, player_action_cooldown - dt)
     end
 
-    -- Poll directional keys every frame for smooth, responsive movement.
-    -- Uses key.is_down() which reflects the real hardware key state tracked
-    -- by KKC, independent of OS terminal repeat settings.
-    if player_action_cooldown <= 0 then
+    if MOVEMENT_USES_POLLING and player_action_cooldown <= 0 then
         local acted = false
         if key.is_down(key.LEFT) then
             acted = move_player(-1, 0)
@@ -1308,9 +1369,31 @@ function app.update(dt)
     end
 end
 
--- keydown: fires once per physical key press.
--- Used for instantaneous discrete actions (menu, restart, dig-in-place).
--- Continuous directional movement is handled in update() via key.is_down().
+-- keypressed: fires on initial press and on terminal repeat.
+-- Keep directional movement here so both Terminal.app and Ghostty behave consistently.
+function app.keypressed(k)
+    if MOVEMENT_USES_POLLING or state ~= "playing" or player_action_cooldown > 0 then
+        return
+    end
+
+    local acted = false
+    if k == key.LEFT then
+        acted = move_player(-1, 0)
+    elseif k == key.RIGHT then
+        acted = move_player(1, 0)
+    elseif k == key.UP then
+        acted = move_player(0, -1)
+    elseif k == key.DOWN then
+        acted = move_player(0, 1)
+    end
+
+    if acted then
+        player_action_cooldown = PLAYER_ACTION_INTERVAL
+    end
+end
+
+-- keydown: fires exactly once per physical key press (new press, not OS repeat).
+-- Used for instantaneous discrete actions: menu nav, restart, dig-in-place.
 function app.keydown(k)
     if k == key.ESC then
         kkc.quit()
