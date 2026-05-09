@@ -14,12 +14,14 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear as RatatuiClear, Paragraph},
 };
+use crate::ui::{FooterShortcut, ShortcutBarStyle, footer_shortcut_items, render_shortcut_bar};
 use serde::Deserialize;
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -34,6 +36,8 @@ const BUNDLED_CALENDAR_APP: &str = include_str!("../assets/applications/calendar
 const BUNDLED_CALENDAR_MANIFEST: &str = include_str!("../assets/applications/calendar/app.toml");
 const BUNDLED_SNAKE_APP: &str = include_str!("../assets/applications/snake/app.lua");
 const BUNDLED_SNAKE_MANIFEST: &str = include_str!("../assets/applications/snake/app.toml");
+const BUNDLED_GIT_REPO_APP: &str = include_str!("../assets/applications/git_repo/app.lua");
+const BUNDLED_GIT_REPO_MANIFEST: &str = include_str!("../assets/applications/git_repo/app.toml");
 
 #[derive(Debug, Clone, Deserialize)]
 struct LuaAppManifest {
@@ -208,6 +212,12 @@ pub fn initialize() -> Result<()> {
         BUNDLED_SNAKE_APP,
         BUNDLED_SNAKE_MANIFEST,
     )?;
+    install_bundled_app(
+        &apps_dir,
+        "git_repo",
+        BUNDLED_GIT_REPO_APP,
+        BUNDLED_GIT_REPO_MANIFEST,
+    )?;
     Ok(())
 }
 
@@ -219,7 +229,11 @@ pub fn app_id_from_command_token(token: &str) -> Option<String> {
         .map(|id| id.to_string())
 }
 
-pub fn launch_lua_application(app_id: &str, args: &[String]) -> Result<()> {
+pub fn launch_lua_application_with_cwd(
+    app_id: &str,
+    args: &[String],
+    cwd: Option<&Path>,
+) -> Result<()> {
     let descriptor = resolve_app_descriptor(app_id)?;
     let main_name = descriptor
         .manifest
@@ -236,7 +250,7 @@ pub fn launch_lua_application(app_id: &str, args: &[String]) -> Result<()> {
             script_path.display()
         );
     }
-    run_lua_app(&descriptor, &script_path, args)
+    run_lua_app(&descriptor, &script_path, args, cwd)
 }
 
 pub fn list_installed_apps() -> Result<Vec<LuaAppInfo>> {
@@ -400,12 +414,20 @@ fn load_manifest(path: &Path) -> Result<LuaAppManifest> {
     Ok(manifest)
 }
 
-fn run_lua_app(descriptor: &LuaAppDescriptor, script_path: &Path, args: &[String]) -> Result<()> {
+fn run_lua_app(
+    descriptor: &LuaAppDescriptor,
+    script_path: &Path,
+    args: &[String],
+    cwd: Option<&Path>,
+) -> Result<()> {
     let lua = Lua::new();
     let (width, height) = terminal::size().unwrap_or((80, 24));
     let graphics = Rc::new(RefCell::new(GraphicsBuffer::new(width, height)));
     let should_quit = Rc::new(Cell::new(false));
     let start_time = Instant::now();
+    let launch_cwd = cwd
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| descriptor.app_dir.clone()));
 
     install_lua_app_modules(
         &lua,
@@ -415,6 +437,7 @@ fn run_lua_app(descriptor: &LuaAppDescriptor, script_path: &Path, args: &[String
         Rc::clone(&graphics),
         Rc::clone(&should_quit),
         start_time,
+        launch_cwd,
     )?;
 
     let script = fs::read_to_string(script_path)
@@ -644,6 +667,64 @@ fn run_lua_app(descriptor: &LuaAppDescriptor, script_path: &Path, args: &[String
                     },
                 );
             }
+
+            // Git Lua app footer rendered with KKC native shortcut bar renderer.
+            if descriptor.manifest.app.id == "git_repo" && inner.height > 0 {
+                let footer_area = Rect {
+                    x: inner.x,
+                    y: inner.y + inner.height.saturating_sub(1),
+                    width: inner.width,
+                    height: 1,
+                };
+                let shortcuts = vec![
+                    FooterShortcut {
+                        label: "F2:Toggle",
+                        key: KeyCode::F(2),
+                    },
+                    FooterShortcut {
+                        label: "F3:ToggleAll",
+                        key: KeyCode::F(3),
+                    },
+                    FooterShortcut {
+                        label: "F4:DiffMode",
+                        key: KeyCode::F(4),
+                    },
+                    FooterShortcut {
+                        label: "F5:Refresh",
+                        key: KeyCode::F(5),
+                    },
+                    FooterShortcut {
+                        label: "F6:Diff",
+                        key: KeyCode::F(6),
+                    },
+                    FooterShortcut {
+                        label: "F7:Commit",
+                        key: KeyCode::F(7),
+                    },
+                    FooterShortcut {
+                        label: "F8:Pull",
+                        key: KeyCode::F(8),
+                    },
+                    FooterShortcut {
+                        label: "F9:Push",
+                        key: KeyCode::F(9),
+                    },
+                    FooterShortcut {
+                        label: "Esc:Quit",
+                        key: KeyCode::Esc,
+                    },
+                ];
+                let items = footer_shortcut_items(&shortcuts);
+                let style = ShortcutBarStyle {
+                    key_fg: Color::Rgb(230, 238, 255),
+                    key_bg: Color::Rgb(52, 73, 110),
+                    label_fg: Color::Rgb(198, 212, 238),
+                    label_bg: Color::Rgb(30, 36, 52),
+                    bar_bg: Color::Rgb(22, 26, 40),
+                    sep_fg: Color::Rgb(88, 104, 136),
+                };
+                render_shortcut_bar(f, footer_area, &items, style);
+            }
         })?;
     }
 
@@ -685,6 +766,7 @@ fn install_lua_app_modules(
     graphics: Rc<RefCell<GraphicsBuffer>>,
     should_quit: Rc<Cell<bool>>,
     start_time: Instant,
+    launch_cwd: PathBuf,
 ) -> Result<()> {
     let globals = lua.globals();
     let package: Table = globals.get("package")?;
@@ -713,6 +795,7 @@ fn install_lua_app_modules(
         .clone()
         .unwrap_or_else(|| "0.1.0".to_string());
     let app_args = args.to_vec();
+    let launch_cwd_text = launch_cwd.to_string_lossy().into_owned();
 
     let kkc_mod = lua.create_function(move |lua, ()| {
         let t = lua.create_table()?;
@@ -746,6 +829,12 @@ fn install_lua_app_modules(
         t.set("id", app_id.clone())?;
         t.set("name", app_name.clone())?;
         t.set("version", app_version.clone())?;
+        t.set("cwd", launch_cwd_text.clone())?;
+        let cwd_fn_value = launch_cwd_text.clone();
+        t.set(
+            "get_cwd",
+            lua.create_function(move |_, ()| Ok(cwd_fn_value.clone()))?,
+        )?;
         Ok(t)
     })?;
     preload.set("kkc", kkc_mod)?;
@@ -1048,6 +1137,57 @@ fn install_lua_app_modules(
         Ok(t)
     })?;
     preload.set("kkc-fs", fs_mod)?;
+
+    // Shell facade for terminal apps. Useful for Git-oriented tools.
+    let shell_default_cwd = launch_cwd.clone();
+    let shell_mod = lua.create_function(move |lua, ()| {
+        let t = lua.create_table()?;
+
+        let run_default_cwd = shell_default_cwd.clone();
+        t.set(
+            "run",
+            lua.create_function(
+                move |lua, (program, args_tbl, cwd): (String, Option<Table>, Option<String>)| {
+                    let mut args = Vec::new();
+                    if let Some(tbl) = args_tbl {
+                        for value in tbl.sequence_values::<String>() {
+                            args.push(value?);
+                        }
+                    }
+
+                    let mut cmd = Command::new(&program);
+                    cmd.args(&args);
+                    cmd.stdin(Stdio::null());
+                    cmd.env("GIT_TERMINAL_PROMPT", "0");
+                    match cwd {
+                        Some(path) if !path.trim().is_empty() => {
+                            cmd.current_dir(path);
+                        }
+                        _ => {
+                            cmd.current_dir(&run_default_cwd);
+                        }
+                    }
+
+                    let output = cmd.output().map_err(|e| {
+                        mlua::Error::external(anyhow!("Running '{}': {}", program, e))
+                    })?;
+
+                    let result = lua.create_table()?;
+                    result.set("ok", output.status.success())?;
+                    result.set("code", output.status.code().unwrap_or(-1))?;
+                    result.set("stdout", String::from_utf8_lossy(&output.stdout).into_owned())?;
+                    result.set("stderr", String::from_utf8_lossy(&output.stderr).into_owned())?;
+                    Ok(result)
+                },
+            )?,
+        )?;
+
+        let cwd_value = shell_default_cwd.to_string_lossy().into_owned();
+        t.set("cwd", lua.create_function(move |_, ()| Ok(cwd_value.clone()))?)?;
+
+        Ok(t)
+    })?;
+    preload.set("kkc-shell", shell_mod)?;
 
     // Audio facade for terminal apps. Currently limited to terminal bell.
     let audio_mod = lua.create_function(move |lua, ()| {

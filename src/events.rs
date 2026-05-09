@@ -157,7 +157,6 @@ fn handle_key_mode(app: &mut App, key: KeyEvent) -> Option<Result<bool>> {
         AppMode::Config(_) => Some(handle_config(app, key)),
         AppMode::Plugins(_) => Some(handle_plugins(app, key)),
         AppMode::ActionPalette(_) => Some(handle_action_palette(app, key)),
-        AppMode::LuaAppPalette(_) => Some(handle_lua_app_palette(app, key)),
         AppMode::CommandPalette(_) => Some(handle_command_palette(app, key)),
         AppMode::StoreInstallPalette(_) => Some(handle_store_install_palette(app, key)),
         AppMode::Opener(_) => Some(handle_opener(app, key)),
@@ -2159,7 +2158,8 @@ fn handle_copy_progress(app: &mut App, key: KeyEvent) -> Result<bool> {
 fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
     // Check if the key matches a Lua app shortcut before any other handling.
     if let Some(app_id) = app.lua_app_id_for_key(key) {
-        crate::lua_apps::launch_lua_application(&app_id, &[])?;
+        let panel_cwd = app.active_panel().path.clone();
+        crate::lua_apps::launch_lua_application_with_cwd(&app_id, &[], Some(&panel_cwd))?;
         app.needs_full_redraw = true;
         return Ok(false);
     }
@@ -2592,7 +2592,19 @@ fn launch_external(app: &mut App, command: &str, path: &std::path::Path) -> Resu
             app_args.push(path.to_string_lossy().into_owned());
         }
 
-        match crate::lua_apps::launch_lua_application(&app_id, &app_args) {
+        let launch_cwd = if path.is_dir() {
+            path.to_path_buf()
+        } else {
+            path.parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| app.active_panel().path.clone())
+        };
+
+        match crate::lua_apps::launch_lua_application_with_cwd(
+            &app_id,
+            &app_args,
+            Some(&launch_cwd),
+        ) {
             Ok(_) => {
                 app.needs_clear = true;
                 app.reload_panels();
@@ -4439,48 +4451,6 @@ fn handle_opener(app: &mut App, key: KeyEvent) -> Result<bool> {
         }
         _ => {}
     }
-    Ok(false)
-}
-
-fn handle_lua_app_palette(app: &mut App, key: KeyEvent) -> Result<bool> {
-    let AppMode::LuaAppPalette(ref mut s) = app.mode else {
-        return Ok(false);
-    };
-
-    match key.code {
-        KeyCode::Esc => {
-            app.mode = AppMode::Browse;
-        }
-        KeyCode::Up | KeyCode::BackTab => s.move_prev(),
-        KeyCode::Down | KeyCode::Tab => s.move_next(),
-        KeyCode::Backspace => s.pop_query(),
-        KeyCode::Char(ch)
-            if !key.modifiers.contains(KeyModifiers::CONTROL)
-                && !key.modifiers.contains(KeyModifiers::ALT)
-                && !ch.is_control() =>
-        {
-            s.append_query(ch);
-        }
-        KeyCode::Enter => {
-            let selected = if let AppMode::LuaAppPalette(state) = &app.mode {
-                state.selected_item().cloned()
-            } else {
-                None
-            };
-            let Some(item) = selected else {
-                return Ok(false);
-            };
-            app.mode = AppMode::Browse;
-            if let Err(e) = crate::lua_apps::launch_lua_application(&item.id, &[]) {
-                app.notify(format!("Cannot launch Lua app '{}': {}", item.id, e));
-            } else {
-                app.needs_clear = true;
-                app.reload_panels();
-            }
-        }
-        _ => {}
-    }
-
     Ok(false)
 }
 

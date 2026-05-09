@@ -1,0 +1,9 @@
+[app]
+id = "git_repo"
+name = "Git Repo"
+version = "0.1.0"
+description = "Git status/stage/unstage/commit/push/pull for current panel repository"
+main = "app.lua"
+fps = 15
+width = 96
+height = 30

@@ -127,8 +127,6 @@ pub enum AppMode {
     Plugins(PluginsState),
     /// Context actions returned by Lua action plugins (Ctrl-A).
     ActionPalette(ActionPaletteState),
-    /// Dedicated launcher for installed Lua terminal applications.
-    LuaAppPalette(LuaAppPaletteState),
     /// Command palette (Ctrl-P) – searchable list of all menu commands.
     CommandPalette(CommandPaletteState),
     /// Store plugin install palette with searchable plugin list.
@@ -174,13 +172,6 @@ pub struct ActionPaletteState {
     pub actions: Vec<crate::plugins::ActionItem>,
     pub cwd: PathBuf,
     pub cursor: usize,
-}
-
-#[derive(Debug, Clone)]
-pub struct LuaAppPaletteState {
-    pub items: Vec<crate::lua_apps::LuaAppInfo>,
-    pub query: String,
-    pub match_pos: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -267,103 +258,6 @@ impl ActionPaletteState {
             actions: crate::plugins::action_items(&cwd),
             cwd,
             cursor: 0,
-        }
-    }
-}
-
-impl LuaAppPaletteState {
-    pub fn load() -> anyhow::Result<Self> {
-        Ok(Self {
-            items: crate::lua_apps::list_installed_apps()?,
-            query: String::new(),
-            match_pos: 0,
-        })
-    }
-
-    pub fn filtered_indices(&self) -> Vec<usize> {
-        if self.query.trim().is_empty() {
-            return (0..self.items.len()).collect();
-        }
-
-        let tokens = self
-            .query
-            .split_whitespace()
-            .map(|token| token.to_ascii_lowercase())
-            .filter(|token| !token.is_empty())
-            .collect::<Vec<_>>();
-        if tokens.is_empty() {
-            return (0..self.items.len()).collect();
-        }
-
-        let first = &tokens[0];
-        let rest = &tokens[1..];
-        let mut starts = Vec::new();
-        let mut contains = Vec::new();
-        for (idx, item) in self.items.iter().enumerate() {
-            let searchable = format!(
-                "{} {} {} {}",
-                item.name, item.id, item.version, item.description
-            )
-            .to_ascii_lowercase();
-            if !rest.iter().all(|token| searchable.contains(token)) {
-                continue;
-            }
-            if item.name.to_ascii_lowercase().starts_with(first)
-                || item.id.to_ascii_lowercase().starts_with(first)
-            {
-                starts.push(idx);
-            } else if searchable.contains(first) {
-                contains.push(idx);
-            }
-        }
-        starts.extend(contains);
-        starts
-    }
-
-    pub fn append_query(&mut self, ch: char) {
-        self.query.push(ch);
-        self.match_pos = 0;
-        self.clamp_match();
-    }
-
-    pub fn pop_query(&mut self) {
-        self.query.pop();
-        self.match_pos = 0;
-        self.clamp_match();
-    }
-
-    pub fn move_prev(&mut self) {
-        let len = self.filtered_indices().len();
-        if len == 0 {
-            self.match_pos = 0;
-        } else if self.match_pos == 0 {
-            self.match_pos = len - 1;
-        } else {
-            self.match_pos -= 1;
-        }
-    }
-
-    pub fn move_next(&mut self) {
-        let len = self.filtered_indices().len();
-        if len == 0 {
-            self.match_pos = 0;
-        } else {
-            self.match_pos = (self.match_pos + 1) % len;
-        }
-    }
-
-    pub fn selected_item(&self) -> Option<&crate::lua_apps::LuaAppInfo> {
-        self.filtered_indices()
-            .get(self.match_pos)
-            .and_then(|idx| self.items.get(*idx))
-    }
-
-    fn clamp_match(&mut self) {
-        let len = self.filtered_indices().len();
-        if len == 0 {
-            self.match_pos = 0;
-        } else {
-            self.match_pos = self.match_pos.min(len.saturating_sub(1));
         }
     }
 }

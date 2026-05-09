@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::app::{App, CommandPaletteState, PALETTE_DATA, PALETTE_SEP};
+use unicode_width::UnicodeWidthStr;
 
 const LUA_APP_CATEGORY: &str = "Apps";
 
@@ -14,6 +15,10 @@ const CLR_MARKER: Color = Color::Rgb(255, 220, 80);
 const CLR_RECENT_STAR: Color = Color::Rgb(255, 190, 60);
 // Width reserved for right-aligned shortcut column (e.g. "Ctrl+F1" = 7 + padding)
 const SHORT_W: usize = 11;
+
+fn display_width(text: &str) -> usize {
+    UnicodeWidthStr::width(text)
+}
 
 pub(crate) fn command_palette_shortcuts(capture: bool) -> Vec<FooterShortcut> {
     if capture {
@@ -44,10 +49,6 @@ pub(crate) fn command_palette_shortcuts(capture: bool) -> Vec<FooterShortcut> {
             FooterShortcut {
                 label: "F4:Set Shortcut",
                 key: KeyCode::F(4),
-            },
-            FooterShortcut {
-                label: " \u{238B} :Close",
-                key: KeyCode::Esc,
             },
         ]
     }
@@ -272,14 +273,14 @@ pub(super) fn render_command_palette(
 
         let slash = "/";
 
-        let fixed_prefix = cat_text.len() + slash.len();
-        let fixed_suffix = fn_text.len();
+        let fixed_prefix = display_width(cat_text) + display_width(slash);
+        let fixed_suffix = display_width(&fn_text);
         let avail_for_label = label_area_w
             .saturating_sub(fixed_prefix + fixed_suffix)
             .max(4);
         let label_shown = truncate_str(label_text, avail_for_label);
 
-        let used = fixed_prefix + label_shown.len() + fixed_suffix;
+        let used = fixed_prefix + display_width(&label_shown) + fixed_suffix;
         let padding = " ".repeat(label_area_w.saturating_sub(used));
 
         // For Lua apps: no shortcut colour customization; for static: detect overrides.

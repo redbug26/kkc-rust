@@ -15,7 +15,7 @@ mod tree_view;
 mod viewer;
 pub(crate) use self::assoc::assoc_editor_shortcuts;
 use self::assoc::{
-    render_action_palette, render_assoc_editor, render_lua_app_palette, render_opener,
+    render_action_palette, render_assoc_editor, render_opener,
 };
 pub(crate) use self::bookmarks::dir_bookmarks_shortcuts;
 use self::bookmarks::{
@@ -55,7 +55,7 @@ pub(crate) use self::plugins::plugins_shortcuts;
 use self::plugins::render_plugins;
 use crate::app::{
     ActionPaletteState, ActivePanel, App, AppMode, AssocEditorState, BookmarkListItem,
-    ComparePanelState, ConfigState, ConfirmAction, ConfirmDialog, InputDialog, LuaAppPaletteState,
+    ComparePanelState, ConfigState, ConfirmAction, ConfirmDialog, InputDialog,
     MENU_DATA, MENU_HEADERS, MenuAction, MenuState, OpenerState, PluginsState, RemoteConnectState,
     RemoteConnectingState, RemoteEditKind, RemoteEditState, SearchState, StoreInstallPaletteState,
     ViewerGotoState, ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,
@@ -305,7 +305,6 @@ pub fn render(f: &mut Frame, app: &App) {
         AppMode::Config(cs) => render_config(f, cs, f.area()),
         AppMode::Plugins(s) => render_plugins(f, s, f.area()),
         AppMode::ActionPalette(s) => render_action_palette(f, s, f.area()),
-        AppMode::LuaAppPalette(s) => render_lua_app_palette(f, s, f.area()),
         AppMode::CommandPalette(s) => render_command_palette(f, app, s, f.area()),
         AppMode::StoreInstallPalette(s) => render_store_install_palette(f, s, f.area()),
         AppMode::Opener(s) => {

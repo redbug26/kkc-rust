@@ -391,14 +391,6 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
         action: MenuAction::NewTab,
     },
     PaletteEntry {
-        category: "Tools",
-        label: "Run Lua app",
-        shortname: "LuaApp",
-        shortcut: None,
-        fn_name: "run_lua_app",
-        action: MenuAction::RunLuaApp,
-    },
-    PaletteEntry {
         category: "Tabs",
         label: "Close tab",
         shortname: "CloseTab",
@@ -595,7 +587,10 @@ fn entry_matches(e: &PaletteEntry, q: &str) -> bool {
 }
 
 fn lua_app_entry_matches(info: &LuaAppInfo, q: &str) -> bool {
-    format!("apps {} lua_app_{} {}", info.name, info.id, info.description)
+    format!(
+        "apps {} {} lua_app_{} {}",
+        info.name, info.version, info.id, info.description
+    )
         .to_lowercase()
         .contains(q)
 }
@@ -662,20 +657,41 @@ impl CommandPaletteState {
             return result;
         }
 
-        // Build a set for fast membership tests.
-        let recent_set: std::collections::HashSet<usize> = recent_valid.iter().copied().collect();
+        let index_matches = |idx: usize| {
+            if idx < lua_base {
+                entry_matches(&PALETTE_DATA[idx], &q)
+            } else {
+                self.lua_apps
+                    .get(idx - lua_base)
+                    .is_some_and(|info| lua_app_entry_matches(info, &q))
+            }
+        };
 
         let recent_items: Vec<usize> = recent_valid
             .iter()
             .copied()
-            .filter(|&i| q.is_empty() || entry_matches(&PALETTE_DATA[i], &q))
+            .filter(|&i| q.is_empty() || index_matches(i))
+            .collect();
+
+        // Only static command indices are relevant for PALETTE_DATA filtering.
+        let recent_static_set: std::collections::HashSet<usize> = recent_valid
+            .iter()
+            .copied()
+            .filter(|&i| i < lua_base)
             .collect();
 
         let rest_items: Vec<usize> = PALETTE_DATA
             .iter()
             .enumerate()
-            .filter(|(i, e)| !recent_set.contains(i) && (q.is_empty() || entry_matches(e, &q)))
+            .filter(|(i, e)| !recent_static_set.contains(i) && (q.is_empty() || entry_matches(e, &q)))
             .map(|(i, _)| i)
+            .collect();
+
+        // Avoid duplicating Lua recents in the lower Lua section.
+        let recent_set: std::collections::HashSet<usize> = recent_valid.iter().copied().collect();
+        let lua_tail: Vec<usize> = lua_matching
+            .into_iter()
+            .filter(|idx| !recent_set.contains(idx))
             .collect();
 
         let mut result = Vec::new();
@@ -684,11 +700,11 @@ impl CommandPaletteState {
             result.push(PALETTE_SEP); // visual separator
         }
         result.extend_from_slice(&rest_items);
-        if !lua_matching.is_empty() {
-            if !result.iter().all(|&i| i == PALETTE_SEP) || !result.is_empty() {
+        if !lua_tail.is_empty() {
+            if !result.is_empty() {
                 result.push(PALETTE_SEP);
             }
-            result.extend_from_slice(&lua_matching);
+            result.extend_from_slice(&lua_tail);
         }
         result
     }

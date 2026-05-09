@@ -170,7 +170,8 @@ pub(super) fn handle_command_palette(app: &mut App, key: KeyEvent) -> Result<boo
                 app.palette_recent.retain(|x| x != &recent_token);
                 app.palette_recent.insert(0, recent_token);
                 app.palette_recent.truncate(5);
-                crate::lua_apps::launch_lua_application(&app_id, &[])?;
+                let panel_cwd = app.active_panel().path.clone();
+                crate::lua_apps::launch_lua_application_with_cwd(&app_id, &[], Some(&panel_cwd))?;
                 app.needs_full_redraw = true;
                 return Ok(false);
             }

@@ -18,13 +18,23 @@ local level = 1
 local game_over = false
 
 local piece_styles = {
-    I = "[]",
-    O = "##",
-    T = "<>",
-    S = "%%",
-    Z = "@@",
-    J = "{}",
-    L = "()",
+    I = "██",
+    O = "▓▓",
+    T = "▒▒",
+    S = "██",
+    Z = "▓▓",
+    J = "▒▒",
+    L = "██",
+}
+
+local piece_colors = {
+    I = 0x29B6F6,
+    O = 0xFFD54F,
+    T = 0xBA68C8,
+    S = 0x81C784,
+    Z = 0xEF5350,
+    J = 0x64B5F6,
+    L = 0xFFB74D,
 }
 
 local pieces = {
@@ -152,7 +162,7 @@ end
 local function lock_piece()
     for _, c in ipairs(piece_cells(active)) do
         if c.y >= 1 and c.y <= board_h and c.x >= 1 and c.x <= board_w then
-            board[c.y][c.x] = active.tile
+            board[c.y][c.x] = active.kind
         end
     end
 end
@@ -311,36 +321,37 @@ end
 function app.draw()
     local term_w, term_h = g.size()
     local play_w = board_w * 2
-    local total_w = play_w + 2 + 18
+    local total_w = play_w + 2 + 20
     local origin_x = math.max(2, math.floor((term_w - total_w) / 2))
     local origin_y = math.max(2, math.floor((term_h - 24) / 2))
-    local side_x = origin_x + play_w + 5
+    local side_x = origin_x + play_w + 4
 
     g.clear(" ")
     g.reset()
 
-    -- Draw borders in bright white
-    g.color(0xFFFFFF, 0x000000)
-    g.text(origin_x, origin_y, "/====================\\")
+    -- Arena frame (Unicode box drawing)
+    g.color(0xE0E0E0, 0x000000)
+    g.text(origin_x, origin_y, "╔════════════════════╗")
     for y = 1, board_h do
-        g.text(origin_x, origin_y + y, "|                    |")
+        g.text(origin_x, origin_y + y, "║                    ║")
     end
-    g.text(origin_x, origin_y + board_h + 1, "\\====================/")
+    g.text(origin_x, origin_y + board_h + 1, "╚════════════════════╝")
 
-    -- Draw placed tiles in cyan
-    g.color(0x00FFFF, 0x000000)
+    -- Draw placed tiles per-piece color
     for y = 1, board_h do
         for x = 1, board_w do
-            local tile = board[y][x]
-            if tile ~= nil then
+            local kind = board[y][x]
+            if kind ~= nil then
                 local px = origin_x + 1 + (x - 1) * 2
+                g.color(piece_colors[kind] or 0x90CAF9, 0x000000)
+                local tile = piece_styles[kind] or "██"
                 g.text(px, origin_y + y, tile)
             end
         end
     end
 
-    -- Draw ghost piece in dim gray
-    g.color(0x444444, 0x000000)
+    -- Draw ghost piece in dim dots
+    g.color(0x505050, 0x000000)
     if active then
         local gy = ghost_y(active)
         for _, c in ipairs(piece_cells(active, active.rot, active.x, gy)) do
@@ -348,13 +359,13 @@ function app.draw()
                 local px = origin_x + 1 + (c.x - 1) * 2
                 local py = origin_y + c.y
                 if board[c.y][c.x] == nil then
-                    g.text(px, py, "::")
+                    g.text(px, py, "··")
                 end
             end
         end
 
-        -- Draw active piece in lime green
-        g.color(0x00FF00, 0x000000)
+        -- Draw active piece with its own color
+        g.color(piece_colors[active.kind] or 0x00FF00, 0x000000)
         for _, c in ipairs(piece_cells(active)) do
             if c.y >= 1 and c.y <= board_h then
                 local px = origin_x + 1 + (c.x - 1) * 2
@@ -364,27 +375,26 @@ function app.draw()
         end
     end
 
-    -- Side panel in bright white
-    g.color(0xFFFFFF, 0x000000)
-    g.text(side_x, origin_y + 1, "+--------------+")
-    g.text(side_x, origin_y + 3, "+--------------+")
+    -- Side panel title (UTF-8, terminal-width safe)
+    g.color(0xFFE082, 0x000000)
+    g.text(side_x, origin_y + 1, "╭────────────────╮")
+    g.text(side_x, origin_y + 2, "│     TETRIS     │")
+    g.text(side_x, origin_y + 3, "╰────────────────╯")
 
-    -- Title in bright yellow
-    g.color(0xFFFF00, 0x000000)
-    g.text(side_x, origin_y + 2, "|    TETRIS    |")
+    -- Stats
+    g.color(0xFFF176, 0x000000)
+    g.text(side_x, origin_y + 5, "★ Score " .. tostring(score))
+    g.text(side_x, origin_y + 6, "■ Lines " .. tostring(lines_cleared))
+    g.text(side_x, origin_y + 7, "▲ Level " .. tostring(level))
 
-    -- Stats in bright yellow
-    g.text(side_x, origin_y + 5, "Score: " .. tostring(score))
-    g.text(side_x, origin_y + 6, "Lines: " .. tostring(lines_cleared))
-    g.text(side_x, origin_y + 7, "Level: " .. tostring(level))
+    -- Next piece preview
+    g.color(0xB0BEC5, 0x000000)
+    g.text(side_x, origin_y + 9, "Next piece")
+    g.text(side_x, origin_y + 10, "╭──────────╮")
+    g.text(side_x, origin_y + 14, "╰──────────╯")
 
-    -- Next piece label in white
-    g.color(0xFFFFFF, 0x000000)
-    g.text(side_x, origin_y + 9, "Next:")
-
-    -- Next piece in cyan
-    g.color(0x00FFFF, 0x000000)
     if next_piece then
+        g.color(piece_colors[next_piece.kind] or 0x4DD0E1, 0x000000)
         for _, c in ipairs(piece_cells(next_piece, 1, 0, 0)) do
             local px = side_x + 2 + c.x * 2
             local py = origin_y + 10 + c.y
@@ -392,21 +402,21 @@ function app.draw()
         end
     end
 
-    -- Instructions in bright cyan
-    g.color(0x00FFFF, 0x000000)
-    g.text(side_x, origin_y + 16, "Left/Right move")
-    g.text(side_x, origin_y + 17, "Up rotate")
-    g.text(side_x, origin_y + 18, "Down soft drop")
-    g.text(side_x, origin_y + 19, "Space hard drop")
-    g.text(side_x, origin_y + 20, "Esc quit")
+    -- Controls
+    g.color(0x80DEEA, 0x000000)
+    g.text(side_x, origin_y + 16, "← → Move")
+    g.text(side_x, origin_y + 17, "↑ Rotate")
+    g.text(side_x, origin_y + 18, "↓ Soft drop")
+    g.text(side_x, origin_y + 19, "Space Hard drop")
+    g.text(side_x, origin_y + 20, "Esc Quit")
 
-    -- Game over message in bright magenta on black background
+    -- Game over banner
     if game_over then
-        g.color(0xFF00FF, 0x000000)
-        g.text(origin_x + 2, origin_y + 10, "##################")
-        g.text(origin_x + 2, origin_y + 11, "#   GAME OVER!   #")
-        g.text(origin_x + 2, origin_y + 12, "##################")
-        g.text(origin_x + 1, origin_y + 14, "Press R to restart")
+        g.color(0xF06292, 0x000000)
+        g.text(origin_x + 2, origin_y + 10, "╔══════════════════╗")
+        g.text(origin_x + 2, origin_y + 11, "║    GAME OVER     ║")
+        g.text(origin_x + 2, origin_y + 12, "╚══════════════════╝")
+        g.text(origin_x + 2, origin_y + 14, "Press R to restart")
     end
 
     g.reset()

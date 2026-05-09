@@ -487,11 +487,6 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
                 )),
             }
         }
-        MenuAction::RunLuaApp => match crate::app::LuaAppPaletteState::load() {
-            Ok(state) if state.items.is_empty() => app.notify("No Lua app installed"),
-            Ok(state) => app.mode = AppMode::LuaAppPalette(state),
-            Err(e) => app.notify(format!("Cannot list Lua apps: {}", e)),
-        },
         MenuAction::RemoteConnect => {
             app.open_remote_connect();
         }
