@@ -6,6 +6,8 @@ KKC loads Lua plugins at startup. Plugins can add:
 - viewer extensions, selected from FileID mime types, to improve the internal viewer display;
 - context actions, queried with `Ctrl-A` from the active panel directory.
 
+For interactive Lua terminal apps (games/tools), see `docs/lua-applications.md`.
+
 User plugins are installed in the `data_dir()/plugins` directory from the `ProjectDirs` crate.
 From KKC, this directory is available through `Options > Plugins > Open Dir`.
 

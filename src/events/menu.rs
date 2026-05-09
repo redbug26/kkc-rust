@@ -215,8 +215,10 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
             app.mode = AppMode::Menu(ms);
         }
         MenuAction::OpenCommandPalette => {
+            let lua_apps = crate::lua_apps::list_installed_apps().unwrap_or_default();
             app.mode = AppMode::CommandPalette(crate::app::CommandPaletteState {
                 recent: app.palette_recent.clone(),
+                lua_apps,
                 ..Default::default()
             });
         }
@@ -485,6 +487,11 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
                 )),
             }
         }
+        MenuAction::RunLuaApp => match crate::app::LuaAppPaletteState::load() {
+            Ok(state) if state.items.is_empty() => app.notify("No Lua app installed"),
+            Ok(state) => app.mode = AppMode::LuaAppPalette(state),
+            Err(e) => app.notify(format!("Cannot list Lua apps: {}", e)),
+        },
         MenuAction::RemoteConnect => {
             app.open_remote_connect();
         }

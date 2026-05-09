@@ -13,6 +13,7 @@ mod file_types;
 mod gif_recorder;
 mod help;
 mod idf;
+mod lua_apps;
 mod matrix_screensaver;
 mod panel;
 mod plugins;
@@ -511,6 +512,12 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
                     }
                 }
                 Ok(false) => {
+                    // A Lua app draws directly on the main terminal; force a full repaint
+                    // so KKC's Ratatui buffer diff sees all cells as changed.
+                    if app.needs_full_redraw {
+                        app.needs_full_redraw = false;
+                        terminal.clear()?;
+                    }
                     if !transitions_enabled(&app) {
                         continue;
                     }

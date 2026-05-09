@@ -1,0 +1,9 @@
+[app]
+id = "calendar"
+name = "Calendar"
+version = "0.1.0"
+description = "Terminal monthly calendar"
+main = "app.lua"
+fps = 15
+width = 28
+height = 20

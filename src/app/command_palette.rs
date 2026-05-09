@@ -4,6 +4,7 @@
 use super::App;
 use super::menu::MenuAction;
 use crate::config::ShortcutOverride;
+use crate::lua_apps::LuaAppInfo;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::HashSet;
 
@@ -390,6 +391,14 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
         action: MenuAction::NewTab,
     },
     PaletteEntry {
+        category: "Tools",
+        label: "Run Lua app",
+        shortname: "LuaApp",
+        shortcut: None,
+        fn_name: "run_lua_app",
+        action: MenuAction::RunLuaApp,
+    },
+    PaletteEntry {
         category: "Tabs",
         label: "Close tab",
         shortname: "CloseTab",
@@ -492,6 +501,9 @@ pub struct CommandPaletteState {
     /// Snapshot of recently-used commands (fn_name values), most-recent first.
     /// Populated from `App::palette_recent` when the palette is opened.
     pub recent: Vec<String>,
+    /// Dynamic Lua app entries appended after the static PALETTE_DATA.
+    /// Indices into this vec are encoded as `PALETTE_DATA.len() + lua_app_idx`.
+    pub lua_apps: Vec<LuaAppInfo>,
 }
 
 /// Sentinel value used in `filtered_indices()` to represent the visual separator between
@@ -582,6 +594,12 @@ fn entry_matches(e: &PaletteEntry, q: &str) -> bool {
     .contains(q)
 }
 
+fn lua_app_entry_matches(info: &LuaAppInfo, q: &str) -> bool {
+    format!("apps {} lua_app_{} {}", info.name, info.id, info.description)
+        .to_lowercase()
+        .contains(q)
+}
+
 impl CommandPaletteState {
     /// Returns indices into PALETTE_DATA that match the current query.
     ///
@@ -592,12 +610,18 @@ impl CommandPaletteState {
         let q = self.query.trim().to_lowercase();
 
         // Resolve persisted fn_name entries to palette indices.
-        // Also accept legacy numeric strings from older configs.
+        // Also accept legacy numeric strings and "lua_app:<id>" tokens from older configs.
+        let lua_base = PALETTE_DATA.len();
         let mut recent_seen = std::collections::HashSet::new();
         let recent_valid: Vec<usize> = self
             .recent
             .iter()
             .filter_map(|name| {
+                // "lua_app:<id>" token → encoded index into lua_apps
+                if let Some(id) = name.strip_prefix("lua_app:") {
+                    let idx = self.lua_apps.iter().position(|info| info.id == id)?;
+                    return Some(lua_base + idx);
+                }
                 if let Ok(i) = name.parse::<usize>() {
                     if i < PALETTE_DATA.len() {
                         return Some(i);
@@ -608,17 +632,34 @@ impl CommandPaletteState {
             .filter(|i| recent_seen.insert(*i))
             .collect();
 
+        // Lua app indices: PALETTE_DATA.len() + lua_app_idx
+        let lua_matching: Vec<usize> = self
+            .lua_apps
+            .iter()
+            .enumerate()
+            .filter(|(_, info)| q.is_empty() || lua_app_entry_matches(info, &q))
+            .map(|(i, _)| lua_base + i)
+            .collect();
+
         if recent_valid.is_empty() {
             // No recents — original behaviour.
-            if q.is_empty() {
-                return (0..PALETTE_DATA.len()).collect();
+            let mut result: Vec<usize> = if q.is_empty() {
+                (0..PALETTE_DATA.len()).collect()
+            } else {
+                PALETTE_DATA
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, e)| entry_matches(e, &q))
+                    .map(|(i, _)| i)
+                    .collect()
+            };
+            if !lua_matching.is_empty() {
+                if !result.is_empty() {
+                    result.push(PALETTE_SEP);
+                }
+                result.extend_from_slice(&lua_matching);
             }
-            return PALETTE_DATA
-                .iter()
-                .enumerate()
-                .filter(|(_, e)| entry_matches(e, &q))
-                .map(|(i, _)| i)
-                .collect();
+            return result;
         }
 
         // Build a set for fast membership tests.
@@ -643,7 +684,24 @@ impl CommandPaletteState {
             result.push(PALETTE_SEP); // visual separator
         }
         result.extend_from_slice(&rest_items);
+        if !lua_matching.is_empty() {
+            if !result.iter().all(|&i| i == PALETTE_SEP) || !result.is_empty() {
+                result.push(PALETTE_SEP);
+            }
+            result.extend_from_slice(&lua_matching);
+        }
         result
+    }
+
+    /// Returns a Lua app info when the selected index encodes a Lua app.
+    pub fn selected_lua_app(&self) -> Option<&LuaAppInfo> {
+        let idx = self.selected_palette_index()?;
+        let lua_base = PALETTE_DATA.len();
+        if idx >= lua_base {
+            self.lua_apps.get(idx - lua_base)
+        } else {
+            None
+        }
     }
 
     pub fn selected_palette_index(&self) -> Option<usize> {
@@ -773,6 +831,10 @@ impl App {
     pub(crate) fn normalize_shortcut_overrides(&mut self) {
         let valid_names: HashSet<&str> = PALETTE_DATA.iter().map(|entry| entry.fn_name).collect();
         self.config.shortcut_overrides.retain(|item| {
+            // Always preserve Lua app shortcut entries (fn_name = "lua_app_<id>").
+            if item.fn_name.starts_with("lua_app_") {
+                return item.shortcut.is_some();
+            }
             if !valid_names.contains(item.fn_name.as_str()) {
                 return false;
             }
@@ -783,5 +845,18 @@ impl App {
                 .map(normalize_shortcut);
             item.shortcut != default
         });
+    }
+
+    /// Returns the app_id if `key` matches a shortcut override for a Lua app (`lua_app_<id>`).
+    pub fn lua_app_id_for_key(&self, key: crossterm::event::KeyEvent) -> Option<String> {
+        let shortcut = shortcut_from_key_event(key)?;
+        self.config
+            .shortcut_overrides
+            .iter()
+            .find(|item| {
+                item.fn_name.starts_with("lua_app_")
+                    && item.shortcut.as_deref() == Some(shortcut.as_str())
+            })
+            .and_then(|item| item.fn_name.strip_prefix("lua_app_").map(str::to_string))
     }
 }

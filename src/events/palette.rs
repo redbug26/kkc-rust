@@ -22,49 +22,52 @@ pub(super) fn handle_command_palette(app: &mut App, key: KeyEvent) -> Result<boo
     let fn_key = fx_shortcut(key);
 
     if state.capture {
+        // Determine the fn_name of the selected entry (static or Lua app).
+        let selected_fn_name = state
+            .selected_lua_app()
+            .map(|info| format!("lua_app_{}", info.id))
+            .or_else(|| {
+                state
+                    .selected_palette_index()
+                    .and_then(|idx| PALETTE_DATA.get(idx))
+                    .map(|e| e.fn_name.to_string())
+            });
+
         match key.code {
             KeyCode::Esc => {
                 state.capture = false;
             }
             KeyCode::Char('r') | KeyCode::Char('R') if key.modifiers.is_empty() => {
-                if let Some(entry) = state
-                    .selected_palette_index()
-                    .and_then(|idx| PALETTE_DATA.get(idx))
-                {
-                    app.reset_shortcut_for_fn(entry.fn_name);
+                if let Some(fn_name) = selected_fn_name {
+                    app.reset_shortcut_for_fn(&fn_name);
                     match app.save_config() {
-                        Ok(_) => app.set_status(format!("Shortcut reset: {}", entry.label)),
+                        Ok(_) => app.set_status(format!("Shortcut reset: {}", fn_name)),
                         Err(e) => app.set_status(format!("Save error: {}", e)),
                     }
                 }
                 state.capture = false;
             }
             KeyCode::Backspace | KeyCode::Delete => {
-                if let Some(entry) = state
-                    .selected_palette_index()
-                    .and_then(|idx| PALETTE_DATA.get(idx))
-                {
-                    app.set_shortcut_for_fn(entry.fn_name, None);
+                if let Some(fn_name) = selected_fn_name {
+                    app.set_shortcut_for_fn(&fn_name, None);
                     match app.save_config() {
-                        Ok(_) => app.set_status(format!("Shortcut removed: {}", entry.label)),
+                        Ok(_) => app.set_status(format!("Shortcut removed: {}", fn_name)),
                         Err(e) => app.set_status(format!("Save error: {}", e)),
                     }
                 }
                 state.capture = false;
             }
             _ => {
-                if let Some(shortcut) = shortcut_from_key_event(key)
-                    && let Some(entry) = state
-                        .selected_palette_index()
-                        .and_then(|idx| PALETTE_DATA.get(idx))
-                {
-                    app.set_shortcut_for_fn(entry.fn_name, Some(shortcut.clone()));
-                    match app.save_config() {
-                        Ok(_) => app
-                            .set_status(format!("Shortcut saved: {} -> {}", entry.label, shortcut)),
-                        Err(e) => app.set_status(format!("Save error: {}", e)),
+                if let Some(shortcut) = shortcut_from_key_event(key) {
+                    if let Some(fn_name) = selected_fn_name {
+                        app.set_shortcut_for_fn(&fn_name, Some(shortcut.clone()));
+                        match app.save_config() {
+                            Ok(_) => app
+                                .set_status(format!("Shortcut saved: {} -> {}", fn_name, shortcut)),
+                            Err(e) => app.set_status(format!("Save error: {}", e)),
+                        }
+                        state.capture = false;
                     }
-                    state.capture = false;
                 }
             }
         }
@@ -137,17 +140,40 @@ pub(super) fn handle_command_palette(app: &mut App, key: KeyEvent) -> Result<boo
         }
         KeyCode::Enter => {
             let data_idx = state.selected_palette_index();
-            let action = data_idx.and_then(|i| PALETTE_DATA.get(i).map(|e| e.action));
+
+            // Check if the selected entry is a Lua app (encoded index >= PALETTE_DATA.len()).
+            let lua_app_id = state.selected_lua_app().map(|info| info.id.clone());
+
+            let action = data_idx.and_then(|i| {
+                if i < PALETTE_DATA.len() {
+                    PALETTE_DATA.get(i).map(|e| e.action)
+                } else {
+                    None
+                }
+            });
 
             // Record in recents: deduplicate then prepend, cap at 5.
             if let Some(idx) = data_idx {
-                let fn_name = PALETTE_DATA[idx].fn_name.to_string();
-                app.palette_recent.retain(|x| x != &fn_name);
-                app.palette_recent.insert(0, fn_name);
-                app.palette_recent.truncate(5);
+                if idx < PALETTE_DATA.len() {
+                    let fn_name = PALETTE_DATA[idx].fn_name.to_string();
+                    app.palette_recent.retain(|x| x != &fn_name);
+                    app.palette_recent.insert(0, fn_name);
+                    app.palette_recent.truncate(5);
+                }
             }
 
             app.mode = AppMode::Browse;
+
+            if let Some(app_id) = lua_app_id {
+                // Record Lua app in recents with a distinct prefix.
+                let recent_token = format!("lua_app:{}", app_id);
+                app.palette_recent.retain(|x| x != &recent_token);
+                app.palette_recent.insert(0, recent_token);
+                app.palette_recent.truncate(5);
+                crate::lua_apps::launch_lua_application(&app_id, &[])?;
+                app.needs_full_redraw = true;
+                return Ok(false);
+            }
             if let Some(action) = action {
                 return execute_menu_action(app, action);
             }

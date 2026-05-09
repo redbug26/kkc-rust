@@ -1,0 +1,9 @@
+[app]
+id = "tetris"
+name = "Tetris"
+version = "0.1.0"
+description = "Terminal Tetris powered by KKC Lua app runtime"
+main = "app.lua"
+fps = 20
+width = 46
+height = 26

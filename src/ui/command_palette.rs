@@ -3,6 +3,8 @@
 use super::*;
 use crate::app::{App, CommandPaletteState, PALETTE_DATA, PALETTE_SEP};
 
+const LUA_APP_CATEGORY: &str = "Apps";
+
 // Accent colour for shortcuts and dim colour for fn_name.
 const CLR_SHORTCUT: Color = Color::Rgb(100, 195, 220);
 const CLR_SHORTCUT_CHANGED: Color = Color::Rgb(255, 196, 92);
@@ -205,7 +207,39 @@ pub(super) fn render_command_palette(
         let selected = vis_idx == s.match_pos;
         // An entry is "recent" when it appears before the separator.
         let is_recent = sep_pos.map_or(false, |sp| vis_idx < sp);
-        let entry = &PALETTE_DATA[cmd_idx];
+
+        // ── Determine if this is a static or dynamic (Lua app) entry ─────
+        let lua_base = PALETTE_DATA.len();
+        let is_lua = cmd_idx >= lua_base;
+
+        let (cat_text, label_text, fn_text, shortcut_str) = if is_lua {
+            let info = &s.lua_apps[cmd_idx - lua_base];
+            let fn_name = format!("lua_app_{}", info.id);
+            let fn_display = format!(" (lua_app_{})", info.id);
+            let shortcut = app
+                .effective_shortcut_for(&fn_name, None)
+                .unwrap_or_default();
+            let shortcut_fmt = format!("{:>width$}", shortcut, width = SHORT_W);
+            (
+                LUA_APP_CATEGORY,
+                info.name.as_str(),
+                fn_display,
+                shortcut_fmt,
+            )
+        } else {
+            let entry = &PALETTE_DATA[cmd_idx];
+            let shortcut = app
+                .effective_shortcut_for(entry.fn_name, entry.shortcut)
+                .unwrap_or_default();
+            let default_shortcut = entry
+                .shortcut
+                .map(crate::app::normalize_shortcut)
+                .unwrap_or_default();
+            let shortcut_changed = shortcut != default_shortcut;
+            let _ = shortcut_changed; // used below
+            let shortcut_fmt = format!("{:>width$}", shortcut, width = SHORT_W);
+            (entry.category, entry.label, format!(" ({})", entry.fn_name), shortcut_fmt)
+        };
 
         let (row_bg, label_fg, cat_fg, fn_fg, short_fg, marker_fg) = if selected {
             (
@@ -236,10 +270,7 @@ pub(super) fn render_command_palette(
             ("  ", marker_fg)
         };
 
-        let cat_text = entry.category;
         let slash = "/";
-        let label_text = entry.label;
-        let fn_text = format!(" ({})", entry.fn_name);
 
         let fixed_prefix = cat_text.len() + slash.len();
         let fixed_suffix = fn_text.len();
@@ -251,24 +282,24 @@ pub(super) fn render_command_palette(
         let used = fixed_prefix + label_shown.len() + fixed_suffix;
         let padding = " ".repeat(label_area_w.saturating_sub(used));
 
-        let shortcut = app
-            .effective_shortcut_for(entry.fn_name, entry.shortcut)
-            .unwrap_or_default();
-        let default_shortcut = entry
-            .shortcut
-            .map(crate::app::normalize_shortcut)
-            .unwrap_or_default();
-        let shortcut_changed = shortcut != default_shortcut;
-        let shortcut_str = format!("{:>width$}", shortcut, width = SHORT_W);
-        let fn_fg = if !selected && shortcut_changed {
-            CLR_SHORTCUT_CHANGED
+        // For Lua apps: no shortcut colour customization; for static: detect overrides.
+        let (fn_fg, shortcut_fg) = if !is_lua && !selected {
+            let entry = &PALETTE_DATA[cmd_idx];
+            let shortcut = app
+                .effective_shortcut_for(entry.fn_name, entry.shortcut)
+                .unwrap_or_default();
+            let default_shortcut = entry
+                .shortcut
+                .map(crate::app::normalize_shortcut)
+                .unwrap_or_default();
+            let changed = shortcut != default_shortcut;
+            if changed {
+                (CLR_SHORTCUT_CHANGED, CLR_SHORTCUT_CHANGED)
+            } else {
+                (fn_fg, short_fg)
+            }
         } else {
-            fn_fg
-        };
-        let shortcut_fg = if !selected && shortcut_changed {
-            CLR_SHORTCUT_CHANGED
-        } else {
-            short_fg
+            (fn_fg, short_fg)
         };
 
         let spans = vec![

@@ -1,0 +1,7 @@
+[app]
+id = "my_lua_app"
+name = "My Lua App"
+version = "0.1.0"
+description = "Starter template for KKC Lua applications"
+main = "src/app.lua"
+fps = 30

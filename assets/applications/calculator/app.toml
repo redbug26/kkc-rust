@@ -1,0 +1,9 @@
+[app]
+id = "calculator"
+name = "Calculator"
+version = "0.1.0"
+description = "Simple terminal calculator"
+main = "app.lua"
+fps = 20
+width = 37
+height = 24

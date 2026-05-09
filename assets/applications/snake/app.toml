@@ -1,0 +1,8 @@
+[app]
+id = "snake"
+name = "Snake"
+version = "1.0.0"
+description = "Classic Nokia-style Snake game"
+fps = 10
+width = 52
+height = 24

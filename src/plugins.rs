@@ -961,10 +961,13 @@ fn install_plugin_from_store_descriptor(
         }
     }
 
-    if !temp_dir.join("plugin.lua").is_file() && !is_native_rust_plugin_dir(&temp_dir)? {
+    if !temp_dir.join("plugin.lua").is_file()
+        && !is_native_rust_plugin_dir(&temp_dir)?
+        && !crate::lua_apps::is_lua_application_dir(&temp_dir)?
+    {
         let _ = fs::remove_dir_all(&temp_dir);
         bail!(
-            "Installed store plugin '{}' does not contain plugin.lua or a valid native plugin.toml (remote-rust/viewer-rust) at its root",
+            "Installed store plugin '{}' does not contain plugin.lua, a valid native plugin.toml (remote-rust/viewer-rust), or a valid Lua app (app.toml + app.lua) at its root",
             plugin_id
         );
     }
@@ -2417,14 +2420,18 @@ fn extract_plugin_bundle(path: &Path, plugins_dir: &Path) -> Result<PathBuf> {
         io::copy(&mut file, &mut out).with_context(|| format!("Extracting {}", file.name()))?;
     }
 
-    if !has_plugin_lua && !has_plugin_toml {
-        let _ = fs::remove_dir_all(&temp_dir);
-        bail!("Plugin bundle does not contain plugin.lua or plugin.toml at its root");
-    }
-    if !has_plugin_lua && !is_native_rust_plugin_dir(&temp_dir)? {
+    let has_lua_app = crate::lua_apps::is_lua_application_dir(&temp_dir)?;
+
+    if !has_plugin_lua && !has_plugin_toml && !has_lua_app {
         let _ = fs::remove_dir_all(&temp_dir);
         bail!(
-            "Plugin bundle contains plugin.toml but is not a valid native plugin (remote-rust/viewer-rust)"
+            "Plugin bundle does not contain plugin.lua, plugin.toml, or a Lua app (app.toml + app.lua) at its root"
+        );
+    }
+    if !has_plugin_lua && !is_native_rust_plugin_dir(&temp_dir)? && !has_lua_app {
+        let _ = fs::remove_dir_all(&temp_dir);
+        bail!(
+            "Plugin bundle contains plugin.toml but is not a valid native plugin (remote-rust/viewer-rust) or Lua app"
         );
     }
 

@@ -127,6 +127,8 @@ pub enum AppMode {
     Plugins(PluginsState),
     /// Context actions returned by Lua action plugins (Ctrl-A).
     ActionPalette(ActionPaletteState),
+    /// Dedicated launcher for installed Lua terminal applications.
+    LuaAppPalette(LuaAppPaletteState),
     /// Command palette (Ctrl-P) – searchable list of all menu commands.
     CommandPalette(CommandPaletteState),
     /// Store plugin install palette with searchable plugin list.
@@ -172,6 +174,13 @@ pub struct ActionPaletteState {
     pub actions: Vec<crate::plugins::ActionItem>,
     pub cwd: PathBuf,
     pub cursor: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct LuaAppPaletteState {
+    pub items: Vec<crate::lua_apps::LuaAppInfo>,
+    pub query: String,
+    pub match_pos: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -258,6 +267,103 @@ impl ActionPaletteState {
             actions: crate::plugins::action_items(&cwd),
             cwd,
             cursor: 0,
+        }
+    }
+}
+
+impl LuaAppPaletteState {
+    pub fn load() -> anyhow::Result<Self> {
+        Ok(Self {
+            items: crate::lua_apps::list_installed_apps()?,
+            query: String::new(),
+            match_pos: 0,
+        })
+    }
+
+    pub fn filtered_indices(&self) -> Vec<usize> {
+        if self.query.trim().is_empty() {
+            return (0..self.items.len()).collect();
+        }
+
+        let tokens = self
+            .query
+            .split_whitespace()
+            .map(|token| token.to_ascii_lowercase())
+            .filter(|token| !token.is_empty())
+            .collect::<Vec<_>>();
+        if tokens.is_empty() {
+            return (0..self.items.len()).collect();
+        }
+
+        let first = &tokens[0];
+        let rest = &tokens[1..];
+        let mut starts = Vec::new();
+        let mut contains = Vec::new();
+        for (idx, item) in self.items.iter().enumerate() {
+            let searchable = format!(
+                "{} {} {} {}",
+                item.name, item.id, item.version, item.description
+            )
+            .to_ascii_lowercase();
+            if !rest.iter().all(|token| searchable.contains(token)) {
+                continue;
+            }
+            if item.name.to_ascii_lowercase().starts_with(first)
+                || item.id.to_ascii_lowercase().starts_with(first)
+            {
+                starts.push(idx);
+            } else if searchable.contains(first) {
+                contains.push(idx);
+            }
+        }
+        starts.extend(contains);
+        starts
+    }
+
+    pub fn append_query(&mut self, ch: char) {
+        self.query.push(ch);
+        self.match_pos = 0;
+        self.clamp_match();
+    }
+
+    pub fn pop_query(&mut self) {
+        self.query.pop();
+        self.match_pos = 0;
+        self.clamp_match();
+    }
+
+    pub fn move_prev(&mut self) {
+        let len = self.filtered_indices().len();
+        if len == 0 {
+            self.match_pos = 0;
+        } else if self.match_pos == 0 {
+            self.match_pos = len - 1;
+        } else {
+            self.match_pos -= 1;
+        }
+    }
+
+    pub fn move_next(&mut self) {
+        let len = self.filtered_indices().len();
+        if len == 0 {
+            self.match_pos = 0;
+        } else {
+            self.match_pos = (self.match_pos + 1) % len;
+        }
+    }
+
+    pub fn selected_item(&self) -> Option<&crate::lua_apps::LuaAppInfo> {
+        self.filtered_indices()
+            .get(self.match_pos)
+            .and_then(|idx| self.items.get(*idx))
+    }
+
+    fn clamp_match(&mut self) {
+        let len = self.filtered_indices().len();
+        if len == 0 {
+            self.match_pos = 0;
+        } else {
+            self.match_pos = self.match_pos.min(len.saturating_sub(1));
         }
     }
 }
@@ -965,6 +1071,9 @@ pub struct App {
     pub quick_preview_forced_mode: Option<ViewMode>,
     /// Recently-used command palette entries (fn_name values), most-recent first.
     pub palette_recent: Vec<String>,
+    /// When true, the main loop calls terminal.clear() before the next draw to force
+    /// a full repaint (e.g. after a Lua app that drew directly on the main terminal).
+    pub needs_full_redraw: bool,
     /// Center-column buttons shown between the two panels.
     pub center_buttons: Vec<MenuAction>,
     /// Last command action executed via menu/palette/shortcuts.
@@ -1059,6 +1168,27 @@ impl App {
             }
         ));
 
+        let lua_apps_start = std::time::Instant::now();
+        let lua_app_status = crate::lua_apps::initialize()
+            .err()
+            .map(|err| format!("Lua app initialization failed: {err}"));
+        crate::viewer::debug_log(&format!(
+            "startup: lua app initialization completed in {:.3} ms{}",
+            lua_apps_start.elapsed().as_secs_f64() * 1000.0,
+            if lua_app_status.is_some() {
+                " with error"
+            } else {
+                ""
+            }
+        ));
+
+        let startup_status = match (plugin_status, lua_app_status) {
+            (Some(a), Some(b)) => Some(format!("{a}\n{b}")),
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            (None, None) => None,
+        };
+
         let palette_recent = config.palette_recent.clone();
         let restored_active_panel = match config.active_panel {
             ActivePanelSide::Left => ActivePanel::Left,
@@ -1075,7 +1205,7 @@ impl App {
             file_preview_info: false,
             file_id_active: false,
             file_id_scroll: 0,
-            mode: if let Some(msg) = plugin_status {
+            mode: if let Some(msg) = startup_status {
                 AppMode::Confirm(ConfirmDialog {
                     title: String::new(),
                     message: msg,
@@ -1111,6 +1241,7 @@ impl App {
             quick_preview_active: false,
             quick_preview_forced_mode: None,
             palette_recent,
+            needs_full_redraw: false,
             center_buttons: default_center_button_actions(),
             last_menu_action: None,
         };

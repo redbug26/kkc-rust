@@ -179,3 +179,12 @@ All Lua plugins must provide that manifest.
 ## Plugin development
 
 See [docs/plugins.md](docs/plugins.md) for the full Lua plugin API reference.
+
+## Lua applications
+
+KKC can run terminal Lua apps (games/tools) using the internal runtime.
+Use `Tools > Run Lua app` to browse and launch installed Lua apps.
+See [docs/lua-applications.md](docs/lua-applications.md) for manifests,
+runtime APIs (`kkc`, `kkc-graphics`, `kkc-key`), and launcher usage.
+The repository includes a creator starter template with lint CI in
+`assets/applications/template_lua_app`.

@@ -1,0 +1,9 @@
+[app]
+id = "ascii"
+name = "ASCII Table"
+version = "0.1.0"
+description = "ASCII chart explorer for terminal"
+main = "app.lua"
+fps = 15
+width = 79
+height = 24
