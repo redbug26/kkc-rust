@@ -1,0 +1,9 @@
+[app]
+id = "rockland"
+name = "Rockland"
+version = "0.1.0"
+description = "Boulder-dash style cave game for KKC"
+main = "app.lua"
+fps = 30
+width = 96
+height = 32

@@ -38,6 +38,10 @@ const BUNDLED_SNAKE_APP: &str = include_str!("../assets/applications/snake/app.l
 const BUNDLED_SNAKE_MANIFEST: &str = include_str!("../assets/applications/snake/app.toml");
 const BUNDLED_GIT_REPO_APP: &str = include_str!("../assets/applications/git_repo/app.lua");
 const BUNDLED_GIT_REPO_MANIFEST: &str = include_str!("../assets/applications/git_repo/app.toml");
+const BUNDLED_ROCKLAND_APP: &str = include_str!("../assets/applications/rockland/app.lua");
+const BUNDLED_ROCKLAND_MANIFEST: &str =
+    include_str!("../assets/applications/rockland/app.toml");
+const BUNDLED_ROCKLAND_LEVELS: &str = include_str!("../assets/applications/rockland/levels.lua");
 
 #[derive(Debug, Clone, Deserialize)]
 struct LuaAppManifest {
@@ -218,6 +222,14 @@ pub fn initialize() -> Result<()> {
         BUNDLED_GIT_REPO_APP,
         BUNDLED_GIT_REPO_MANIFEST,
     )?;
+    install_bundled_app(
+        &apps_dir,
+        "rockland",
+        BUNDLED_ROCKLAND_APP,
+        BUNDLED_ROCKLAND_MANIFEST,
+    )?;
+    let rockland_dir = apps_dir.join("rockland");
+    write_if_changed(&rockland_dir.join("levels.lua"), BUNDLED_ROCKLAND_LEVELS)?;
     Ok(())
 }
 
