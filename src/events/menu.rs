@@ -15,9 +15,10 @@ fn materialize_compare_path(
     side: &str,
 ) -> Result<(std::path::PathBuf, bool)> {
     if let Some(profile) = remote_profile {
-        let downloaded = app.run_with_busy(&format!("Remote: downloading {side} file..."), |_| {
-            crate::remote::download_to_temp(&profile, &entry.path.to_string_lossy(), false)
-        })?;
+        let downloaded = app
+            .run_with_busy(&format!("Remote: downloading {side} file..."), |_| {
+                crate::remote::download_to_temp(&profile, &entry.path.to_string_lossy(), false)
+            })?;
         Ok((downloaded, true))
     } else {
         Ok((entry.path, false))

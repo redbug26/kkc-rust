@@ -1,0 +1,6 @@
+[plugin]
+name = "lha_lzh"
+version = "1.0.0"
+type = "archive"
+description = "Pure Lua LHA/LZH archive plugin"
+mime_types = ["application/x-lzh-compressed"]

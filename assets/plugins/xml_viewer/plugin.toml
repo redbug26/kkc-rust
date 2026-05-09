@@ -1,0 +1,6 @@
+[plugin]
+name = "xml_viewer"
+version = "1.0.0"
+type = "viewer"
+description = "Structured XML document viewer"
+mime_types = ["application/xml", "text/xml", "application/rss+xml", "application/atom+xml", "application/x-plist", "image/svg+xml"]

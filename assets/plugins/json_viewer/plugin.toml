@@ -1,0 +1,6 @@
+[plugin]
+name = "json_viewer"
+version = "1.0.0"
+type = "viewer"
+description = "Pretty and tree JSON viewer"
+mime_types = ["application/json"]

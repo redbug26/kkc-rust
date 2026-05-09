@@ -2028,6 +2028,7 @@ impl App {
                     installed_only: false,
                     query: String::new(),
                     match_pos: 0,
+                    scroll_offset: std::cell::Cell::new(0),
                     progress: None,
                     detect: None,
                 },

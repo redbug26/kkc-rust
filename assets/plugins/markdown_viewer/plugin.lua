@@ -199,7 +199,7 @@ local function parse_inline(text, base_fg, base_bold)
             { code_start, code_end, "code", code_text },
             { link_start, link_end, "link", link_text, link_url },
             { bold_start, bold_end, "bold", bold_text },
-            { em_start, em_end, "em", em_text },
+            { em_start,   em_end,   "em",   em_text },
         }) do
             if item[1] and (not best_start or item[1] < best_start) then
                 best_start, best_end, kind, a, b = item[1], item[2], item[3], item[4], item[5]
@@ -374,7 +374,8 @@ local function render_markdown(path, mode, state, width)
                 append_prefixed(out, string.rep(" ", math.floor(#indent / 2) * 2) .. "• ", text, "white", false, width)
             elseif line_text:match("^%s*%d+[.)]%s+") then
                 local indent, num, text = line_text:match("^(%s*)(%d+)[.)]%s+(.+)$")
-                append_prefixed(out, string.rep(" ", math.floor(#indent / 2) * 2) .. num .. ". ", text, "white", false, width)
+                append_prefixed(out, string.rep(" ", math.floor(#indent / 2) * 2) .. num .. ". ", text, "white", false,
+                    width)
             elseif line_text:find("|", 1, true)
                 and source_lines[idx + 1]
                 and is_table_separator(source_lines[idx + 1]) then
@@ -401,10 +402,6 @@ local function render_markdown(path, mode, state, width)
 end
 
 kkc.register_viewer_plugin({
-    name = "markdown_viewer",
-    version = "1.0.0",
-    description = "Rendered Markdown viewer",
     modes = { "text" },
-    mime_types = { "text/markdown" },
     render = render_markdown,
 })

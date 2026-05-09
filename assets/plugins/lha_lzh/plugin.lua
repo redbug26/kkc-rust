@@ -289,10 +289,6 @@ local function extract_lha_lzh(path, destination)
 end
 
 kkc.register_archive_plugin({
-    name = "lha_lzh",
-    version = "1.0.0",
-    description = "Pure Lua LHA/LZH archive plugin",
-    mime_types = { "application/x-lzh-compressed" },
     can_handle = function(path)
         local lower = path:lower()
         return lower:match("%.lha$") ~= nil or lower:match("%.lzh$") ~= nil

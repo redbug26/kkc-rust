@@ -96,12 +96,8 @@ impl MatrixScreensaverState {
     }
 }
 
-fn matrix_char(seed: u64, frame: u64, col: usize, row: usize, dist: usize) -> char {
-    let mut x = seed
-        ^ frame.wrapping_mul(0x9E37_79B9_7F4A_7C15)
-        ^ ((col as u64) << 32)
-        ^ ((row as u64) << 16)
-        ^ (dist as u64).wrapping_mul(0xA24B_1CFD);
+fn matrix_char(seed: u64, col: usize, row: usize) -> char {
+    let mut x = seed ^ ((col as u64) << 32) ^ ((row as u64) << 16);
     x ^= x >> 33;
     x = x.wrapping_mul(0xff51afd7ed558ccd);
     x ^= x >> 33;
@@ -144,7 +140,7 @@ pub fn render(f: &mut Frame, state: &MatrixScreensaverState, area: Rect) {
             }
             let dist = (head - y) as usize;
             let row = y as usize;
-            let ch = matrix_char(state.seed, state.frame, col, row, dist);
+            let ch = matrix_char(state.seed, col, row);
 
             let style = if dist == 0 {
                 Style::default()
@@ -215,5 +211,32 @@ pub fn render(f: &mut Frame, state: &MatrixScreensaverState, area: Rect) {
             .alignment(Alignment::Center),
             hint_area,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn step_keeps_one_drop_per_column() {
+        let mut state = MatrixScreensaverState::new();
+
+        state.step(80, 24);
+        assert_eq!(state.drops.len(), 80);
+
+        state.step(20, 24);
+        assert_eq!(state.drops.len(), 20);
+
+        state.step(0, 24);
+        assert!(state.drops.is_empty());
+    }
+
+    #[test]
+    fn matrix_chars_are_stable_for_a_cell() {
+        let seed = 0xA5A5_5A5A_1337_C0DE;
+
+        assert_eq!(matrix_char(seed, 12, 8), matrix_char(seed, 12, 8));
+        assert_ne!(matrix_char(seed, 12, 8), matrix_char(seed, 13, 8));
     }
 }

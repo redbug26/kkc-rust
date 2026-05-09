@@ -1,0 +1,6 @@
+[plugin]
+name = "html_viewer"
+version = "2.0.0"
+type = "viewer"
+description = "Rendered HTML viewer - heading hierarchy, box tables, kbd, smart links"
+mime_types = ["text/html", "application/xhtml+xml"]

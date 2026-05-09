@@ -1,0 +1,6 @@
+[plugin]
+name = "markdown_viewer"
+version = "1.0.0"
+type = "viewer"
+description = "Rendered Markdown viewer"
+mime_types = ["text/markdown"]

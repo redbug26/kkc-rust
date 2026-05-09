@@ -528,11 +528,7 @@ local function handle_json_key(path, mode, key, state)
 end
 
 kkc.register_viewer_plugin({
-    name = "json_viewer",
-    version = "1.0.0",
-    description = "Pretty and tree JSON viewer",
     modes = { "text" },
-    mime_types = { "application/json" },
     render = render_json,
     handle_key = handle_json_key,
 })

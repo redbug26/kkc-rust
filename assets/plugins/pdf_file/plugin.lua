@@ -245,10 +245,6 @@ local function extract_pdf(path, destination)
 end
 
 kkc.register_archive_plugin({
-    name = "pdf_file",
-    version = "1.0.0",
-    description = "Pure Lua PDF file access plugin",
-    mime_types = { "application/pdf" },
     can_handle = function(path)
         return path:lower():match("%.pdf$") ~= nil
     end,

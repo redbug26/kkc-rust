@@ -119,9 +119,6 @@ local function highlight_line(line, language)
 end
 
 kkc.register_viewer_plugin({
-    name = "text_syntax",
-    version = "1.0.0",
-    description = "Syntax highlighting for text files",
     modes = { "text" },
     render_line = function(path, mode, line)
         if mode ~= "text" and mode ~= "ansi" then

@@ -202,9 +202,6 @@ local function extract_git_commits(path, destination)
 end
 
 kkc.register_archive_plugin({
-    name = "git_commits",
-    version = "1.0.0",
-    description = "Browse a .git directory as commit folders",
     extensions = { "git" },
     can_handle = function(path)
         return is_dot_git_dir(path)

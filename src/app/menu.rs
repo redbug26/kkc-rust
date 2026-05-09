@@ -159,6 +159,7 @@ pub struct StoreInstallPaletteState {
     pub installed_only: bool,
     pub query: String,
     pub match_pos: usize,
+    pub scroll_offset: std::cell::Cell<usize>,
     pub progress: Option<StoreInstallProgress>,
     pub detect: Option<StoreDetectState>,
 }
@@ -222,7 +223,11 @@ impl StoreInstallPaletteState {
         items.sort_by(|a, b| {
             item_kind_rank(a)
                 .cmp(&item_kind_rank(b))
-                .then_with(|| a.plugin_type.to_lowercase().cmp(&b.plugin_type.to_lowercase()))
+                .then_with(|| {
+                    a.plugin_type
+                        .to_lowercase()
+                        .cmp(&b.plugin_type.to_lowercase())
+                })
                 .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
                 .then_with(|| a.id.cmp(&b.id))
         });
@@ -237,6 +242,7 @@ impl StoreInstallPaletteState {
             installed_only: false,
             query: String::new(),
             match_pos: 0,
+            scroll_offset: std::cell::Cell::new(0),
             progress: None,
             detect: None,
         })
@@ -286,7 +292,10 @@ impl StoreInstallPaletteState {
         crate::plugins::store_plugin_install_dir_name(&item.id)
     }
 
-    pub fn plugin_install_dir_for(&self, item: &crate::plugins::StorePluginInfo) -> Option<PathBuf> {
+    pub fn plugin_install_dir_for(
+        &self,
+        item: &crate::plugins::StorePluginInfo,
+    ) -> Option<PathBuf> {
         if !matches!(item.item_kind, crate::plugins::StoreItemKind::Plugin) {
             return None;
         }
@@ -396,18 +405,21 @@ impl StoreInstallPaletteState {
     pub fn append_query(&mut self, ch: char) {
         self.query.push(ch);
         self.match_pos = 0;
+        self.scroll_offset.set(0);
         self.clamp_match();
     }
 
     pub fn toggle_installed_only(&mut self) {
         self.installed_only = !self.installed_only;
         self.match_pos = 0;
+        self.scroll_offset.set(0);
         self.clamp_match();
     }
 
     pub fn pop_query(&mut self) {
         self.query.pop();
         self.match_pos = 0;
+        self.scroll_offset.set(0);
         self.clamp_match();
     }
 

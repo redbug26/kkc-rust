@@ -1,0 +1,6 @@
+[plugin]
+name = "csv_viewer"
+version = "1.0.0"
+type = "viewer"
+description = "CSV file viewer with column alignment"
+mime_types = ["text/csv"]

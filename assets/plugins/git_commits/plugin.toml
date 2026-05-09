@@ -1,0 +1,5 @@
+[plugin]
+name = "Git Commits"
+version = "1.0.0"
+type = "archive"
+description = "Browse a .git directory as commit folders"

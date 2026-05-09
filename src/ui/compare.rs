@@ -54,14 +54,20 @@ pub(super) fn render_compare_panel(f: &mut Frame, state: &ComparePanelState, are
         Line::from(vec![
             Span::styled(" Left : ", Style::default().fg(Color::Rgb(120, 170, 230))),
             Span::styled(
-                truncate_path(&state.left_label, chunks[0].width.saturating_sub(10) as usize),
+                truncate_path(
+                    &state.left_label,
+                    chunks[0].width.saturating_sub(10) as usize,
+                ),
                 Style::default().fg(Color::Rgb(220, 225, 235)),
             ),
         ]),
         Line::from(vec![
             Span::styled(" Right: ", Style::default().fg(Color::Rgb(120, 170, 230))),
             Span::styled(
-                truncate_path(&state.right_label, chunks[0].width.saturating_sub(10) as usize),
+                truncate_path(
+                    &state.right_label,
+                    chunks[0].width.saturating_sub(10) as usize,
+                ),
                 Style::default().fg(Color::Rgb(220, 225, 235)),
             ),
             Span::raw("  "),
@@ -70,23 +76,25 @@ pub(super) fn render_compare_panel(f: &mut Frame, state: &ComparePanelState, are
                 Style::default().fg(Color::Rgb(150, 160, 180)),
             ),
         ]),
-        Line::from(vec![
-            Span::styled(
-                format!(
-                    " [D]iff only:{}  [W]hitespace:{}  [L]ine endings:{}  [/] search:{}{} ",
-                    if state.show_only_differences { "on" } else { "off" },
-                    if state.ignore_whitespace { "on" } else { "off" },
-                    if state.ignore_crlf { "on" } else { "off" },
-                    if state.search_query.is_empty() {
-                        "-"
-                    } else {
-                        state.search_query.as_str()
-                    },
-                    if state.search_active { "_" } else { "" }
-                ),
-                Style::default().fg(Color::Rgb(160, 170, 200)),
+        Line::from(vec![Span::styled(
+            format!(
+                " [D]iff only:{}  [W]hitespace:{}  [L]ine endings:{}  [/] search:{}{} ",
+                if state.show_only_differences {
+                    "on"
+                } else {
+                    "off"
+                },
+                if state.ignore_whitespace { "on" } else { "off" },
+                if state.ignore_crlf { "on" } else { "off" },
+                if state.search_query.is_empty() {
+                    "-"
+                } else {
+                    state.search_query.as_str()
+                },
+                if state.search_active { "_" } else { "" }
             ),
-        ]),
+            Style::default().fg(Color::Rgb(160, 170, 200)),
+        )]),
     ];
     safe_render_widget(
         f,
@@ -136,10 +144,7 @@ pub(super) fn render_compare_panel(f: &mut Frame, state: &ComparePanelState, are
 
     let items = if state.rows.is_empty() {
         vec![ListItem::new(Line::from(vec![Span::styled(
-            state
-                .message
-                .as_deref()
-                .unwrap_or("No differences"),
+            state.message.as_deref().unwrap_or("No differences"),
             Style::default().fg(Color::Rgb(150, 200, 150)),
         )]))]
     } else {
@@ -181,7 +186,10 @@ pub(super) fn render_compare_panel(f: &mut Frame, state: &ComparePanelState, are
                     Span::styled("  ", Style::default().bg(bg)),
                     Span::styled(
                         format!(" {marker} "),
-                        Style::default().fg(marker_color).bg(bg).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(marker_color)
+                            .bg(bg)
+                            .add_modifier(Modifier::BOLD),
                     ),
                     Span::styled("  ", Style::default().bg(bg)),
                     Span::styled(format!(" {right_no} "), Style::default().fg(fg).bg(bg)),

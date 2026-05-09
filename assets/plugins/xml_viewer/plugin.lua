@@ -436,7 +436,8 @@ local function render_xml(path, mode, state, width)
         span("  nodes: " .. tostring(stats.nodes), "gray"),
         span("  depth: " .. tostring(stats.depth), "gray"),
         preview and span("  preview", "yellow") or span("", "gray"),
-        truncated and span("  partial: " .. tostring(#data) .. "/" .. tostring(file_size) .. " bytes", "yellow") or span("", "gray"),
+        truncated and span("  partial: " .. tostring(#data) .. "/" .. tostring(file_size) .. " bytes", "yellow") or
+        span("", "gray"),
         span("  wrap: ", "gray"),
         span(wrap and "on" or "off", wrap and "lightgreen" or "yellow"),
         span("  [F2/w] wrap", "gray"),
@@ -484,11 +485,7 @@ local function handle_xml_key(_path, mode, key, state)
 end
 
 kkc.register_viewer_plugin({
-    name = "xml_viewer",
-    version = "1.0.0",
-    description = "Structured XML document viewer",
     modes = { "text" },
-    mime_types = { "application/xml", "text/xml", "application/rss+xml", "application/atom+xml", "application/x-plist", "image/svg+xml" },
     render = render_xml,
     handle_key = handle_xml_key,
 })

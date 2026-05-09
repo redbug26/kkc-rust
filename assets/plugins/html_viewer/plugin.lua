@@ -380,7 +380,7 @@ local function parse_html(input, width)
         heading = false,
         heading_level = 0,
         link = nil,
-        skip = 0,   -- depth counter: >0 means we are inside a SKIP_TAG block
+        skip = 0, -- depth counter: >0 means we are inside a SKIP_TAG block
     }
     local lists      = {}
     local pos        = 1
@@ -655,10 +655,6 @@ local function render_html(path, mode, state, width)
 end
 
 kkc.register_viewer_plugin({
-    name        = "html_viewer",
-    version     = "2.0.0",
-    description = "Rendered HTML viewer — heading hierarchy, box tables, kbd, smart links",
-    modes       = { "text" },
-    mime_types  = { "text/html", "application/xhtml+xml" },
-    render      = render_html,
+    modes  = { "text" },
+    render = render_html,
 })

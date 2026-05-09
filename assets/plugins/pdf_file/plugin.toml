@@ -1,0 +1,6 @@
+[plugin]
+name = "pdf_file"
+version = "1.0.0"
+type = "archive"
+description = "Pure Lua PDF file access plugin"
+mime_types = ["application/pdf"]

@@ -97,22 +97,14 @@ pub fn rebuild_compare_panel_state(state: &mut ComparePanelState) {
         (CompareBuffer::Binary(left), CompareBuffer::Binary(right)) => {
             rebuild_binary_rows(left, right, state.show_only_differences)
         }
-        (CompareBuffer::Text(_), CompareBuffer::Binary(right)) => {
-            rebuild_binary_message(
-                format!(
-                    "Right file is binary ({} bytes). Compare is only available for text files, or binary files with the same size.",
-                    right.len()
-                ),
-            )
-        }
-        (CompareBuffer::Binary(left), CompareBuffer::Text(_)) => {
-            rebuild_binary_message(
-                format!(
-                    "Left file is binary ({} bytes). Compare is only available for text files, or binary files with the same size.",
-                    left.len()
-                ),
-            )
-        }
+        (CompareBuffer::Text(_), CompareBuffer::Binary(right)) => rebuild_binary_message(format!(
+            "Right file is binary ({} bytes). Compare is only available for text files, or binary files with the same size.",
+            right.len()
+        )),
+        (CompareBuffer::Binary(left), CompareBuffer::Text(_)) => rebuild_binary_message(format!(
+            "Left file is binary ({} bytes). Compare is only available for text files, or binary files with the same size.",
+            left.len()
+        )),
     };
 
     state.summary = result.summary;
@@ -171,15 +163,17 @@ fn rebuild_binary_message(message: String) -> CompareBuildResult {
     }
 }
 
-fn rebuild_binary_rows(left: &[u8], right: &[u8], show_only_differences: bool) -> CompareBuildResult {
+fn rebuild_binary_rows(
+    left: &[u8],
+    right: &[u8],
+    show_only_differences: bool,
+) -> CompareBuildResult {
     if left.len() != right.len() {
-        return rebuild_binary_message(
-            format!(
-                "Both files are binary, but their sizes differ ({} vs {} bytes). Compare only shows binary content when sizes are identical.",
-                left.len(),
-                right.len()
-            ),
-        );
+        return rebuild_binary_message(format!(
+            "Both files are binary, but their sizes differ ({} vs {} bytes). Compare only shows binary content when sizes are identical.",
+            left.len(),
+            right.len()
+        ));
     }
 
     let mut rows = Vec::new();
@@ -401,7 +395,10 @@ fn compare_key(line: &str, ignore_whitespace: bool, ignore_crlf: bool) -> String
 }
 
 fn compare_lines(content: &str) -> Vec<String> {
-    content.split_terminator('\n').map(|line| line.to_string()).collect()
+    content
+        .split_terminator('\n')
+        .map(|line| line.to_string())
+        .collect()
 }
 
 #[cfg(test)]
@@ -432,11 +429,13 @@ mod tests {
         );
 
         assert!(state.rows.is_empty());
-        assert!(state
-            .message
-            .as_deref()
-            .unwrap_or_default()
-            .contains("sizes differ"));
+        assert!(
+            state
+                .message
+                .as_deref()
+                .unwrap_or_default()
+                .contains("sizes differ")
+        );
     }
 
     #[test]
@@ -456,7 +455,11 @@ mod tests {
 
     #[test]
     fn binary_detection_accepts_latin1_text() {
-        let text_bytes = b"4 to 4 music\n".iter().copied().chain([0xE9]).collect::<Vec<_>>();
+        let text_bytes = b"4 to 4 music\n"
+            .iter()
+            .copied()
+            .chain([0xE9])
+            .collect::<Vec<_>>();
         assert!(!is_probably_binary(&text_bytes));
     }
 

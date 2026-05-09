@@ -1,0 +1,6 @@
+[plugin]
+name = "eml_viewer"
+version = "1.0.0"
+type = "viewer"
+description = "Rendered EML/MIME message viewer"
+mime_types = ["message/rfc822", "application/mbox"]

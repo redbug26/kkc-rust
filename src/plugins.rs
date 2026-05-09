@@ -13,16 +13,31 @@ use std::sync::{OnceLock, RwLock};
 use zip::ZipArchive;
 
 const BUNDLED_PDF_FILE_PLUGIN: &str = include_str!("../assets/plugins/pdf_file/plugin.lua");
+const BUNDLED_PDF_FILE_MANIFEST: &str = include_str!("../assets/plugins/pdf_file/plugin.toml");
 const BUNDLED_HTML_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/html_viewer/plugin.lua");
+const BUNDLED_HTML_VIEWER_MANIFEST: &str =
+    include_str!("../assets/plugins/html_viewer/plugin.toml");
 const BUNDLED_EML_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/eml_viewer/plugin.lua");
+const BUNDLED_EML_VIEWER_MANIFEST: &str = include_str!("../assets/plugins/eml_viewer/plugin.toml");
 const BUNDLED_JSON_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/json_viewer/plugin.lua");
+const BUNDLED_JSON_VIEWER_MANIFEST: &str =
+    include_str!("../assets/plugins/json_viewer/plugin.toml");
 const BUNDLED_XML_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/xml_viewer/plugin.lua");
+const BUNDLED_XML_VIEWER_MANIFEST: &str = include_str!("../assets/plugins/xml_viewer/plugin.toml");
 const BUNDLED_CSV_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/csv_viewer/plugin.lua");
+const BUNDLED_CSV_VIEWER_MANIFEST: &str = include_str!("../assets/plugins/csv_viewer/plugin.toml");
 const BUNDLED_MARKDOWN_VIEWER_PLUGIN: &str =
     include_str!("../assets/plugins/markdown_viewer/plugin.lua");
+const BUNDLED_MARKDOWN_VIEWER_MANIFEST: &str =
+    include_str!("../assets/plugins/markdown_viewer/plugin.toml");
 const BUNDLED_TEXT_SYNTAX_PLUGIN: &str = include_str!("../assets/plugins/text_syntax/plugin.lua");
+const BUNDLED_TEXT_SYNTAX_MANIFEST: &str =
+    include_str!("../assets/plugins/text_syntax/plugin.toml");
 const BUNDLED_GIT_ACTION_PLUGIN: &str = include_str!("../assets/plugins/git_action/plugin.lua");
+const BUNDLED_GIT_ACTION_MANIFEST: &str = include_str!("../assets/plugins/git_action/plugin.toml");
 const BUNDLED_GIT_COMMITS_PLUGIN: &str = include_str!("../assets/plugins/git_commits/plugin.lua");
+const BUNDLED_GIT_COMMITS_MANIFEST: &str =
+    include_str!("../assets/plugins/git_commits/plugin.toml");
 const BUNDLED_PLUGIN_DIRS: &[&str] = &[
     "pdf_file",
     "html_viewer",
@@ -239,6 +254,19 @@ struct RegisteredActionPlugin {
     name: String,
     version: String,
     description: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct LuaPluginManifest {
+    plugin: LuaPluginManifestPlugin,
+}
+
+#[derive(Debug, Deserialize)]
+struct LuaPluginManifestPlugin {
+    name: Option<String>,
+    version: Option<String>,
+    description: Option<String>,
+    mime_types: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -1592,12 +1620,7 @@ pub fn uninstall_store_application(item: &StorePluginInfo) -> Result<()> {
                 bail!("Install method 'apt' is not available on PATH");
             }
             if !is_unix_root() && command_exists("sudo") {
-                run_install_command(
-                    &item.id,
-                    "sudo",
-                    &[cmd, "remove", "-y", package],
-                    &[],
-                )
+                run_install_command(&item.id, "sudo", &[cmd, "remove", "-y", package], &[])
             } else {
                 run_install_command(&item.id, cmd, &["remove", "-y", package], &[])
             }
@@ -1608,12 +1631,7 @@ pub fn uninstall_store_application(item: &StorePluginInfo) -> Result<()> {
                 .as_deref()
                 .ok_or_else(|| anyhow!("Dnf uninstall requires a package name"))?;
             if !is_unix_root() && command_exists("sudo") {
-                run_install_command(
-                    &item.id,
-                    "sudo",
-                    &["dnf", "remove", "-y", package],
-                    &[],
-                )
+                run_install_command(&item.id, "sudo", &["dnf", "remove", "-y", package], &[])
             } else {
                 run_install_command(&item.id, "dnf", &["remove", "-y", package], &[])
             }
@@ -1631,12 +1649,7 @@ pub fn uninstall_store_application(item: &StorePluginInfo) -> Result<()> {
                     &[],
                 )
             } else {
-                run_install_command(
-                    &item.id,
-                    "pacman",
-                    &["-R", "--noconfirm", package],
-                    &[],
-                )
+                run_install_command(&item.id, "pacman", &["-R", "--noconfirm", package], &[])
             }
         }
         "winget" => {
@@ -2248,26 +2261,32 @@ fn install_bundled_plugins(plugins_dir: &Path) -> Result<()> {
     let pdf_dir = plugins_dir.join("pdf_file");
     fs::create_dir_all(&pdf_dir)?;
     write_bundled_file(&pdf_dir.join("plugin.lua"), BUNDLED_PDF_FILE_PLUGIN)?;
+    write_bundled_file(&pdf_dir.join("plugin.toml"), BUNDLED_PDF_FILE_MANIFEST)?;
 
     let html_dir = plugins_dir.join("html_viewer");
     fs::create_dir_all(&html_dir)?;
     write_bundled_file(&html_dir.join("plugin.lua"), BUNDLED_HTML_VIEWER_PLUGIN)?;
+    write_bundled_file(&html_dir.join("plugin.toml"), BUNDLED_HTML_VIEWER_MANIFEST)?;
 
     let eml_dir = plugins_dir.join("eml_viewer");
     fs::create_dir_all(&eml_dir)?;
     write_bundled_file(&eml_dir.join("plugin.lua"), BUNDLED_EML_VIEWER_PLUGIN)?;
+    write_bundled_file(&eml_dir.join("plugin.toml"), BUNDLED_EML_VIEWER_MANIFEST)?;
 
     let json_dir = plugins_dir.join("json_viewer");
     fs::create_dir_all(&json_dir)?;
     write_bundled_file(&json_dir.join("plugin.lua"), BUNDLED_JSON_VIEWER_PLUGIN)?;
+    write_bundled_file(&json_dir.join("plugin.toml"), BUNDLED_JSON_VIEWER_MANIFEST)?;
 
     let xml_dir = plugins_dir.join("xml_viewer");
     fs::create_dir_all(&xml_dir)?;
     write_bundled_file(&xml_dir.join("plugin.lua"), BUNDLED_XML_VIEWER_PLUGIN)?;
+    write_bundled_file(&xml_dir.join("plugin.toml"), BUNDLED_XML_VIEWER_MANIFEST)?;
 
     let csv_dir = plugins_dir.join("csv_viewer");
     fs::create_dir_all(&csv_dir)?;
     write_bundled_file(&csv_dir.join("plugin.lua"), BUNDLED_CSV_VIEWER_PLUGIN)?;
+    write_bundled_file(&csv_dir.join("plugin.toml"), BUNDLED_CSV_VIEWER_MANIFEST)?;
 
     let markdown_dir = plugins_dir.join("markdown_viewer");
     fs::create_dir_all(&markdown_dir)?;
@@ -2275,10 +2294,18 @@ fn install_bundled_plugins(plugins_dir: &Path) -> Result<()> {
         &markdown_dir.join("plugin.lua"),
         BUNDLED_MARKDOWN_VIEWER_PLUGIN,
     )?;
+    write_bundled_file(
+        &markdown_dir.join("plugin.toml"),
+        BUNDLED_MARKDOWN_VIEWER_MANIFEST,
+    )?;
 
     let syntax_dir = plugins_dir.join("text_syntax");
     fs::create_dir_all(&syntax_dir)?;
     write_bundled_file(&syntax_dir.join("plugin.lua"), BUNDLED_TEXT_SYNTAX_PLUGIN)?;
+    write_bundled_file(
+        &syntax_dir.join("plugin.toml"),
+        BUNDLED_TEXT_SYNTAX_MANIFEST,
+    )?;
 
     let git_action_dir = plugins_dir.join("git_action");
     fs::create_dir_all(&git_action_dir)?;
@@ -2286,12 +2313,20 @@ fn install_bundled_plugins(plugins_dir: &Path) -> Result<()> {
         &git_action_dir.join("plugin.lua"),
         BUNDLED_GIT_ACTION_PLUGIN,
     )?;
+    write_bundled_file(
+        &git_action_dir.join("plugin.toml"),
+        BUNDLED_GIT_ACTION_MANIFEST,
+    )?;
 
     let git_commits_dir = plugins_dir.join("git_commits");
     fs::create_dir_all(&git_commits_dir)?;
     write_bundled_file(
         &git_commits_dir.join("plugin.lua"),
         BUNDLED_GIT_COMMITS_PLUGIN,
+    )?;
+    write_bundled_file(
+        &git_commits_dir.join("plugin.toml"),
+        BUNDLED_GIT_COMMITS_MANIFEST,
     )?;
 
     Ok(())
@@ -2623,7 +2658,13 @@ fn inspect_plugin(script_path: &Path) -> Result<Vec<RegisteredPlugin>> {
         .set_name(script_path.to_string_lossy())
         .exec()?;
 
-    Ok(registered.borrow().clone())
+    let mut plugins = registered.borrow().clone();
+    if let Some(manifest) = load_lua_plugin_manifest(script_path.parent().unwrap_or(Path::new("")))?
+    {
+        apply_lua_manifest_to_archive_plugins(&manifest, &mut plugins);
+    }
+
+    Ok(plugins)
 }
 
 fn inspect_plugins(
@@ -2655,11 +2696,116 @@ fn inspect_plugins(
         .set_name(script_path.to_string_lossy())
         .exec()?;
 
-    Ok((
-        registered_archives.borrow().clone(),
-        registered_viewers.borrow().clone(),
-        registered_actions.borrow().clone(),
-    ))
+    let manifest = load_lua_plugin_manifest(script_path.parent().unwrap_or(Path::new("")))?;
+    let mut archives = registered_archives.borrow().clone();
+    let mut viewers = registered_viewers.borrow().clone();
+    let mut actions = registered_actions.borrow().clone();
+    if let Some(manifest) = manifest.as_ref() {
+        apply_lua_manifest_to_archive_plugins(manifest, &mut archives);
+        apply_lua_manifest_to_viewer_plugins(manifest, &mut viewers);
+        apply_lua_manifest_to_action_plugins(manifest, &mut actions);
+    }
+
+    Ok((archives, viewers, actions))
+}
+
+fn load_lua_plugin_manifest(plugin_dir: &Path) -> Result<Option<LuaPluginManifestPlugin>> {
+    let manifest_path = plugin_dir.join("plugin.toml");
+    if !manifest_path.is_file() {
+        return Ok(None);
+    }
+    let text = fs::read_to_string(&manifest_path)
+        .with_context(|| format!("Reading {}", manifest_path.display()))?;
+    let manifest: LuaPluginManifest =
+        toml::from_str(&text).with_context(|| format!("Parsing {}", manifest_path.display()))?;
+    Ok(Some(manifest.plugin))
+}
+
+fn apply_lua_manifest_to_archive_plugins(
+    manifest: &LuaPluginManifestPlugin,
+    plugins: &mut [RegisteredPlugin],
+) {
+    for plugin in plugins {
+        if let Some(name) = manifest.name.as_deref().filter(|value| !value.is_empty()) {
+            plugin.name = name.to_string();
+        }
+        if let Some(version) = manifest
+            .version
+            .as_deref()
+            .filter(|value| !value.is_empty())
+        {
+            plugin.version = version.to_string();
+        }
+        if let Some(description) = manifest
+            .description
+            .as_deref()
+            .filter(|value| !value.is_empty())
+        {
+            plugin.description = description.to_string();
+        }
+        if let Some(mime_types) = manifest.mime_types.as_ref() {
+            plugin.mime_types = mime_types
+                .iter()
+                .map(|value| value.to_ascii_lowercase())
+                .collect();
+        }
+    }
+}
+
+fn apply_lua_manifest_to_viewer_plugins(
+    manifest: &LuaPluginManifestPlugin,
+    plugins: &mut [RegisteredViewerPlugin],
+) {
+    for plugin in plugins {
+        if let Some(name) = manifest.name.as_deref().filter(|value| !value.is_empty()) {
+            plugin.name = name.to_string();
+        }
+        if let Some(version) = manifest
+            .version
+            .as_deref()
+            .filter(|value| !value.is_empty())
+        {
+            plugin.version = version.to_string();
+        }
+        if let Some(description) = manifest
+            .description
+            .as_deref()
+            .filter(|value| !value.is_empty())
+        {
+            plugin.description = description.to_string();
+        }
+        if let Some(mime_types) = manifest.mime_types.as_ref() {
+            plugin.mime_types = mime_types
+                .iter()
+                .map(|value| value.to_ascii_lowercase())
+                .collect();
+        }
+    }
+}
+
+fn apply_lua_manifest_to_action_plugins(
+    manifest: &LuaPluginManifestPlugin,
+    plugins: &mut [RegisteredActionPlugin],
+) {
+    for plugin in plugins {
+        if let Some(name) = manifest.name.as_deref().filter(|value| !value.is_empty()) {
+            plugin.name = name.to_string();
+        }
+        if let Some(version) = manifest
+            .version
+            .as_deref()
+            .filter(|value| !value.is_empty())
+        {
+            plugin.version = version.to_string();
+        }
+        if let Some(description) = manifest
+            .description
+            .as_deref()
+            .filter(|value| !value.is_empty())
+        {
+            plugin.description = description.to_string();
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2677,7 +2823,13 @@ fn inspect_viewer_plugin(script_path: &Path) -> Result<Vec<RegisteredViewerPlugi
         .set_name(script_path.to_string_lossy())
         .exec()?;
 
-    Ok(registered.borrow().clone())
+    let mut plugins = registered.borrow().clone();
+    if let Some(manifest) = load_lua_plugin_manifest(script_path.parent().unwrap_or(Path::new("")))?
+    {
+        apply_lua_manifest_to_viewer_plugins(&manifest, &mut plugins);
+    }
+
+    Ok(plugins)
 }
 
 #[cfg(test)]
@@ -2726,15 +2878,19 @@ where
     kkc.set(
         "register_archive_plugin",
         lua.create_function(move |_, table: Table| {
-            let name: String = table.get("name")?;
-            let version: String = table.get("version").unwrap_or_else(|_| "0.0.0".into());
-            let description: String = table.get("description").unwrap_or_else(|_| String::new());
+            let name: String = table
+                .get::<Option<String>>("name")?
+                .unwrap_or_else(|| "plugin".to_string());
+            let version: String = table
+                .get::<Option<String>>("version")?
+                .unwrap_or_else(|| "0.0.0".to_string());
+            let description: String = table
+                .get::<Option<String>>("description")?
+                .unwrap_or_default();
             let extract: Option<Function> = table.get("extract")?;
             let add_files: Option<Function> = table.get("add_files").ok();
             if extract.is_none() {
-                return Err(mlua::Error::external(format!(
-                    "Plugin '{name}' does not define extract()"
-                )));
+                return Err(mlua::Error::external("Plugin does not define extract()"));
             }
 
             let mime_types = table_string_list(&table, "mime_types")?
@@ -2840,6 +2996,17 @@ fn table_string_list(table: &Table, key: &str) -> mlua::Result<Vec<String>> {
     match table.get::<Option<Table>>(key)? {
         Some(values) => values.sequence_values::<String>().collect(),
         None => Ok(Vec::new()),
+    }
+}
+
+fn runtime_plugin_name_matches(
+    table: &Table,
+    expected_name: &str,
+    single_registration: bool,
+) -> mlua::Result<bool> {
+    match table.get::<Option<String>>("name")? {
+        Some(name) => Ok(name == expected_name),
+        None => Ok(single_registration),
     }
 }
 
@@ -3227,10 +3394,10 @@ impl ArchivePlugin {
             .exec()?;
 
         let handles = handles.borrow();
+        let single_registration = handles.len() == 1;
         for key in handles.iter() {
             let table: Table = lua.registry_value(key)?;
-            let name: String = table.get("name")?;
-            if name == self.name {
+            if runtime_plugin_name_matches(&table, &self.name, single_registration)? {
                 let extract: Function = table.get("extract")?;
                 let ok: bool = extract.call((
                     path.to_string_lossy().into_owned(),
@@ -3266,10 +3433,10 @@ impl ArchivePlugin {
         }
 
         let handles = handles.borrow();
+        let single_registration = handles.len() == 1;
         for key in handles.iter() {
             let table: Table = lua.registry_value(key)?;
-            let name: String = table.get("name")?;
-            if name == self.name {
+            if runtime_plugin_name_matches(&table, &self.name, single_registration)? {
                 let add_files: Function = table.get("add_files")?;
                 let ok: bool =
                     add_files.call((path.to_string_lossy().into_owned(), source_table))?;
@@ -3314,10 +3481,10 @@ impl ViewerPlugin {
             .exec()?;
 
         let handles = handles.borrow();
+        let single_registration = handles.len() == 1;
         for key in handles.iter() {
             let table: Table = lua.registry_value(key)?;
-            let name: String = table.get("name")?;
-            if name == self.name {
+            if runtime_plugin_name_matches(&table, &self.name, single_registration)? {
                 let Some(render_line) = table.get::<Option<Function>>("render_line")? else {
                     return Ok(None);
                 };
@@ -3357,10 +3524,10 @@ impl ViewerPlugin {
 
         let state_table = lua_state_table(&lua, state)?;
         let handles = handles.borrow();
+        let single_registration = handles.len() == 1;
         for key in handles.iter() {
             let table: Table = lua.registry_value(key)?;
-            let name: String = table.get("name")?;
-            if name == self.name {
+            if runtime_plugin_name_matches(&table, &self.name, single_registration)? {
                 let Some(render) = table.get::<Option<Function>>("render")? else {
                     return Ok(None);
                 };
@@ -3405,10 +3572,10 @@ impl ViewerPlugin {
 
         let state_table = lua_state_table(&lua, state)?;
         let handles = handles.borrow();
+        let single_registration = handles.len() == 1;
         for reg_key in handles.iter() {
             let table: Table = lua.registry_value(reg_key)?;
-            let name: String = table.get("name")?;
-            if name == self.name {
+            if runtime_plugin_name_matches(&table, &self.name, single_registration)? {
                 let Some(handle_key_fn) = table.get::<Option<Function>>("handle_key")? else {
                     return Ok(None);
                 };
@@ -3692,15 +3859,21 @@ where
     kkc.set(
         "register_viewer_plugin",
         lua.create_function(move |_, table: Table| {
-            let name: String = table.get("name")?;
-            let version: String = table.get("version").unwrap_or_else(|_| "0.0.0".into());
-            let description: String = table.get("description").unwrap_or_else(|_| String::new());
+            let name: String = table
+                .get::<Option<String>>("name")?
+                .unwrap_or_else(|| "plugin".to_string());
+            let version: String = table
+                .get::<Option<String>>("version")?
+                .unwrap_or_else(|| "0.0.0".to_string());
+            let description: String = table
+                .get::<Option<String>>("description")?
+                .unwrap_or_default();
             let render_line: Option<Function> = table.get("render_line").ok();
             let render: Option<Function> = table.get("render").ok();
             if render_line.is_none() && render.is_none() {
-                return Err(mlua::Error::external(format!(
-                    "Viewer plugin '{name}' does not define render_line() or render()"
-                )));
+                return Err(mlua::Error::external(
+                    "Viewer plugin does not define render_line() or render()",
+                ));
             }
             let modes = match table.get::<Option<Table>>("modes")? {
                 Some(values) => values

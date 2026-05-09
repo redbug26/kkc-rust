@@ -1,0 +1,5 @@
+[plugin]
+name = "text_syntax"
+version = "1.0.0"
+type = "viewer"
+description = "Syntax highlighting for text files"

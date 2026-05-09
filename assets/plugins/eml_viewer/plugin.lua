@@ -7,15 +7,33 @@ for i = 1, #b64_chars do
 end
 
 local cp1252 = {
-    [0x80] = "\226\130\172", [0x82] = "\226\128\154", [0x83] = "\198\146",
-    [0x84] = "\226\128\158", [0x85] = "\226\128\166", [0x86] = "\226\128\160",
-    [0x87] = "\226\128\161", [0x88] = "\203\134", [0x89] = "\226\128\176",
-    [0x8a] = "\197\160", [0x8b] = "\226\128\185", [0x8c] = "\197\146",
-    [0x8e] = "\197\189", [0x91] = "\226\128\152", [0x92] = "\226\128\153",
-    [0x93] = "\226\128\156", [0x94] = "\226\128\157", [0x95] = "\226\128\162",
-    [0x96] = "\226\128\147", [0x97] = "\226\128\148", [0x98] = "\203\156",
-    [0x99] = "\226\132\162", [0x9a] = "\197\161", [0x9b] = "\226\128\186",
-    [0x9c] = "\197\147", [0x9e] = "\197\190", [0x9f] = "\197\184",
+    [0x80] = "\226\130\172",
+    [0x82] = "\226\128\154",
+    [0x83] = "\198\146",
+    [0x84] = "\226\128\158",
+    [0x85] = "\226\128\166",
+    [0x86] = "\226\128\160",
+    [0x87] = "\226\128\161",
+    [0x88] = "\203\134",
+    [0x89] = "\226\128\176",
+    [0x8a] = "\197\160",
+    [0x8b] = "\226\128\185",
+    [0x8c] = "\197\146",
+    [0x8e] = "\197\189",
+    [0x91] = "\226\128\152",
+    [0x92] = "\226\128\153",
+    [0x93] = "\226\128\156",
+    [0x94] = "\226\128\157",
+    [0x95] = "\226\128\162",
+    [0x96] = "\226\128\147",
+    [0x97] = "\226\128\148",
+    [0x98] = "\203\156",
+    [0x99] = "\226\132\162",
+    [0x9a] = "\197\161",
+    [0x9b] = "\226\128\186",
+    [0x9c] = "\197\147",
+    [0x9e] = "\197\190",
+    [0x9f] = "\197\184",
 }
 
 local function span(text, fg, bold)
@@ -50,7 +68,8 @@ local function decode_latin1(bytes)
         elseif b < 0xC0 then
             out[#out + 1] = string.char(0xC0 + math.floor(b / 0x40), 0x80 + (b % 0x40))
         else
-            out[#out + 1] = string.char(0xE0 + math.floor(b / 0x1000), 0x80 + (math.floor(b / 0x40) % 0x40), 0x80 + (b % 0x40))
+            out[#out + 1] = string.char(0xE0 + math.floor(b / 0x1000), 0x80 + (math.floor(b / 0x40) % 0x40),
+                0x80 + (b % 0x40))
         end
     end
     return table.concat(out)
@@ -300,10 +319,12 @@ local function render_eml(path, mode, state, width)
         end
     end
     if headers["content-type"] then
-        table.insert(out, line(span("Content-Type: ", "lightcyan", true), span(decode_rfc2047(headers["content-type"]), "white")))
+        table.insert(out,
+            line(span("Content-Type: ", "lightcyan", true), span(decode_rfc2047(headers["content-type"]), "white")))
     end
     if headers["content-transfer-encoding"] then
-        table.insert(out, line(span("Encoding: ", "lightcyan", true), span(headers["content-transfer-encoding"], "white")))
+        table.insert(out,
+            line(span("Encoding: ", "lightcyan", true), span(headers["content-transfer-encoding"], "white")))
     end
 
     local attachments = collect_attachments(headers, body)
@@ -331,10 +352,6 @@ local function render_eml(path, mode, state, width)
 end
 
 kkc.register_viewer_plugin({
-    name = "eml_viewer",
-    version = "1.0.0",
-    description = "Rendered EML/MIME message viewer",
     modes = { "text" },
-    mime_types = { "message/rfc822", "application/mbox" },
     render = render_eml,
 })

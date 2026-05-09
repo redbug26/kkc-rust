@@ -99,7 +99,7 @@ pub(crate) fn store_install_shortcuts(state: &StoreInstallPaletteState) -> Vec<F
             FooterShortcut {
                 label: "Ctrl+R:Refresh",
                 key: KeyCode::Char('r'),
-            }
+            },
         ]);
 
         shortcuts
@@ -1113,11 +1113,23 @@ pub(super) fn render_store_install_palette(
         .iter()
         .position(|row| matches!(row, StoreListRow::Item(pos) if *pos == state.match_pos))
         .unwrap_or(0);
-    let scroll = if rows.is_empty() || selected_display_row < list_h {
+
+    // "Keep in view" scroll: only scroll when cursor goes off-screen,
+    // preserving position otherwise (avoids the cursor-at-bottom-while-scrolling bug).
+    let current_scroll = state.scroll_offset.get();
+    let scroll = if rows.is_empty() || list_h == 0 {
         0
-    } else {
+    } else if selected_display_row < current_scroll {
+        // Cursor went above viewport — scroll up to show it at top.
+        selected_display_row
+    } else if selected_display_row >= current_scroll + list_h {
+        // Cursor went below viewport — scroll down to show it at bottom.
         selected_display_row.saturating_sub(list_h - 1)
+    } else {
+        // Cursor still visible — keep scroll but clamp to valid range.
+        current_scroll.min(rows.len().saturating_sub(list_h))
     };
+    state.scroll_offset.set(scroll);
 
     for (display_row, idx) in (scroll..).zip(0..list_h) {
         if display_row >= rows.len() {

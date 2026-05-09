@@ -55,9 +55,8 @@ use crate::app::{
     ActionPaletteState, ActivePanel, App, AppMode, AssocEditorState, BookmarkListItem,
     ComparePanelState, ConfigState, ConfirmAction, ConfirmDialog, InputDialog, MENU_DATA,
     MENU_HEADERS, MenuAction, MenuState, OpenerState, PluginsState, RemoteConnectState,
-    RemoteConnectingState, RemoteEditKind, RemoteEditState, SearchState,
-    StoreInstallPaletteState, ViewerGotoState, ViewerMenuKind, ViewerMenuState,
-    ViewerPluginPaletteState,
+    RemoteConnectingState, RemoteEditKind, RemoteEditState, SearchState, StoreInstallPaletteState,
+    ViewerGotoState, ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,
 };
 use crate::config::SortMode;
 use crate::copy::{CopyDialogState, CopyProgressState};

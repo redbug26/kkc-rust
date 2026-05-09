@@ -254,7 +254,7 @@ local function render_csv(path, mode, state, width)
 
     -- Read sort state (passed from previous handle_key calls)
     state          = state or {}
-    local sort_col = tonumber(state.sort_col) or 0  -- 0 = no sort
+    local sort_col = tonumber(state.sort_col) or 0 -- 0 = no sort
     local sort_dir = state.sort_dir or "asc"
     local wrap     = state.wrap ~= "0"
     local hscroll  = tonumber(state.hscroll) or 0
@@ -273,11 +273,11 @@ local function render_csv(path, mode, state, width)
         return { { span("(empty file)", "gray") } }
     end
 
-    first           = first:gsub("\r$", "")
-    local sep       = detect_separator(first)
-    local sep_label = sep == "\t" and "TAB" or sep == "|" and "|" or sep
+    first             = first:gsub("\r$", "")
+    local sep         = detect_separator(first)
+    local sep_label   = sep == "\t" and "TAB" or sep == "|" and "|" or sep
 
-    local rows      = {}
+    local rows        = {}
     local row_numbers = {}
     local col_widths  = {}
     local col_numeric = {}
@@ -347,9 +347,9 @@ local function render_csv(path, mode, state, width)
 
     -- Sort data rows (keep header at position 1)
     if sort_col > 0 and #rows > 1 then
-        local header = rows[1]
+        local header         = rows[1]
         local header_line_no = row_numbers[1]
-        local data   = {}
+        local data           = {}
         for i = 2, #rows do
             data[i - 1] = { row = rows[i], line_no = row_numbers[i] }
         end
@@ -557,11 +557,7 @@ local function handle_csv_key(path, mode, key, state)
 end
 
 kkc.register_viewer_plugin({
-    name        = "csv_viewer",
-    version     = "1.0.0",
-    description = "CSV file viewer with column alignment",
-    modes       = { "text" },
-    mime_types  = { "text/csv" },
-    render      = render_csv,
-    handle_key  = handle_csv_key,
+    modes      = { "text" },
+    render     = render_csv,
+    handle_key = handle_csv_key,
 })
