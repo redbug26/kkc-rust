@@ -2659,10 +2659,8 @@ fn inspect_plugin(script_path: &Path) -> Result<Vec<RegisteredPlugin>> {
         .exec()?;
 
     let mut plugins = registered.borrow().clone();
-    if let Some(manifest) = load_lua_plugin_manifest(script_path.parent().unwrap_or(Path::new("")))?
-    {
-        apply_lua_manifest_to_archive_plugins(&manifest, &mut plugins);
-    }
+    let manifest = load_lua_plugin_manifest(script_path.parent().unwrap_or(Path::new("")))?;
+    apply_lua_manifest_to_archive_plugins(&manifest, &mut plugins);
 
     Ok(plugins)
 }
@@ -2700,25 +2698,26 @@ fn inspect_plugins(
     let mut archives = registered_archives.borrow().clone();
     let mut viewers = registered_viewers.borrow().clone();
     let mut actions = registered_actions.borrow().clone();
-    if let Some(manifest) = manifest.as_ref() {
-        apply_lua_manifest_to_archive_plugins(manifest, &mut archives);
-        apply_lua_manifest_to_viewer_plugins(manifest, &mut viewers);
-        apply_lua_manifest_to_action_plugins(manifest, &mut actions);
-    }
+    apply_lua_manifest_to_archive_plugins(&manifest, &mut archives);
+    apply_lua_manifest_to_viewer_plugins(&manifest, &mut viewers);
+    apply_lua_manifest_to_action_plugins(&manifest, &mut actions);
 
     Ok((archives, viewers, actions))
 }
 
-fn load_lua_plugin_manifest(plugin_dir: &Path) -> Result<Option<LuaPluginManifestPlugin>> {
+fn load_lua_plugin_manifest(plugin_dir: &Path) -> Result<LuaPluginManifestPlugin> {
     let manifest_path = plugin_dir.join("plugin.toml");
     if !manifest_path.is_file() {
-        return Ok(None);
+        bail!(
+            "Lua plugin manifest not found: {}",
+            manifest_path.display()
+        );
     }
     let text = fs::read_to_string(&manifest_path)
         .with_context(|| format!("Reading {}", manifest_path.display()))?;
     let manifest: LuaPluginManifest =
         toml::from_str(&text).with_context(|| format!("Parsing {}", manifest_path.display()))?;
-    Ok(Some(manifest.plugin))
+    Ok(manifest.plugin)
 }
 
 fn apply_lua_manifest_to_archive_plugins(
@@ -2824,10 +2823,8 @@ fn inspect_viewer_plugin(script_path: &Path) -> Result<Vec<RegisteredViewerPlugi
         .exec()?;
 
     let mut plugins = registered.borrow().clone();
-    if let Some(manifest) = load_lua_plugin_manifest(script_path.parent().unwrap_or(Path::new("")))?
-    {
-        apply_lua_manifest_to_viewer_plugins(&manifest, &mut plugins);
-    }
+    let manifest = load_lua_plugin_manifest(script_path.parent().unwrap_or(Path::new("")))?;
+    apply_lua_manifest_to_viewer_plugins(&manifest, &mut plugins);
 
     Ok(plugins)
 }
@@ -4131,6 +4128,38 @@ mod tests {
     }
 
     #[test]
+    fn lua_plugin_without_manifest_is_rejected() {
+        let plugin_dir = std::env::temp_dir().join(format!(
+            "kkc-missing-manifest-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&plugin_dir);
+        fs::create_dir_all(&plugin_dir).expect("create plugin dir");
+        fs::write(
+            plugin_dir.join("plugin.lua"),
+            r#"local kkc = require("kkc")
+kkc.register_archive_plugin({
+    name = "broken",
+    version = "1.0.0",
+    description = "Missing manifest",
+    mime_types = { "application/x-broken" },
+    extract = function(path, destination)
+        return true
+    end,
+})
+"#,
+        )
+        .expect("write plugin lua");
+
+        let err = inspect_plugin(&plugin_dir.join("plugin.lua")).expect_err("missing manifest");
+        assert!(err
+            .to_string()
+            .contains("Lua plugin manifest not found"));
+
+        let _ = fs::remove_dir_all(&plugin_dir);
+    }
+
+    #[test]
     fn bundled_text_syntax_viewer_plugin_registers() {
         let script = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("assets")
@@ -4273,7 +4302,7 @@ mod tests {
         let plugins = inspect_plugin(&script).expect("plugin should load");
 
         assert_eq!(plugins.len(), 1);
-        assert_eq!(plugins[0].name, "git_commits");
+        assert_eq!(plugins[0].name, "Git Commits");
         assert_eq!(plugins[0].version, "1.0.0");
         assert_eq!(plugins[0].mime_types, Vec::<String>::new());
         assert_eq!(plugins[0].extensions, vec!["git"]);
@@ -4743,6 +4772,16 @@ kkc.register_viewer_plugin({
 "#,
         )
         .expect("write plugin");
+        fs::write(
+            root.join("plugin.toml"),
+            r#"[plugin]
+name = "debug_log_test"
+version = "1.0.0"
+type = "viewer"
+description = "Test plugin"
+"#,
+        )
+        .expect("write manifest");
 
         let plugins = inspect_viewer_plugin(&script_path).expect("viewer plugin should load");
 

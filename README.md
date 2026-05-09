@@ -170,6 +170,10 @@ Open the search dialog with **`Alt+F7`**. Enter a pattern in the "Name:" field:
 Plugins can be installed as directories or as `.kkplug` ZIP bundles.  
 Press `Enter` on a `.kkplug` file to install it automatically.
 
+The bundled plugins now also ship a `plugin.toml` manifest for their metadata
+(`name`, `version`, `description`, and `mime_types`).
+All Lua plugins must provide that manifest.
+
 ---
 
 ## Plugin development

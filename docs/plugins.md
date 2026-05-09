@@ -45,6 +45,21 @@ my_plugin.kkplug
     module.lua
 ```
 
+## Plugin Metadata
+
+Every Lua plugin must ship a `plugin.toml` file next to `plugin.lua`.
+KKC reads this manifest to load plugin metadata such as:
+
+- `name`
+- `version`
+- `description`
+- `mime_types`
+
+This keeps Lua plugin code focused on behavior while metadata lives in a small manifest file.
+Bundled plugins in `assets/plugins/` now use `plugin.toml` for the same fields.
+
+If `plugin.toml` is missing, KKC rejects the plugin.
+
 ## The `kkc` Module
 
 Plugins usually start with:
