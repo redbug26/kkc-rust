@@ -309,6 +309,9 @@ pub struct Config {
     /// Set to 0 to disable auto screensaver.
     #[serde(default = "screensaver_idle_minutes_default")]
     pub screensaver_idle_minutes: u64,
+    /// Enable screen transitions for the screensaver and application exit.
+    #[serde(default = "t")]
+    pub transitions_enabled: bool,
     /// Color-code files by type category.
     #[serde(default = "t")]
     pub color_by_type: bool,
@@ -395,6 +398,7 @@ impl Default for Config {
             insert_moves_down: true,
             select_dirs: false,
             screensaver_idle_minutes: screensaver_idle_minutes_default(),
+            transitions_enabled: true,
             color_by_type: true,
             show_cloud_icons: true,
             show_file_icons: false,
@@ -549,6 +553,10 @@ impl Config {
         out.push_str(&format!(
             "screensaver_idle_minutes = {}\n",
             self.screensaver_idle_minutes
+        ));
+        out.push_str(&format!(
+            "transitions_enabled = {}\n",
+            self.transitions_enabled
         ));
         out.push('\n');
 
@@ -793,6 +801,7 @@ mod tests {
         cfg.insert_moves_down = false;
         cfg.select_dirs = true;
         cfg.screensaver_idle_minutes = 42;
+        cfg.transitions_enabled = false;
         cfg.show_fkey_bar = false;
         cfg.color_by_type = false;
         cfg.show_cloud_icons = false;
@@ -819,6 +828,7 @@ mod tests {
         assert!(!parsed.show_cloud_icons);
         assert!(!parsed.show_file_icons);
         assert_eq!(parsed.screensaver_idle_minutes, 42);
+        assert!(!parsed.transitions_enabled);
         assert!(!parsed.viewer.word_wrap);
         assert_eq!(parsed.viewer.tab_width, 8);
         assert_eq!(parsed.editor, "vim");

@@ -18,6 +18,7 @@ mod panel;
 mod plugins;
 mod remote;
 mod remote_plugins;
+mod screen_transition;
 mod search;
 mod system_info;
 mod terminal;
@@ -37,13 +38,16 @@ use crossterm::{
         EnterAlternateScreen, LeaveAlternateScreen, SetTitle, disable_raw_mode, enable_raw_mode,
     },
 };
-use ratatui::{Terminal, backend::CrosstermBackend, layout::Rect};
+use ratatui::{Terminal, backend::CrosstermBackend, buffer::Buffer, layout::Rect};
+use screen_transition::{ScreenTransition, ScreenTransitionDirection, ScreenTransitionEffect};
 use std::io::{self, Stdout, Write};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
 type QuickPreviewImageTask = (PathBuf, (u32, u32), Receiver<Option<Vec<u8>>>);
+
+const SCREENSAVER_TRANSITION_FRAMES: u16 = 18;
 
 fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
     enable_raw_mode()?;
@@ -145,6 +149,18 @@ fn compose_window_title(app: &App) -> String {
     }
 }
 
+fn screensaver_transition_effect() -> ScreenTransitionEffect {
+    ScreenTransitionEffect::ALL[12]
+}
+
+fn exit_transition_effect() -> ScreenTransitionEffect {
+    ScreenTransitionEffect::Plasma
+}
+
+fn transitions_enabled(app: &App) -> bool {
+    app.config.transitions_enabled
+}
+
 fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
     let startup_start = Instant::now();
     let config_load_start = Instant::now();
@@ -174,6 +190,9 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
     let mut last_user_activity = Instant::now();
     let mut last_window_title = String::new();
     let mut quick_preview_image_task: Option<QuickPreviewImageTask> = None;
+    let mut last_frame: Option<Buffer> = None;
+    let mut active_transition: Option<ScreenTransition> = None;
+    let mut quit_after_transition = false;
 
     loop {
         app.poll_background_tasks();
@@ -215,8 +234,16 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
             )
         {
             let timeout = Duration::from_secs(app.config.screensaver_idle_minutes * 60);
-            if last_user_activity.elapsed() >= timeout {
-                app.mode = AppMode::MatrixScreensaver(app::MatrixScreensaverState::new());
+            if last_user_activity.elapsed() >= timeout && !quit_after_transition {
+                if transitions_enabled(&app) && active_transition.is_none() {
+                    active_transition = Some(ScreenTransition::to_black(
+                        screensaver_transition_effect(),
+                        SCREENSAVER_TRANSITION_FRAMES,
+                        last_frame.clone(),
+                    ));
+                } else if !transitions_enabled(&app) {
+                    app.mode = AppMode::MatrixScreensaver(app::MatrixScreensaverState::new());
+                }
             }
         }
 
@@ -258,7 +285,8 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
             width: term_size.width,
             height: term_size.height,
         };
-        let next_kitty_image = if viewer::kitty_graphics_supported() {
+        let next_kitty_image = if active_transition.is_none() && viewer::kitty_graphics_supported()
+        {
             match &app.mode {
                 AppMode::Viewer(v) | AppMode::ViewerSearching(v) | AppMode::ViewerMenu(v, _) => {
                     ui::kitty_image_area(v, term_area).map(|rect| {
@@ -335,7 +363,12 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
         }
 
         let draw_start = Instant::now();
-        let completed = terminal.draw(|f| ui::render(f, &app))?;
+        let completed = terminal.draw(|f| {
+            ui::render(f, &app);
+            if let Some(transition) = &active_transition {
+                transition.render(f);
+            }
+        })?;
         if !first_draw_logged {
             first_draw_logged = true;
             viewer::debug_log(&format!(
@@ -358,6 +391,34 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
                 }
                 Err(e) => app.notify(format!("GIF capture failed: {e}")),
             }
+        }
+
+        let completed_buffer = completed.buffer.clone();
+        let mut clear_after_transition = false;
+        if let Some(transition) = &mut active_transition {
+            let finished = transition.advance();
+            if finished {
+                if quit_after_transition {
+                    break;
+                } else {
+                    match transition.direction() {
+                        ScreenTransitionDirection::ToBlack => {
+                            app.mode =
+                                AppMode::MatrixScreensaver(app::MatrixScreensaverState::new());
+                            clear_after_transition = true;
+                        }
+                        ScreenTransitionDirection::FromBlack => {}
+                    }
+                    active_transition = None;
+                    last_kitty_image = None;
+                }
+            }
+        }
+
+        last_frame = Some(completed_buffer);
+        drop(completed);
+        if clear_after_transition {
+            terminal.clear()?;
         }
 
         // POST-DRAW: for image-to-image transitions, clear the previous Kitty
@@ -422,12 +483,48 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
         }
 
         // Poll for input (~60 fps)
-        if event::poll(Duration::from_millis(16))? {
+        if quit_after_transition {
+            std::thread::sleep(Duration::from_millis(16));
+        } else if event::poll(Duration::from_millis(16))? {
             let ev = event::read()?;
             last_user_activity = Instant::now();
+            if active_transition.is_some() && !quit_after_transition {
+                active_transition = None;
+            }
+            let was_screensaver = matches!(app.mode, AppMode::MatrixScreensaver(_));
             match events::handle_event(&mut app, ev) {
-                Ok(true) => break,
-                Ok(false) => {}
+                Ok(true) => {
+                    if transitions_enabled(&app) {
+                        active_transition = Some(ScreenTransition::to_black(
+                            exit_transition_effect(),
+                            SCREENSAVER_TRANSITION_FRAMES,
+                            last_frame.clone(),
+                        ));
+                        quit_after_transition = true;
+                    } else {
+                        break;
+                    }
+                }
+                Ok(false) => {
+                    if !transitions_enabled(&app) {
+                        continue;
+                    }
+
+                    if was_screensaver && matches!(app.mode, AppMode::Browse) {
+                        active_transition = Some(ScreenTransition::from_black(
+                            screensaver_transition_effect(),
+                            SCREENSAVER_TRANSITION_FRAMES,
+                        ));
+                    } else if !was_screensaver && matches!(app.mode, AppMode::MatrixScreensaver(_))
+                    {
+                        app.mode = AppMode::Browse;
+                        active_transition = Some(ScreenTransition::to_black(
+                            screensaver_transition_effect(),
+                            SCREENSAVER_TRANSITION_FRAMES,
+                            last_frame.clone(),
+                        ));
+                    }
+                }
                 Err(e) => {
                     app.notify(format!("Error: {}", e));
                 }
