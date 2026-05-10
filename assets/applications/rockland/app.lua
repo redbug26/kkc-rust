@@ -107,6 +107,7 @@ local reveal_mask = {}
 local motion_dx = {}
 local motion_dy = {}
 local anim_frame = 0
+local sparkle_frame = 0
 local sfx_cooldown = 0
 local blink_ticks = 0
 local player_action_cooldown = 0
@@ -545,7 +546,7 @@ end
 
 local function kill_player(reason)
     state = "dead"
-    dead_reason = reason or "Rockford exploded"
+    dead_reason = reason or "Exploded"
     message = dead_reason
     audio.beep()
 end
@@ -602,7 +603,7 @@ local function explode(x, y)
             local c = cell(xx, yy)
             if c == OBJ.ROCKFORD then
                 update_piece(xx, yy, object)
-                kill_player("Rockford exploded")
+                kill_player("Exploded")
             elseif c ~= OBJ.TITANIUMWALL then
                 update_piece(xx, yy, object)
             end
@@ -932,13 +933,13 @@ end
 
 local function tile_color(c)
     if c == OBJ.DIRT then return 0x8D6E63 end
-    if c == OBJ.WALL then return 0xB0BEC5 end
-    if c == OBJ.TITANIUMWALL then return 0xECEFF1 end
+    if c == OBJ.WALL then return 0x78909C end
+    if c == OBJ.TITANIUMWALL then return 0x90CAF9 end
     if c == OBJ.MAGICALWALL then return 0x7E57C2 end
     if c == OBJ.EXIT then return 0xEF5350 end
     if c == OBJ.EXIT_OPEN then return 0x66BB6A end
-    if c == OBJ.BOULDER or c == OBJ.BOULDER_FALLING then return 0x90A4AE end
-    if c == OBJ.DIAMOND or c == OBJ.DIAMOND_FALLING then return 0x4DD0E1 end
+    if c == OBJ.BOULDER or c == OBJ.BOULDER_FALLING then return 0x8D6E63 end
+    if c == OBJ.DIAMOND or c == OBJ.DIAMOND_FALLING then return 0xFFFFFF end
     if c == OBJ.AMOEBA then return 0xAED581 end
     if c == OBJ.ROCKFORD then return 0xFDD835 end
     if is_firefly(c) then return 0xFFA726 end
@@ -966,9 +967,15 @@ local function anim_phase(c, x, y)
     return anim_frame % 4
 end
 
+local function diamond_sparkles(x, y)
+    return ((x * 17 + y * 31 + sparkle_frame) % 97) == 0
+end
+
 local function tile_sprite(c, x, y)
     local hero = hero_face and "☺" or "☻"
-    local p = anim_phase(c, x or 1, y or 1)
+    x = x or 1
+    y = y or 1
+    local p = anim_phase(c, x, y)
 
     if c == OBJ.SPACE then return { "    ", "    ", "    " } end
     if c == OBJ.DIRT then
@@ -985,12 +992,18 @@ local function tile_sprite(c, x, y)
     end
     if c == OBJ.EXIT then return { "/==\\", "|XX|", "\\==/" } end
     if c == OBJ.EXIT_OPEN then return { "/  \\", "|  |", "\\__/" } end
-    if c == OBJ.BOULDER then return { " __ ", "/  \\", "\\__/" } end
+    if c == OBJ.BOULDER then return { " __ ", "/@@\\", "\\@@/" } end
     if c == OBJ.BOULDER_FALLING then return { " __ ", "/vv\\", "\\__/" } end
     if c == OBJ.DIAMOND then
+        if diamond_sparkles(x, y) then
+            return { " /\\ ", "/+*\\", "\\__/" }
+        end
         return { " /\\ ", "/**\\", "\\__/" }
     end
     if c == OBJ.DIAMOND_FALLING then
+        if diamond_sparkles(x, y) then
+            return { " vv ", "<+*>", "\\__/" }
+        end
         return { " vv ", "<**>", "\\__/" }
     end
     if c == OBJ.AMOEBA then
@@ -1193,6 +1206,9 @@ local function draw_map()
             local py = top + 1 + (vy - 1) * SPRITE_H - sub_y
             local bg = field_blink and 0xE3F2FD or tile_bg(c)
             local fg = field_blink and 0x000000 or tile_color(c)
+            if not field_blink and (c == OBJ.DIAMOND or c == OBJ.DIAMOND_FALLING) and diamond_sparkles(mx, my) then
+                fg = 0xFFFFFF
+            end
             g.color(fg, bg)
             local ox = 0
             local oy = 0
@@ -1397,6 +1413,9 @@ function app.update(dt)
         if step == 3 then
             anim_frame = (anim_frame + 1) % 4
             hero_face = not hero_face
+        end
+        if step == 3 then
+            sparkle_frame = (sparkle_frame + 1) % 97
         end
         if step == 1 then
             update_world()
