@@ -751,6 +751,8 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             vec![],
         ))
+    } else if let Some(mime_type) = amiga_adf_mime_type(&data, file_len, &ext) {
+        Some(info(mime_type, path, IdfKind::Archive, None, None, vec![]))
     } else if is_commodore_d64(file_len, &ext) {
         Some(info(
             "application/x-c64-d64",
@@ -1019,6 +1021,8 @@ fn format_from_mime_type(mime_type: &str) -> Option<&'static str> {
         "application/x-uf2" => Some("UF2 firmware image"),
         "application/x-amstrad-cpc-amsdos" => Some("Amstrad AMSDOS file"),
         "application/x-amstrad-cpc-dsk" => Some("Amstrad CPC DSK image"),
+        "application/x-amiga-adf-ofs" => Some("Amiga Disk Format (OFS) image"),
+        "application/x-amiga-adf-ffs" => Some("Amiga Disk Format (FFS) image"),
         "application/x-c64-d64" => Some("Commodore 64 D64 disk image"),
         "application/x-bittorrent" => Some("BitTorrent metadata"),
         "application/x-sqlite3" => Some("SQLite database"),
@@ -3193,6 +3197,18 @@ fn is_amstrad_dsk(data: &[u8], ext: &str) -> bool {
     ext == "dsk" && (data.starts_with(b"MV - CPC") || data.starts_with(b"EXTENDED CPC DSK"))
 }
 
+fn amiga_adf_mime_type(data: &[u8], file_len: usize, ext: &str) -> Option<&'static str> {
+    if ext != "adf" || file_len < 1024 || file_len % 512 != 0 || data.get(..3) != Some(b"DOS") {
+        return None;
+    }
+
+    match data.get(3).copied() {
+        Some(0) | Some(2) | Some(4) => Some("application/x-amiga-adf-ofs"),
+        Some(1) | Some(3) | Some(5) => Some("application/x-amiga-adf-ffs"),
+        _ => None,
+    }
+}
+
 fn is_plausible_amsdos_name_byte(byte: u8) -> bool {
     byte.is_ascii_uppercase() || byte.is_ascii_digit() || matches!(byte, b' ' | b'_' | b'-' | b'.')
 }
@@ -4372,6 +4388,26 @@ mod tests {
             .expect("d64 should be detected");
         assert_eq!(d64_info.mime_types[0], "application/x-c64-d64");
         assert_eq!(d64_info.format, "Commodore 64 D64 disk image");
+
+        let adf_ofs_path = root.join("disk-ofs.adf");
+        let mut adf_ofs = vec![0u8; 901_120];
+        adf_ofs[..4].copy_from_slice(b"DOS\0");
+        fs::write(&adf_ofs_path, adf_ofs).expect("write adf ofs");
+        let adf_ofs_info = probe_file(&adf_ofs_path)
+            .expect("probe adf ofs should not fail")
+            .expect("adf ofs should be detected");
+        assert_eq!(adf_ofs_info.mime_types[0], "application/x-amiga-adf-ofs");
+        assert_eq!(adf_ofs_info.format, "Amiga Disk Format (OFS) image");
+
+        let adf_ffs_path = root.join("disk-ffs.adf");
+        let mut adf_ffs = vec![0u8; 901_120];
+        adf_ffs[..4].copy_from_slice(b"DOS\x01");
+        fs::write(&adf_ffs_path, adf_ffs).expect("write adf ffs");
+        let adf_ffs_info = probe_file(&adf_ffs_path)
+            .expect("probe adf ffs should not fail")
+            .expect("adf ffs should be detected");
+        assert_eq!(adf_ffs_info.mime_types[0], "application/x-amiga-adf-ffs");
+        assert_eq!(adf_ffs_info.format, "Amiga Disk Format (FFS) image");
 
         let _ = fs::remove_dir_all(root);
     }
