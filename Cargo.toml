@@ -37,7 +37,7 @@ unarc-rs = "0.6.1"
 rodio = { version = "0.22", default-features = false, features = ["playback", "wav", "flac", "mp3"] }
 rustfft = "6.2"
 xmrs = { version = "0.11.0", default-features = false, features = ["std", "import_mod", "import_xm", "import_s3m"] }
-xmrsplayer = { version = "0.11.0", default-features = false, features = ["std", "import_mod", "import_xm", "import_s3m"] }
+xmrsplayer = { version = "0.11.1", default-features = false, features = ["std", "import_mod", "import_xm", "import_s3m"] }
 
 [features]
 smb = ["dep:pavao"]

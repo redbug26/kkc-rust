@@ -751,6 +751,42 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             vec![],
         ))
+    } else if data.starts_with(b"PP20") || data.starts_with(b"PP11") {
+        Some(info(
+            "application/x-powerpacker",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            powerpacker_lines(&data),
+        ))
+    } else if data.starts_with(b"XPKF") {
+        Some(info(
+            "application/x-xpk",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            xpk_lines(&data),
+        ))
+    } else if data.starts_with(b"DMS!") {
+        Some(info(
+            "application/x-amiga-dms",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"IMP!") || data.starts_with(b"IMPL") {
+        Some(info(
+            "application/x-amiga-imploder",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
     } else if let Some(mime_type) = amiga_adf_mime_type(&data, file_len, &ext) {
         Some(info(mime_type, path, IdfKind::Archive, None, None, vec![]))
     } else if is_commodore_d64(file_len, &ext) {
@@ -1024,6 +1060,10 @@ fn format_from_mime_type(mime_type: &str) -> Option<&'static str> {
         "application/x-amiga-adf-ofs" => Some("Amiga Disk Format (OFS) image"),
         "application/x-amiga-adf-ffs" => Some("Amiga Disk Format (FFS) image"),
         "application/x-c64-d64" => Some("Commodore 64 D64 disk image"),
+            "application/x-powerpacker" => Some("PowerPacker compressed file"),
+            "application/x-xpk" => Some("XPK compressed file"),
+            "application/x-amiga-dms" => Some("Amiga DMS disk image"),
+            "application/x-amiga-imploder" => Some("Amiga Imploder compressed file"),
         "application/x-bittorrent" => Some("BitTorrent metadata"),
         "application/x-sqlite3" => Some("SQLite database"),
         "application/x-apple-diskimage" => Some("Apple Disk Image"),
@@ -3208,6 +3248,44 @@ fn amiga_adf_mime_type(data: &[u8], file_len: usize, ext: &str) -> Option<&'stat
         _ => None,
     }
 }
+
+    fn powerpacker_lines(data: &[u8]) -> Vec<String> {
+        let mut lines = Vec::new();
+        if data.len() < 8 {
+            return lines;
+        }
+        let version = if data.starts_with(b"PP20") {
+            "PowerPacker 2.0"
+        } else {
+            "PowerPacker 1.1"
+        };
+        lines.push(version.to_string());
+        if data.len() >= 8 {
+            let efficiency = match (data[4], data[5], data[6], data[7]) {
+                (9, 9, 9, 9) => "Efficiency: Fast",
+                (9, 10, 10, 10) => "Efficiency: Mediocre",
+                (9, 10, 11, 11) => "Efficiency: Good",
+                (9, 10, 12, 12) => "Efficiency: Very Good",
+                (9, 10, 12, 13) => "Efficiency: Best",
+                _ => "Efficiency: Unknown",
+            };
+            lines.push(efficiency.to_string());
+        }
+        lines
+    }
+
+    fn xpk_lines(data: &[u8]) -> Vec<String> {
+        let mut lines = Vec::new();
+        if data.len() >= 12 {
+            // XPK packer ID is at offset 8, 4 bytes
+            if let Ok(name) = std::str::from_utf8(&data[8..12]) {
+                if name.chars().all(|c| c.is_ascii_alphanumeric()) {
+                    lines.push(format!("XPK sub-packer: {}", name));
+                }
+            }
+        }
+        lines
+    }
 
 fn is_plausible_amsdos_name_byte(byte: u8) -> bool {
     byte.is_ascii_uppercase() || byte.is_ascii_digit() || matches!(byte, b' ' | b'_' | b'-' | b'.')
