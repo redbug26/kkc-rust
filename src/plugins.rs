@@ -38,6 +38,9 @@ const BUNDLED_GIT_ACTION_MANIFEST: &str = include_str!("../assets/plugins/git_ac
 const BUNDLED_GIT_COMMITS_PLUGIN: &str = include_str!("../assets/plugins/git_commits/plugin.lua");
 const BUNDLED_GIT_COMMITS_MANIFEST: &str =
     include_str!("../assets/plugins/git_commits/plugin.toml");
+const BUNDLED_AMIGA_ADF_PLUGIN: &str = include_str!("../assets/plugins/amiga_adf/plugin.lua");
+const BUNDLED_AMIGA_ADF_MANIFEST: &str =
+    include_str!("../assets/plugins/amiga_adf/plugin.toml");
 const BUNDLED_PLUGIN_DIRS: &[&str] = &[
     "pdf_file",
     "html_viewer",
@@ -49,6 +52,7 @@ const BUNDLED_PLUGIN_DIRS: &[&str] = &[
     "text_syntax",
     "git_action",
     "git_commits",
+    "amiga_adf",
 ];
 
 static PLUGINS: OnceLock<RwLock<PluginRegistry>> = OnceLock::new();
@@ -2334,6 +2338,14 @@ fn install_bundled_plugins(plugins_dir: &Path) -> Result<()> {
     write_bundled_file(
         &git_commits_dir.join("plugin.toml"),
         BUNDLED_GIT_COMMITS_MANIFEST,
+    )?;
+
+    let amiga_adf_dir = plugins_dir.join("amiga_adf");
+    fs::create_dir_all(&amiga_adf_dir)?;
+    write_bundled_file(&amiga_adf_dir.join("plugin.lua"), BUNDLED_AMIGA_ADF_PLUGIN)?;
+    write_bundled_file(
+        &amiga_adf_dir.join("plugin.toml"),
+        BUNDLED_AMIGA_ADF_MANIFEST,
     )?;
 
     Ok(())
