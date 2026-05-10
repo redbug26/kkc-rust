@@ -570,6 +570,109 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             tga_lines(&data),
         ))
+    } else if data.starts_with(&[0x00, 0x00, 0x00, 0x0C, 0x6A, 0x50, 0x20, 0x20, 0x0D, 0x0A, 0x87, 0x0A]) {
+        Some(info(
+            "image/jp2",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"/* XPM */") {
+        Some(info(
+            "image/x-xpixmap",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"IIN1") {
+        Some(info(
+            "image/x-niff",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"AT&TFORM") && data.len() > 12 && &data[8..12] == b"DjVu" {
+        Some(info(
+            "image/vnd.djvu",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"%bitmap\0") {
+        Some(info(
+            "image/x-fbm",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.len() > 2 && data[0] == b'P' && (1..=7).contains(&(data[1] - b'0' + 1)) 
+        && (data.len() > 2 && matches!(data[2], b' ' | b'\t' | b'\n' | b'\r'))  {
+        let format_name = match data[1] {
+            b'1' => "image/x-portable-bitmap",
+            b'2' => "image/x-portable-graymap",
+            b'3' => "image/x-portable-pixmap",
+            b'4' => "image/x-portable-bitmap",
+            b'5' => "image/x-portable-graymap",
+            b'6' => "image/x-portable-pixmap",
+            b'7' => "image/x-portable-pixmap",
+            _ => "image/x-portable-pixmap",
+        };
+        Some(info(format_name, path, IdfKind::Bitmap, None, None, vec![]))
+    } else if data.starts_with(&[0x00, 0x01, 0x00, 0x08]) {
+        Some(info(
+            "image/x-gem",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(&[0x59, 0xa6, 0x6a, 0x95]) {
+        Some(info(
+            "image/x-sun-raster",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(&[0xf1, 0x00, 0x40, 0xbb]) {
+        Some(info(
+            "image/x-cmu-raster",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.len() > 2 && data[0] == 0x4f && data[1] == b':' {
+        Some(info(
+            "image/x-solitaire",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"id=ImageMagick") {
+        Some(info(
+            "image/x-miff",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(b"wOFF") {
         Some(info("font/woff", path, IdfKind::Other, None, None, vec![]))
     } else if data.starts_with(b"wOF2") {
@@ -650,8 +753,119 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         ))
     } else if let Some(mp3) = mp3_info(path, &data, &ext) {
         Some(mp3)
+    } else if data.starts_with(b"MMD1") {
+        Some(info(
+            "audio/x-octamed",
+            path,
+            IdfKind::Module,
+            None,
+            None,
+            vec![" OctaMED Pro v1".into()],
+        ))
+    } else if data.starts_with(b"MMD3") {
+        Some(info(
+            "audio/x-octamed",
+            path,
+            IdfKind::Module,
+            None,
+            None,
+            vec![" OctaMED Soundstudio v3".into()],
+        ))
+    } else if data.starts_with(b"OctaMEDCmpr") {
+        Some(info(
+            "audio/x-octamed-compressed",
+            path,
+            IdfKind::Module,
+            None,
+            None,
+            vec![" OctaMED Compressed".into()],
+        ))
+    } else if data.starts_with(b"MThd   ") {
+        // Standard MIDI with explicit length check
+        Some(midi_info(path, &data))
     } else if data.starts_with(b"MThd") {
         Some(midi_info(path, &data))
+    } else if data.starts_with(b"FC14") {
+        Some(info(
+            "audio/x-fc14",
+            path,
+            IdfKind::Module,
+            None,
+            None,
+            vec![" Future Composer 1.4 Module".into()],
+        ))
+    } else if data.starts_with(b"SMOD") {
+        Some(info(
+            "audio/x-smod",
+            path,
+            IdfKind::Module,
+            None,
+            None,
+            vec![" Smod Module".into()],
+        ))
+    } else if data.starts_with(b"AON4artofnoise") {
+        Some(info(
+            "audio/x-aon4",
+            path,
+            IdfKind::Module,
+            None,
+            None,
+            vec![" Art Of Noise Module".into()],
+        ))
+    } else if data.starts_with(b"ARP.") {
+        Some(info(
+            "audio/x-arp",
+            path,
+            IdfKind::Module,
+            None,
+            None,
+            vec![" The Holy Noise Module".into()],
+        ))
+    } else if data.starts_with(b"BeEp\x00") {
+        Some(info(
+            "audio/x-jamcracker",
+            path,
+            IdfKind::Module,
+            None,
+            None,
+            vec![" JamCracker Module".into()],
+        ))
+    } else if data.starts_with(b"COSO\x00") {
+        Some(info(
+            "audio/x-coso",
+            path,
+            IdfKind::Module,
+            None,
+            None,
+            vec![" Hippel-COSO Module".into()],
+        ))
+    } else if data.starts_with(b"FTMN") {
+        Some(info(
+            "audio/x-ftmn",
+            path,
+            IdfKind::Module,
+            None,
+            None,
+            vec![" FaceTheMusic Module".into()],
+        ))
+    } else if data.starts_with(b"EMOD") {
+        Some(info(
+            "audio/x-emod",
+            path,
+            IdfKind::Module,
+            None,
+            None,
+            vec![" Extended MOD Module".into()],
+        ))
+    } else if data.starts_with(b"CTMF") {
+        Some(info(
+            "audio/x-ctmf",
+            path,
+            IdfKind::Module,
+            None,
+            None,
+            vec![" Creative Music Format".into()],
+        ))
     } else if data.starts_with(b"%PDF-") {
         Some(info(
             "application/pdf",
@@ -751,6 +965,42 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             vec![],
         ))
+    } else if data.starts_with(b"ZXTape!\x1a") {
+        Some(info(
+            "application/x-tzx",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"RZX!") {
+        Some(info(
+            "application/x-rzx",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"\x13\x00\x00") {
+        Some(info(
+            "application/x-tap",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"PLUS3DOS\x1a") {
+        Some(info(
+            "application/x-plus3dos",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(b"PP20") || data.starts_with(b"PP11") {
         Some(info(
             "application/x-powerpacker",
@@ -792,6 +1042,78 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
     } else if is_commodore_d64(file_len, &ext) {
         Some(info(
             "application/x-c64-d64",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(&[0x89, 0x4c, 0x5a, 0x4f, 0x00, 0x0d, 0x0a, 0x1a, 0x0a]) {
+        Some(info(
+            "application/x-lzop",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"070701") || data.starts_with(b"070702") || data.starts_with(b"070707") {
+        Some(info(
+            "application/x-cpio",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.len() >= 7 && data[0] == 0xe9 && data[1] == 0x2c && data[2] == 0x01 && &data[3..7] == b"JAM\x20" {
+        Some(info(
+            "application/x-jam-archive",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"HPAK") {
+        Some(info(
+            "application/x-hpack",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"PAR\x00") {
+        Some(info(
+            "application/x-parity-archive",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"SQSH") {
+        Some(info(
+            "application/x-acorn-sqsh",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.len() >= 12 && data[0] == 0 && data[1..11].iter().all(|&b| b == b' ') && data[11] == 0 {
+        Some(info(
+            "application/x-lbr",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"Archive\x00") {
+        Some(info(
+            "application/x-risc-os-arcfs",
             path,
             IdfKind::Archive,
             None,
@@ -1054,6 +1376,28 @@ fn format_from_mime_type(mime_type: &str) -> Option<&'static str> {
         "audio/x-it" => Some("Impulse Tracker module"),
         "audio/x-mod" => Some("ProTracker module"),
         "audio/x-vgm" => Some("VGM audio"),
+        "application/x-lzop" => Some("LZOP compressed archive"),
+        "application/x-cpio" => Some("CPIO archive"),
+        "application/x-jam-archive" => Some("JAM archive"),
+        "application/x-hpack" => Some("HPACK archive"),
+        "application/x-parity-archive" => Some("Parity archive"),
+        "image/jp2" => Some("JPEG 2000 bitmap"),
+        "image/x-xpixmap" => Some("X PixMap bitmap"),
+        "image/x-niff" => Some("NIFF image"),
+        "image/vnd.djvu" => Some("DjVu image"),
+        "image/x-fbm" => Some("FBM bitmap"),
+        "image/x-portable-bitmap" => Some("Portable BitMap image"),
+        "image/x-portable-graymap" => Some("Portable GrayMap image"),
+        "image/x-portable-pixmap" => Some("Portable PixMap image"),
+        "audio/x-fc14" => Some("Future Composer 1.4 module"),
+        "audio/x-smod" => Some("Smod module"),
+        "audio/x-aon4" => Some("Art Of Noise module"),
+        "audio/x-arp" => Some("The Holy Noise module"),
+        "audio/x-jamcracker" => Some("JamCracker module"),
+        "audio/x-coso" => Some("Hippel-COSO module"),
+        "audio/x-ftmn" => Some("FaceTheMusic module"),
+        "audio/x-emod" => Some("Extended MOD module"),
+        "audio/x-ctmf" => Some("Creative Music Format"),
         "application/x-uf2" => Some("UF2 firmware image"),
         "application/x-amstrad-cpc-amsdos" => Some("Amstrad AMSDOS file"),
         "application/x-amstrad-cpc-dsk" => Some("Amstrad CPC DSK image"),
@@ -1085,6 +1429,20 @@ fn format_from_mime_type(mime_type: &str) -> Option<&'static str> {
         "application/mbox" => Some("Mbox mailbox"),
         "text/html" => Some("HTML document"),
         "text/plain" => Some("Text file"),
+        "image/x-gem" => Some("GEM image"),
+        "image/x-sun-raster" => Some("Sun raster image"),
+        "image/x-cmu-raster" => Some("CMU raster image"),
+        "image/x-solitaire" => Some("Solitaire image"),
+        "image/x-miff" => Some("MIFF image"),
+        "audio/x-octamed" => Some("OctaMED module"),
+        "audio/x-octamed-compressed" => Some("OctaMED compressed module"),
+        "application/x-acorn-sqsh" => Some("Acorn squished archive"),
+        "application/x-lbr" => Some("LBR archive"),
+        "application/x-risc-os-arcfs" => Some("RISC OS ArcFS archive"),
+        "application/x-tzx" => Some("ZX Spectrum TZX tape image"),
+        "application/x-rzx" => Some("ZX Spectrum RZX recording"),
+        "application/x-tap" => Some("ZX Spectrum TAP tape image"),
+        "application/x-plus3dos" => Some("Spectrum +3 DOS disk image"),
         _ => None,
     }
 }
