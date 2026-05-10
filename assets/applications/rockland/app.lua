@@ -18,7 +18,7 @@ local LEVEL_INCREASE = 4
 local GAME_OVER_DELAY = 1.5
 local SPRITE_W = 4
 local SPRITE_H = 3
-local CAM_DEADZONE_X = 3
+local CAM_DEADZONE_X = 5
 local CAM_DEADZONE_Y = 2
 local PLAYER_ACTION_INTERVAL = 0.08
 local MOVEMENT_USES_POLLING = key.HAS_RELEASE_EVENTS == true
@@ -108,6 +108,7 @@ local motion_dx = {}
 local motion_dy = {}
 local anim_frame = 0
 local sfx_cooldown = 0
+local blink_ticks = 0
 local player_action_cooldown = 0
 
 local magic_willing_time = 0
@@ -430,6 +431,7 @@ local function decode_cave(level_data, diff)
     amoeba_dead = OBJ.NOTSET
     amoeba_max = 200
     amoeba_slow = magic_willing_time * (50 / STEPMAX)
+    blink_ticks = 0
 
     score = score or 0
     message = "Collect diamonds"
@@ -534,6 +536,7 @@ local function increase_diamond()
     end
 
     if nb_diamonds == required_diamonds then
+        blink_ticks = 10
         set_cell(exit_x, exit_y, OBJ.EXIT_OPEN)
         message = "Exit opened"
         audio.beep()
@@ -1142,16 +1145,17 @@ end
 
 local function draw_map()
     local top = 3
-    local avail_w = math.max(6, W - 4)
-    local avail_h = math.max(6, H - top - 2)
+    local avail_w = math.max(6, W - 2)
+    local avail_h = math.max(6, H - top - 1)
 
-    local view_tiles_w = math.max(5, math.min(CAVE_W, math.floor((avail_w - 2) / SPRITE_W)))
-    local view_tiles_h = math.max(4, math.min(CAVE_H, math.floor((avail_h - 2) / SPRITE_H)))
+    local view_tiles_w = math.max(5, math.min(CAVE_W, math.floor(avail_w / SPRITE_W)))
+    local view_tiles_h = math.max(4, math.min(CAVE_H, math.floor(avail_h / SPRITE_H)))
 
     local view_chars_w = view_tiles_w * SPRITE_W
     local view_chars_h = view_tiles_h * SPRITE_H
 
-    local left = math.max(2, math.floor((W - (view_chars_w + 2)) / 2))
+    local left = math.max(1, math.floor((W - (view_chars_w + 2)) / 2) + 1)
+    local field_blink = blink_ticks > 0 and (blink_ticks & 2) ~= 0
 
     update_camera(view_chars_w, view_chars_h)
 
@@ -1187,7 +1191,9 @@ local function draw_map()
             local sprite = tile_sprite(c, mx, my)
             local px = left + 1 + (vx - 1) * SPRITE_W - sub_x
             local py = top + 1 + (vy - 1) * SPRITE_H - sub_y
-            g.color(tile_color(c), tile_bg(c))
+            local bg = field_blink and 0xE3F2FD or tile_bg(c)
+            local fg = field_blink and 0x000000 or tile_color(c)
+            g.color(fg, bg)
             local ox = 0
             local oy = 0
             if state == "playing" and in_bounds(mx, my) then
@@ -1211,7 +1217,11 @@ local function draw_map()
     end
 
     -- Draw border LAST so it overwrites tile chars that bled onto border columns
-    g.color(0xECEFF1, 0x000000)
+    if field_blink then
+        g.color(0x000000, 0xE3F2FD)
+    else
+        g.color(0xECEFF1, 0x000000)
+    end
     g.text(left, top, "┌" .. string.rep("─", view_chars_w) .. "┐")
     for row = 1, view_chars_h do
         g.text(left, top + row, "│")
@@ -1380,6 +1390,9 @@ function app.update(dt)
         tick_motion_offsets()
         if sfx_cooldown > 0 then
             sfx_cooldown = sfx_cooldown - 1
+        end
+        if blink_ticks > 0 then
+            blink_ticks = blink_ticks - 1
         end
         if step == 3 then
             anim_frame = (anim_frame + 1) % 4
