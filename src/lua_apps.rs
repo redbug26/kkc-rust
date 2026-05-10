@@ -1334,7 +1334,7 @@ fn lua_shortcut_items(app_table: &Table) -> Result<Vec<ShortcutBarItem>> {
 }
 
 fn is_quit_key(key: &KeyEvent) -> bool {
-    key.code == KeyCode::Esc || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL))
+    key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL)
 }
 
 fn key_name(key: &KeyEvent) -> Option<String> {

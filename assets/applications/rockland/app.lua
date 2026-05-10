@@ -14,6 +14,8 @@ local CAVE_W = 40
 local CAVE_H = 22
 local STEPMAX = 5
 local TICK = 0.02
+local LEVEL_INCREASE = 4
+local GAME_OVER_DELAY = 1.5
 local SPRITE_W = 4
 local SPRITE_H = 3
 local CAM_DEADZONE_X = 3
@@ -80,7 +82,7 @@ local exit_x, exit_y = 2, 2
 local step = 0
 local tick_acc = 0
 local sec_acc = 0
-local cam_cx = 1  -- camera position in character coords (1-based)
+local cam_cx = 1 -- camera position in character coords (1-based)
 local cam_cy = 1
 
 local timer_s = 0
@@ -97,6 +99,7 @@ local hero_dir = "stand"
 local level_clear_acc = 0
 local level_clear_wait = 0
 local level_clear_started = false
+local game_over_timer = 0
 local intro_acc = 0
 local reveal_index = 1
 local reveal_order = {}
@@ -226,7 +229,7 @@ local function is_firefly(c)
 end
 
 local function is_round(c)
-    return c == OBJ.DIAMOND or c == OBJ.DIAMOND_FALLING or c == OBJ.BOULDER or c == OBJ.BOULDER_FALLING or c == OBJ.WALL
+    return c == OBJ.DIAMOND or c == OBJ.BOULDER or c == OBJ.WALL
 end
 
 local function is_magic(c)
@@ -467,8 +470,8 @@ local function decode_cave(level_data, diff)
     for i = #early, 1, -1 do
         table.insert(reveal_order, 1, early[i])
     end
-        cam_cx = (rx - 1) * SPRITE_W + 1
-        cam_cy = (ry - 1) * SPRITE_H + 1
+    cam_cx = (rx - 1) * SPRITE_W + 1
+    cam_cy = (ry - 1) * SPRITE_H + 1
 end
 
 local function current_cave_index()
@@ -544,18 +547,31 @@ local function kill_player(reason)
     audio.beep()
 end
 
+local function return_to_menu_after_game_over()
+    state = "menu"
+    message = "Choose level and difficulty"
+    dead_reason = ""
+    current_level = menu_level
+    intermission = false
+    difficulty = menu_difficulty
+    score = 0
+    extra_score = 500
+    lives = 3
+    game_over_timer = 0
+end
+
+local function begin_game_over()
+    state = "game_over"
+    message = "Game over"
+    dead_reason = ""
+    game_over_timer = 0
+    audio.beep()
+end
+
 local function restart_after_death()
     lives = lives - 1
     if lives <= 0 then
-        state = "menu"
-        message = "Game over - choose level/difficulty"
-        dead_reason = ""
-        current_level = menu_level
-        intermission = false
-        difficulty = menu_difficulty
-        score = 0
-        extra_score = 500
-        lives = 3
+        begin_game_over()
         return
     end
     start_current_cave()
@@ -966,13 +982,13 @@ local function tile_sprite(c, x, y)
     end
     if c == OBJ.EXIT then return { "/==\\", "|XX|", "\\==/" } end
     if c == OBJ.EXIT_OPEN then return { "/  \\", "|  |", "\\__/" } end
-    if c == OBJ.BOULDER then return { " /o\\", "|oo|", " \\o/" } end
-    if c == OBJ.BOULDER_FALLING then return { " /o\\", "|vv|", " \\o/" } end
+    if c == OBJ.BOULDER then return { " __ ", "/  \\", "\\__/" } end
+    if c == OBJ.BOULDER_FALLING then return { " __ ", "/vv\\", "\\__/" } end
     if c == OBJ.DIAMOND then
-        return { " /\\ ", "<**>", " \\/ " }
+        return { " /\\ ", "/**\\", "\\__/" }
     end
     if c == OBJ.DIAMOND_FALLING then
-        return { " vv ", "<**>", " \\/ " }
+        return { " vv ", "<**>", "\\__/" }
     end
     if c == OBJ.AMOEBA then
         if p == 0 then return { "(oo)", "oOOo", "(oo)" } end
@@ -1048,11 +1064,11 @@ local function update_camera(view_chars_w, view_chars_h)
         pmx = math.max(-1, math.min(1, motion_dx[ry][rx]))
         pmy = math.max(-1, math.min(1, motion_dy[ry][rx]))
     end
-    local player_cx = (rx - 1) * SPRITE_W + 1 + pmx
-    local player_cy = (ry - 1) * SPRITE_H + 1 + pmy
+    local player_cx   = (rx - 1) * SPRITE_W + 1 + pmx
+    local player_cy   = (ry - 1) * SPRITE_H + 1 + pmy
 
-    local dzx = CAM_DEADZONE_X * SPRITE_W
-    local dzy = CAM_DEADZONE_Y * SPRITE_H
+    local dzx         = CAM_DEADZONE_X * SPRITE_W
+    local dzy         = CAM_DEADZONE_Y * SPRITE_H
 
     local left_bound  = cam_cx + dzx
     local right_bound = cam_cx + view_chars_w - dzx - 1
@@ -1060,8 +1076,8 @@ local function update_camera(view_chars_w, view_chars_h)
     local bot_bound   = cam_cy + view_chars_h - dzy - 1
 
     -- Calculate target camera position based on dead zone
-    local target_cx = cam_cx
-    local target_cy = cam_cy
+    local target_cx   = cam_cx
+    local target_cy   = cam_cy
     if player_cx < left_bound then
         target_cx = player_cx - dzx
     elseif player_cx > right_bound then
@@ -1132,87 +1148,87 @@ local function draw_map()
     local view_tiles_w = math.max(5, math.min(CAVE_W, math.floor((avail_w - 2) / SPRITE_W)))
     local view_tiles_h = math.max(4, math.min(CAVE_H, math.floor((avail_h - 2) / SPRITE_H)))
 
-        local view_chars_w = view_tiles_w * SPRITE_W
-        local view_chars_h = view_tiles_h * SPRITE_H
+    local view_chars_w = view_tiles_w * SPRITE_W
+    local view_chars_h = view_tiles_h * SPRITE_H
 
-        local left = math.max(2, math.floor((W - (view_chars_w + 2)) / 2))
+    local left = math.max(2, math.floor((W - (view_chars_w + 2)) / 2))
 
-        update_camera(view_chars_w, view_chars_h)
+    update_camera(view_chars_w, view_chars_h)
 
-        -- Sub-tile character offset into the first visible tile (0..SPRITE-1)
-        local sub_x = (cam_cx - 1) % SPRITE_W
-        local sub_y = (cam_cy - 1) % SPRITE_H
+    -- Sub-tile character offset into the first visible tile (0..SPRITE-1)
+    local sub_x = (cam_cx - 1) % SPRITE_W
+    local sub_y = (cam_cy - 1) % SPRITE_H
 
-        -- First tile to draw in map coordinates (1-based)
-        local first_tx = math.floor((cam_cx - 1) / SPRITE_W) + 1
-        local first_ty = math.floor((cam_cy - 1) / SPRITE_H) + 1
+    -- First tile to draw in map coordinates (1-based)
+    local first_tx = math.floor((cam_cx - 1) / SPRITE_W) + 1
+    local first_ty = math.floor((cam_cy - 1) / SPRITE_H) + 1
 
-        -- Extra tile column/row when sub-offset > 0 (partial tile at left/top edge)
-        local draw_cols = view_tiles_w + (sub_x > 0 and 1 or 0)
-        local draw_rows = view_tiles_h + (sub_y > 0 and 1 or 0)
+    -- Extra tile column/row when sub-offset > 0 (partial tile at left/top edge)
+    local draw_cols = view_tiles_w + (sub_x > 0 and 1 or 0)
+    local draw_rows = view_tiles_h + (sub_y > 0 and 1 or 0)
 
-        -- Vertical clip bounds: tile rows must stay within the box interior
-        local clip_top = top + 1
-        local clip_bot = top + view_chars_h
+    -- Vertical clip bounds: tile rows must stay within the box interior
+    local clip_top = top + 1
+    local clip_bot = top + view_chars_h
 
-        -- Pre-clear interior so no ghost chars appear between frames
-        g.color(0x000000, 0x000000)
-        g["box"](left + 1, clip_top, view_chars_w, view_chars_h, " ")
+    -- Pre-clear interior so no ghost chars appear between frames
+    g.color(0x000000, 0x000000)
+    g["box"](left + 1, clip_top, view_chars_w, view_chars_h, " ")
 
-        -- Draw tiles; horizontal spillover is masked by the border drawn below
-        for vy = 1, draw_rows do
-            for vx = 1, draw_cols do
-                local mx = first_tx + vx - 1
-                local my = first_ty + vy - 1
-                local c = cell(mx, my)
-                if state == "level_intro" and in_bounds(mx, my) and not reveal_mask[my][mx] then
-                    c = OBJ.TITANIUMWALL
-                end
-                local sprite = tile_sprite(c, mx, my)
-                local px = left + 1 + (vx - 1) * SPRITE_W - sub_x
-                local py = top + 1 + (vy - 1) * SPRITE_H - sub_y
-                g.color(tile_color(c), tile_bg(c))
-                local ox = 0
-                local oy = 0
-                if state == "playing" and in_bounds(mx, my) then
-                    ox = math.max(-1, math.min(1, motion_dx[my][mx]))
-                    oy = math.max(-1, math.min(1, motion_dy[my][mx]))
-                end
-                draw_sprite_in_box(px, py, sprite, clip_top, clip_bot, ox, oy)
+    -- Draw tiles; horizontal spillover is masked by the border drawn below
+    for vy = 1, draw_rows do
+        for vx = 1, draw_cols do
+            local mx = first_tx + vx - 1
+            local my = first_ty + vy - 1
+            local c = cell(mx, my)
+            if state == "level_intro" and in_bounds(mx, my) and not reveal_mask[my][mx] then
+                c = OBJ.TITANIUMWALL
             end
-        end
-
-        -- Clear horizontal spillover outside the box to hide partial tiles leaking there
-        local spill = SPRITE_W + 1
-        g.color(0x000000, 0x000000)
-        for row = clip_top, clip_bot do
-            for col = math.max(1, left - spill + 1), left - 1 do
-                g.put(col, row, " ")
+            local sprite = tile_sprite(c, mx, my)
+            local px = left + 1 + (vx - 1) * SPRITE_W - sub_x
+            local py = top + 1 + (vy - 1) * SPRITE_H - sub_y
+            g.color(tile_color(c), tile_bg(c))
+            local ox = 0
+            local oy = 0
+            if state == "playing" and in_bounds(mx, my) then
+                ox = math.max(-1, math.min(1, motion_dx[my][mx]))
+                oy = math.max(-1, math.min(1, motion_dy[my][mx]))
             end
-            for col = left + view_chars_w + 2, math.min(W, left + view_chars_w + spill) do
-                g.put(col, row, " ")
-            end
+            draw_sprite_in_box(px, py, sprite, clip_top, clip_bot, ox, oy)
         end
+    end
 
-        -- Draw border LAST so it overwrites tile chars that bled onto border columns
-        g.color(0xECEFF1, 0x000000)
-        g.text(left, top, "┌" .. string.rep("─", view_chars_w) .. "┐")
-        for row = 1, view_chars_h do
-            g.text(left, top + row, "│")
-            g.text(left + view_chars_w + 1, top + row, "│")
+    -- Clear horizontal spillover outside the box to hide partial tiles leaking there
+    local spill = SPRITE_W + 1
+    g.color(0x000000, 0x000000)
+    for row = clip_top, clip_bot do
+        for col = math.max(1, left - spill + 1), left - 1 do
+            g.put(col, row, " ")
         end
-        g.text(left, top + view_chars_h + 1, "└" .. string.rep("─", view_chars_w) .. "┘")
+        for col = left + view_chars_w + 2, math.min(W, left + view_chars_w + spill) do
+            g.put(col, row, " ")
+        end
+    end
 
-        if state == "dead" then
-            local msg = "GAME OVER"
-            local hint = dead_reason ~= "" and dead_reason or "Press R"
-            local cx = left + 1 + math.floor((view_chars_w - #msg) / 2)
-            local cy = top + 1 + math.floor(view_chars_h / 2)
-            g.color(0xEF9A9A, 0x000000)
-            g.text(cx, cy, msg)
-            g.color(0xCFD8DC, 0x000000)
-            g.text(left + 1 + math.floor((view_chars_w - #hint) / 2), cy + 1, hint)
-        end
+    -- Draw border LAST so it overwrites tile chars that bled onto border columns
+    g.color(0xECEFF1, 0x000000)
+    g.text(left, top, "┌" .. string.rep("─", view_chars_w) .. "┐")
+    for row = 1, view_chars_h do
+        g.text(left, top + row, "│")
+        g.text(left + view_chars_w + 1, top + row, "│")
+    end
+    g.text(left, top + view_chars_h + 1, "└" .. string.rep("─", view_chars_w) .. "┘")
+
+    if state == "dead" then
+        local msg = lives <= 1 and "GAME OVER" or "You loose"
+        local hint = dead_reason ~= "" and dead_reason or "Press R"
+        local cx = left + 1 + math.floor((view_chars_w - #msg) / 2)
+        local cy = top + 1 + math.floor(view_chars_h / 2)
+        g.color(0xEF9A9A, 0x000000)
+        g.text(cx, cy, msg)
+        g.color(0xCFD8DC, 0x000000)
+        g.text(left + 1 + math.floor((view_chars_w - #hint) / 2), cy + 1, hint)
+    end
 end
 
 function app.init(ctx)
@@ -1236,6 +1252,7 @@ function app.init(ctx)
     cam_cx = 1
     cam_cy = 1
     player_action_cooldown = 0
+    game_over_timer = 0
     map = new_grid(OBJ.TITANIUMWALL)
     processed = new_grid(false)
 end
@@ -1250,13 +1267,16 @@ function app.shortcuts()
         return { "←/→:Level", "↑/↓:Difficulty", "Enter:Start", "Esc:Quit" }
     end
     if state == "playing" then
-        return { "Arrows:Move", "HJKL:Dig", "R:Restart Cave", "N:Next Cave", "Esc:Quit" }
+        return { "Arrows:Move", "HJKL:Dig", "R:Restart Cave", "N:Next Cave", "Esc:Lose Life" }
     end
     if state == "level_intro" then
         return { "Preparing cave..." }
     end
     if state == "level_clear" then
         return { "Converting time bonus..." }
+    end
+    if state == "game_over" then
+        return { "Game over" }
     end
     if state == "dead" then
         return { "Enter:Continue", "R:Retry", "N:Skip", "Esc:Quit" }
@@ -1265,6 +1285,14 @@ function app.shortcuts()
 end
 
 function app.update(dt)
+    if state == "game_over" then
+        game_over_timer = game_over_timer + dt
+        if game_over_timer >= GAME_OVER_DELAY then
+            return_to_menu_after_game_over()
+        end
+        return
+    end
+
     if state == "level_intro" then
         intro_acc = intro_acc + dt
         while intro_acc >= 0.01 and reveal_index <= #reveal_order do
@@ -1396,25 +1424,31 @@ end
 -- Used for instantaneous discrete actions: menu nav, restart, dig-in-place.
 function app.keydown(k)
     if k == key.ESC then
-        kkc.quit()
+        if state == "playing" then
+            restart_after_death()
+            return
+        end
+        if state == "menu" then
+            kkc.quit()
+        end
         return
     end
 
     if state == "menu" then
         if k == key.LEFT then
-            menu_level = math.max(1, menu_level - 1)
+            menu_level = math.max(1, menu_level - LEVEL_INCREASE)
             current_level = menu_level
             difficulty = menu_difficulty
             message = string.format("Start cave %s", cave_letter(menu_level))
             return
         elseif k == key.RIGHT then
-            menu_level = math.min(16, menu_level + 1)
+            menu_level = math.min(13, menu_level + LEVEL_INCREASE)
             current_level = menu_level
             difficulty = menu_difficulty
             message = string.format("Start cave %s", cave_letter(menu_level))
             return
         elseif k == key.UP then
-            menu_difficulty = math.min(4, menu_difficulty + 1)
+            menu_difficulty = math.min(2, menu_difficulty + 1)
             current_level = menu_level
             difficulty = menu_difficulty
             message = string.format("Difficulty %d", menu_difficulty + 1)
@@ -1455,6 +1489,13 @@ function app.keydown(k)
         elseif k == "char:n" or k == "char:N" then
             advance_progression_after_win()
             start_current_cave()
+        end
+        return
+    end
+
+    if state == "game_over" then
+        if k == key.ENTER or k == key.SPACE then
+            return_to_menu_after_game_over()
         end
         return
     end
@@ -1501,16 +1542,67 @@ function app.draw()
     g.reset()
 
     if state == "menu" then
-        g.color(0xFFF59D, 0x000000)
-        g.text(math.max(2, math.floor((W - 24) / 2)), 7, "⛏ ROCKLAND CAVE")
-        g.color(0xCFD8DC, 0x000000)
-        g.text(math.max(2, math.floor((W - 38) / 2)), 9, "Playdate C rules ported to Lua runtime")
-        g.text(math.max(2, math.floor((W - 28) / 2)), 10, "Explosions, magic, amoeba")
-        g.color(0xA5D6A7, 0x000000)
-        g.text(math.max(2, math.floor((W - 34) / 2)), 12,
-            string.format("Level %s (%02d)  Difficulty %d", cave_letter(menu_level), menu_level, menu_difficulty + 1))
-        g.color(0xCFD8DC, 0x000000)
-        g.text(math.max(2, math.floor((W - 38) / 2)), 14, "Use arrows to change, Enter to start")
+        local function menu_line(left, right)
+            left = left or ""
+            right = right or ""
+            local gap = math.max(1, 78 - #left - #right)
+            return left .. string.rep(" ", gap) .. right
+        end
+
+        local cave_name = string.format("CAVE %s", cave_letter(menu_level))
+
+
+        local lines = {
+            "                                                                              ",
+            "                                                                              ",
+            "                     ██████╗  ██████╗  ██████╗██╗  ██╗                       ",
+            "                     ██╔══██╗██╔═══██╗██╔════╝██║ ██╔╝                       ",
+            "                     ██████╔╝██║   ██║██║     █████╔╝                        ",
+            "                     ██╔══██╗██║   ██║██║     ██╔═██╗                        ",
+            "                     ██║  ██║╚██████╔╝╚██████╗██║  ██╗                       ",
+            "                     ╚═╝  ╚═╝ ╚═════╝  ╚═════╝╚═╝  ╚═╝                       ",
+            "                                                                              ",
+            "                     ██╗      █████╗ ███╗   ██╗██████╗                      ",
+            "                     ██║     ██╔══██╗████╗  ██║██╔══██╗                     ",
+            "                     ██║     ███████║██╔██╗ ██║██║  ██║                     ",
+            "                     ██║     ██╔══██║██║╚██╗██║██║  ██║                     ",
+            "                     ███████╗██║  ██║██║ ╚████║██████╔╝                     ",
+            "                     ╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚═════╝                      ",
+            "                                                                              ",
+            "                         .--.      _.-._      .--.                              ",
+            "                       .'_\\/_'.   /_   _\\   .'_\\/_'.                            ",
+            "                       '. /\\ .'   \\_) (_/   '. /\\ .'                            ",
+            "                         '--'       `-'       '--'                              ",
+            "══════════════════════════════════════════════════════════════════════════════",
+            menu_line(string.format("  CAVE : %02d - %s", menu_level, cave_name), "   "),
+            menu_line(string.format("  LEVEL: %03d     LIVES: %02d     SCORE: %06d", menu_difficulty + 1, lives, score),
+                "PRESS [ENTER] TO START"),
+        }
+
+        local left = math.max(1, math.floor((W - 80) / 2) + 1)
+        local top = math.max(1, math.floor((H - #lines) / 2) + 1)
+        for i, line in ipairs(lines) do
+            if i == 1 or i == 21 or i == #lines then
+                g.color(0x78909C, 0x000000)
+            elseif i >= 3 and i <= 8 then
+                g.color(0xFFEE58, 0x000000)
+            elseif i >= 10 and i <= 15 then
+                g.color(0x4FC3F7, 0x000000)
+            elseif i >= 17 and i <= 20 then
+                g.color(0xA5D6A7, 0x000000)
+            elseif i >= 22 and i <= 23 then
+                g.color(0xFFFFFF, 0x000000)
+            else
+                g.color(0x455A64, 0x000000)
+            end
+            g.text(left, top + i - 1, line)
+        end
+        return
+    end
+
+    if state == "game_over" then
+        g.color(0xEF9A9A, 0x000000)
+        g.text(math.max(2, math.floor((W - 9) / 2)), math.max(4, math.floor(H / 2)), "GAME OVER")
         return
     end
 
