@@ -1001,6 +1001,15 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             vec![],
         ))
+    } else if data.starts_with(b"CLIB\x1a") {
+        Some(info(
+            "application/x-ags-archive",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(b"PP20") || data.starts_with(b"PP11") {
         Some(info(
             "application/x-powerpacker",
@@ -1398,6 +1407,7 @@ fn format_from_mime_type(mime_type: &str) -> Option<&'static str> {
         "audio/x-ftmn" => Some("FaceTheMusic module"),
         "audio/x-emod" => Some("Extended MOD module"),
         "audio/x-ctmf" => Some("Creative Music Format"),
+        "application/x-ags-archive" => Some("Adventure Game Studio archive"),
         "application/x-uf2" => Some("UF2 firmware image"),
         "application/x-amstrad-cpc-amsdos" => Some("Amstrad AMSDOS file"),
         "application/x-amstrad-cpc-dsk" => Some("Amstrad CPC DSK image"),
