@@ -1140,16 +1140,88 @@ impl Viewer {
         start: usize,
         height: usize,
     ) -> Vec<Line<'static>> {
-        self.module_info_lines_for_width(selected_width)
+        let lines = self.module_info_lines_for_area(selected_width, height);
+        let start = if self.audio_tab() == AudioViewerTab::Text {
+            start
+        } else {
+            0
+        };
+        let mut out = lines
             .into_iter()
             .skip(start)
             .take(height)
             .map(|line| self.audio_viewer_line(&line, selected_width))
-            .collect()
+            .collect::<Vec<_>>();
+        while out.len() < height {
+            out.push(Line::from(Span::styled(
+                " ".repeat(selected_width),
+                Style::default().fg(Color::White).bg(Color::Black),
+            )));
+        }
+        out
     }
 
     fn audio_viewer_line(&self, line: &str, width: usize) -> Line<'static> {
         let line = self.display_line(line, width);
+        if line.starts_with('╔') {
+            return Line::from(Span::styled(
+                line,
+                Style::default()
+                    .fg(Color::LightMagenta)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
+        if line.starts_with('╟') || line.starts_with('╚') {
+            return Line::from(Span::styled(line, Style::default().fg(Color::LightBlue)));
+        }
+        if line.starts_with('║') {
+            let mut chars = line.chars();
+            let border_left = chars.next().unwrap_or('║');
+            let mut body = chars.collect::<String>();
+            let border_right = body.pop().unwrap_or('║');
+            let trimmed = body.trim_start();
+            let mut spans = vec![Span::styled(
+                border_left.to_string(),
+                Style::default().fg(Color::LightBlue),
+            )];
+            if trimmed.starts_with("tabs") {
+                spans.extend(styled_audio_tabs_body(&body));
+            } else if self.audio_tab() == AudioViewerTab::Spectrum
+                && body
+                    .chars()
+                    .any(|ch| matches!(ch, '@' | '#' | '*' | '+' | '=' | '-' | ':' | '.'))
+            {
+                spans.extend(styled_spectrum_body(&body));
+            } else if trimmed.starts_with('>') {
+                spans.push(Span::styled(
+                    body,
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::LightGreen)
+                        .add_modifier(Modifier::BOLD),
+                ));
+            } else if trimmed.starts_with("Level") || trimmed.starts_with("Progress") {
+                spans.extend(styled_meter_body(&body));
+            } else if trimmed.starts_with("FFT") {
+                spans.extend(styled_fft_body(&body));
+            } else if trimmed.starts_with("order") {
+                spans.push(Span::styled(body, Style::default().fg(Color::LightYellow)));
+            } else if trimmed.starts_with("Title")
+                || trimmed.starts_with("Format")
+                || trimmed.starts_with("Channels")
+                || trimmed.starts_with("Rate")
+                || trimmed.starts_with("Orders")
+            {
+                spans.push(Span::styled(body, Style::default().fg(Color::LightCyan)));
+            } else {
+                spans.push(Span::styled(body, Style::default().fg(Color::White)));
+            }
+            spans.push(Span::styled(
+                border_right.to_string(),
+                Style::default().fg(Color::LightBlue),
+            ));
+            return Line::from(spans);
+        }
         if line.starts_with("Playing audio:") {
             return Line::from(vec![
                 Span::styled("Playing audio:", Style::default().fg(Color::LightMagenta)),
@@ -1253,67 +1325,94 @@ impl Viewer {
     }
 
     fn module_info_lines(&self) -> Vec<String> {
-        self.module_info_lines_for_width(80)
+        self.module_info_lines_for_area(120, 32)
     }
 
     fn module_info_line_count(&self) -> usize {
-        self.module_info_lines_for_width(80).len()
+        self.module_info_lines_for_area(120, 48).len()
     }
 
-    fn module_info_lines_for_width(&self, width: usize) -> Vec<String> {
+    fn module_info_lines_for_area(&self, width: usize, height: usize) -> Vec<String> {
         let snapshot = crate::tracker_audio::playback_snapshot_for_path(&self.path);
+        let width = width.max(32);
         if let Some(info) = &self.music {
-            let mut lines = self.audio_common_lines(info, snapshot.as_ref(), width);
+            let mut lines = self.audio_deck_header(info, snapshot.as_ref(), width);
             match self.audio_tab() {
                 AudioViewerTab::Overview => {
-                    lines.push(String::new());
-                    lines.push("Overview".into());
+                    let mut meta = audio_metadata_lines(self, info);
                     if let Some(snapshot) = &snapshot {
-                        lines.push(format!("Level: {}", meter_bar(snapshot.rms, 32)));
-                        lines.push(format!(
-                            "FFT:   {}",
-                            spectrum_bar(&snapshot.spectrum, width.saturating_sub(7).max(24))
+                        meta.push(format!(
+                            "Level  {}",
+                            meter_bar(snapshot.rms, width.saturating_sub(22).max(24))
+                        ));
+                        meta.push(format!(
+                            "FFT    {}",
+                            spectrum_bar(&snapshot.spectrum, width.saturating_sub(18).max(32))
                         ));
                     }
+                    lines.extend(audio_box("Overview console", width, &meta));
                     if !info.patterns.is_empty() {
-                        lines.push(String::new());
-                        lines.push("Tracker".into());
-                        lines.extend(tracker_window_lines(info, snapshot.as_ref(), 9));
+                        let rows = height.saturating_sub(lines.len() + 8).clamp(9, 18);
+                        lines.extend(audio_box(
+                            "Tracker monitor",
+                            width,
+                            &tracker_window_lines(info, snapshot.as_ref(), rows),
+                        ));
                     }
                     if !info.text_tracks.is_empty() {
-                        lines.push(String::new());
-                        lines.push("Track text".into());
-                        lines.extend(info.text_tracks.iter().take(8).cloned());
+                        let text_rows = height.saturating_sub(lines.len() + 2).clamp(4, 10);
+                        lines.extend(audio_box(
+                            "Track text",
+                            width,
+                            &info
+                                .text_tracks
+                                .iter()
+                                .take(text_rows)
+                                .cloned()
+                                .collect::<Vec<_>>(),
+                        ));
                     }
                 }
                 AudioViewerTab::Spectrum => {
-                    lines.push(String::new());
-                    lines.push("Spectrum analyzer".into());
                     if let Some(snapshot) = &snapshot {
-                        lines.extend(spectrum_block(
-                            &snapshot.spectrum,
-                            width.saturating_sub(2).max(24),
-                            16,
+                        let spectrum_height = height.saturating_sub(lines.len() + 3).max(12);
+                        lines.extend(audio_box(
+                            "Spectrum analyzer",
+                            width,
+                            &spectrum_block(
+                                &snapshot.spectrum,
+                                width.saturating_sub(6).max(32),
+                                spectrum_height,
+                            ),
                         ));
                     } else {
-                        lines.push("No audio samples yet".into());
+                        lines.extend(audio_box(
+                            "Spectrum analyzer",
+                            width,
+                            &["No audio samples yet".into()],
+                        ));
                     }
                 }
                 AudioViewerTab::Tracker => {
-                    lines.push(String::new());
-                    lines.push("Tracker".into());
-                    lines.extend(tracker_window_lines(info, snapshot.as_ref(), 21));
+                    let rows = height.saturating_sub(lines.len() + 3).max(12);
+                    lines.extend(audio_box(
+                        "Tracker pattern",
+                        width,
+                        &tracker_window_lines(info, snapshot.as_ref(), rows),
+                    ));
                 }
                 AudioViewerTab::Text => {
-                    lines.push(String::new());
-                    lines.push("Track text".into());
                     if info.text_tracks.is_empty() {
-                        lines.push(
-                            "No embedded track text, channel names, instruments, or samples."
-                                .into(),
-                        );
+                        lines.extend(audio_box(
+                            "Track text",
+                            width,
+                            &[
+                                "No embedded track text, channel names, instruments, or samples."
+                                    .into(),
+                            ],
+                        ));
                     } else {
-                        lines.extend(info.text_tracks.iter().cloned());
+                        lines.extend(audio_box("Track text", width, &info.text_tracks));
                     }
                 }
             }
@@ -1326,64 +1425,27 @@ impl Viewer {
         }
     }
 
-    fn audio_common_lines(
+    fn audio_deck_header(
         &self,
         info: &crate::tracker_audio::TrackerModuleInfo,
         snapshot: Option<&crate::tracker_audio::TrackerPlaybackSnapshot>,
         width: usize,
     ) -> Vec<String> {
-        let mut lines = vec![
-            format!(
-                "Playing audio: {}",
-                if info.name.is_empty() {
-                    self.path
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .unwrap_or("Untitled")
-                } else {
-                    &info.name
-                }
-            ),
-            format!(
-                "Tabs: {}",
-                AudioViewerTab::ALL
-                    .iter()
-                    .map(|tab| {
-                        if *tab == self.audio_tab() {
-                            format!("[{}]", tab.label())
-                        } else {
-                            tab.label().to_string()
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join("  ")
-            ),
-            format!("Format: {}", info.format),
-            format!(
-                "Channels: {}{}",
-                info.channels.max(1),
-                info.sample_rate
-                    .map(|rate| format!("  Rate: {rate} Hz"))
-                    .unwrap_or_default()
-            ),
-            info.duration
-                .map(|duration| format!("Duration: {}", format_duration(duration)))
-                .unwrap_or_else(|| "Duration: streaming".into()),
-            if info.patterns.is_empty() {
-                format!("File: {}", self.path.display())
-            } else {
-                format!(
-                    "Songs: {}  Orders: {}  Patterns: {}",
-                    info.songs.max(1),
-                    info.orders.len(),
-                    info.patterns.len()
-                )
-            },
-        ];
+        let title = if info.name.is_empty() {
+            self.path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("Untitled")
+        } else {
+            &info.name
+        };
+        let mut lines = Vec::new();
+        lines.push(audio_banner(width, &format!("KKC AUDIO DECK  ·  {title}")));
+        lines.push(audio_tabs(width, self.audio_tab()));
 
         if let Some(snapshot) = snapshot {
-            lines.push(format!(
-                "Position: order {:02X}  pattern {:02X}  row {:02X}  {}",
+            let transport = format!(
+                "order {:02X}  pattern {:02X}  row {:02X}  {}",
                 snapshot.table_index,
                 snapshot.pattern,
                 snapshot.row,
@@ -1392,14 +1454,16 @@ impl Viewer {
                 } else {
                     "stopped"
                 }
-            ));
-            lines.push(format!(
-                "Progress: {}",
-                progress_bar(
+            );
+            lines.extend(audio_box("Transport", width, &[transport]));
+            lines.extend(audio_box(
+                "Progress",
+                width,
+                &[progress_bar(
                     snapshot.position,
                     snapshot.duration.or(info.duration),
-                    width.saturating_sub(10).max(12)
-                )
+                    width.saturating_sub(6).max(24),
+                )],
             ));
         }
 
@@ -2160,10 +2224,196 @@ impl Viewer {
 fn meter_bar(value: f32, width: usize) -> String {
     let filled = ((value.clamp(0.0, 1.0) * width as f32).round() as usize).min(width);
     format!(
-        "{}{}",
-        "#".repeat(filled),
-        ".".repeat(width.saturating_sub(filled))
+        "[{}{}]",
+        "█".repeat(filled),
+        "░".repeat(width.saturating_sub(filled))
     )
+}
+
+fn audio_metadata_lines(
+    viewer: &Viewer,
+    info: &crate::tracker_audio::TrackerModuleInfo,
+) -> Vec<String> {
+    let title = if info.name.is_empty() {
+        viewer
+            .path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("Untitled")
+            .to_string()
+    } else {
+        info.name.clone()
+    };
+    let duration = info
+        .duration
+        .map(format_duration)
+        .unwrap_or_else(|| "live".into());
+    vec![
+        format!("Title    {title}"),
+        format!("Format   {}", info.format),
+        format!(
+            "Channels {:>2}        Songs {:>2}",
+            info.channels, info.songs
+        ),
+        format!(
+            "Rate     {} Hz     Duration {duration}",
+            info.sample_rate.unwrap_or(0)
+        ),
+        format!(
+            "Orders   {:>3}       Patterns {:>3}",
+            info.orders.len(),
+            info.patterns.len()
+        ),
+    ]
+}
+
+fn audio_banner(width: usize, title: &str) -> String {
+    let inner_width = width.saturating_sub(2).max(1);
+    let text = format!(" {title} ");
+    if UnicodeWidthStr::width(text.as_str()) >= inner_width {
+        return format!("╔{}╗", fit_to_width(&text, inner_width));
+    }
+    let left = (inner_width - UnicodeWidthStr::width(text.as_str())) / 2;
+    let right = inner_width - left - UnicodeWidthStr::width(text.as_str());
+    format!("╔{}{}{}╗", "═".repeat(left), text, "═".repeat(right))
+}
+
+fn audio_tabs(width: usize, active: AudioViewerTab) -> String {
+    let labels = AudioViewerTab::ALL
+        .iter()
+        .map(|tab| {
+            if *tab == active {
+                format!("[{}]", tab.label().to_ascii_uppercase())
+            } else {
+                format!(" {} ", tab.label())
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("  ");
+    let text = format!(" tabs  {labels}");
+    let inner_width = width.saturating_sub(2).max(1);
+    format!("║{}║", pad_to_width(&text, inner_width))
+}
+
+fn audio_box(title: &str, width: usize, body: &[String]) -> Vec<String> {
+    let inner_width = width.saturating_sub(2).max(1);
+    let title = format!(" {title} ");
+    let top = if UnicodeWidthStr::width(title.as_str()) >= inner_width {
+        format!("╟{}╢", fit_to_width(&title, inner_width))
+    } else {
+        format!(
+            "╟{}{}╢",
+            title,
+            "─".repeat(inner_width - UnicodeWidthStr::width(title.as_str()))
+        )
+    };
+    let mut lines = Vec::with_capacity(body.len() + 2);
+    lines.push(top);
+    if body.is_empty() {
+        lines.push(format!("║{}║", " ".repeat(inner_width)));
+    } else {
+        for row in body {
+            lines.push(format!("║{}║", pad_to_width(row, inner_width)));
+        }
+    }
+    lines.push(format!("╚{}╝", "═".repeat(inner_width)));
+    lines
+}
+
+fn fit_to_width(text: &str, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    let mut out = String::new();
+    let mut used = 0;
+    for ch in text.chars() {
+        let char_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if used + char_width > width {
+            break;
+        }
+        out.push(ch);
+        used += char_width;
+    }
+    out
+}
+
+fn pad_to_width(text: &str, width: usize) -> String {
+    let mut out = fit_to_width(text, width);
+    let used = UnicodeWidthStr::width(out.as_str());
+    if used < width {
+        out.push_str(&" ".repeat(width - used));
+    }
+    out
+}
+
+fn styled_audio_tabs_body(body: &str) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    let mut active = false;
+    for ch in body.chars() {
+        if ch == '[' {
+            active = true;
+        }
+        let style = if active {
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::LightCyan)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Gray)
+        };
+        spans.push(Span::styled(ch.to_string(), style));
+        if ch == ']' {
+            active = false;
+        }
+    }
+    spans
+}
+
+fn styled_meter_body(body: &str) -> Vec<Span<'static>> {
+    body.chars()
+        .map(|ch| {
+            let style = match ch {
+                '█' => Style::default().fg(Color::LightGreen),
+                '░' => Style::default().fg(Color::DarkGray),
+                '[' | ']' => Style::default().fg(Color::LightBlue),
+                '%' | '/' => Style::default().fg(Color::Yellow),
+                '0'..='9' | ':' => Style::default().fg(Color::LightYellow),
+                _ => Style::default().fg(Color::LightCyan),
+            };
+            Span::styled(ch.to_string(), style)
+        })
+        .collect()
+}
+
+fn styled_fft_body(body: &str) -> Vec<Span<'static>> {
+    body.chars()
+        .map(|ch| {
+            let style = if matches!(ch, '@' | '#' | '*' | '+' | '=' | '-' | ':' | '.') {
+                Style::default().fg(spectrum_color(ch))
+            } else if ch == 'F' || ch == 'T' {
+                Style::default().fg(Color::LightBlue)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            };
+            Span::styled(ch.to_string(), style)
+        })
+        .collect()
+}
+
+fn styled_spectrum_body(body: &str) -> Vec<Span<'static>> {
+    body.chars()
+        .map(|ch| Span::styled(ch.to_string(), Style::default().fg(spectrum_color(ch))))
+        .collect()
+}
+
+fn spectrum_color(ch: char) -> Color {
+    match ch {
+        '@' | '#' => Color::LightRed,
+        '*' | '+' => Color::Yellow,
+        '=' | '-' => Color::LightGreen,
+        ':' | '.' => Color::Cyan,
+        _ => Color::DarkGray,
+    }
 }
 
 fn tracker_window_lines(
@@ -2202,13 +2452,12 @@ fn spectrum_block(values: &[f32], width: usize, height: usize) -> Vec<String> {
     if values.is_empty() || width == 0 || height == 0 {
         return Vec::new();
     }
-    let buckets = values.len().min(width);
+    let buckets = width;
     (1..=height)
         .rev()
         .map(|level| {
             let threshold = level as f32 / height as f32;
-            let mut line = String::with_capacity(buckets + 2);
-            line.push_str("S ");
+            let mut line = String::with_capacity(buckets);
             for idx in 0..buckets {
                 let src = idx * values.len() / buckets;
                 let value = values.get(src).copied().unwrap_or_default();
@@ -2238,15 +2487,22 @@ fn progress_bar(
     duration: Option<std::time::Duration>,
     width: usize,
 ) -> String {
+    let bar_width = width.saturating_sub(18).max(10);
     let Some(duration) = duration.filter(|duration| !duration.is_zero()) else {
-        return format!("{} {}", meter_bar(0.0, width), format_duration(position));
+        return format!(
+            "[{}] --% {}",
+            "░".repeat(bar_width),
+            format_duration(position)
+        );
     };
     let ratio = (position.as_secs_f64() / duration.as_secs_f64()).clamp(0.0, 1.0);
-    let filled = ((ratio * width as f64).round() as usize).min(width);
+    let filled = ((ratio * bar_width as f64).round() as usize).min(bar_width);
+    let percent = (ratio * 100.0).round() as usize;
     format!(
-        "{}{} {} / {}",
-        "=".repeat(filled),
-        "-".repeat(width.saturating_sub(filled)),
+        "[{}{}] {:>3}% {} / {}",
+        "█".repeat(filled),
+        "░".repeat(bar_width.saturating_sub(filled)),
+        percent,
         format_duration(position),
         format_duration(duration)
     )
@@ -2267,7 +2523,7 @@ fn spectrum_bar(values: &[f32], width: usize) -> String {
     if values.is_empty() || width == 0 {
         return String::new();
     }
-    let buckets = values.len().min(width);
+    let buckets = width;
     let mut out = String::with_capacity(buckets);
     for idx in 0..buckets {
         let src = idx * values.len() / buckets;

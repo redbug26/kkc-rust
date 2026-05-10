@@ -12,6 +12,7 @@ use xmrsplayer::prelude::XmrsPlayer;
 
 const SAMPLE_RATE: u32 = 48_000;
 const BUFFER_SIZE: usize = 2048;
+const SPECTRUM_BANDS: usize = 96;
 
 #[derive(Debug, Clone)]
 pub struct TrackerModuleInfo {
@@ -64,7 +65,7 @@ impl TrackerVisualizer {
             samples: vec![0.0; 1024],
             write_pos: 0,
             rms: 0.0,
-            spectrum: vec![0.0; 24],
+            spectrum: vec![0.0; SPECTRUM_BANDS],
             table_index: 0,
             pattern: 0,
             row: 0,
@@ -86,7 +87,7 @@ impl TrackerVisualizer {
         } else {
             (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt()
         };
-        self.spectrum = compute_fft_bands(&self.ordered_samples(), 24);
+        self.spectrum = compute_fft_bands(&self.ordered_samples(), SPECTRUM_BANDS);
     }
 
     fn ordered_samples(&self) -> Vec<f32> {
@@ -385,7 +386,7 @@ fn module_text_tracks(module: &Module) -> Vec<String> {
 
 fn format_pattern_row(row_idx: usize, row: &[TrackUnit]) -> String {
     let mut line = format!("{row_idx:02X} ");
-    for unit in row.iter().take(12) {
+    for unit in row {
         let note = format!("{:?}", unit.note);
         let instr = unit
             .instrument
@@ -398,9 +399,6 @@ fn format_pattern_row(row_idx: usize, row: &[TrackUnit]) -> String {
             .unwrap_or_default();
         let fx = fx.chars().take(3).collect::<String>();
         line.push_str(&format!("[{note:<4} {instr} {fx:<3}] "));
-    }
-    if row.len() > 12 {
-        line.push_str("...");
     }
     line
 }

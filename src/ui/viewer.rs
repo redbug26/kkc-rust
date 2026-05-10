@@ -103,7 +103,7 @@ pub(crate) fn viewer_area(v: &Viewer, area: Rect) -> Rect {
     let max_width = match v.mode {
         ViewMode::Hex => 80u16,
         ViewMode::Image => area.width.saturating_sub(4).max(40).min(area.width),
-        ViewMode::Module => 80u16,
+        ViewMode::Module => area.width,
         _ => {
             let ln = v.line_number_width() as u16;
             let text_max = v

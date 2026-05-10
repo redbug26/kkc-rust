@@ -1,4 +1,5 @@
 [plugin]
+id = "xml_viewer"
 name = "xml_viewer"
 version = "1.0.0"
 type = "viewer"

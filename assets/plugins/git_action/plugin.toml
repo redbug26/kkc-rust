@@ -1,4 +1,5 @@
 [plugin]
+id = "git_action"
 name = "git_action"
 version = "1.0.0"
 type = "action"

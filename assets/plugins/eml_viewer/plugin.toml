@@ -1,4 +1,5 @@
 [plugin]
+id = "eml_viewer"
 name = "eml_viewer"
 version = "1.0.0"
 type = "viewer"

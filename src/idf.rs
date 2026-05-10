@@ -456,6 +456,16 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             vec![],
         ))
+    } else if is_webshots_wbc(&data, file_len) {
+        Some(info_with_mime_types(
+            "image/x-webshots",
+            &["application/x-webshots"],
+            path,
+            IdfKind::Bitmap,
+            webshots_title(&data),
+            None,
+            webshots_wbc_lines(&data, file_len),
+        ))
     } else if data.starts_with(b"\x89PNG\r\n\x1A\n") {
         let (w, h) = png_size(&data).unwrap_or((0, 0));
         Some(info(
@@ -981,6 +991,7 @@ fn format_from_mime_type(mime_type: &str) -> Option<&'static str> {
         "image/jpeg" => Some("JPEG bitmap"),
         "image/bmp" => Some("BMP bitmap"),
         "image/tiff" => Some("TIFF bitmap"),
+        "image/x-webshots" | "application/x-webshots" => Some("Webshots picture"),
         "image/heic" => Some("HEIC bitmap"),
         "image/vnd.adobe.photoshop" => Some("Photoshop bitmap"),
         "image/x-tga" => Some("TGA bitmap"),
@@ -2603,6 +2614,69 @@ fn is_iso9660(data: &[u8]) -> bool {
 
 fn is_tiff(data: &[u8]) -> bool {
     data.starts_with(b"II*\0") || data.starts_with(b"MM\0*")
+}
+
+fn read_le_u32(data: &[u8], offset: usize) -> Option<u32> {
+    let bytes = data.get(offset..offset + 4)?;
+    Some(u32::from_le_bytes(bytes.try_into().ok()?))
+}
+
+fn is_webshots_wbc(data: &[u8], file_len: usize) -> bool {
+    // Webshots WBC header (Setaou, 2006):
+    // offset 0: int32 file tag = -1778772309 (AB 16 FA 95)
+    if !data.starts_with(&[0xAB, 0x16, 0xFA, 0x95]) {
+        return false;
+    }
+
+    // Header size field at offset 4 is documented as 8606 in typical files.
+    // Keep this permissive to avoid false negatives across WBC variants.
+    let Some(header_size) = read_le_u32(data, 4) else {
+        return false;
+    };
+    if header_size < 2196 || header_size as usize > file_len {
+        return false;
+    }
+
+    true
+}
+
+fn webshots_title(data: &[u8]) -> Option<String> {
+    // offset 12, char[256] file title
+    let raw = data.get(12..(12 + 256))?;
+    fixed_text(raw)
+}
+
+fn webshots_wbc_lines(data: &[u8], file_len: usize) -> Vec<String> {
+    let mut out = Vec::new();
+
+    if let Some(header_size) = read_le_u32(data, 4) {
+        out.push(format!(" Header size: {}", header_size));
+    }
+
+    // offset 2196, int32 unit count
+    if let Some(unit_count) = read_le_u32(data, 2196) {
+        out.push(format!(" Units: {}", unit_count));
+
+        // First index item starts at 2200 with a unit offset int32.
+        if unit_count > 0 {
+            if let Some(first_unit_offset) = read_le_u32(data, 2200) {
+                out.push(format!(" First unit offset: {}", first_unit_offset));
+
+                if first_unit_offset as usize + 4 <= data.len() {
+                    let looks_unit = data
+                        [first_unit_offset as usize..first_unit_offset as usize + 4]
+                        == [0xE2, 0xCD, 0x71, 0xF0];
+                    if looks_unit {
+                        out.push(" Unit tag: E2 CD 71 F0".to_string());
+                    }
+                } else if (first_unit_offset as usize) < file_len {
+                    out.push(" Unit tag: outside probe window".to_string());
+                }
+            }
+        }
+    }
+
+    out
 }
 
 fn jpeg_size(data: &[u8]) -> Option<(u32, u32)> {

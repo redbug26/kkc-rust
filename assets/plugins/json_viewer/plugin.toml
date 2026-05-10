@@ -1,4 +1,5 @@
 [plugin]
+id = "json_viewer"
 name = "json_viewer"
 version = "1.0.0"
 type = "viewer"

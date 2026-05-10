@@ -198,6 +198,7 @@ pub struct PluginInfo {
 
 #[derive(Debug, Clone)]
 struct ArchivePlugin {
+    id: String,
     name: String,
     version: String,
     description: String,
@@ -231,6 +232,7 @@ struct ActionPlugin {
 
 #[derive(Debug, Clone)]
 struct RegisteredPlugin {
+    id: String,
     name: String,
     version: String,
     description: String,
@@ -263,6 +265,7 @@ struct LuaPluginManifest {
 
 #[derive(Debug, Deserialize)]
 struct LuaPluginManifestPlugin {
+    id: Option<String>,
     name: Option<String>,
     version: Option<String>,
     description: Option<String>,
@@ -2203,6 +2206,7 @@ fn load_plugins() -> Result<PluginRegistry> {
 
         for plugin in registered {
             archive_plugins.push(ArchivePlugin {
+                id: plugin.id,
                 name: plugin.name,
                 version: plugin.version,
                 description: plugin.description,
@@ -2724,11 +2728,27 @@ fn load_lua_plugin_manifest(plugin_dir: &Path) -> Result<LuaPluginManifestPlugin
     Ok(manifest.plugin)
 }
 
+fn lua_plugin_manifest_id(plugin_dir: &Path) -> Option<String> {
+    load_lua_plugin_manifest(plugin_dir)
+        .ok()
+        .and_then(|manifest| manifest.id)
+        .filter(|id| !id.is_empty())
+        .or_else(|| {
+            plugin_dir
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_string)
+        })
+}
+
 fn apply_lua_manifest_to_archive_plugins(
     manifest: &LuaPluginManifestPlugin,
     plugins: &mut [RegisteredPlugin],
 ) {
     for plugin in plugins {
+        if let Some(id) = manifest.id.as_deref().filter(|value| !value.is_empty()) {
+            plugin.id = id.to_string();
+        }
         if let Some(name) = manifest.name.as_deref().filter(|value| !value.is_empty()) {
             plugin.name = name.to_string();
         }
@@ -2882,6 +2902,9 @@ where
             let name: String = table
                 .get::<Option<String>>("name")?
                 .unwrap_or_else(|| "plugin".to_string());
+            let id: String = table
+                .get::<Option<String>>("id")?
+                .unwrap_or_else(|| name.clone());
             let version: String = table
                 .get::<Option<String>>("version")?
                 .unwrap_or_else(|| "0.0.0".to_string());
@@ -2904,6 +2927,7 @@ where
                 .collect::<Vec<_>>();
 
             on_register(RegisteredPlugin {
+                id,
                 name,
                 version,
                 description,
@@ -3000,14 +3024,24 @@ fn table_string_list(table: &Table, key: &str) -> mlua::Result<Vec<String>> {
     }
 }
 
+fn runtime_plugin_id_matches(table: &Table, expected_id: &str) -> mlua::Result<bool> {
+    match table.get::<Option<String>>("id")? {
+        Some(id) => Ok(id == expected_id),
+        None => Ok(false),
+    }
+}
+
 fn runtime_plugin_name_matches(
     table: &Table,
     expected_name: &str,
     single_registration: bool,
 ) -> mlua::Result<bool> {
+    if single_registration {
+        return Ok(true);
+    }
     match table.get::<Option<String>>("name")? {
         Some(name) => Ok(name == expected_name),
-        None => Ok(single_registration),
+        None => Ok(false),
     }
 }
 
@@ -3395,10 +3429,9 @@ impl ArchivePlugin {
             .exec()?;
 
         let handles = handles.borrow();
-        let single_registration = handles.len() == 1;
         for key in handles.iter() {
             let table: Table = lua.registry_value(key)?;
-            if runtime_plugin_name_matches(&table, &self.name, single_registration)? {
+            if runtime_plugin_id_matches(&table, &self.id)? {
                 let extract: Function = table.get("extract")?;
                 let ok: bool = extract.call((
                     path.to_string_lossy().into_owned(),
@@ -3434,10 +3467,9 @@ impl ArchivePlugin {
         }
 
         let handles = handles.borrow();
-        let single_registration = handles.len() == 1;
         for key in handles.iter() {
             let table: Table = lua.registry_value(key)?;
-            if runtime_plugin_name_matches(&table, &self.name, single_registration)? {
+            if runtime_plugin_id_matches(&table, &self.id)? {
                 let add_files: Function = table.get("add_files")?;
                 let ok: bool =
                     add_files.call((path.to_string_lossy().into_owned(), source_table))?;
@@ -3823,6 +3855,7 @@ fn install_runtime_bindings(
     plugin_dir: &Path,
     handles: Rc<RefCell<Vec<mlua::RegistryKey>>>,
 ) -> Result<()> {
+    let manifest_id = lua_plugin_manifest_id(plugin_dir);
     install_bindings(lua, plugin_dir, move |plugin| {
         let _ = plugin;
     })?;
@@ -3838,6 +3871,11 @@ fn install_runtime_bindings(
             let extract: Option<Function> = table.get("extract")?;
             if extract.is_none() {
                 return Err(mlua::Error::external("Plugin does not define extract()"));
+            }
+            if table.get::<Option<String>>("id")?.is_none()
+                && let Some(id) = manifest_id.as_deref()
+            {
+                table.set("id", id)?;
             }
             handles.borrow_mut().push(lua.create_registry_value(table)?);
             Ok(())
@@ -4787,6 +4825,51 @@ description = "Test plugin"
 
         assert_eq!(plugins.len(), 1);
         assert_eq!(plugins[0].name, "debug_log_test");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn archive_runtime_registration_uses_manifest_id() {
+        let root = std::env::temp_dir().join(format!(
+            "kkc-runtime-id-plugin-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).expect("temp dir");
+        fs::write(
+            root.join("plugin.toml"),
+            r#"[plugin]
+id = "wbc-webshots"
+name = "Webshots parser"
+version = "1.0.0"
+type = "archive"
+description = "Test plugin"
+"#,
+        )
+        .expect("write manifest");
+
+        let lua = plugin_lua();
+        let handles = Rc::new(RefCell::new(Vec::new()));
+        install_runtime_bindings(&lua, &root, Rc::clone(&handles)).expect("runtime bindings");
+        lua.load(
+            r#"local kkc = require("kkc")
+kkc.register_archive_plugin({
+    name = "wbc_webshots",
+    extract = function(path, destination) return true end,
+})
+"#,
+        )
+        .exec()
+        .expect("register runtime plugin");
+
+        let handles = handles.borrow();
+        assert_eq!(handles.len(), 1);
+        let table: Table = lua.registry_value(&handles[0]).expect("runtime table");
+        assert!(runtime_plugin_id_matches(&table, "wbc-webshots").expect("id should match"));
+        assert!(!runtime_plugin_id_matches(&table, "Webshots parser").expect("name is not id"));
         let _ = fs::remove_dir_all(root);
     }
 

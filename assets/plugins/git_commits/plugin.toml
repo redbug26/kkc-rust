@@ -1,4 +1,5 @@
 [plugin]
+id = "git_commits"
 name = "Git Commits"
 version = "1.0.0"
 type = "archive"

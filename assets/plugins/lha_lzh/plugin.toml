@@ -1,4 +1,5 @@
 [plugin]
+id = "lha_lzh"
 name = "lha_lzh"
 version = "1.0.0"
 type = "archive"
