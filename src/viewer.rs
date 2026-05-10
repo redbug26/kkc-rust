@@ -123,6 +123,7 @@ pub struct Viewer {
     ansi_lines: Vec<String>,
     ansi_screen_lines: Vec<AnsiLine>,
     image: Option<ImageInfo>,
+    music: Option<crate::tracker_audio::TrackerModuleInfo>,
     plugin_document_cache: RefCell<Option<PluginDocumentCache>>,
     /// Bytes-per-row for hex mode, updated lazily during rendering to match panel width.
     pub hex_bytes_per_row: Cell<usize>,
@@ -150,6 +151,56 @@ pub enum ViewMode {
     Hex,
     Ansi,
     Image,
+    Module,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AudioViewerTab {
+    Overview,
+    Spectrum,
+    Tracker,
+    Text,
+}
+
+impl AudioViewerTab {
+    const ALL: [Self; 4] = [Self::Overview, Self::Spectrum, Self::Tracker, Self::Text];
+
+    fn key(self) -> &'static str {
+        match self {
+            Self::Overview => "overview",
+            Self::Spectrum => "spectrum",
+            Self::Tracker => "tracker",
+            Self::Text => "text",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Overview => "Overview",
+            Self::Spectrum => "Spectrum",
+            Self::Tracker => "Tracker",
+            Self::Text => "Text",
+        }
+    }
+
+    fn from_key(key: &str) -> Self {
+        match key {
+            "spectrum" => Self::Spectrum,
+            "tracker" => Self::Tracker,
+            "text" => Self::Text,
+            _ => Self::Overview,
+        }
+    }
+
+    fn next(self) -> Self {
+        let idx = Self::ALL.iter().position(|tab| *tab == self).unwrap_or(0);
+        Self::ALL[(idx + 1) % Self::ALL.len()]
+    }
+
+    fn prev(self) -> Self {
+        let idx = Self::ALL.iter().position(|tab| *tab == self).unwrap_or(0);
+        Self::ALL[(idx + Self::ALL.len() - 1) % Self::ALL.len()]
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -291,6 +342,7 @@ impl Viewer {
             ansi_lines: Vec::new(),
             ansi_screen_lines: Vec::new(),
             image: None,
+            music: None,
             plugin_document_cache: RefCell::new(None),
             hex_bytes_per_row: Cell::new(16),
             mouse_selection: None,
@@ -325,6 +377,9 @@ impl Viewer {
             .bytes;
         let line_feed = LineFeedMode::Mixed;
         let image = detect_image_info(path, &raw);
+        let music = crate::tracker_audio::is_audio_path(path)
+            .then(|| crate::tracker_audio::audio_info(path, &raw).ok())
+            .flatten();
         let mode = detect_mode(path, &raw);
         let encoding = default_encoding_for_mode(mode);
         let ansi_canvas_mode = if matches!(mode, ViewMode::Ansi) {
@@ -357,6 +412,7 @@ impl Viewer {
             ansi_lines: Vec::new(),
             ansi_screen_lines: Vec::new(),
             image,
+            music,
             plugin_document_cache: RefCell::new(None),
             hex_bytes_per_row: Cell::new(16),
             mouse_selection: None,
@@ -365,6 +421,9 @@ impl Viewer {
         viewer.ensure_mode_decoded(mode);
         if matches!(viewer.mode, ViewMode::Image) {
             viewer.zoomed = true;
+        }
+        if max_bytes.is_none() && matches!(viewer.mode, ViewMode::Module) {
+            viewer.start_module_playback();
         }
         if let Some(plugin_name) = crate::plugins::default_viewer_plugin_for_path(path) {
             viewer.set_viewer_plugin(plugin_name);
@@ -391,6 +450,7 @@ impl Viewer {
             ViewMode::Hex => "Hex",
             ViewMode::Ansi => "Ansi",
             ViewMode::Image => "Image",
+            ViewMode::Module => "Audio",
         }
     }
 
@@ -463,6 +523,7 @@ impl Viewer {
         }
         match self.mode {
             ViewMode::Image => 1,
+            ViewMode::Module => self.module_info_line_count().max(1),
             ViewMode::Hex => self.hex_line_count(),
             _ => self.current_plain_lines().len().max(1),
         }
@@ -485,6 +546,11 @@ impl Viewer {
         self.viewer_plugin = None;
         self.plugin_state = HashMap::new();
         self.ensure_mode_decoded(mode);
+        if matches!(mode, ViewMode::Module) {
+            self.start_module_playback();
+        } else {
+            crate::tracker_audio::stop_module_if_path(&self.path);
+        }
         self.scroll = 0;
         self.hscroll = 0;
         self.rebuild_matches();
@@ -644,6 +710,40 @@ impl Viewer {
 
     pub fn toggle_zoom(&mut self) {
         self.zoomed = !self.zoomed;
+        self.clear_mouse_selection();
+    }
+
+    pub fn audio_next_tab(&mut self) -> bool {
+        if !matches!(self.mode, ViewMode::Module) {
+            return false;
+        }
+        let next = self.audio_tab().next();
+        self.set_audio_tab(next);
+        true
+    }
+
+    pub fn audio_prev_tab(&mut self) -> bool {
+        if !matches!(self.mode, ViewMode::Module) {
+            return false;
+        }
+        let prev = self.audio_tab().prev();
+        self.set_audio_tab(prev);
+        true
+    }
+
+    fn audio_tab(&self) -> AudioViewerTab {
+        self.plugin_state
+            .get("__audio_tab")
+            .map(|tab| AudioViewerTab::from_key(tab))
+            .unwrap_or(AudioViewerTab::Overview)
+    }
+
+    fn set_audio_tab(&mut self, tab: AudioViewerTab) {
+        self.plugin_state
+            .insert("__audio_tab".into(), tab.key().into());
+        self.scroll = 0;
+        self.hscroll = 0;
+        self.wrap_row_offset = 0;
         self.clear_mouse_selection();
     }
 
@@ -1029,8 +1129,281 @@ impl Viewer {
             ViewMode::Text => self.render_text_like_lines(selected_width, start, height),
             ViewMode::Ansi => self.render_ansi_lines(selected_width, start, height),
             ViewMode::Image => self.render_image_fallback_lines(selected_width, height),
+            ViewMode::Module => self.render_module_lines(selected_width, start, height),
             ViewMode::Hex => self.render_hex_lines(selected_width, start, height),
         }
+    }
+
+    fn render_module_lines(
+        &self,
+        selected_width: usize,
+        start: usize,
+        height: usize,
+    ) -> Vec<Line<'static>> {
+        self.module_info_lines_for_width(selected_width)
+            .into_iter()
+            .skip(start)
+            .take(height)
+            .map(|line| self.audio_viewer_line(&line, selected_width))
+            .collect()
+    }
+
+    fn audio_viewer_line(&self, line: &str, width: usize) -> Line<'static> {
+        let line = self.display_line(line, width);
+        if line.starts_with("Playing audio:") {
+            return Line::from(vec![
+                Span::styled("Playing audio:", Style::default().fg(Color::LightMagenta)),
+                Span::styled(
+                    line.trim_start_matches("Playing audio:").to_string(),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]);
+        }
+        if let Some(rest) = line.strip_prefix("FFT:   ") {
+            let mut spans = vec![Span::styled(
+                "FFT:   ",
+                Style::default().fg(Color::LightBlue),
+            )];
+            for ch in rest.chars() {
+                let color = match ch {
+                    '@' | '#' => Color::LightRed,
+                    '*' | '+' => Color::Yellow,
+                    '=' | '-' => Color::LightGreen,
+                    ':' | '.' => Color::Cyan,
+                    _ => Color::DarkGray,
+                };
+                spans.push(Span::styled(ch.to_string(), Style::default().fg(color)));
+            }
+            return Line::from(spans);
+        }
+        if let Some(rest) = line.strip_prefix("Level: ") {
+            return Line::from(vec![
+                Span::styled("Level: ", Style::default().fg(Color::LightBlue)),
+                Span::styled(rest.to_string(), Style::default().fg(Color::LightGreen)),
+            ]);
+        }
+        if let Some(rest) = line.strip_prefix("Progress: ") {
+            return Line::from(vec![
+                Span::styled("Progress: ", Style::default().fg(Color::LightBlue)),
+                Span::styled(rest.to_string(), Style::default().fg(Color::Yellow)),
+            ]);
+        }
+        if line.starts_with("Format:")
+            || line.starts_with("Channels:")
+            || line.starts_with("Songs:")
+            || line.starts_with("Duration:")
+            || line.starts_with("Tabs:")
+        {
+            return Line::from(Span::styled(line, Style::default().fg(Color::LightCyan)));
+        }
+        if line.starts_with("Position:") {
+            return Line::from(Span::styled(line, Style::default().fg(Color::LightYellow)));
+        }
+        if matches!(
+            line.as_str(),
+            "Overview" | "Spectrum analyzer" | "Tracker" | "Track text"
+        ) {
+            return Line::from(Span::styled(
+                line,
+                Style::default()
+                    .fg(Color::LightMagenta)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
+        if matches!(
+            line.as_str(),
+            "Comment" | "Channels" | "Instruments" | "Samples"
+        ) {
+            return Line::from(Span::styled(
+                line,
+                Style::default()
+                    .fg(Color::LightBlue)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
+        if let Some(rest) = line.strip_prefix("S ") {
+            let mut spans = vec![Span::styled("  ", Style::default().fg(Color::DarkGray))];
+            for ch in rest.chars() {
+                let color = match ch {
+                    '@' | '#' => Color::LightRed,
+                    '*' | '+' => Color::Yellow,
+                    '=' | '-' => Color::LightGreen,
+                    ':' | '.' => Color::Cyan,
+                    _ => Color::DarkGray,
+                };
+                spans.push(Span::styled(ch.to_string(), Style::default().fg(color)));
+            }
+            return Line::from(spans);
+        }
+        if line.starts_with('>') {
+            return Line::from(Span::styled(
+                line,
+                Style::default().fg(Color::Black).bg(Color::LightGreen),
+            ));
+        }
+        if line.starts_with(' ') && line.contains('[') {
+            return Line::from(Span::styled(line, Style::default().fg(Color::Gray)));
+        }
+        if line.starts_with("  ") {
+            return Line::from(Span::styled(line, Style::default().fg(Color::LightCyan)));
+        }
+        Line::from(Span::styled(line, Style::default().fg(Color::White)))
+    }
+
+    fn module_info_lines(&self) -> Vec<String> {
+        self.module_info_lines_for_width(80)
+    }
+
+    fn module_info_line_count(&self) -> usize {
+        self.module_info_lines_for_width(80).len()
+    }
+
+    fn module_info_lines_for_width(&self, width: usize) -> Vec<String> {
+        let snapshot = crate::tracker_audio::playback_snapshot_for_path(&self.path);
+        if let Some(info) = &self.music {
+            let mut lines = self.audio_common_lines(info, snapshot.as_ref(), width);
+            match self.audio_tab() {
+                AudioViewerTab::Overview => {
+                    lines.push(String::new());
+                    lines.push("Overview".into());
+                    if let Some(snapshot) = &snapshot {
+                        lines.push(format!("Level: {}", meter_bar(snapshot.rms, 32)));
+                        lines.push(format!(
+                            "FFT:   {}",
+                            spectrum_bar(&snapshot.spectrum, width.saturating_sub(7).max(24))
+                        ));
+                    }
+                    if !info.patterns.is_empty() {
+                        lines.push(String::new());
+                        lines.push("Tracker".into());
+                        lines.extend(tracker_window_lines(info, snapshot.as_ref(), 9));
+                    }
+                    if !info.text_tracks.is_empty() {
+                        lines.push(String::new());
+                        lines.push("Track text".into());
+                        lines.extend(info.text_tracks.iter().take(8).cloned());
+                    }
+                }
+                AudioViewerTab::Spectrum => {
+                    lines.push(String::new());
+                    lines.push("Spectrum analyzer".into());
+                    if let Some(snapshot) = &snapshot {
+                        lines.extend(spectrum_block(
+                            &snapshot.spectrum,
+                            width.saturating_sub(2).max(24),
+                            16,
+                        ));
+                    } else {
+                        lines.push("No audio samples yet".into());
+                    }
+                }
+                AudioViewerTab::Tracker => {
+                    lines.push(String::new());
+                    lines.push("Tracker".into());
+                    lines.extend(tracker_window_lines(info, snapshot.as_ref(), 21));
+                }
+                AudioViewerTab::Text => {
+                    lines.push(String::new());
+                    lines.push("Track text".into());
+                    if info.text_tracks.is_empty() {
+                        lines.push(
+                            "No embedded track text, channel names, instruments, or samples."
+                                .into(),
+                        );
+                    } else {
+                        lines.extend(info.text_tracks.iter().cloned());
+                    }
+                }
+            }
+            lines
+        } else {
+            vec![
+                "Audio unavailable".into(),
+                format!("File: {}", self.path.display()),
+            ]
+        }
+    }
+
+    fn audio_common_lines(
+        &self,
+        info: &crate::tracker_audio::TrackerModuleInfo,
+        snapshot: Option<&crate::tracker_audio::TrackerPlaybackSnapshot>,
+        width: usize,
+    ) -> Vec<String> {
+        let mut lines = vec![
+            format!(
+                "Playing audio: {}",
+                if info.name.is_empty() {
+                    self.path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("Untitled")
+                } else {
+                    &info.name
+                }
+            ),
+            format!(
+                "Tabs: {}",
+                AudioViewerTab::ALL
+                    .iter()
+                    .map(|tab| {
+                        if *tab == self.audio_tab() {
+                            format!("[{}]", tab.label())
+                        } else {
+                            tab.label().to_string()
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("  ")
+            ),
+            format!("Format: {}", info.format),
+            format!(
+                "Channels: {}{}",
+                info.channels.max(1),
+                info.sample_rate
+                    .map(|rate| format!("  Rate: {rate} Hz"))
+                    .unwrap_or_default()
+            ),
+            info.duration
+                .map(|duration| format!("Duration: {}", format_duration(duration)))
+                .unwrap_or_else(|| "Duration: streaming".into()),
+            if info.patterns.is_empty() {
+                format!("File: {}", self.path.display())
+            } else {
+                format!(
+                    "Songs: {}  Orders: {}  Patterns: {}",
+                    info.songs.max(1),
+                    info.orders.len(),
+                    info.patterns.len()
+                )
+            },
+        ];
+
+        if let Some(snapshot) = snapshot {
+            lines.push(format!(
+                "Position: order {:02X}  pattern {:02X}  row {:02X}  {}",
+                snapshot.table_index,
+                snapshot.pattern,
+                snapshot.row,
+                if snapshot.playing {
+                    "playing"
+                } else {
+                    "stopped"
+                }
+            ));
+            lines.push(format!(
+                "Progress: {}",
+                progress_bar(
+                    snapshot.position,
+                    snapshot.duration.or(info.duration),
+                    width.saturating_sub(10).max(12)
+                )
+            ));
+        }
+
+        lines
     }
 
     fn render_image_fallback_lines(
@@ -1359,6 +1732,7 @@ impl Viewer {
             ViewMode::Hex => &[],
             ViewMode::Ansi => &self.ansi_lines,
             ViewMode::Image => &[],
+            ViewMode::Module => &[],
         }
     }
 
@@ -1368,6 +1742,11 @@ impl Viewer {
             ViewMode::Hex => self.hex_plain_line_at(idx),
             ViewMode::Ansi => self.ansi_lines.get(idx).cloned().unwrap_or_default(),
             ViewMode::Image => String::new(),
+            ViewMode::Module => self
+                .module_info_lines()
+                .get(idx)
+                .cloned()
+                .unwrap_or_default(),
         }
     }
 
@@ -1656,6 +2035,7 @@ impl Viewer {
             ViewMode::Text => Some("text"),
             ViewMode::Ansi => Some("ansi"),
             ViewMode::Image => Some("image"),
+            ViewMode::Module => None,
             _ => None,
         }
     }
@@ -1693,6 +2073,9 @@ impl Viewer {
         self.ansi_lines = Vec::new();
         self.ansi_screen_lines = Vec::new();
         self.image = detect_image_info(&self.path, &self.raw);
+        self.music = crate::tracker_audio::is_audio_path(&self.path)
+            .then(|| crate::tracker_audio::audio_info(&self.path, &self.raw).ok())
+            .flatten();
         // Immediately rebuild only the currently active mode.
         let mode = self.mode;
         self.ensure_mode_decoded(mode);
@@ -1730,6 +2113,19 @@ impl Viewer {
                 }
             }
             ViewMode::Image => {}
+            ViewMode::Module => {}
+        }
+    }
+
+    fn start_module_playback(&mut self) {
+        match crate::tracker_audio::play_audio_bytes(self.path.clone(), &self.raw) {
+            Ok(info) => self.music = Some(info),
+            Err(err) => {
+                debug_log(&format!(
+                    "tracker-audio: cannot play {}: {err}",
+                    self.path.display()
+                ));
+            }
         }
     }
 
@@ -1757,6 +2153,145 @@ impl Viewer {
         {
             self.scroll = pos.scroll.min(self.line_count().saturating_sub(1));
             self.hscroll = pos.hscroll;
+        }
+    }
+}
+
+fn meter_bar(value: f32, width: usize) -> String {
+    let filled = ((value.clamp(0.0, 1.0) * width as f32).round() as usize).min(width);
+    format!(
+        "{}{}",
+        "#".repeat(filled),
+        ".".repeat(width.saturating_sub(filled))
+    )
+}
+
+fn tracker_window_lines(
+    info: &crate::tracker_audio::TrackerModuleInfo,
+    snapshot: Option<&crate::tracker_audio::TrackerPlaybackSnapshot>,
+    rows: usize,
+) -> Vec<String> {
+    let Some(snapshot) = snapshot else {
+        return vec!["No tracker playback position yet".into()];
+    };
+    let Some(pattern) = info.patterns.get(snapshot.pattern) else {
+        return vec!["Pattern unavailable".into()];
+    };
+    if pattern.is_empty() || rows == 0 {
+        return vec!["Pattern is empty".into()];
+    }
+
+    let half_window = rows / 2;
+    let max_start = pattern.len().saturating_sub(rows);
+    let start = snapshot.row.saturating_sub(half_window).min(max_start);
+    let end = start.saturating_add(rows).min(pattern.len());
+    let mut lines = Vec::with_capacity(rows);
+    for idx in start..end {
+        let marker = if idx == snapshot.row { ">" } else { " " };
+        if let Some(row) = pattern.get(idx) {
+            lines.push(format!("{marker}{row}"));
+        }
+    }
+    for _ in lines.len()..rows {
+        lines.push(String::new());
+    }
+    lines
+}
+
+fn spectrum_block(values: &[f32], width: usize, height: usize) -> Vec<String> {
+    if values.is_empty() || width == 0 || height == 0 {
+        return Vec::new();
+    }
+    let buckets = values.len().min(width);
+    (1..=height)
+        .rev()
+        .map(|level| {
+            let threshold = level as f32 / height as f32;
+            let mut line = String::with_capacity(buckets + 2);
+            line.push_str("S ");
+            for idx in 0..buckets {
+                let src = idx * values.len() / buckets;
+                let value = values.get(src).copied().unwrap_or_default();
+                let ch = if value >= threshold {
+                    match level * 8 / height {
+                        0 | 1 => '.',
+                        2 => ':',
+                        3 => '-',
+                        4 => '=',
+                        5 => '+',
+                        6 => '*',
+                        7 => '#',
+                        _ => '@',
+                    }
+                } else {
+                    ' '
+                };
+                line.push(ch);
+            }
+            line
+        })
+        .collect()
+}
+
+fn progress_bar(
+    position: std::time::Duration,
+    duration: Option<std::time::Duration>,
+    width: usize,
+) -> String {
+    let Some(duration) = duration.filter(|duration| !duration.is_zero()) else {
+        return format!("{} {}", meter_bar(0.0, width), format_duration(position));
+    };
+    let ratio = (position.as_secs_f64() / duration.as_secs_f64()).clamp(0.0, 1.0);
+    let filled = ((ratio * width as f64).round() as usize).min(width);
+    format!(
+        "{}{} {} / {}",
+        "=".repeat(filled),
+        "-".repeat(width.saturating_sub(filled)),
+        format_duration(position),
+        format_duration(duration)
+    )
+}
+
+fn format_duration(duration: std::time::Duration) -> String {
+    let total = duration.as_secs();
+    let minutes = total / 60;
+    let seconds = total % 60;
+    if minutes >= 60 {
+        format!("{}:{:02}:{:02}", minutes / 60, minutes % 60, seconds)
+    } else {
+        format!("{minutes}:{seconds:02}")
+    }
+}
+
+fn spectrum_bar(values: &[f32], width: usize) -> String {
+    if values.is_empty() || width == 0 {
+        return String::new();
+    }
+    let buckets = values.len().min(width);
+    let mut out = String::with_capacity(buckets);
+    for idx in 0..buckets {
+        let src = idx * values.len() / buckets;
+        let v = values.get(src).copied().unwrap_or_default();
+        let ch = match (v.clamp(0.0, 1.0) * 8.0).round() as usize {
+            0 => ' ',
+            1 => '.',
+            2 => ':',
+            3 => '-',
+            4 => '=',
+            5 => '+',
+            6 => '*',
+            7 => '#',
+            _ => '@',
+        };
+        out.push(ch);
+    }
+    out
+}
+
+impl Drop for Viewer {
+    fn drop(&mut self) {
+        if matches!(self.mode, ViewMode::Module) {
+            crate::tracker_audio::stop_module_if_path(&self.path);
         }
     }
 }

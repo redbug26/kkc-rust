@@ -239,7 +239,12 @@ pub(super) fn render_command_palette(
             let shortcut_changed = shortcut != default_shortcut;
             let _ = shortcut_changed; // used below
             let shortcut_fmt = format!("{:>width$}", shortcut, width = SHORT_W);
-            (entry.category, entry.label, format!(" ({})", entry.fn_name), shortcut_fmt)
+            (
+                entry.category,
+                entry.label,
+                format!(" ({})", entry.fn_name),
+                shortcut_fmt,
+            )
         };
 
         let (row_bg, label_fg, cat_fg, fn_fg, short_fg, marker_fg) = if selected {

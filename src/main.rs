@@ -23,6 +23,7 @@ mod screen_transition;
 mod search;
 mod system_info;
 mod terminal;
+mod tracker_audio;
 mod tree_mode;
 mod ui;
 mod viewer;

@@ -49,6 +49,7 @@ fn render_quick_preview(
         Some(ViewMode::Hex) => "Hex".to_string(),
         Some(ViewMode::Ansi) => "Ansi".to_string(),
         Some(ViewMode::Image) => "Image".to_string(),
+        Some(ViewMode::Module) => "Audio".to_string(),
     };
     let label = if active {
         format!("[{}]  F4:mode  \u{2191}\u{2193}  Tab=exit", mode_str)

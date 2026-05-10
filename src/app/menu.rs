@@ -579,13 +579,14 @@ impl ViewerMenuState {
         let cursor = match kind {
             ViewerMenuKind::Mode => {
                 if viewer.viewer_plugin.is_some() {
-                    4
+                    5
                 } else {
                     match viewer.mode {
                         ViewMode::Text => 0,
                         ViewMode::Hex => 1,
                         ViewMode::Ansi => 2,
                         ViewMode::Image => 3,
+                        ViewMode::Module => 4,
                     }
                 }
             }

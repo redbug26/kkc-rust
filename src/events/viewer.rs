@@ -188,6 +188,12 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
             return Ok(false);
         }
         match key.code {
+            KeyCode::Tab if matches!(v.mode, ViewMode::Module) => {
+                v.audio_next_tab();
+            }
+            KeyCode::BackTab if matches!(v.mode, ViewMode::Module) => {
+                v.audio_prev_tab();
+            }
             KeyCode::Up => v.scroll_up_visual(text_width),
             KeyCode::Down => v.scroll_down_visual(text_width),
             KeyCode::PageUp => v.page_up_visual(display_rows, text_width),
@@ -535,7 +541,7 @@ pub(super) fn handle_viewer_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
 
 fn viewer_menu_items(kind: ViewerMenuKind) -> &'static [&'static str] {
     match kind {
-        ViewerMenuKind::Mode => &["Text", "Binary", "Ansi", "Image", "Plugins viewer"],
+        ViewerMenuKind::Mode => &["Text", "Binary", "Ansi", "Image", "Audio", "Plugins viewer"],
         ViewerMenuKind::LineFeed => &["DOS (CR/LF)", "Unix (LF)", "Mac (CR)", "Mixed"],
         ViewerMenuKind::Encoding => &["Plain ASCII", "DOS CP437"],
         ViewerMenuKind::Mask => &[
@@ -568,7 +574,7 @@ const PREPROC_ADD_ITEMS: &[(&str, PreprocOpKind)] = &[
     ("Add Latin", PreprocOpKind::Latin),
     ("Add Elite", PreprocOpKind::Elite),
 ];
-const VIEWER_PLUGIN_MENU_INDEX: usize = 4;
+const VIEWER_PLUGIN_MENU_INDEX: usize = 5;
 
 fn viewer_menu_len(viewer: &crate::viewer::Viewer, kind: ViewerMenuKind) -> usize {
     match kind {
@@ -588,6 +594,7 @@ fn set_viewer_mode(viewer: &mut crate::viewer::Viewer, cursor: usize) {
         1 => viewer.set_mode(ViewMode::Hex),
         2 => viewer.set_mode(ViewMode::Ansi),
         3 => viewer.set_mode(ViewMode::Image),
+        4 => viewer.set_mode(ViewMode::Module),
         _ => {}
     }
 }

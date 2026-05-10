@@ -591,8 +591,8 @@ fn lua_app_entry_matches(info: &LuaAppInfo, q: &str) -> bool {
         "apps {} {} lua_app_{} {}",
         info.name, info.version, info.id, info.description
     )
-        .to_lowercase()
-        .contains(q)
+    .to_lowercase()
+    .contains(q)
 }
 
 impl CommandPaletteState {
@@ -683,7 +683,9 @@ impl CommandPaletteState {
         let rest_items: Vec<usize> = PALETTE_DATA
             .iter()
             .enumerate()
-            .filter(|(i, e)| !recent_static_set.contains(i) && (q.is_empty() || entry_matches(e, &q)))
+            .filter(|(i, e)| {
+                !recent_static_set.contains(i) && (q.is_empty() || entry_matches(e, &q))
+            })
             .map(|(i, _)| i)
             .collect();
 

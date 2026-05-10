@@ -16,6 +16,29 @@ pub(crate) fn viewer_footer_shortcuts(v: &Viewer) -> Vec<FooterShortcut> {
                 key: KeyCode::F(5),
             },
         ]
+    } else if matches!(v.mode, ViewMode::Module) {
+        vec![
+            FooterShortcut {
+                label: "F10:Close",
+                key: KeyCode::F(10),
+            },
+            FooterShortcut {
+                label: "F4:Mode",
+                key: KeyCode::F(4),
+            },
+            FooterShortcut {
+                label: "Tab:Section",
+                key: KeyCode::Tab,
+            },
+            FooterShortcut {
+                label: "↑↓:Scroll",
+                key: KeyCode::Down,
+            },
+            FooterShortcut {
+                label: "F5:Zoom",
+                key: KeyCode::F(5),
+            },
+        ]
     } else {
         let mut shortcuts = vec![
             FooterShortcut {
@@ -80,6 +103,7 @@ pub(crate) fn viewer_area(v: &Viewer, area: Rect) -> Rect {
     let max_width = match v.mode {
         ViewMode::Hex => 80u16,
         ViewMode::Image => area.width.saturating_sub(4).max(40).min(area.width),
+        ViewMode::Module => 80u16,
         _ => {
             let ln = v.line_number_width() as u16;
             let text_max = v
@@ -206,6 +230,38 @@ fn line_with_default_viewer_style(mut line: Line<'static>) -> Line<'static> {
         }
     }
     line
+}
+
+fn clip_line_to_width(line: Line<'static>, width: usize) -> Line<'static> {
+    use unicode_width::UnicodeWidthChar;
+
+    if width == 0 {
+        return Line::from(Span::raw(String::new()));
+    }
+
+    let mut remaining = width;
+    let mut spans = Vec::new();
+    for span in line.spans {
+        if remaining == 0 {
+            break;
+        }
+        let mut text = String::new();
+        for ch in span.content.chars() {
+            let ch_width = ch.width().unwrap_or(0);
+            if ch_width > remaining {
+                break;
+            }
+            text.push(ch);
+            remaining = remaining.saturating_sub(ch_width);
+        }
+        if !text.is_empty() {
+            spans.push(Span::styled(text, span.style));
+        }
+    }
+    if remaining > 0 {
+        spans.push(Span::raw(" ".repeat(remaining)));
+    }
+    Line::from(spans)
 }
 
 fn render_solid_bg(f: &mut Frame, area: Rect, bg: Color) {
@@ -565,6 +621,11 @@ pub(super) fn render_viewer(
             } else {
                 content_line
             };
+            let rendered_line = if !v.wrap || !matches!(v.mode, ViewMode::Text | ViewMode::Ansi) {
+                clip_line_to_width(rendered_line, width)
+            } else {
+                rendered_line
+            };
             line_with_default_viewer_style(rendered_line)
         })
         .collect();
@@ -721,6 +782,7 @@ pub(super) fn render_viewer_menu(
             "Binary: as hex dump",
             "Ansi: with ANSI escapes",
             "Image: as inline preview",
+            "Audio: as inline preview",
             "Plugins viewer",
         ]
         .into_iter()
@@ -889,7 +951,7 @@ pub(super) fn render_viewer_menu(
 }
 
 fn viewer_mode_menu_line(idx: usize, item: &str, style: Style) -> Line<'static> {
-    if idx == 4 {
+    if idx == 5 {
         return Line::from(vec![
             Span::styled(" ", style),
             Span::styled("P. ", style.add_modifier(Modifier::BOLD)),

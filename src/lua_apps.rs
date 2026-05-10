@@ -1,7 +1,11 @@
+use crate::ui::{ShortcutBarItem, ShortcutBarStyle, render_shortcut_bar};
 use anyhow::{Context, Result, anyhow, bail};
 use crossterm::{
     cursor::{Hide, Show},
-    event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind},
+    event::{
+        self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
+        MouseEventKind,
+    },
     execute,
     terminal::{self},
 };
@@ -14,7 +18,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear as RatatuiClear, Paragraph},
 };
-use crate::ui::{ShortcutBarItem, ShortcutBarStyle, render_shortcut_bar};
 use serde::Deserialize;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -39,8 +42,7 @@ const BUNDLED_SNAKE_MANIFEST: &str = include_str!("../assets/applications/snake/
 const BUNDLED_GIT_REPO_APP: &str = include_str!("../assets/applications/git_repo/app.lua");
 const BUNDLED_GIT_REPO_MANIFEST: &str = include_str!("../assets/applications/git_repo/app.toml");
 const BUNDLED_ROCKLAND_APP: &str = include_str!("../assets/applications/rockland/app.lua");
-const BUNDLED_ROCKLAND_MANIFEST: &str =
-    include_str!("../assets/applications/rockland/app.toml");
+const BUNDLED_ROCKLAND_MANIFEST: &str = include_str!("../assets/applications/rockland/app.toml");
 const BUNDLED_ROCKLAND_LEVELS: &str = include_str!("../assets/applications/rockland/levels.lua");
 
 #[derive(Debug, Clone, Deserialize)]
@@ -76,15 +78,15 @@ pub struct LuaAppInfo {
 
 #[derive(Debug, Clone, Copy)]
 struct CellStyle {
-    fg: u32,  // RGB color as 0xRRGGBB, 0xFFFFFF = white
-    bg: u32,  // RGB color as 0xRRGGBB, 0x000000 = black
+    fg: u32, // RGB color as 0xRRGGBB, 0xFFFFFF = white
+    bg: u32, // RGB color as 0xRRGGBB, 0x000000 = black
 }
 
 impl CellStyle {
     fn default() -> Self {
         Self {
-            fg: 0xFFFFFF,  // white
-            bg: 0x000000,  // black
+            fg: 0xFFFFFF, // white
+            bg: 0x000000, // black
         }
     }
 }
@@ -323,7 +325,11 @@ pub fn list_installed_apps() -> Result<Vec<LuaAppInfo>> {
         }
     }
 
-    out.sort_by(|a, b| a.name.to_ascii_lowercase().cmp(&b.name.to_ascii_lowercase()));
+    out.sort_by(|a, b| {
+        a.name
+            .to_ascii_lowercase()
+            .cmp(&b.name.to_ascii_lowercase())
+    });
     Ok(out)
 }
 
@@ -521,8 +527,7 @@ fn run_lua_app(
     // ── Enhanced keyboard protocol ──────────────────────────────────────────
     // Enables distinct Press / Release / Repeat events on supporting terminals
     // (kitty, WezTerm, foot, …). Falls back silently on terminals that do not.
-    let enhanced_keyboard = crossterm::terminal::supports_keyboard_enhancement()
-        .unwrap_or(false)
+    let enhanced_keyboard = crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false)
         && execute!(
             io::stdout(),
             crossterm::event::PushKeyboardEnhancementFlags(
@@ -577,14 +582,10 @@ fn run_lua_app(
                 match event::read()? {
                     Event::Key(key) => {
                         // F5 to toggle zoom (full-screen vs floating window)
-                        if matches!(key.code, KeyCode::F(5))
-                            && key.kind != KeyEventKind::Release
-                        {
+                        if matches!(key.code, KeyCode::F(5)) && key.kind != KeyEventKind::Release {
                             zoomed = !zoomed;
                             resized = true;
-                        } else if is_quit_key(&key)
-                            && key.kind != KeyEventKind::Release
-                        {
+                        } else if is_quit_key(&key) && key.kind != KeyEventKind::Release {
                             key_state.borrow_mut().clear();
                             should_quit.set(true);
                             continue;
@@ -606,32 +607,31 @@ fn run_lua_app(
                                     let is_new = {
                                         let ks = key_state.borrow();
                                         ks.get(&name)
-                                            .map(|t| now_ts.duration_since(*t).as_millis() >= HOLD_TIMEOUT_MS)
+                                            .map(|t| {
+                                                now_ts.duration_since(*t).as_millis()
+                                                    >= HOLD_TIMEOUT_MS
+                                            })
                                             .unwrap_or(true)
                                     };
                                     key_state.borrow_mut().insert(name.clone(), now_ts);
                                     if is_new {
                                         call_table_function_if_exists(
-                                            &app_table, "keydown", name.clone(),
+                                            &app_table,
+                                            "keydown",
+                                            name.clone(),
                                         )?;
                                     }
-                                    call_table_function_if_exists(
-                                        &app_table, "keypressed", name,
-                                    )?;
+                                    call_table_function_if_exists(&app_table, "keypressed", name)?;
                                 }
                                 KeyEventKind::Release => {
                                     key_state.borrow_mut().remove(&name);
-                                    call_table_function_if_exists(
-                                        &app_table, "keyup", name,
-                                    )?;
+                                    call_table_function_if_exists(&app_table, "keyup", name)?;
                                 }
                                 KeyEventKind::Repeat => {
                                     // True repeat (enhanced protocol terminals):
                                     // refresh timestamp to keep key marked as held.
                                     key_state.borrow_mut().insert(name.clone(), now_ts);
-                                    call_table_function_if_exists(
-                                        &app_table, "keypressed", name,
-                                    )?;
+                                    call_table_function_if_exists(&app_table, "keypressed", name)?;
                                 }
                             }
                         }
@@ -795,14 +795,19 @@ fn run_lua_app(
 /// Compute the window area for a Lua app (floating when !zoomed, full-screen when zoomed).
 fn lua_app_window_area(term: Rect, zoomed: bool, req_width: u16, req_height: u16) -> Rect {
     if zoomed {
-        return term;  // Full screen
+        return term; // Full screen
     }
     // Floating window: use app-requested size, constrained to terminal
     let w = req_width.min(term.width);
     let h = req_height.min(term.height);
     let x = term.x + term.width.saturating_sub(w) / 2;
     let y = term.y + term.height.saturating_sub(h) / 2;
-    Rect { x, y, width: w, height: h }
+    Rect {
+        x,
+        y,
+        width: w,
+        height: h,
+    }
 }
 
 /// Inner content area (after borders) inside the window.
@@ -843,11 +848,7 @@ fn install_lua_app_modules(
 
     let quit_cell = Rc::clone(&should_quit);
     let app_id = manifest.app.id.clone();
-    let app_name = manifest
-        .app
-        .name
-        .clone()
-        .unwrap_or_else(|| app_id.clone());
+    let app_name = manifest.app.name.clone().unwrap_or_else(|| app_id.clone());
     let app_version = manifest
         .app
         .version
@@ -915,10 +916,7 @@ fn install_lua_app_modules(
         t.set(
             "clear",
             lua.create_function(move |_, ch: Option<String>| {
-                let c = ch
-                    .as_deref()
-                    .and_then(|s| s.chars().next())
-                    .unwrap_or(' ');
+                let c = ch.as_deref().and_then(|s| s.chars().next()).unwrap_or(' ');
                 g_clear.borrow_mut().clear(c);
                 Ok(())
             })?,
@@ -962,14 +960,13 @@ fn install_lua_app_modules(
         let g_box = Rc::clone(&gfx);
         t.set(
             "box",
-            lua.create_function(move |_, (x, y, w, h, ch): (i64, i64, i64, i64, Option<String>)| {
-                let c = ch
-                    .as_deref()
-                    .and_then(|s| s.chars().next())
-                    .unwrap_or(' ');
-                g_box.borrow_mut().box_rect(x, y, w, h, c);
-                Ok(())
-            })?,
+            lua.create_function(
+                move |_, (x, y, w, h, ch): (i64, i64, i64, i64, Option<String>)| {
+                    let c = ch.as_deref().and_then(|s| s.chars().next()).unwrap_or(' ');
+                    g_box.borrow_mut().box_rect(x, y, w, h, c);
+                    Ok(())
+                },
+            )?,
         )?;
 
         // color(fg, bg) - set foreground and background colors in hex (0xRRGGBB)
@@ -1154,8 +1151,9 @@ fn install_lua_app_modules(
             "read_text",
             lua.create_function(move |_, path: String| {
                 let p = resolve_read(&path);
-                let text = fs::read_to_string(&p)
-                    .map_err(|e| mlua::Error::external(anyhow!("Reading {}: {}", p.display(), e)))?;
+                let text = fs::read_to_string(&p).map_err(|e| {
+                    mlua::Error::external(anyhow!("Reading {}: {}", p.display(), e))
+                })?;
                 Ok(text)
             })?,
         )?;
@@ -1170,8 +1168,9 @@ fn install_lua_app_modules(
                         mlua::Error::external(anyhow!("Creating {}: {}", parent.display(), e))
                     })?;
                 }
-                fs::write(&p, text)
-                    .map_err(|e| mlua::Error::external(anyhow!("Writing {}: {}", p.display(), e)))?;
+                fs::write(&p, text).map_err(|e| {
+                    mlua::Error::external(anyhow!("Writing {}: {}", p.display(), e))
+                })?;
                 Ok(())
             })?,
         )?;
@@ -1184,8 +1183,9 @@ fn install_lua_app_modules(
                     .as_deref()
                     .map(resolve_list.clone())
                     .unwrap_or_else(|| app_root_exists.clone());
-                let entries = fs::read_dir(&p)
-                    .map_err(|e| mlua::Error::external(anyhow!("Reading {}: {}", p.display(), e)))?;
+                let entries = fs::read_dir(&p).map_err(|e| {
+                    mlua::Error::external(anyhow!("Reading {}: {}", p.display(), e))
+                })?;
                 let out = lua.create_table()?;
                 for (idx, entry) in entries.flatten().enumerate() {
                     if let Some(name) = entry.file_name().to_str() {
@@ -1201,8 +1201,9 @@ fn install_lua_app_modules(
             "mkdir_all",
             lua.create_function(move |_, path: String| {
                 let p = resolve_mkdir(&path);
-                fs::create_dir_all(&p)
-                    .map_err(|e| mlua::Error::external(anyhow!("Creating {}: {}", p.display(), e)))?;
+                fs::create_dir_all(&p).map_err(|e| {
+                    mlua::Error::external(anyhow!("Creating {}: {}", p.display(), e))
+                })?;
                 Ok(())
             })?,
         )?;
@@ -1220,11 +1221,12 @@ fn install_lua_app_modules(
 
     // Shell facade for terminal apps. Useful for Git-oriented tools.
     let shell_default_cwd = launch_cwd.clone();
-    let shell_mod = lua.create_function(move |lua, ()| {
-        let t = lua.create_table()?;
+    let shell_mod =
+        lua.create_function(move |lua, ()| {
+            let t = lua.create_table()?;
 
-        let run_default_cwd = shell_default_cwd.clone();
-        t.set(
+            let run_default_cwd = shell_default_cwd.clone();
+            t.set(
             "run",
             lua.create_function(
                 move |lua, (program, args_tbl, cwd): (String, Option<Table>, Option<String>)| {
@@ -1262,14 +1264,17 @@ fn install_lua_app_modules(
             )?,
         )?;
 
-        let cwd_value = shell_default_cwd.to_string_lossy().into_owned();
-        t.set("cwd", lua.create_function(move |_, ()| Ok(cwd_value.clone()))?)?;
+            let cwd_value = shell_default_cwd.to_string_lossy().into_owned();
+            t.set(
+                "cwd",
+                lua.create_function(move |_, ()| Ok(cwd_value.clone()))?,
+            )?;
 
-        Ok(t)
-    })?;
+            Ok(t)
+        })?;
     preload.set("kkc-shell", shell_mod)?;
 
-    // Audio facade for terminal apps. Currently limited to terminal bell.
+    // Audio facade for terminal apps.
     let audio_mod = lua.create_function(move |lua, ()| {
         let t = lua.create_table()?;
         t.set(
@@ -1281,6 +1286,29 @@ fn install_lua_app_modules(
                     .map_err(|e| mlua::Error::external(anyhow!("Flushing stdout: {}", e)))?;
                 Ok(())
             })?,
+        )?;
+        t.set(
+            "play_audio",
+            lua.create_function(move |lua, path: String| {
+                let info = crate::tracker_audio::play_audio_file(Path::new(&path))
+                    .map_err(mlua::Error::external)?;
+                let tbl = lua.create_table()?;
+                tbl.set("name", info.name)?;
+                tbl.set("format", info.format)?;
+                tbl.set("songs", info.songs)?;
+                Ok(tbl)
+            })?,
+        )?;
+        t.set(
+            "stop_audio",
+            lua.create_function(move |_, ()| {
+                crate::tracker_audio::stop_module();
+                Ok(())
+            })?,
+        )?;
+        t.set(
+            "is_audio_playing",
+            lua.create_function(move |_, ()| Ok(crate::tracker_audio::is_module_playing()))?,
         )?;
         Ok(t)
     })?;
@@ -1419,10 +1447,8 @@ mod tests {
 
     #[test]
     fn detects_valid_lua_app_directory() {
-        let root = std::env::temp_dir().join(format!(
-            "kkc-lua-app-dir-test-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("kkc-lua-app-dir-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).expect("create temp app dir");
         fs::write(

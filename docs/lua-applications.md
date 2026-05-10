@@ -257,6 +257,9 @@ The result table contains:
 Terminal audio helpers:
 
 - `beep()`: terminal bell.
+- `play_audio(path)`: play a MOD/XM/S3M/WAV/FLAC/MP3 file and return `{ name, format, songs }`.
+- `stop_audio()`: stop the current audio file.
+- `is_audio_playing()`: return whether an audio file is active.
 
 ## Store Distribution
 
