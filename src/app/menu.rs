@@ -149,6 +149,11 @@ pub struct StoreDetectState {
 }
 
 #[derive(Debug, Clone)]
+pub struct StoreInstallMethodsState {
+    pub methods: Vec<crate::plugins::StoreInstallMethodCapability>,
+}
+
+#[derive(Debug, Clone)]
 pub struct StoreInstallPaletteState {
     pub index_path: PathBuf,
     pub index_info: crate::plugins::StoreIndexInfo,
@@ -162,6 +167,7 @@ pub struct StoreInstallPaletteState {
     pub scroll_offset: std::cell::Cell<usize>,
     pub progress: Option<StoreInstallProgress>,
     pub detect: Option<StoreDetectState>,
+    pub methods: Option<StoreInstallMethodsState>,
 }
 
 impl StoreInstallPaletteState {
@@ -245,6 +251,7 @@ impl StoreInstallPaletteState {
             scroll_offset: std::cell::Cell::new(0),
             progress: None,
             detect: None,
+            methods: None,
         })
     }
 

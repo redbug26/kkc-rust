@@ -22,7 +22,18 @@ pub(crate) fn dir_bookmarks_shortcuts() -> Vec<FooterShortcut> {
 }
 
 pub(crate) fn store_install_shortcuts(state: &StoreInstallPaletteState) -> Vec<FooterShortcut> {
-    if state.detect.is_some() {
+    if state.methods.is_some() {
+        vec![
+            FooterShortcut {
+                label: " \u{23ce} :Close",
+                key: KeyCode::Enter,
+            },
+            FooterShortcut {
+                label: " \u{238B} :Close",
+                key: KeyCode::Esc,
+            },
+        ]
+    } else if state.detect.is_some() {
         vec![
             FooterShortcut {
                 label: "Space:Toggle",
@@ -93,6 +104,10 @@ pub(crate) fn store_install_shortcuts(state: &StoreInstallPaletteState) -> Vec<F
 
         shortcuts.extend([
             FooterShortcut {
+                label: "Ctrl+Y:Methods",
+                key: KeyCode::Char('y'),
+            },
+            FooterShortcut {
                 label: "Ctrl+D:Detect",
                 key: KeyCode::Char('d'),
             },
@@ -122,6 +137,19 @@ pub(crate) fn store_detect_shortcuts() -> Vec<FooterShortcut> {
         },
         FooterShortcut {
             label: " \u{238B} :Cancel",
+            key: KeyCode::Esc,
+        },
+    ]
+}
+
+fn store_install_methods_shortcuts() -> Vec<FooterShortcut> {
+    vec![
+        FooterShortcut {
+            label: " \u{23ce} :Close",
+            key: KeyCode::Enter,
+        },
+        FooterShortcut {
+            label: " \u{238B} :Close",
             key: KeyCode::Esc,
         },
     ]
@@ -973,6 +1001,11 @@ pub(super) fn render_store_install_palette(
     let hint_items = footer_shortcut_items(&store_install_shortcuts(state));
     render_shortcut_bar(f, hint_area, &hint_items, secondary_shortcut_bar_style());
 
+    if let Some(methods) = state.methods.as_ref() {
+        render_store_install_methods_dialog(f, methods, inner);
+        return;
+    }
+
     if let Some(detect) = state.detect.as_ref() {
         render_store_detect_dialog(f, detect, inner);
         return;
@@ -1462,6 +1495,125 @@ fn render_store_install_progress(
             },
         );
     }
+}
+
+fn render_store_install_methods_dialog(
+    f: &mut Frame,
+    state: &crate::app::StoreInstallMethodsState,
+    area: Rect,
+) {
+    let width = area.width.saturating_sub(4).min(104).max(56);
+    let height = area.height.saturating_sub(4).min(18).max(10);
+    let popup = Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    };
+    safe_render_widget(f, Clear, popup);
+    let block = Block::default()
+        .title(" Install Methods ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG))
+        .style(Style::default().bg(CLR_APP_BG));
+    let inner = block.inner(popup);
+    safe_render_widget(f, block, popup);
+
+    let ok_count = state
+        .methods
+        .iter()
+        .filter(|method| method.available)
+        .count();
+    let summary = format!(
+        "  {} method(s) allowed by this OS, {} executable(s) available",
+        state.methods.len(),
+        ok_count
+    );
+    safe_render_widget(
+        f,
+        Paragraph::new(truncate_str(&summary, inner.width as usize))
+            .style(Style::default().fg(Color::Rgb(46, 28, 16)).bg(CLR_APP_BG)),
+        Rect {
+            x: inner.x,
+            y: inner.y,
+            width: inner.width,
+            height: 1,
+        },
+    );
+
+    let header_y = inner.y + 2;
+    safe_render_widget(
+        f,
+        Paragraph::new("  Method       Command        Status      Store apps").style(
+            Style::default()
+                .fg(CLR_HEADER_FG)
+                .bg(CLR_HEADER_BG)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Rect {
+            x: inner.x,
+            y: header_y,
+            width: inner.width,
+            height: 1,
+        },
+    );
+
+    let list_y = header_y + 1;
+    let list_h = inner.height.saturating_sub(5) as usize;
+    if state.methods.is_empty() {
+        safe_render_widget(
+            f,
+            Paragraph::new("  No application install method matches this OS.")
+                .style(Style::default().fg(Color::Rgb(118, 104, 88)).bg(CLR_APP_BG)),
+            Rect {
+                x: inner.x,
+                y: list_y,
+                width: inner.width,
+                height: 1,
+            },
+        );
+    } else {
+        for (row, method) in state.methods.iter().take(list_h).enumerate() {
+            let command = method.executable.as_deref().unwrap_or("manual");
+            let status = if method.available {
+                "available"
+            } else {
+                "missing"
+            };
+            let apps = method.applications.join(", ");
+            let text = format!(
+                "  {:<12} {:<14} {:<11} {}",
+                truncate_str(&method.method, 12),
+                truncate_str(command, 14),
+                status,
+                apps
+            );
+            let style = if method.available {
+                Style::default().fg(Color::Rgb(26, 104, 46)).bg(CLR_APP_BG)
+            } else {
+                Style::default().fg(Color::Rgb(150, 74, 10)).bg(CLR_APP_BG)
+            };
+            safe_render_widget(
+                f,
+                Paragraph::new(truncate_str(&text, inner.width as usize)).style(style),
+                Rect {
+                    x: inner.x,
+                    y: list_y + row as u16,
+                    width: inner.width,
+                    height: 1,
+                },
+            );
+        }
+    }
+
+    let hint_area = Rect {
+        x: inner.x,
+        y: inner.y + inner.height.saturating_sub(1),
+        width: inner.width,
+        height: 1,
+    };
+    let hint_items = footer_shortcut_items(&store_install_methods_shortcuts());
+    render_shortcut_bar(f, hint_area, &hint_items, secondary_shortcut_bar_style());
 }
 
 fn render_store_detect_dialog(f: &mut Frame, detect: &crate::app::StoreDetectState, area: Rect) {

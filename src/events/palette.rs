@@ -204,6 +204,17 @@ pub(super) fn handle_store_install_palette(app: &mut App, key: KeyEvent) -> Resu
         return Ok(false);
     }
 
+    if state.methods.is_some() {
+        match key.code {
+            KeyCode::Esc | KeyCode::Enter => {
+                state.methods = None;
+            }
+            _ => {}
+        }
+        app.mode = AppMode::StoreInstallPalette(state);
+        return Ok(false);
+    }
+
     if state.detect.is_some() {
         match key.code {
             KeyCode::Esc => {
@@ -298,6 +309,10 @@ pub(super) fn handle_store_install_palette(app: &mut App, key: KeyEvent) -> Resu
         }
         KeyCode::Char('d') | KeyCode::Char('D') if ctrl && !alt => {
             app.open_store_detection_dialog(state);
+            return Ok(false);
+        }
+        KeyCode::Char('y') | KeyCode::Char('Y') if ctrl && !alt => {
+            app.open_store_install_methods_dialog(state);
             return Ok(false);
         }
         KeyCode::Char('i') | KeyCode::Char('I') if ctrl && !alt => {

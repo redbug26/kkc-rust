@@ -1,0 +1,6 @@
+[plugin]
+id = "m3u_playlist"
+name = "M3U Playlist Archive"
+version = "1.0.0"
+type = "archive"
+description = "Browse M3U and M3U8 playlists as archive-like entries"

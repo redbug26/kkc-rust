@@ -3,7 +3,7 @@ use mlua::{Function, Lua, Table, Value};
 use serde::Deserialize;
 use serde::Serialize;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::{self, Cursor, Read, Seek};
 use std::path::{Path, PathBuf};
@@ -38,6 +38,10 @@ const BUNDLED_GIT_ACTION_MANIFEST: &str = include_str!("../assets/plugins/git_ac
 const BUNDLED_GIT_COMMITS_PLUGIN: &str = include_str!("../assets/plugins/git_commits/plugin.lua");
 const BUNDLED_GIT_COMMITS_MANIFEST: &str =
     include_str!("../assets/plugins/git_commits/plugin.toml");
+const BUNDLED_M3U_PLAYLIST_PLUGIN: &str =
+    include_str!("../assets/plugins/m3u_playlist/plugin.lua");
+const BUNDLED_M3U_PLAYLIST_MANIFEST: &str =
+    include_str!("../assets/plugins/m3u_playlist/plugin.toml");
 const BUNDLED_PLUGIN_DIRS: &[&str] = &[
     "pdf_file",
     "html_viewer",
@@ -49,6 +53,7 @@ const BUNDLED_PLUGIN_DIRS: &[&str] = &[
     "text_syntax",
     "git_action",
     "git_commits",
+    "m3u_playlist",
 ];
 
 static PLUGINS: OnceLock<RwLock<PluginRegistry>> = OnceLock::new();
@@ -168,6 +173,14 @@ pub struct StoreIndexInfo {
     pub plugins_count: Option<usize>,
     pub applications_count: Option<usize>,
     pub tag: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoreInstallMethodCapability {
+    pub method: String,
+    pub executable: Option<String>,
+    pub available: bool,
+    pub applications: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -773,6 +786,44 @@ pub fn list_store_plugins_with_info(
     Ok((out, info))
 }
 
+pub fn list_store_install_method_capabilities(
+    index_path: &Path,
+) -> Result<Vec<StoreInstallMethodCapability>> {
+    let (index, _) = read_store_index(index_path)?;
+    let mut methods: BTreeMap<String, StoreInstallMethodCapability> = BTreeMap::new();
+
+    for app in index.applications {
+        let app_name = app.name.unwrap_or(app.id);
+        for install in app.install {
+            if !install_os_matches(&install.os) {
+                continue;
+            }
+            let executable = executable_for_install_method(&install);
+            let available = executable
+                .as_deref()
+                .map(command_exists)
+                .unwrap_or_else(|| install.method == "manual");
+            let entry = methods.entry(install.method.clone()).or_insert_with(|| {
+                StoreInstallMethodCapability {
+                    method: install.method.clone(),
+                    executable: executable.clone(),
+                    available,
+                    applications: Vec::new(),
+                }
+            });
+            if entry.executable.is_none() {
+                entry.executable = executable;
+            }
+            entry.available |= available;
+            if !entry.applications.iter().any(|name| name == &app_name) {
+                entry.applications.push(app_name.clone());
+            }
+        }
+    }
+
+    Ok(methods.into_values().collect())
+}
+
 pub fn store_index_path() -> PathBuf {
     if let Some(path) = std::env::var_os("KKC_PLUGIN_STORE_INDEX") {
         return PathBuf::from(path);
@@ -1128,6 +1179,33 @@ fn run_application_install_command(app_id: &str, install: &StoreApplicationInsta
             other,
             app_id
         ),
+    }
+}
+
+fn executable_for_install_method(install: &StoreApplicationInstall) -> Option<String> {
+    match install.method.as_str() {
+        "cargo" => Some("cargo".to_string()),
+        "brew" => Some("brew".to_string()),
+        "apt" => {
+            if command_exists("apt-get") {
+                Some("apt-get".to_string())
+            } else {
+                Some("apt".to_string())
+            }
+        }
+        "dnf" => Some("dnf".to_string()),
+        "pacman" => Some("pacman".to_string()),
+        "winget" => Some("winget".to_string()),
+        "scoop" => Some("scoop".to_string()),
+        "script" => {
+            if cfg!(windows) {
+                Some("cmd".to_string())
+            } else {
+                Some("sh".to_string())
+            }
+        }
+        "manual" => None,
+        other => Some(other.to_string()),
     }
 }
 
@@ -2334,6 +2412,17 @@ fn install_bundled_plugins(plugins_dir: &Path) -> Result<()> {
     write_bundled_file(
         &git_commits_dir.join("plugin.toml"),
         BUNDLED_GIT_COMMITS_MANIFEST,
+    )?;
+
+    let m3u_playlist_dir = plugins_dir.join("m3u_playlist");
+    fs::create_dir_all(&m3u_playlist_dir)?;
+    write_bundled_file(
+        &m3u_playlist_dir.join("plugin.lua"),
+        BUNDLED_M3U_PLAYLIST_PLUGIN,
+    )?;
+    write_bundled_file(
+        &m3u_playlist_dir.join("plugin.toml"),
+        BUNDLED_M3U_PLAYLIST_MANIFEST,
     )?;
 
     Ok(())
@@ -4140,6 +4229,46 @@ mod tests {
     }
 
     #[test]
+    fn store_install_capabilities_filter_current_os_and_check_commands() {
+        let index_path = std::env::temp_dir().join(format!(
+            "kkc-store-capabilities-{}.json",
+            std::process::id()
+        ));
+        let os = current_store_os_labels()
+            .first()
+            .cloned()
+            .unwrap_or_else(|| std::env::consts::OS.to_string());
+        fs::write(
+            &index_path,
+            format!(
+                r#"{{
+  "applications": [
+    {{
+      "id": "bat",
+      "name": "bat",
+      "install": [
+        {{ "os": ["{os}"], "method": "cargo", "crate": "bat", "bin": "bat" }},
+        {{ "os": ["definitely-not-this-os"], "method": "brew", "package": "bat", "bin": "bat" }}
+      ]
+    }}
+  ]
+}}"#
+            ),
+        )
+        .expect("write store index");
+
+        let methods =
+            list_store_install_method_capabilities(&index_path).expect("read install capabilities");
+        assert_eq!(methods.len(), 1);
+        assert_eq!(methods[0].method, "cargo");
+        assert_eq!(methods[0].executable.as_deref(), Some("cargo"));
+        assert_eq!(methods[0].available, command_exists("cargo"));
+        assert_eq!(methods[0].applications, vec!["bat"]);
+
+        let _ = fs::remove_file(&index_path);
+    }
+
+    #[test]
     fn plugin_remove_only_allows_non_bundled_direct_children() {
         let root = Path::new("/tmp/kkc-store");
 
@@ -4870,6 +4999,59 @@ kkc.register_archive_plugin({
         let table: Table = lua.registry_value(&handles[0]).expect("runtime table");
         assert!(runtime_plugin_id_matches(&table, "wbc-webshots").expect("id should match"));
         assert!(!runtime_plugin_id_matches(&table, "Webshots parser").expect("name is not id"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn bundled_m3u_playlist_archive_plugin_extracts_entries() {
+        let plugin_dir = Path::new("assets/plugins/m3u_playlist");
+        let script_path = plugin_dir.join("plugin.lua");
+        let plugins = inspect_plugin(&script_path).expect("m3u playlist plugin should load");
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(plugins[0].id, "m3u_playlist");
+        assert!(plugins[0].extensions.iter().any(|ext| ext == "m3u"));
+        assert!(plugins[0].extensions.iter().any(|ext| ext == "m3u8"));
+
+        let root = std::env::temp_dir().join(format!(
+            "kkc-m3u-plugin-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let destination = root.join("out");
+        fs::create_dir_all(&destination).expect("create destination");
+        let media = root.join("track one.mp3");
+        let playlist = root.join("list.m3u8");
+        fs::write(&media, b"fake mp3").expect("write media");
+        fs::write(
+            &playlist,
+            "#EXTM3U\n#EXTINF:1,Track One\ntrack one.mp3\nhttps://example.test/live\n",
+        )
+        .expect("write playlist");
+
+        let plugin = ArchivePlugin {
+            id: plugins[0].id.clone(),
+            name: plugins[0].name.clone(),
+            version: plugins[0].version.clone(),
+            description: plugins[0].description.clone(),
+            script_path,
+            plugin_dir: plugin_dir.to_path_buf(),
+            mime_types: plugins[0].mime_types.clone(),
+            extensions: plugins[0].extensions.clone(),
+            can_add_files: plugins[0].can_add_files,
+        };
+        assert!(plugin.supports_path(&playlist, None));
+        plugin
+            .extract(&playlist, &destination)
+            .expect("extract playlist");
+        assert!(destination.join("001 - track one.mp3").exists());
+        assert_eq!(
+            fs::read_to_string(destination.join("002 - live")).expect("read url pointer"),
+            "https://example.test/live\n"
+        );
+
         let _ = fs::remove_dir_all(root);
     }
 

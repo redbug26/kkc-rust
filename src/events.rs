@@ -846,7 +846,10 @@ fn handle_mouse_store_install_palette(app: &mut App, mouse: MouseEvent) -> Resul
             {
                 if matches!(
                     key,
-                    KeyCode::Char('d') | KeyCode::Char('u') | KeyCode::Char('r')
+                    KeyCode::Char('d')
+                        | KeyCode::Char('u')
+                        | KeyCode::Char('y')
+                        | KeyCode::Char('r')
                 ) {
                     return handle_store_install_palette(
                         app,

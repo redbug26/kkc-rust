@@ -19,8 +19,8 @@ use self::helpers::{
 };
 pub use self::menu::{
     MENU_DATA, MENU_HEADERS, MenuAction, MenuEntry, MenuState, StoreDetectChoice, StoreDetectItem,
-    StoreDetectState, StoreInstallPaletteState, StoreInstallProgress, ViewerGotoState,
-    ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,
+    StoreDetectState, StoreInstallMethodsState, StoreInstallPaletteState, StoreInstallProgress,
+    ViewerGotoState, ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,
 };
 use self::panel_tabs::{PanelTabs, panel_config_for_save, restore_panel_side};
 pub use self::remote_edit::{RemoteEditKind, RemoteEditState};
@@ -2056,6 +2056,7 @@ impl App {
                     scroll_offset: std::cell::Cell::new(0),
                     progress: None,
                     detect: None,
+                    methods: None,
                 },
             )
         }
@@ -2167,6 +2168,21 @@ impl App {
             ));
         }
         self.mode = AppMode::StoreInstallPalette(state);
+    }
+
+    pub fn open_store_install_methods_dialog(&mut self, mut state: StoreInstallPaletteState) {
+        match crate::plugins::list_store_install_method_capabilities(&state.index_path) {
+            Ok(methods) => {
+                let count = methods.len();
+                state.methods = Some(StoreInstallMethodsState { methods });
+                self.notify(format!("Store install methods for this OS: {}", count));
+                self.mode = AppMode::StoreInstallPalette(state);
+            }
+            Err(err) => {
+                self.notify(format!("Store method detection failed: {}", err));
+                self.mode = AppMode::StoreInstallPalette(state);
+            }
+        }
     }
 
     pub fn apply_store_detection_choices(&mut self, mut state: StoreInstallPaletteState) {
