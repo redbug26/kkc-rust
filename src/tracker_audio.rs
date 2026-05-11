@@ -92,7 +92,13 @@ impl TrackerVisualizer {
         }
     }
 
-    pub(crate) fn update(&mut self, samples: &[f32], table_index: usize, pattern: usize, row: usize) {
+    pub(crate) fn update(
+        &mut self,
+        samples: &[f32],
+        table_index: usize,
+        pattern: usize,
+        row: usize,
+    ) {
         for &sample in samples {
             self.samples[self.write_pos] = sample;
             self.write_pos = (self.write_pos + 1) % self.samples.len();
@@ -290,8 +296,7 @@ pub fn module_info(bytes: &[u8]) -> Result<TrackerModuleInfo> {
 pub fn audio_info(path: &Path, bytes: &[u8]) -> Result<TrackerModuleInfo> {
     if let Some((_, module)) = select_audio_plugin(path) {
         let path_text = path.to_string_lossy();
-        let info = module
-            .open()(path_text.as_ref().into())
+        let info = module.open()(path_text.as_ref().into())
             .into_result()
             .map_err(|err| anyhow!("Opening audio plugin track: {err}"))?;
         let _ = module.close()(path_text.as_ref().into());
@@ -333,9 +338,7 @@ pub fn playback_finished_for_path(path: &Path) -> bool {
         return false;
     }
     if let Some(plugin) = &state.plugin_backend {
-        return plugin
-            .module
-            .is_finished()(plugin.path.as_str().into())
+        return plugin.module.is_finished()(plugin.path.as_str().into())
             .into_result()
             .unwrap_or(false);
     }
@@ -443,8 +446,7 @@ fn play_audio_plugin_path(
         plugin_info.id,
         path.display()
     ));
-    let info = module
-        .open()(path_text.as_str().into())
+    let info = module.open()(path_text.as_str().into())
         .into_result()
         .map_err(|err| {
             crate::viewer::debug_log(&format!(
@@ -496,7 +498,6 @@ fn play_audio_plugin_path(
 
     Ok(info)
 }
-
 
 pub fn stop_module() {
     if let Ok(mut state) = playback_state().lock()
@@ -795,10 +796,7 @@ impl PluginAudioSource {
             return;
         }
 
-        let chunk = match self
-            .module
-            .read_samples()(self.path.as_str().into(), 1024)
-            .into_result()
+        let chunk = match self.module.read_samples()(self.path.as_str().into(), 1024).into_result()
         {
             Ok(chunk) => chunk,
             Err(_) => {

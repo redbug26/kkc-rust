@@ -1,7 +1,7 @@
 mod about;
-mod audio_plugins;
 mod app;
 mod archive;
+mod audio_plugins;
 mod cloud_status;
 mod compare;
 mod config;

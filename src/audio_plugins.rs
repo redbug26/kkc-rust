@@ -164,7 +164,10 @@ pub fn load_audio_plugin(plugin_id: &str) -> Result<AudioPluginModRef> {
         }
 
         let Some(audio) = manifest.audio.as_ref() else {
-            return Err(anyhow!("Native audio plugin '{}' missing [audio]", plugin_id));
+            return Err(anyhow!(
+                "Native audio plugin '{}' missing [audio]",
+                plugin_id
+            ));
         };
 
         let Some(library_path) = resolve_audio_library_path(&path, &audio.library) else {

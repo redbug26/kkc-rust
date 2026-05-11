@@ -38,8 +38,7 @@ const BUNDLED_GIT_ACTION_MANIFEST: &str = include_str!("../assets/plugins/git_ac
 const BUNDLED_GIT_COMMITS_PLUGIN: &str = include_str!("../assets/plugins/git_commits/plugin.lua");
 const BUNDLED_GIT_COMMITS_MANIFEST: &str =
     include_str!("../assets/plugins/git_commits/plugin.toml");
-const BUNDLED_M3U_PLAYLIST_PLUGIN: &str =
-    include_str!("../assets/plugins/m3u_playlist/plugin.lua");
+const BUNDLED_M3U_PLAYLIST_PLUGIN: &str = include_str!("../assets/plugins/m3u_playlist/plugin.lua");
 const BUNDLED_M3U_PLAYLIST_MANIFEST: &str =
     include_str!("../assets/plugins/m3u_playlist/plugin.toml");
 const BUNDLED_PLUGIN_DIRS: &[&str] = &[

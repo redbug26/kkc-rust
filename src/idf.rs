@@ -1,5 +1,6 @@
 use anyhow::Result;
 use chrono::{DateTime, Local};
+use delharc::decode::{Decoder, Lh5Decoder};
 use std::collections::HashMap;
 use std::fs;
 use std::io::{Cursor, Read};
@@ -1893,7 +1894,9 @@ fn parse_ym_info(data: &[u8]) -> anyhow::Result<YmInfo> {
     let magic_bytes: [u8; 4] = data[..4]
         .try_into()
         .map_err(|_| anyhow::anyhow!("Invalid YM header"))?;
-    let magic = std::str::from_utf8(&magic_bytes).unwrap_or("YM??").to_string();
+    let magic = std::str::from_utf8(&magic_bytes)
+        .unwrap_or("YM??")
+        .to_string();
 
     if magic == "YM2!" || magic == "YM3!" || magic == "YM3b" {
         return parse_ym_info_legacy(data, &magic);
@@ -1958,7 +1961,8 @@ fn parse_ym_info_legacy(data: &[u8], magic: &str) -> anyhow::Result<YmInfo> {
         }
         let frames = (payload_len - 4) / 14;
         let loop_bytes = &data[data.len() - 4..];
-        let loop_frame = u32::from_le_bytes([loop_bytes[0], loop_bytes[1], loop_bytes[2], loop_bytes[3]]);
+        let loop_frame =
+            u32::from_le_bytes([loop_bytes[0], loop_bytes[1], loop_bytes[2], loop_bytes[3]]);
         (frames as u32, loop_frame)
     } else {
         ((payload_len / 14) as u32, 0)
@@ -2016,6 +2020,9 @@ fn decompress_lzh(data: &[u8]) -> anyhow::Result<Vec<u8>> {
     match decompress_lzh_strict(data) {
         Ok(out) => Ok(out),
         Err(strict_err) => {
+            if let Ok(out) = decompress_lzh_stsound_compat(data) {
+                return Ok(out);
+            }
             if let Some(repaired) = repair_lzh_level0_header_checksum(data) {
                 decompress_lzh_strict(&repaired).map_err(|retry_err| {
                     anyhow::anyhow!(
@@ -2060,6 +2067,64 @@ fn decompress_lzh_strict(data: &[u8]) -> anyhow::Result<Vec<u8>> {
     anyhow::bail!("YM LZH archive has no decodable file entry");
 }
 
+fn decompress_lzh_stsound_compat(data: &[u8]) -> anyhow::Result<Vec<u8>> {
+    if data.len() < 22 || data.get(2..7) != Some(b"-lh5-") {
+        anyhow::bail!("Not an LH5 stream");
+    }
+
+    let header_size = data[0];
+    if header_size == 0 {
+        anyhow::bail!("Not compressed");
+    }
+
+    let packed_size = u32::from_le_bytes([data[7], data[8], data[9], data[10]]) as usize;
+    let original_size = u32::from_le_bytes([data[11], data[12], data[13], data[14]]) as usize;
+    let level = data[20];
+    let name_len = data[21] as usize;
+    if original_size == 0 {
+        anyhow::bail!("Empty LH5 output");
+    }
+    if level > 1 {
+        anyhow::bail!("Unsupported LH5 header level");
+    }
+
+    let mut ptr = 22usize
+        .checked_add(name_len)
+        .and_then(|v| v.checked_add(2))
+        .ok_or_else(|| anyhow::anyhow!("LH5 header offset overflow"))?;
+    if level == 1 {
+        ptr = ptr
+            .checked_add(1)
+            .ok_or_else(|| anyhow::anyhow!("LH5 header offset overflow"))?;
+        loop {
+            let size_bytes = data
+                .get(ptr..ptr + 2)
+                .ok_or_else(|| anyhow::anyhow!("Truncated LH5 extended header"))?;
+            ptr += 2;
+            let next_header_size = u16::from_le_bytes([size_bytes[0], size_bytes[1]]) as usize;
+            if next_header_size == 0 {
+                break;
+            }
+            ptr = ptr
+                .checked_add(next_header_size)
+                .ok_or_else(|| anyhow::anyhow!("LH5 extended header offset overflow"))?;
+            if ptr > data.len() {
+                anyhow::bail!("LH5 extended header exceeds file size");
+            }
+        }
+    }
+
+    if ptr >= data.len() {
+        anyhow::bail!("LH5 payload is missing");
+    }
+    let available = data.len() - ptr;
+    let packed_size = packed_size.min(available);
+    let mut out = vec![0; original_size];
+    let mut decoder = Lh5Decoder::new(&data[ptr..ptr + packed_size]);
+    decoder.fill_buffer(&mut out)?;
+    Ok(out)
+}
+
 fn repair_lzh_level0_header_checksum(data: &[u8]) -> Option<Vec<u8>> {
     if data.len() < 22 || data.get(2..5) != Some(b"-lh") || data.get(6) != Some(&b'-') {
         return None;
@@ -2080,14 +2145,18 @@ fn repair_lzh_level0_header_checksum(data: &[u8]) -> Option<Vec<u8>> {
 
 fn read_be_u32(data: &[u8], ptr: &mut usize) -> anyhow::Result<u32> {
     let end = ptr.saturating_add(4);
-    let bytes = data.get(*ptr..end).ok_or_else(|| anyhow::anyhow!("Truncated YM header"))?;
+    let bytes = data
+        .get(*ptr..end)
+        .ok_or_else(|| anyhow::anyhow!("Truncated YM header"))?;
     *ptr = end;
     Ok(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
 }
 
 fn read_be_u16(data: &[u8], ptr: &mut usize) -> anyhow::Result<u16> {
     let end = ptr.saturating_add(2);
-    let bytes = data.get(*ptr..end).ok_or_else(|| anyhow::anyhow!("Truncated YM header"))?;
+    let bytes = data
+        .get(*ptr..end)
+        .ok_or_else(|| anyhow::anyhow!("Truncated YM header"))?;
     *ptr = end;
     Ok(u16::from_be_bytes([bytes[0], bytes[1]]))
 }
@@ -4343,11 +4412,7 @@ fn lha_first_name(data: &[u8]) -> Option<String> {
     let s = String::from_utf8_lossy(name)
         .trim_matches(|c: char| c == '\0' || c.is_control() || c.is_whitespace())
         .to_string();
-    if s.is_empty() {
-        None
-    } else {
-        Some(s)
-    }
+    if s.is_empty() { None } else { Some(s) }
 }
 
 fn lha_lines(data: &[u8]) -> Vec<String> {
