@@ -1759,6 +1759,7 @@ impl App {
         self.poll_tree_view();
         self.poll_store_install();
         self.poll_quick_preview();
+        self.poll_audio_autoadvance();
         // Auto-clear status bar text after 30 seconds.
         if let Some(set_at) = self.status.set_at {
             if set_at.elapsed() >= std::time::Duration::from_secs(30) {
@@ -1898,6 +1899,51 @@ impl App {
             };
             self.notify(msg);
         }
+    }
+
+    fn poll_audio_autoadvance(&mut self) {
+        let Some(path) = (match &self.mode {
+            AppMode::Viewer(viewer) if matches!(viewer.mode, ViewMode::Module) => {
+                Some(viewer.path.clone())
+            }
+            _ => None,
+        }) else {
+            return;
+        };
+
+        if !crate::tracker_audio::playback_finished_for_path(&path) {
+            return;
+        }
+
+        crate::tracker_audio::stop_module_if_path(&path);
+        let Some(next_idx) = self.next_audio_entry_index() else {
+            self.notify("Audio playback finished");
+            return;
+        };
+
+        let panel = self.active_panel_mut();
+        panel.cursor = next_idx;
+        if panel.cursor < panel.scroll {
+            panel.scroll = panel.cursor;
+        }
+        self.open_viewer();
+    }
+
+    fn next_audio_entry_index(&self) -> Option<usize> {
+        let panel = self.active_panel();
+        let start = panel.cursor.saturating_add(1);
+        panel
+            .entries
+            .iter()
+            .enumerate()
+            .skip(start)
+            .find_map(|(idx, entry)| {
+                (!entry.is_dir
+                    && entry.name != ".."
+                    && !entry.cloud_only
+                    && crate::tracker_audio::is_audio_path(&entry.path))
+                .then_some(idx)
+            })
     }
 
     fn poll_store_install(&mut self) {
@@ -2727,6 +2773,44 @@ impl App {
     // Viewer
     // -----------------------------------------------------------------------
 
+    pub fn open_adjacent_viewer_file(&mut self, direction: isize) {
+        let Some(idx) = self.adjacent_viewer_file_index(direction) else {
+            if direction < 0 {
+                self.notify("No previous file");
+            } else {
+                self.notify("No next file");
+            }
+            return;
+        };
+
+        let panel = self.active_panel_mut();
+        panel.cursor = idx;
+        if panel.cursor < panel.scroll {
+            panel.scroll = panel.cursor;
+        }
+        self.open_viewer();
+    }
+
+    fn adjacent_viewer_file_index(&self, direction: isize) -> Option<usize> {
+        let panel = self.active_panel();
+        if direction < 0 {
+            panel
+                .entries
+                .iter()
+                .enumerate()
+                .take(panel.cursor)
+                .rev()
+                .find_map(|(idx, entry)| viewer_navigable_entry(entry).then_some(idx))
+        } else {
+            panel
+                .entries
+                .iter()
+                .enumerate()
+                .skip(panel.cursor.saturating_add(1))
+                .find_map(|(idx, entry)| viewer_navigable_entry(entry).then_some(idx))
+        }
+    }
+
     pub fn open_viewer(&mut self) {
         if let Some(entry) = self.active_panel().current_entry().cloned() {
             if entry.is_dir || entry.name == ".." {
@@ -3282,6 +3366,10 @@ fn store_application_opener(item: &crate::plugins::StorePluginInfo) -> Option<St
     } else {
         Some(format!("{bin} {args}"))
     }
+}
+
+fn viewer_navigable_entry(entry: &crate::panel::Entry) -> bool {
+    !entry.is_dir && entry.name != ".." && !entry.cloud_only
 }
 
 #[cfg(test)]

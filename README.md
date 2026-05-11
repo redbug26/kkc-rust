@@ -147,6 +147,7 @@ Open the search dialog with **`Alt+F7`**. Enter a pattern in the "Name:" field:
 | `g` → `e` | Goto last line (anchored at bottom of viewport) |
 | `/` | Search in document |
 | `n` | Next search match |
+| `Ctrl+J` / `Ctrl+K` | Open next / previous file from the active panel |
 | `F4` | Change viewer mode / plugin |
 | `Esc` | Close viewer |
 

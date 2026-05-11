@@ -81,6 +81,20 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
             app.mode = AppMode::ViewerGotoLine(v, String::new());
             return Ok(false);
         }
+        KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if let AppMode::Viewer(ref v) = app.mode {
+                v.save_position();
+            }
+            app.open_adjacent_viewer_file(1);
+            return Ok(false);
+        }
+        KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if let AppMode::Viewer(ref v) = app.mode {
+                v.save_position();
+            }
+            app.open_adjacent_viewer_file(-1);
+            return Ok(false);
+        }
         KeyCode::Char('g')
             if !key.modifiers.contains(KeyModifiers::CONTROL)
                 && !key.modifiers.contains(KeyModifiers::ALT) =>

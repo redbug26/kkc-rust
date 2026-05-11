@@ -202,6 +202,7 @@
     n                Jump to next match.
     N                Jump to previous match.
     C-N              Jump to next match (alternative).
+    C-J / C-K        Open next / previous file from the active panel.
 
 % Viewer menus (F-keys)
 

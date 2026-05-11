@@ -167,6 +167,17 @@ pub fn playback_snapshot_for_path(path: &Path) -> Option<TrackerPlaybackSnapshot
     })
 }
 
+pub fn playback_finished_for_path(path: &Path) -> bool {
+    playback_state()
+        .lock()
+        .ok()
+        .and_then(|state| {
+            let state = state.as_ref()?;
+            (state.path == path && state.player.empty()).then_some(())
+        })
+        .is_some()
+}
+
 pub fn play_audio_file(path: &Path) -> Result<TrackerModuleInfo> {
     let bytes = std::fs::read(path).with_context(|| format!("Reading {}", path.display()))?;
     play_audio_bytes(path.to_path_buf(), &bytes)
@@ -187,13 +198,14 @@ fn play_tracker_bytes(path: PathBuf, bytes: &[u8]) -> Result<TrackerModuleInfo> 
     let module_ref: &'static Module = Box::leak(Box::new(module));
     let mut xmrs_player = XmrsPlayer::new(module_ref, SAMPLE_RATE, 0);
     xmrs_player.set_amplification(Amplification::from_raw_q4_12((0.30 * 4096.0) as i16));
-    xmrs_player.set_max_loop_count(0);
+    xmrs_player.set_max_loop_count(1);
 
     let player = Arc::new(Mutex::new(xmrs_player));
     let visualizer = Arc::new(Mutex::new(TrackerVisualizer::new()));
     let source = TrackerSource::new(Arc::clone(&player), Arc::clone(&visualizer));
-    let stream = rodio::DeviceSinkBuilder::open_default_sink()
+    let mut stream = rodio::DeviceSinkBuilder::open_default_sink()
         .map_err(|err| anyhow!("Opening default audio output: {err}"))?;
+    stream.log_on_drop(false);
     let sink = rodio::Player::connect_new(&stream.mixer());
     sink.append(source);
     sink.play();
@@ -221,8 +233,9 @@ fn play_decoded_audio_bytes(path: PathBuf, bytes: &[u8]) -> Result<TrackerModule
         .map_err(|err| anyhow!("Decoding audio: {err}"))?;
     let visualizer = Arc::new(Mutex::new(TrackerVisualizer::new()));
     let source = DecodedAudioVisualizerSource::new(decoder, Arc::clone(&visualizer));
-    let stream = rodio::DeviceSinkBuilder::open_default_sink()
+    let mut stream = rodio::DeviceSinkBuilder::open_default_sink()
         .map_err(|err| anyhow!("Opening default audio output: {err}"))?;
+    stream.log_on_drop(false);
     let sink = rodio::Player::connect_new(&stream.mixer());
     sink.append(source);
     sink.play();
