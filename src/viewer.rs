@@ -1337,6 +1337,11 @@ impl Viewer {
         let width = width.max(32);
         if let Some(info) = &self.music {
             let mut lines = self.audio_deck_header(info, snapshot.as_ref(), width);
+            let track_text_lines = snapshot
+                .as_ref()
+                .filter(|snap| !snap.track_text_lines.is_empty())
+                .map(|snap| snap.track_text_lines.clone())
+                .unwrap_or_else(|| info.text_tracks.clone());
             match self.audio_tab() {
                 AudioViewerTab::Overview => {
                     let mut meta = audio_metadata_lines(self, info);
@@ -1351,7 +1356,12 @@ impl Viewer {
                         ));
                     }
                     lines.extend(audio_box("Overview console", width, &meta));
-                    if !info.patterns.is_empty() {
+                    if snapshot
+                        .as_ref()
+                        .map(|snap| !snap.tracker_monitor_lines.is_empty())
+                        .unwrap_or(false)
+                        || !info.patterns.is_empty()
+                    {
                         let rows = height.saturating_sub(lines.len() + 8).clamp(9, 18);
                         lines.extend(audio_box(
                             "Tracker monitor",
@@ -1359,13 +1369,12 @@ impl Viewer {
                             &tracker_window_lines(info, snapshot.as_ref(), rows),
                         ));
                     }
-                    if !info.text_tracks.is_empty() {
+                    if !track_text_lines.is_empty() {
                         let text_rows = height.saturating_sub(lines.len() + 2).clamp(4, 10);
                         lines.extend(audio_box(
                             "Track text",
                             width,
-                            &info
-                                .text_tracks
+                            &track_text_lines
                                 .iter()
                                 .take(text_rows)
                                 .cloned()
@@ -1402,7 +1411,7 @@ impl Viewer {
                     ));
                 }
                 AudioViewerTab::Text => {
-                    if info.text_tracks.is_empty() {
+                    if track_text_lines.is_empty() {
                         lines.extend(audio_box(
                             "Track text",
                             width,
@@ -1412,7 +1421,7 @@ impl Viewer {
                             ],
                         ));
                     } else {
-                        lines.extend(audio_box("Track text", width, &info.text_tracks));
+                        lines.extend(audio_box("Track text", width, &track_text_lines));
                     }
                 }
             }
@@ -2424,6 +2433,18 @@ fn tracker_window_lines(
     let Some(snapshot) = snapshot else {
         return vec!["No tracker playback position yet".into()];
     };
+    if !snapshot.tracker_monitor_lines.is_empty() {
+        let mut lines = snapshot
+            .tracker_monitor_lines
+            .iter()
+            .take(rows.max(1))
+            .cloned()
+            .collect::<Vec<_>>();
+        for _ in lines.len()..rows.max(1) {
+            lines.push(String::new());
+        }
+        return lines;
+    }
     let Some(pattern) = info.patterns.get(snapshot.pattern) else {
         return vec!["Pattern unavailable".into()];
     };

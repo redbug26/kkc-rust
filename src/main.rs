@@ -1,4 +1,5 @@
 mod about;
+mod audio_plugins;
 mod app;
 mod archive;
 mod cloud_status;

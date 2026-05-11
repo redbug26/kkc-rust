@@ -2801,6 +2801,14 @@ impl App {
                 .take(panel.cursor)
                 .rev()
                 .find_map(|(idx, entry)| viewer_navigable_entry(entry).then_some(idx))
+                .or_else(|| {
+                    panel
+                        .entries
+                        .iter()
+                        .enumerate()
+                        .rev()
+                        .find_map(|(idx, entry)| viewer_navigable_entry(entry).then_some(idx))
+                })
         } else {
             panel
                 .entries
@@ -2808,6 +2816,13 @@ impl App {
                 .enumerate()
                 .skip(panel.cursor.saturating_add(1))
                 .find_map(|(idx, entry)| viewer_navigable_entry(entry).then_some(idx))
+                .or_else(|| {
+                    panel
+                        .entries
+                        .iter()
+                        .enumerate()
+                        .find_map(|(idx, entry)| viewer_navigable_entry(entry).then_some(idx))
+                })
         }
     }
 

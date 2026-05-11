@@ -47,7 +47,7 @@ impl FileCategory {
             // --- Audio ---
             Some(
                 "mp3" | "ogg" | "flac" | "wav" | "aiff" | "aif" | "m4a" | "wma" | "au" | "voc"
-                | "mod" | "xm" | "it" | "s3m" | "mid" | "midi" | "opus" | "ape" | "mpc",
+                | "mod" | "xm" | "it" | "s3m" | "ayt" | "mid" | "midi" | "opus" | "ape" | "mpc",
             ) => FileCategory::Audio,
 
             // --- Images ---

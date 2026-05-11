@@ -38,6 +38,7 @@ rodio = { version = "0.22", default-features = false, features = ["playback", "w
 rustfft = "6.2"
 xmrs = { version = "0.11.0", default-features = false, features = ["std", "import_mod", "import_xm", "import_s3m", "import_it"] }
 xmrsplayer = { version = "0.11.1", default-features = false, features = ["std", "import_mod", "import_xm", "import_s3m", "import_it"] }
+delharc = "0.6"
 
 [features]
 smb = ["dep:pavao"]

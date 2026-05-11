@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::{DateTime, Local};
 use std::collections::HashMap;
 use std::fs;
-use std::io::Cursor;
+use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use zip::ZipArchive;
@@ -371,14 +371,46 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             vec![],
         ))
     } else if data.get(2..5) == Some(b"-lh") && data.get(6) == Some(&b'-') {
-        Some(info(
-            "application/x-lzh-compressed",
-            path,
-            IdfKind::Archive,
-            lha_first_name(&data),
-            None,
-            lha_lines(&data),
-        ))
+        let ym_from_lzh = parse_ym_info(&data).or_else(|_| {
+            if matches!(ext.as_str(), "ym" | "ym5" | "ym6") && data.len() < file_len {
+                let full = crate::file_cache::read_file(path, None)?;
+                parse_ym_info(&full.bytes)
+            } else {
+                anyhow::bail!("Not a YM payload")
+            }
+        });
+
+        match ym_from_lzh {
+            Ok(song) => Some(info(
+                "audio/x-ym",
+                path,
+                IdfKind::Module,
+                Some(song.song_name.clone()),
+                Some(song.song_author.clone()),
+                ym_lines(&song),
+            )),
+            Err(err) if matches!(ext.as_str(), "ym" | "ym5" | "ym6") => {
+                let mut lines = vec![" YM file in LZH container (decode failed)".into()];
+                lines.push(format!(" Decode error: {err}"));
+                lines.extend(lha_lines(&data));
+                Some(info(
+                    "audio/x-ym",
+                    path,
+                    IdfKind::Module,
+                    lha_first_name(&data),
+                    None,
+                    lines,
+                ))
+            }
+            Err(_) => Some(info(
+                "application/x-lzh-compressed",
+                path,
+                IdfKind::Archive,
+                lha_first_name(&data),
+                None,
+                lha_lines(&data),
+            )),
+        }
     } else if data.starts_with(b"UC2\x1a") || data.starts_with(b"UE2") {
         Some(info(
             "application/x-uc2",
@@ -954,6 +986,54 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             vec![],
         ))
+    } else if ext == "ayt" || looks_like_ayt(&data) {
+        match parse_ayt_info(&data) {
+            Ok(song) => Some(info(
+                "audio/x-ayt",
+                path,
+                IdfKind::Module,
+                None,
+                None,
+                ayt_lines(&song),
+            )),
+            Err(_) if ext == "ayt" => Some(info(
+                "audio/x-ayt",
+                path,
+                IdfKind::Module,
+                None,
+                None,
+                vec![" AYT file (header parsing failed)".into()],
+            )),
+            Err(_) => None,
+        }
+    } else if matches!(ext.as_str(), "ym" | "ym5" | "ym6") || looks_like_ym(&data) {
+        let ym_info = parse_ym_info(&data).or_else(|_| {
+            if matches!(ext.as_str(), "ym" | "ym5" | "ym6") && data.len() < file_len {
+                let full = crate::file_cache::read_file(path, None)?;
+                parse_ym_info(&full.bytes)
+            } else {
+                anyhow::bail!("YM header parsing failed")
+            }
+        });
+        match ym_info {
+            Ok(song) => Some(info(
+                "audio/x-ym",
+                path,
+                IdfKind::Module,
+                Some(song.song_name.clone()),
+                Some(song.song_author.clone()),
+                ym_lines(&song),
+            )),
+            Err(_) if matches!(ext.as_str(), "ym" | "ym5" | "ym6") => Some(info(
+                "audio/x-ym",
+                path,
+                IdfKind::Module,
+                None,
+                None,
+                vec![" YM file (header parsing failed)".into()],
+            )),
+            Err(_) => None,
+        }
     } else if is_amsdos_file(&data, &ext) {
         Some(info(
             "application/x-amstrad-cpc-amsdos",
@@ -1404,6 +1484,9 @@ fn format_from_mime_type(mime_type: &str) -> Option<&'static str> {
         "audio/x-it" => Some("Impulse Tracker module"),
         "audio/x-sid" => Some("Commodore 64 SID music"),
         "audio/x-mod" => Some("ProTracker module"),
+        "audio/x-ayt" => Some("AYT tracker stream"),
+        "audio/x-ym" => Some("YM tracker stream"),
+        "audio/x-ym6" => Some("YM tracker stream"),
         "audio/x-vgm" => Some("VGM audio"),
         "application/x-lzop" => Some("LZOP compressed archive"),
         "application/x-cpio" => Some("CPIO archive"),
@@ -1652,6 +1735,378 @@ fn wh_lines(w: u32, h: u32) -> Vec<String> {
     } else {
         Vec::new()
     }
+}
+
+#[derive(Debug, Clone)]
+struct AytInfo {
+    version: u8,
+    pattern_size: u8,
+    sequence_count: usize,
+    frame_count: usize,
+    loop_frame: usize,
+    frame_rate: u32,
+    platform_name: &'static str,
+    master_clock_hz: f64,
+    active_registers: Vec<u8>,
+}
+
+fn looks_like_ayt(data: &[u8]) -> bool {
+    parse_ayt_info(data).is_ok()
+}
+
+fn looks_like_ym(data: &[u8]) -> bool {
+    parse_ym_info(data).is_ok()
+}
+
+fn parse_ayt_info(data: &[u8]) -> anyhow::Result<AytInfo> {
+    if data.len() < 14 {
+        anyhow::bail!("AYT file too short");
+    }
+
+    let version = data[0];
+    let active_mask = u16::from_le_bytes([data[1], data[2]]);
+    let pattern_size = data[3];
+    if pattern_size == 0 {
+        anyhow::bail!("Invalid AYT pattern size");
+    }
+
+    let first_seq = u16::from_le_bytes([data[4], data[5]]) as usize;
+    let loop_seq = u16::from_le_bytes([data[6], data[7]]) as usize;
+    let nb_ptr = u16::from_le_bytes([data[10], data[11]]) as usize;
+    let platform_freq = data[12];
+
+    if first_seq < 14 || first_seq > data.len() {
+        anyhow::bail!("Invalid AYT first sequence pointer");
+    }
+
+    let active_registers = (0u8..14)
+        .filter(|reg| {
+            let bit = 15usize.saturating_sub(*reg as usize);
+            bit >= 2 && ((active_mask >> bit) & 1) != 0
+        })
+        .collect::<Vec<_>>();
+    if active_registers.is_empty() {
+        anyhow::bail!("AYT has no active registers");
+    }
+
+    let present_count = active_registers.len();
+    if nb_ptr < present_count {
+        anyhow::bail!("Invalid AYT pointer count");
+    }
+    let seq_words = nb_ptr - present_count;
+    if seq_words == 0 || seq_words % present_count != 0 {
+        anyhow::bail!("Invalid AYT sequence words");
+    }
+
+    let sequence_count = seq_words / present_count;
+    let frame_count = sequence_count * pattern_size as usize;
+    let one_seq_bytes = present_count * 2;
+    let loop_frame = if loop_seq >= first_seq && one_seq_bytes > 0 {
+        let delta = loop_seq - first_seq;
+        if delta % one_seq_bytes == 0 {
+            (delta / one_seq_bytes) * pattern_size as usize
+        } else {
+            0
+        }
+    } else {
+        0
+    };
+
+    let platform_id = platform_freq & 0x1F;
+    let freq_code = (platform_freq >> 5) & 0x07;
+    let (platform_name, master_clock_hz) = match platform_id {
+        0 => ("Amstrad CPC", 1_000_000.0),
+        1 => ("Oric", 1_000_000.0),
+        2 => ("ZXUno", 1_750_000.0),
+        3 => ("Pentagon", 1_750_000.0),
+        4 => ("Timex TS2068", 1_764_000.0),
+        5 => ("ZX 128", 1_773_450.0),
+        6 => ("MSX", 1_789_772.0),
+        7 => ("Atari ST", 2_000_000.0),
+        8 => ("VG5000", 1_000_000.0),
+        _ => ("Unknown", 1_000_000.0),
+    };
+    let frame_rate = match freq_code {
+        0 => 50,
+        1 => 25,
+        2 => 60,
+        3 => 30,
+        4 => 100,
+        5 => 200,
+        _ => 50,
+    };
+
+    Ok(AytInfo {
+        version,
+        pattern_size,
+        sequence_count,
+        frame_count,
+        loop_frame,
+        frame_rate,
+        platform_name,
+        master_clock_hz,
+        active_registers,
+    })
+}
+
+fn ayt_lines(song: &AytInfo) -> Vec<String> {
+    vec![
+        format!(" Version: {}.{}", song.version >> 4, song.version & 0x0F),
+        format!(" Platform: {}", song.platform_name),
+        format!(" Frame rate: {} Hz", song.frame_rate),
+        format!(" Master clock: {:.0} Hz", song.master_clock_hz),
+        format!(" Pattern size: {}", song.pattern_size),
+        format!(" Sequences: {}", song.sequence_count),
+        format!(" Frames: {}", song.frame_count),
+        format!(" Loop frame: {}", song.loop_frame),
+        format!(" Active regs: {:?}", song.active_registers),
+    ]
+}
+
+#[derive(Debug, Clone)]
+struct YmInfo {
+    magic: String,
+    nb_frames: u32,
+    attributes: u32,
+    nb_drums: u16,
+    clock_rate: u32,
+    player_rate: u16,
+    loop_frame: u32,
+    song_name: String,
+    song_author: String,
+    song_comment: String,
+}
+
+fn parse_ym_info(data: &[u8]) -> anyhow::Result<YmInfo> {
+    let owned;
+    let data = if is_lzh_compressed(data) {
+        owned = decompress_lzh(data)?;
+        owned.as_slice()
+    } else {
+        data
+    };
+
+    if data.len() < 12 {
+        anyhow::bail!("YM file too short");
+    }
+
+    let magic_bytes: [u8; 4] = data[..4]
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("Invalid YM header"))?;
+    let magic = std::str::from_utf8(&magic_bytes).unwrap_or("YM??").to_string();
+
+    if magic == "YM2!" || magic == "YM3!" || magic == "YM3b" {
+        return parse_ym_info_legacy(data, &magic);
+    }
+
+    if magic != "YM5!" && magic != "YM6!" {
+        anyhow::bail!("Not a valid YM2/YM3/YM5/YM6 file");
+    }
+    if data.get(4..12) != Some(b"LeOnArD!") {
+        anyhow::bail!("Invalid YM signature");
+    }
+
+    let mut ptr = 12usize;
+    let nb_frames = read_be_u32(data, &mut ptr)?;
+    let attributes = read_be_u32(data, &mut ptr)?;
+    let nb_drums = read_be_u16(data, &mut ptr)?;
+    let clock_rate = read_be_u32(data, &mut ptr)?;
+    let player_rate = read_be_u16(data, &mut ptr)?;
+    let loop_frame = read_be_u32(data, &mut ptr)?;
+    let extra_size = read_be_u16(data, &mut ptr)? as usize;
+
+    ptr = ptr.saturating_add(extra_size);
+    if ptr > data.len() {
+        anyhow::bail!("YM extra data exceeds file size");
+    }
+
+    for _ in 0..nb_drums {
+        let drum_size = read_be_u32(data, &mut ptr)? as usize;
+        ptr = ptr.saturating_add(drum_size);
+        if ptr > data.len() {
+            anyhow::bail!("YM digidrum data exceeds file size");
+        }
+    }
+
+    let song_name = read_nt_string(data, &mut ptr)?;
+    let song_author = read_nt_string(data, &mut ptr)?;
+    let song_comment = read_nt_string(data, &mut ptr)?;
+
+    Ok(YmInfo {
+        magic,
+        nb_frames,
+        attributes,
+        nb_drums,
+        clock_rate,
+        player_rate,
+        loop_frame,
+        song_name,
+        song_author,
+        song_comment,
+    })
+}
+
+fn parse_ym_info_legacy(data: &[u8], magic: &str) -> anyhow::Result<YmInfo> {
+    if data.len() < 4 + 14 {
+        anyhow::bail!("Legacy YM file too short");
+    }
+
+    let payload_len = data.len() - 4;
+    let (nb_frames, loop_frame) = if magic == "YM3b" {
+        if payload_len < 4 {
+            anyhow::bail!("YM3b file too short");
+        }
+        let frames = (payload_len - 4) / 14;
+        let loop_bytes = &data[data.len() - 4..];
+        let loop_frame = u32::from_le_bytes([loop_bytes[0], loop_bytes[1], loop_bytes[2], loop_bytes[3]]);
+        (frames as u32, loop_frame)
+    } else {
+        ((payload_len / 14) as u32, 0)
+    };
+
+    if nb_frames == 0 {
+        anyhow::bail!("Legacy YM contains no frames");
+    }
+
+    Ok(YmInfo {
+        magic: magic.to_string(),
+        nb_frames,
+        attributes: 1,
+        nb_drums: 0,
+        clock_rate: 2_000_000,
+        player_rate: 50,
+        loop_frame,
+        song_name: String::new(),
+        song_author: String::new(),
+        song_comment: String::new(),
+    })
+}
+
+fn ym_lines(song: &YmInfo) -> Vec<String> {
+    let mut lines = vec![
+        format!(" Format: {}", song.magic),
+        format!(" Frames: {}", song.nb_frames),
+        format!(" Player rate: {} Hz", song.player_rate),
+        format!(" Clock rate: {} Hz", song.clock_rate),
+        format!(" Loop frame: {}", song.loop_frame),
+        format!(" Attributes: 0x{:08X}", song.attributes),
+        format!(" Digidrums: {}", song.nb_drums),
+    ];
+
+    if !song.song_name.is_empty() {
+        lines.push(format!(" Title: {}", song.song_name));
+    }
+    if !song.song_author.is_empty() {
+        lines.push(format!(" Author: {}", song.song_author));
+    }
+    if !song.song_comment.is_empty() {
+        lines.push(String::new());
+        lines.push(" Comment:".into());
+        lines.extend(song.song_comment.lines().map(|line| format!("  {line}")));
+    }
+
+    lines
+}
+
+fn is_lzh_compressed(data: &[u8]) -> bool {
+    data.len() >= 7 && data.get(2..5) == Some(b"-lh") && data.get(6) == Some(&b'-')
+}
+
+fn decompress_lzh(data: &[u8]) -> anyhow::Result<Vec<u8>> {
+    match decompress_lzh_strict(data) {
+        Ok(out) => Ok(out),
+        Err(strict_err) => {
+            if let Some(repaired) = repair_lzh_level0_header_checksum(data) {
+                decompress_lzh_strict(&repaired).map_err(|retry_err| {
+                    anyhow::anyhow!(
+                        "YM LZH decode failed (strict: {strict_err}; checksum-repair retry: {retry_err})"
+                    )
+                })
+            } else {
+                Err(strict_err)
+            }
+        }
+    }
+}
+
+fn decompress_lzh_strict(data: &[u8]) -> anyhow::Result<Vec<u8>> {
+    let mut reader = delharc::LhaDecodeReader::new(data)
+        .map_err(|err| anyhow::anyhow!("YM LZH header decode failed: {err}"))?;
+
+    loop {
+        if !reader.header().is_directory() {
+            if !reader.is_decoder_supported() {
+                anyhow::bail!("YM LZH compression method is not supported");
+            }
+
+            let mut out = Vec::new();
+            reader
+                .read_to_end(&mut out)
+                .map_err(|err| anyhow::anyhow!("YM LZH data decode failed: {err}"))?;
+            reader
+                .crc_check()
+                .map_err(|err| anyhow::anyhow!("YM LZH CRC check failed: {err}"))?;
+            return Ok(out);
+        }
+
+        let has_more = reader
+            .next_file()
+            .map_err(|err| anyhow::anyhow!("YM LZH next entry failed: {err}"))?;
+        if !has_more {
+            break;
+        }
+    }
+
+    anyhow::bail!("YM LZH archive has no decodable file entry");
+}
+
+fn repair_lzh_level0_header_checksum(data: &[u8]) -> Option<Vec<u8>> {
+    if data.len() < 22 || data.get(2..5) != Some(b"-lh") || data.get(6) != Some(&b'-') {
+        return None;
+    }
+    let header_size = data[0] as usize;
+    let end = 2usize.checked_add(header_size)?;
+    if end > data.len() {
+        return None;
+    }
+
+    let checksum = data[2..end]
+        .iter()
+        .fold(0u8, |acc, byte| acc.wrapping_add(*byte));
+    let mut repaired = data.to_vec();
+    repaired[1] = checksum;
+    Some(repaired)
+}
+
+fn read_be_u32(data: &[u8], ptr: &mut usize) -> anyhow::Result<u32> {
+    let end = ptr.saturating_add(4);
+    let bytes = data.get(*ptr..end).ok_or_else(|| anyhow::anyhow!("Truncated YM header"))?;
+    *ptr = end;
+    Ok(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+}
+
+fn read_be_u16(data: &[u8], ptr: &mut usize) -> anyhow::Result<u16> {
+    let end = ptr.saturating_add(2);
+    let bytes = data.get(*ptr..end).ok_or_else(|| anyhow::anyhow!("Truncated YM header"))?;
+    *ptr = end;
+    Ok(u16::from_be_bytes([bytes[0], bytes[1]]))
+}
+
+fn read_nt_string(data: &[u8], ptr: &mut usize) -> anyhow::Result<String> {
+    let start = *ptr;
+    let mut len = 0usize;
+    while start + len < data.len() {
+        if data[start + len] == 0 {
+            let out = String::from_utf8_lossy(&data[start..start + len]).to_string();
+            *ptr = start + len + 1;
+            return Ok(out);
+        }
+        if len > 4096 {
+            anyhow::bail!("YM string too long or missing terminator");
+        }
+        len += 1;
+    }
+    anyhow::bail!("YM string extends beyond file end");
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -3860,9 +4315,22 @@ fn xm_lines(data: &[u8]) -> Vec<String> {
 }
 
 fn lha_first_name(data: &[u8]) -> Option<String> {
-    // Level-0/1 LZH headers: offset 0 = header size, 2..7 = method,
-    // 7..11 = compressed size (LE32), 11..15 = original size (LE32),
-    // 19 = filename length, 20.. = filename
+    if let Ok(reader) = delharc::LhaDecodeReader::new(data) {
+        let path = reader.header().parse_pathname();
+        let raw_name = path
+            .file_name()
+            .unwrap_or(path.as_os_str())
+            .to_string_lossy()
+            .to_string();
+        let trimmed = raw_name
+            .trim_matches(|c: char| c == '\0' || c.is_control() || c.is_whitespace())
+            .to_string();
+        if !trimmed.is_empty() {
+            return Some(trimmed);
+        }
+    }
+
+    // Fallback parser for truncated probes or malformed headers.
     if data.len() < 22 {
         return None;
     }
@@ -3871,8 +4339,15 @@ fn lha_first_name(data: &[u8]) -> Option<String> {
         return None;
     }
     let name = &data[20..20 + name_len];
-    let s = String::from_utf8_lossy(name).trim().to_string();
-    if s.is_empty() { None } else { Some(s) }
+    let name = &name[..name.iter().position(|b| *b == 0).unwrap_or(name.len())];
+    let s = String::from_utf8_lossy(name)
+        .trim_matches(|c: char| c == '\0' || c.is_control() || c.is_whitespace())
+        .to_string();
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
 }
 
 fn lha_lines(data: &[u8]) -> Vec<String> {

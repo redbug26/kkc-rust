@@ -11,6 +11,27 @@ For interactive Lua terminal apps (games/tools), see `docs/lua-applications.md`.
 User plugins are installed in the `data_dir()/plugins` directory from the `ProjectDirs` crate.
 From KKC, this directory is available through `Options > Plugins > Open Dir`.
 
+## Native Rust Plugins
+
+In addition to Lua plugins, KKC can load native Rust plugins via the stable ABI in `crates/kkc-plugin-api`.
+
+- `type = "viewer-rust"`: custom viewer rendering.
+- `type = "audio-rust"`: audio decoding plugin. The plugin provides decoded PCM chunks and playback metadata snapshots, while `kkc-rust` keeps ownership of audio output/playback lifecycle.
+
+For AYT specifically:
+
+- the Rust plugin decodes AYT and streams PCM through `audio-rust` ABI functions;
+- `kkc-rust` performs output/play/stop/autoadvance;
+- tracker monitor lines, track text, and progress data shown by `kkc-rust` are provided by the plugin snapshot.
+
+For YM files, the same `audio-rust` path is used:
+
+- the Rust plugin decodes YM5/YM6 frames and streams PCM through `audio-rust` ABI functions;
+- `kkc-rust` keeps output/playback lifecycle;
+- YM metadata and tracker text come from the plugin snapshot.
+
+This split keeps playback lifecycle (start/stop/autoadvance) consistent with KKC internal audio viewers.
+
 ## Structure
 
 A plugin is a directory containing a `plugin.lua` file:

@@ -1373,6 +1373,7 @@ dependencies = [
  "base64 0.13.1",
  "chrono",
  "crossterm",
+ "delharc",
  "directories",
  "font8x8",
  "image",

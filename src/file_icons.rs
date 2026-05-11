@@ -15,6 +15,7 @@ const EXTENSION_ICONS: &[(&str, &str)] = &[
     (".aac", AUDIO),
     (".accdb", "\u{e706}"),
     (".aiff", AUDIO),
+    (".ayt", AUDIO),
     (".arj", ARCHIVE),
     (".asc", "\u{f084}"),
     (".asm", "\u{e6ab}"),

@@ -367,7 +367,9 @@ pub(super) fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
                     "zip" | "tar" | "gz" | "bz2" | "xz" | "7z" | "rar" | "lha" | "lzh" => {
                         CLR_ARCHIVE
                     }
-                    "mp3" | "flac" | "ogg" | "wav" | "mod" | "xm" | "s3m" => CLR_AUDIO,
+                    "mp3" | "flac" | "ogg" | "wav" | "mod" | "xm" | "s3m" | "ayt" => {
+                        CLR_AUDIO
+                    }
                     "png" | "jpg" | "jpeg" | "gif" | "bmp" | "svg" | "webp" => CLR_IMAGE,
                     "mp4" | "mkv" | "avi" | "mov" => CLR_VIDEO,
                     "pdf" | "doc" | "docx" | "odt" => CLR_DOC,

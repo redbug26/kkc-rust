@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, anyhow};
+use kkc_plugin_api::{AudioPlaybackSnapshot as PluginSnapshot, AudioPluginModRef};
 use rodio::Source;
 use rustfft::{FftPlanner, num_complex::Complex};
 use std::io::Cursor;
@@ -35,6 +36,12 @@ struct PlaybackState {
     player: rodio::Player,
     visualizer: Arc<Mutex<TrackerVisualizer>>,
     duration: Option<Duration>,
+    plugin_backend: Option<PluginBackendState>,
+}
+
+struct PluginBackendState {
+    module: AudioPluginModRef,
+    path: String,
 }
 
 #[derive(Debug, Clone)]
@@ -47,10 +54,12 @@ pub struct TrackerPlaybackSnapshot {
     pub playing: bool,
     pub position: Duration,
     pub duration: Option<Duration>,
+    pub tracker_monitor_lines: Vec<String>,
+    pub track_text_lines: Vec<String>,
 }
 
 #[derive(Debug)]
-struct TrackerVisualizer {
+pub(crate) struct TrackerVisualizer {
     samples: Vec<f32>,
     write_pos: usize,
     rms: f32,
@@ -59,10 +68,14 @@ struct TrackerVisualizer {
     pattern: usize,
     row: usize,
     playing: bool,
+    position: Option<Duration>,
+    duration: Option<Duration>,
+    tracker_monitor_lines: Vec<String>,
+    track_text_lines: Vec<String>,
 }
 
 impl TrackerVisualizer {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             samples: vec![0.0; 1024],
             write_pos: 0,
@@ -72,10 +85,14 @@ impl TrackerVisualizer {
             pattern: 0,
             row: 0,
             playing: true,
+            position: None,
+            duration: None,
+            tracker_monitor_lines: Vec::new(),
+            track_text_lines: Vec::new(),
         }
     }
 
-    fn update(&mut self, samples: &[f32], table_index: usize, pattern: usize, row: usize) {
+    pub(crate) fn update(&mut self, samples: &[f32], table_index: usize, pattern: usize, row: usize) {
         for &sample in samples {
             self.samples[self.write_pos] = sample;
             self.write_pos = (self.write_pos + 1) % self.samples.len();
@@ -84,12 +101,48 @@ impl TrackerVisualizer {
         self.pattern = pattern;
         self.row = row;
         self.playing = true;
+        self.position = None;
+        self.duration = None;
+        self.tracker_monitor_lines.clear();
+        self.track_text_lines.clear();
         self.rms = if samples.is_empty() {
             0.0
         } else {
             (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt()
         };
         self.spectrum = compute_fft_bands(&self.ordered_samples(), SPECTRUM_BANDS);
+    }
+
+    fn update_plugin(&mut self, samples: &[f32], snapshot: &PluginSnapshot) {
+        for &sample in samples {
+            self.samples[self.write_pos] = sample;
+            self.write_pos = (self.write_pos + 1) % self.samples.len();
+        }
+        self.table_index = snapshot.table_index as usize;
+        self.pattern = snapshot.pattern as usize;
+        self.row = snapshot.row as usize;
+        self.playing = snapshot.playing;
+        self.position = Some(Duration::from_secs_f64(snapshot.position_secs.max(0.0)));
+        self.duration = if snapshot.duration_secs > 0.0 {
+            Some(Duration::from_secs_f64(snapshot.duration_secs))
+        } else {
+            None
+        };
+        self.tracker_monitor_lines = snapshot
+            .tracker_monitor_lines
+            .iter()
+            .map(|line| line.to_string())
+            .collect();
+        self.track_text_lines = snapshot
+            .track_text_lines
+            .iter()
+            .map(|line| line.to_string())
+            .collect();
+        self.rms = snapshot.rms;
+        self.spectrum = snapshot.spectrum.iter().copied().collect();
+        if self.spectrum.is_empty() {
+            self.spectrum = compute_fft_bands(&self.ordered_samples(), SPECTRUM_BANDS);
+        }
     }
 
     fn ordered_samples(&self) -> Vec<f32> {
@@ -108,12 +161,14 @@ impl TrackerVisualizer {
             pattern: self.pattern,
             row: self.row,
             playing: self.playing,
-            position: Duration::ZERO,
-            duration: None,
+            position: self.position.unwrap_or(Duration::ZERO),
+            duration: self.duration,
+            tracker_monitor_lines: self.tracker_monitor_lines.clone(),
+            track_text_lines: self.track_text_lines.clone(),
         }
     }
 
-    fn stop(&mut self) {
+    pub(crate) fn stop(&mut self) {
         self.playing = false;
     }
 }
@@ -146,8 +201,85 @@ fn decoded_audio_format(path: &Path) -> Option<&'static str> {
         })
 }
 
+fn select_audio_plugin(
+    path: &Path,
+) -> Option<(crate::audio_plugins::AudioRustPluginInfo, AudioPluginModRef)> {
+    let path_text = path.to_string_lossy();
+    let extension = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+        .unwrap_or_default();
+    let plugins_dir = crate::plugins::plugins_dir().ok()?;
+    let discovered = crate::audio_plugins::discover_audio_rust_plugins(&plugins_dir).ok()?;
+    for plugin in discovered {
+        if !plugin.extensions.is_empty() && !plugin.extensions.iter().any(|ext| ext == &extension) {
+            continue;
+        }
+        let module = match crate::audio_plugins::load_audio_plugin(&plugin.id) {
+            Ok(module) => module,
+            Err(err) => {
+                crate::viewer::debug_log(&format!(
+                    "audio: failed to load plugin '{}' for '{}': {err}",
+                    plugin.id,
+                    path.display()
+                ));
+                continue;
+            }
+        };
+        let supported = match module.probe()(path_text.as_ref().into()).into_result() {
+            Ok(supported) => supported,
+            Err(err) => {
+                crate::viewer::debug_log(&format!(
+                    "audio: plugin '{}' probe failed for '{}': {err}",
+                    plugin.id,
+                    path.display()
+                ));
+                false
+            }
+        };
+        crate::viewer::debug_log(&format!(
+            "audio: plugin '{}' probe '{}' => {}",
+            plugin.id,
+            path.display(),
+            supported
+        ));
+        if supported {
+            return Some((plugin, module));
+        }
+    }
+    None
+}
+
+fn map_plugin_info(path: &Path, info: &kkc_plugin_api::AudioTrackInfo) -> TrackerModuleInfo {
+    TrackerModuleInfo {
+        name: info.name.to_string(),
+        format: info.format.to_string(),
+        songs: info.songs as usize,
+        channels: info.channels as usize,
+        sample_rate: Some(info.sample_rate),
+        duration: if info.duration_secs > 0.0 {
+            Some(Duration::from_secs_f64(info.duration_secs))
+        } else {
+            None
+        },
+        orders: Vec::new(),
+        patterns: Vec::new(),
+        text_tracks: if info.tracker_text_lines.is_empty() {
+            vec![format!("Plugin audio: {}", path.display())]
+        } else {
+            info.tracker_text_lines
+                .iter()
+                .map(|line| line.to_string())
+                .collect()
+        },
+    }
+}
+
 pub fn is_audio_path(path: &Path) -> bool {
-    is_tracker_module_path(path) || decoded_audio_format(path).is_some()
+    is_tracker_module_path(path)
+        || decoded_audio_format(path).is_some()
+        || select_audio_plugin(path).is_some()
 }
 
 pub fn module_info(bytes: &[u8]) -> Result<TrackerModuleInfo> {
@@ -156,7 +288,15 @@ pub fn module_info(bytes: &[u8]) -> Result<TrackerModuleInfo> {
 }
 
 pub fn audio_info(path: &Path, bytes: &[u8]) -> Result<TrackerModuleInfo> {
-    if decoded_audio_format(path).is_some() {
+    if let Some((_, module)) = select_audio_plugin(path) {
+        let path_text = path.to_string_lossy();
+        let info = module
+            .open()(path_text.as_ref().into())
+            .into_result()
+            .map_err(|err| anyhow!("Opening audio plugin track: {err}"))?;
+        let _ = module.close()(path_text.as_ref().into());
+        Ok(map_plugin_info(path, &info))
+    } else if decoded_audio_format(path).is_some() {
         decoded_audio_info(path, bytes)
     } else {
         module_info(bytes)
@@ -171,22 +311,35 @@ pub fn playback_snapshot_for_path(path: &Path) -> Option<TrackerPlaybackSnapshot
     }
     state.visualizer.lock().ok().map(|v| {
         let mut snapshot = v.snapshot();
-        snapshot.position = state.player.get_pos();
-        snapshot.duration = state.duration;
+        if snapshot.position.is_zero() {
+            snapshot.position = state.player.get_pos();
+        }
+        if snapshot.duration.is_none() {
+            snapshot.duration = state.duration;
+        }
         snapshot.playing = !state.player.empty();
         snapshot
     })
 }
 
 pub fn playback_finished_for_path(path: &Path) -> bool {
-    playback_state()
-        .lock()
-        .ok()
-        .and_then(|state| {
-            let state = state.as_ref()?;
-            (state.path == path && state.player.empty()).then_some(())
-        })
-        .is_some()
+    let Some(state_guard) = playback_state().lock().ok() else {
+        return false;
+    };
+    let Some(state) = state_guard.as_ref() else {
+        return false;
+    };
+    if state.path != path {
+        return false;
+    }
+    if let Some(plugin) = &state.plugin_backend {
+        return plugin
+            .module
+            .is_finished()(plugin.path.as_str().into())
+            .into_result()
+            .unwrap_or(false);
+    }
+    state.player.empty()
 }
 
 pub fn play_audio_file(path: &Path) -> Result<TrackerModuleInfo> {
@@ -195,7 +348,9 @@ pub fn play_audio_file(path: &Path) -> Result<TrackerModuleInfo> {
 }
 
 pub fn play_audio_bytes(path: PathBuf, bytes: &[u8]) -> Result<TrackerModuleInfo> {
-    if decoded_audio_format(&path).is_some() {
+    if let Some((plugin_info, module)) = select_audio_plugin(&path) {
+        play_audio_plugin_path(path, plugin_info, module)
+    } else if decoded_audio_format(&path).is_some() {
         play_decoded_audio_bytes(path, bytes)
     } else {
         play_tracker_bytes(path, bytes)
@@ -226,6 +381,9 @@ fn play_tracker_bytes(path: PathBuf, bytes: &[u8]) -> Result<TrackerModuleInfo> 
         .lock()
         .map_err(|_| anyhow!("Tracker audio state lock poisoned"))?;
     if let Some(old) = state.take() {
+        if let Some(plugin) = old.plugin_backend.as_ref() {
+            let _ = plugin.module.close()(plugin.path.as_str().into());
+        }
         old.player.stop();
     }
     *state = Some(PlaybackState {
@@ -234,6 +392,7 @@ fn play_tracker_bytes(path: PathBuf, bytes: &[u8]) -> Result<TrackerModuleInfo> 
         player: sink,
         visualizer,
         duration: info.duration,
+        plugin_backend: None,
     });
 
     Ok(info)
@@ -256,6 +415,9 @@ fn play_decoded_audio_bytes(path: PathBuf, bytes: &[u8]) -> Result<TrackerModule
         .lock()
         .map_err(|_| anyhow!("Tracker audio state lock poisoned"))?;
     if let Some(old) = state.take() {
+        if let Some(plugin) = old.plugin_backend.as_ref() {
+            let _ = plugin.module.close()(plugin.path.as_str().into());
+        }
         old.player.stop();
     }
     *state = Some(PlaybackState {
@@ -264,15 +426,85 @@ fn play_decoded_audio_bytes(path: PathBuf, bytes: &[u8]) -> Result<TrackerModule
         player: sink,
         visualizer,
         duration: info.duration,
+        plugin_backend: None,
     });
 
     Ok(info)
 }
 
+fn play_audio_plugin_path(
+    path: PathBuf,
+    plugin_info: crate::audio_plugins::AudioRustPluginInfo,
+    module: AudioPluginModRef,
+) -> Result<TrackerModuleInfo> {
+    let path_text = path.to_string_lossy().to_string();
+    crate::viewer::debug_log(&format!(
+        "audio: opening plugin '{}' for '{}'",
+        plugin_info.id,
+        path.display()
+    ));
+    let info = module
+        .open()(path_text.as_str().into())
+        .into_result()
+        .map_err(|err| {
+            crate::viewer::debug_log(&format!(
+                "audio: plugin '{}' open failed for '{}': {err}",
+                plugin_info.id,
+                path.display()
+            ));
+            anyhow!("Opening audio plugin track: {err}")
+        })?;
+    let info = map_plugin_info(&path, &info);
+
+    let visualizer = Arc::new(Mutex::new(TrackerVisualizer::new()));
+    let source = PluginAudioSource::new(
+        module,
+        path_text.clone(),
+        Arc::clone(&visualizer),
+        info.duration,
+        info.channels as u16,
+        info.sample_rate.unwrap_or(SAMPLE_RATE),
+    )?;
+
+    let mut stream = rodio::DeviceSinkBuilder::open_default_sink()
+        .map_err(|err| anyhow!("Opening default audio output: {err}"))?;
+    stream.log_on_drop(false);
+    let sink = rodio::Player::connect_new(&stream.mixer());
+    sink.append(source);
+    sink.play();
+
+    let mut state = playback_state()
+        .lock()
+        .map_err(|_| anyhow!("Tracker audio state lock poisoned"))?;
+    if let Some(old) = state.take() {
+        if let Some(plugin) = old.plugin_backend.as_ref() {
+            let _ = plugin.module.close()(plugin.path.as_str().into());
+        }
+        old.player.stop();
+    }
+    *state = Some(PlaybackState {
+        path,
+        _stream: stream,
+        player: sink,
+        visualizer,
+        duration: info.duration,
+        plugin_backend: Some(PluginBackendState {
+            module,
+            path: path_text,
+        }),
+    });
+
+    Ok(info)
+}
+
+
 pub fn stop_module() {
     if let Ok(mut state) = playback_state().lock()
         && let Some(old) = state.take()
     {
+        if let Some(plugin) = old.plugin_backend.as_ref() {
+            let _ = plugin.module.close()(plugin.path.as_str().into());
+        }
         old.player.stop();
     }
 }
@@ -284,6 +516,9 @@ pub fn stop_module_if_path(path: &Path) {
             .map(|current| current.path == path)
             .unwrap_or(false);
         if should_stop && let Some(old) = state.take() {
+            if let Some(plugin) = old.plugin_backend.as_ref() {
+                let _ = plugin.module.close()(plugin.path.as_str().into());
+            }
             old.player.stop();
         }
     }
@@ -513,6 +748,134 @@ impl Source for DecodedAudioVisualizerSource {
     }
 }
 
+struct PluginAudioSource {
+    module: AudioPluginModRef,
+    path: String,
+    visualizer: Arc<Mutex<TrackerVisualizer>>,
+    channels: NonZero<u16>,
+    sample_rate: NonZero<u32>,
+    duration: Option<Duration>,
+    finished: bool,
+    buffer: Vec<f32>,
+    buffer_index: usize,
+}
+
+impl PluginAudioSource {
+    fn new(
+        module: AudioPluginModRef,
+        path: String,
+        visualizer: Arc<Mutex<TrackerVisualizer>>,
+        duration: Option<Duration>,
+        channels: u16,
+        sample_rate: u32,
+    ) -> Result<Self> {
+        let channels = NonZero::new(channels.max(1)).ok_or_else(|| anyhow!("Invalid channels"))?;
+        let sample_rate =
+            NonZero::new(sample_rate.max(1)).ok_or_else(|| anyhow!("Invalid sample rate"))?;
+        Ok(Self {
+            module,
+            path,
+            visualizer,
+            channels,
+            sample_rate,
+            duration,
+            finished: false,
+            buffer: Vec::new(),
+            buffer_index: 0,
+        })
+    }
+
+    fn refill(&mut self) {
+        if self.finished {
+            self.buffer.clear();
+            self.buffer_index = 0;
+            if let Ok(mut visualizer) = self.visualizer.lock() {
+                visualizer.stop();
+            }
+            return;
+        }
+
+        let chunk = match self
+            .module
+            .read_samples()(self.path.as_str().into(), 1024)
+            .into_result()
+        {
+            Ok(chunk) => chunk,
+            Err(_) => {
+                self.finished = true;
+                self.buffer.clear();
+                self.buffer_index = 0;
+                if let Ok(mut visualizer) = self.visualizer.lock() {
+                    visualizer.stop();
+                }
+                return;
+            }
+        };
+
+        self.finished = chunk.finished;
+        self.buffer = chunk.samples.iter().copied().collect();
+        self.buffer_index = 0;
+
+        let channels = chunk.channels.max(1) as usize;
+        if chunk.channels > 0 {
+            self.channels = NonZero::new(chunk.channels as u16).unwrap_or(self.channels);
+        }
+        if chunk.sample_rate > 0 {
+            self.sample_rate = NonZero::new(chunk.sample_rate).unwrap_or(self.sample_rate);
+        }
+
+        let mut mono = Vec::with_capacity(self.buffer.len().saturating_div(channels).max(1));
+        for frame in self.buffer.chunks(channels) {
+            if frame.is_empty() {
+                continue;
+            }
+            mono.push(frame.iter().sum::<f32>() / frame.len() as f32);
+        }
+
+        if let Ok(snapshot) = self.module.snapshot()(self.path.as_str().into()).into_result() {
+            if let Ok(mut visualizer) = self.visualizer.lock() {
+                visualizer.update_plugin(&mono, &snapshot);
+            }
+        } else if let Ok(mut visualizer) = self.visualizer.lock() {
+            visualizer.update(&mono, 0, 0, 0);
+        }
+    }
+}
+
+impl Iterator for PluginAudioSource {
+    type Item = f32;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.buffer_index >= self.buffer.len() {
+            self.refill();
+            if self.buffer.is_empty() {
+                return None;
+            }
+        }
+        let sample = self.buffer[self.buffer_index];
+        self.buffer_index += 1;
+        Some(sample)
+    }
+}
+
+impl Source for PluginAudioSource {
+    fn current_span_len(&self) -> Option<usize> {
+        Some(self.buffer.len().saturating_sub(self.buffer_index))
+    }
+
+    fn channels(&self) -> NonZero<u16> {
+        self.channels
+    }
+
+    fn sample_rate(&self) -> NonZero<u32> {
+        self.sample_rate
+    }
+
+    fn total_duration(&self) -> Option<std::time::Duration> {
+        self.duration
+    }
+}
+
 fn compute_fft_bands(samples: &[f32], bands: usize) -> Vec<f32> {
     if samples.is_empty() || bands == 0 {
         return Vec::new();
@@ -664,5 +1027,10 @@ mod tests {
     fn tracker_module_path_accepts_it() {
         assert!(is_tracker_module_path(Path::new("module.it")));
         assert!(!is_tracker_module_path(Path::new("module.sid")));
+    }
+
+    #[test]
+    fn wav_path_is_audio() {
+        assert!(is_audio_path(Path::new("sample.wav")));
     }
 }

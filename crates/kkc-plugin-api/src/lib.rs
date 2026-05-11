@@ -8,9 +8,11 @@ use abi_stable::{
 
 pub const KKC_REMOTE_PLUGIN_API_VERSION: u32 = 3;
 pub const KKC_VIEWER_PLUGIN_API_VERSION: u32 = 2;
+pub const KKC_AUDIO_PLUGIN_API_VERSION: u32 = 1;
 
 pub type RemotePluginResult<T> = RResult<T, RString>;
 pub type ViewerPluginResult<T> = RResult<T, RString>;
+pub type AudioPluginResult<T> = RResult<T, RString>;
 
 #[repr(C)]
 #[derive(Debug, Clone, StableAbi)]
@@ -111,6 +113,53 @@ pub struct ViewerDocumentImage {
 
 #[repr(C)]
 #[derive(Debug, Clone, StableAbi)]
+pub struct AudioPluginMetadata {
+    pub id: RString,
+    pub name: RString,
+    pub version: RString,
+    pub description: RString,
+    pub mime_types: RVec<RString>,
+    pub extensions: RVec<RString>,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, StableAbi)]
+pub struct AudioTrackInfo {
+    pub name: RString,
+    pub format: RString,
+    pub channels: u32,
+    pub sample_rate: u32,
+    pub duration_secs: f64,
+    pub songs: u32,
+    pub tracker_text_lines: RVec<RString>,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, StableAbi)]
+pub struct AudioPlaybackSnapshot {
+    pub rms: f32,
+    pub spectrum: RVec<f32>,
+    pub table_index: u32,
+    pub pattern: u32,
+    pub row: u32,
+    pub position_secs: f64,
+    pub duration_secs: f64,
+    pub playing: bool,
+    pub tracker_monitor_lines: RVec<RString>,
+    pub track_text_lines: RVec<RString>,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, StableAbi)]
+pub struct AudioPcmChunk {
+    pub samples: RVec<f32>,
+    pub channels: u32,
+    pub sample_rate: u32,
+    pub finished: bool,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, StableAbi)]
 pub struct RemoteEntry {
     pub name: RString,
     pub path: RString,
@@ -193,6 +242,22 @@ pub struct ViewerPluginMod {
     ) -> ViewerPluginResult<ViewerHandleKeyResult>,
 }
 
+#[repr(C)]
+#[derive(StableAbi)]
+#[sabi(kind(Prefix(prefix_ref = AudioPluginModRef)))]
+#[sabi(missing_field(panic))]
+pub struct AudioPluginMod {
+    pub api_version: extern "C" fn() -> u32,
+    pub metadata: extern "C" fn() -> AudioPluginMetadata,
+    pub probe: extern "C" fn(path: RStr<'_>) -> AudioPluginResult<bool>,
+    pub open: extern "C" fn(path: RStr<'_>) -> AudioPluginResult<AudioTrackInfo>,
+    pub read_samples: extern "C" fn(path: RStr<'_>, frames: u32) -> AudioPluginResult<AudioPcmChunk>,
+    pub snapshot: extern "C" fn(path: RStr<'_>) -> AudioPluginResult<AudioPlaybackSnapshot>,
+    pub is_finished: extern "C" fn(path: RStr<'_>) -> AudioPluginResult<bool>,
+    #[sabi(last_prefix_field)]
+    pub close: extern "C" fn(path: RStr<'_>) -> AudioPluginResult<()>,
+}
+
 impl RootModule for RemotePluginModRef {
     abi_stable::declare_root_module_statics! {RemotePluginModRef}
     const BASE_NAME: &'static str = "kkc_remote_plugin";
@@ -204,5 +269,12 @@ impl RootModule for ViewerPluginModRef {
     abi_stable::declare_root_module_statics! {ViewerPluginModRef}
     const BASE_NAME: &'static str = "kkc_viewer_plugin";
     const NAME: &'static str = "kkc_viewer_plugin";
+    const VERSION_STRINGS: VersionStrings = package_version_strings!();
+}
+
+impl RootModule for AudioPluginModRef {
+    abi_stable::declare_root_module_statics! {AudioPluginModRef}
+    const BASE_NAME: &'static str = "kkc_audio_plugin";
+    const NAME: &'static str = "kkc_audio_plugin";
     const VERSION_STRINGS: VersionStrings = package_version_strings!();
 }

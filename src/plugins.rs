@@ -195,6 +195,7 @@ pub struct PluginRegistry {
     archive_plugins: Vec<ArchivePlugin>,
     viewer_plugins: Vec<ViewerPlugin>,
     viewer_rust_plugins: Vec<crate::viewer_plugins::ViewerRustPluginInfo>,
+    audio_rust_plugins: Vec<crate::audio_plugins::AudioRustPluginInfo>,
     action_plugins: Vec<ActionPlugin>,
     remote_rust_plugins: Vec<crate::remote_plugins::RemoteRustPluginInfo>,
 }
@@ -426,6 +427,34 @@ pub fn plugin_infos() -> Vec<PluginInfo> {
                 description: format!("{} (library not loaded)", manifest.description),
                 extensions: vec![manifest.id.clone()],
                 dir: manifest.dir,
+            });
+        }
+
+        let existing_audio_rust_dirs = plugins
+            .iter()
+            .filter(|item| item.kind == "Audio Rust")
+            .map(|item| item.dir.clone())
+            .collect::<std::collections::HashSet<_>>();
+
+        for plugin in crate::audio_plugins::discover_audio_rust_plugins(&plugins_dir)
+            .unwrap_or_else(|err| {
+                crate::viewer::debug_log(&format!(
+                    "startup: native audio plugin discovery failed: {err}"
+                ));
+                Vec::new()
+            })
+        {
+            let dir = plugins_dir.join(&plugin.id);
+            if existing_audio_rust_dirs.contains(&dir) {
+                continue;
+            }
+            plugins.push(PluginInfo {
+                name: plugin.id.clone(),
+                version: String::new(),
+                kind: "Audio Rust".into(),
+                description: "Native audio decoder plugin".into(),
+                extensions: plugin.extensions.clone(),
+                dir,
             });
         }
     }
@@ -1021,7 +1050,7 @@ fn install_plugin_from_store_descriptor(
     {
         let _ = fs::remove_dir_all(&temp_dir);
         bail!(
-            "Installed store plugin '{}' does not contain plugin.lua, a valid native plugin.toml (remote-rust/viewer-rust), or a valid Lua app (app.toml + app.lua) at its root",
+            "Installed store plugin '{}' does not contain plugin.lua, a valid native plugin.toml (remote-rust/viewer-rust/audio-rust), or a valid Lua app (app.toml + app.lua) at its root",
             plugin_id
         );
     }
@@ -2188,6 +2217,13 @@ fn load_plugins() -> Result<PluginRegistry> {
 
     let mut archive_plugins = Vec::new();
     let mut viewer_plugins = Vec::new();
+    let audio_rust_plugins = crate::audio_plugins::discover_audio_rust_plugins(&plugins_dir)
+        .unwrap_or_else(|err| {
+            crate::viewer::debug_log(&format!(
+                "startup: native audio plugin discovery failed: {err}"
+            ));
+            Vec::new()
+        });
     let mut action_plugins = Vec::new();
     let viewer_rust_manifests = crate::viewer_plugins::discover_viewer_rust_plugin_manifests(
         &plugins_dir,
@@ -2319,11 +2355,12 @@ fn load_plugins() -> Result<PluginRegistry> {
     }
 
     crate::viewer::debug_log(&format!(
-        "startup: load_plugins completed in {:.3} ms (archive={}, viewer={}, viewer-rust={}, action={}, remote-rust={})",
+        "startup: load_plugins completed in {:.3} ms (archive={}, viewer={}, viewer-rust={}, audio-rust={}, action={}, remote-rust={})",
         load_start.elapsed().as_secs_f64() * 1000.0,
         archive_plugins.len(),
         viewer_plugins.len(),
         viewer_rust_plugins.len(),
+        audio_rust_plugins.len(),
         action_plugins.len(),
         remote_rust_plugins.len()
     ));
@@ -2331,6 +2368,7 @@ fn load_plugins() -> Result<PluginRegistry> {
         archive_plugins,
         viewer_plugins,
         viewer_rust_plugins,
+        audio_rust_plugins,
         action_plugins,
         remote_rust_plugins,
     })
@@ -2524,7 +2562,7 @@ fn extract_plugin_bundle(path: &Path, plugins_dir: &Path) -> Result<PathBuf> {
     if !has_plugin_lua && !is_native_rust_plugin_dir(&temp_dir)? && !has_lua_app {
         let _ = fs::remove_dir_all(&temp_dir);
         bail!(
-            "Plugin bundle contains plugin.toml but is not a valid native plugin (remote-rust/viewer-rust) or Lua app"
+            "Plugin bundle contains plugin.toml but is not a valid native plugin (remote-rust/viewer-rust/audio-rust) or Lua app"
         );
     }
 
@@ -2687,11 +2725,47 @@ fn is_viewer_rust_plugin_dir(dir: &Path) -> Result<bool> {
     Ok(!viewer.library.trim().is_empty())
 }
 
+fn is_audio_rust_plugin_dir(dir: &Path) -> Result<bool> {
+    #[derive(Deserialize)]
+    struct Manifest {
+        plugin: ManifestPlugin,
+        audio: Option<ManifestAudio>,
+    }
+    #[derive(Deserialize)]
+    struct ManifestPlugin {
+        #[serde(rename = "type")]
+        plugin_type: String,
+    }
+    #[derive(Deserialize)]
+    struct ManifestAudio {
+        library: String,
+    }
+
+    let manifest_path = dir.join("plugin.toml");
+    if !manifest_path.is_file() {
+        return Ok(false);
+    }
+    let text = fs::read_to_string(&manifest_path)
+        .with_context(|| format!("Reading {}", manifest_path.display()))?;
+    let manifest: Manifest =
+        toml::from_str(&text).with_context(|| format!("Parsing {}", manifest_path.display()))?;
+    if manifest.plugin.plugin_type != "audio-rust" {
+        return Ok(false);
+    }
+    let Some(audio) = manifest.audio else {
+        bail!("audio-rust plugin is missing [audio]");
+    };
+    Ok(!audio.library.trim().is_empty())
+}
+
 fn is_native_rust_plugin_dir(dir: &Path) -> Result<bool> {
     if is_remote_rust_plugin_dir(dir)? {
         return Ok(true);
     }
-    is_viewer_rust_plugin_dir(dir)
+    if is_viewer_rust_plugin_dir(dir)? {
+        return Ok(true);
+    }
+    is_audio_rust_plugin_dir(dir)
 }
 
 fn remote_rust_manifest_version(dir: &Path) -> Option<String> {
@@ -3174,6 +3248,14 @@ impl PluginRegistry {
             } else {
                 plugin.extensions.clone()
             },
+            dir: plugin.dir.clone(),
+        }));
+        plugins.extend(self.audio_rust_plugins.iter().map(|plugin| PluginInfo {
+            name: plugin.name.clone(),
+            version: plugin.version.clone(),
+            kind: "Audio Rust".into(),
+            description: plugin.description.clone(),
+            extensions: plugin.extensions.clone(),
             dir: plugin.dir.clone(),
         }));
         plugins.extend(self.action_plugins.iter().map(|plugin| PluginInfo {
