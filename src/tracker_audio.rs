@@ -11,8 +11,10 @@ use xmrs::prelude::*;
 use xmrsplayer::prelude::XmrsPlayer;
 
 const SAMPLE_RATE: u32 = 48_000;
+const SAMPLE_RATE_FAST: u32 = 128;
 const BUFFER_SIZE: usize = 2048;
 const SPECTRUM_BANDS: usize = 96;
+const MAX_TRACKER_DURATION_SCAN_SAMPLES: u64 = SAMPLE_RATE_FAST as u64 * 60 * 60 * 6;
 
 #[derive(Debug, Clone)]
 pub struct TrackerModuleInfo {
@@ -110,6 +112,10 @@ impl TrackerVisualizer {
             duration: None,
         }
     }
+
+    fn stop(&mut self) {
+        self.playing = false;
+    }
 }
 
 fn playback_state() -> &'static Mutex<Option<PlaybackState>> {
@@ -120,7 +126,12 @@ fn playback_state() -> &'static Mutex<Option<PlaybackState>> {
 pub fn is_tracker_module_path(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
-        .map(|ext| matches!(ext.to_ascii_lowercase().as_str(), "mod" | "xm" | "s3m"))
+        .map(|ext| {
+            matches!(
+                ext.to_ascii_lowercase().as_str(),
+                "mod" | "xm" | "s3m" | "it"
+            )
+        })
         .unwrap_or(false)
 }
 
@@ -193,7 +204,8 @@ pub fn play_audio_bytes(path: PathBuf, bytes: &[u8]) -> Result<TrackerModuleInfo
 
 fn play_tracker_bytes(path: PathBuf, bytes: &[u8]) -> Result<TrackerModuleInfo> {
     let module = Module::load(bytes).map_err(|err| anyhow!("Loading tracker module: {err:?}"))?;
-    let info = info_from_module(&module);
+    let mut info = info_from_module(&module);
+    info.duration = tracker_module_duration(&module);
 
     let module_ref: &'static Module = Box::leak(Box::new(module));
     let mut xmrs_player = XmrsPlayer::new(module_ref, SAMPLE_RATE, 0);
@@ -202,7 +214,7 @@ fn play_tracker_bytes(path: PathBuf, bytes: &[u8]) -> Result<TrackerModuleInfo> 
 
     let player = Arc::new(Mutex::new(xmrs_player));
     let visualizer = Arc::new(Mutex::new(TrackerVisualizer::new()));
-    let source = TrackerSource::new(Arc::clone(&player), Arc::clone(&visualizer));
+    let source = TrackerSource::new(Arc::clone(&player), Arc::clone(&visualizer), info.duration);
     let mut stream = rodio::DeviceSinkBuilder::open_default_sink()
         .map_err(|err| anyhow!("Opening default audio output: {err}"))?;
     stream.log_on_drop(false);
@@ -221,7 +233,7 @@ fn play_tracker_bytes(path: PathBuf, bytes: &[u8]) -> Result<TrackerModuleInfo> 
         _stream: stream,
         player: sink,
         visualizer,
-        duration: None,
+        duration: info.duration,
     });
 
     Ok(info)
@@ -306,6 +318,21 @@ fn info_from_module(module: &Module) -> TrackerModuleInfo {
             .collect(),
         text_tracks: module_text_tracks(module),
     }
+}
+
+fn tracker_module_duration(module: &Module) -> Option<Duration> {
+    let mut player = XmrsPlayer::new(module, SAMPLE_RATE_FAST, 0);
+    player.set_max_loop_count(1);
+    let mut samples = 0u64;
+    while player.sample(false).is_some() {
+        samples += 1;
+        if samples > MAX_TRACKER_DURATION_SCAN_SAMPLES {
+            return None;
+        }
+    }
+    Some(Duration::from_secs_f64(
+        samples as f64 / SAMPLE_RATE_FAST as f64,
+    ))
 }
 
 fn decoded_audio_info(path: &Path, bytes: &[u8]) -> Result<TrackerModuleInfo> {
@@ -525,48 +552,70 @@ struct TrackerSource {
     visualizer: Arc<Mutex<TrackerVisualizer>>,
     buffer: [f32; BUFFER_SIZE],
     buffer_index: usize,
+    buffer_len: usize,
     sample_rate: NonZero<u32>,
+    duration: Option<Duration>,
+    finished: bool,
 }
 
 impl TrackerSource {
     fn new(
         player: Arc<Mutex<XmrsPlayer<'static>>>,
         visualizer: Arc<Mutex<TrackerVisualizer>>,
+        duration: Option<Duration>,
     ) -> Self {
         Self {
             player,
             visualizer,
             buffer: [0.0; BUFFER_SIZE],
             buffer_index: BUFFER_SIZE,
+            buffer_len: 0,
             sample_rate: NonZero::new(SAMPLE_RATE).expect("sample rate must be non-zero"),
+            duration,
+            finished: false,
         }
     }
 
     fn generate_samples(&mut self) {
+        if self.finished {
+            self.buffer_len = 0;
+            if let Ok(mut visualizer) = self.visualizer.lock() {
+                visualizer.stop();
+            }
+            return;
+        }
+
         let frames = self.buffer.len() / 2;
         let mut mono = Vec::with_capacity(frames);
         let (mut table_index, mut pattern, mut row) = (0, 0, 0);
+        let mut out_idx = 0usize;
         if let Ok(mut player) = self.player.lock() {
             for idx in 0..frames {
-                let sample = player.sample(true).unwrap_or((0, 0));
+                let Some(sample) = player.sample(true) else {
+                    self.finished = true;
+                    break;
+                };
                 let left = sample.0 as f32 / i16::MAX as f32;
                 let right = sample.1 as f32 / i16::MAX as f32;
-                self.buffer[idx * 2] = left;
-                self.buffer[idx * 2 + 1] = right;
+                out_idx = idx * 2;
+                self.buffer[out_idx] = left;
+                self.buffer[out_idx + 1] = right;
+                out_idx += 2;
                 mono.push((left + right) * 0.5);
             }
             table_index = player.get_current_table_index();
             pattern = player.playing_pattern();
             row = player.playing_row();
         } else {
-            for idx in 0..frames {
-                self.buffer[idx * 2] = 0.0;
-                self.buffer[idx * 2 + 1] = 0.0;
-                mono.push(0.0);
-            }
+            self.finished = true;
         }
+        self.buffer_len = out_idx;
         if let Ok(mut visualizer) = self.visualizer.lock() {
-            visualizer.update(&mono, table_index, pattern, row);
+            if mono.is_empty() {
+                visualizer.stop();
+            } else {
+                visualizer.update(&mono, table_index, pattern, row);
+            }
         }
     }
 }
@@ -575,9 +624,12 @@ impl Iterator for TrackerSource {
     type Item = f32;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.buffer_index >= BUFFER_SIZE {
+        if self.buffer_index >= self.buffer_len {
             self.generate_samples();
             self.buffer_index = 0;
+            if self.buffer_len == 0 {
+                return None;
+            }
         }
         let sample = self.buffer[self.buffer_index];
         self.buffer_index += 1;
@@ -587,7 +639,7 @@ impl Iterator for TrackerSource {
 
 impl Source for TrackerSource {
     fn current_span_len(&self) -> Option<usize> {
-        Some(BUFFER_SIZE - self.buffer_index)
+        Some(self.buffer_len.saturating_sub(self.buffer_index))
     }
 
     fn channels(&self) -> NonZero<u16> {
@@ -599,6 +651,18 @@ impl Source for TrackerSource {
     }
 
     fn total_duration(&self) -> Option<std::time::Duration> {
-        None
+        self.duration
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn tracker_module_path_accepts_it() {
+        assert!(is_tracker_module_path(Path::new("module.it")));
+        assert!(!is_tracker_module_path(Path::new("module.sid")));
     }
 }

@@ -570,15 +570,10 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             tga_lines(&data),
         ))
-    } else if data.starts_with(&[0x00, 0x00, 0x00, 0x0C, 0x6A, 0x50, 0x20, 0x20, 0x0D, 0x0A, 0x87, 0x0A]) {
-        Some(info(
-            "image/jp2",
-            path,
-            IdfKind::Bitmap,
-            None,
-            None,
-            vec![],
-        ))
+    } else if data.starts_with(&[
+        0x00, 0x00, 0x00, 0x0C, 0x6A, 0x50, 0x20, 0x20, 0x0D, 0x0A, 0x87, 0x0A,
+    ]) {
+        Some(info("image/jp2", path, IdfKind::Bitmap, None, None, vec![]))
     } else if data.starts_with(b"/* XPM */") {
         Some(info(
             "image/x-xpixmap",
@@ -615,8 +610,11 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             vec![],
         ))
-    } else if data.len() > 2 && data[0] == b'P' && (1..=7).contains(&(data[1] - b'0' + 1)) 
-        && (data.len() > 2 && matches!(data[2], b' ' | b'\t' | b'\n' | b'\r'))  {
+    } else if data.len() > 2
+        && data[0] == b'P'
+        && (1..=7).contains(&(data[1] - b'0' + 1))
+        && (data.len() > 2 && matches!(data[2], b' ' | b'\t' | b'\n' | b'\r'))
+    {
         let format_name = match data[1] {
             b'1' => "image/x-portable-bitmap",
             b'2' => "image/x-portable-graymap",
@@ -938,6 +936,15 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             vec![],
         ))
+    } else if is_sid(&data) {
+        Some(info(
+            "audio/x-sid",
+            path,
+            IdfKind::Module,
+            sid_title(&data),
+            sid_author(&data),
+            sid_lines(&data),
+        ))
     } else if is_mod(&data) {
         Some(info(
             "audio/x-mod",
@@ -1066,7 +1073,10 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             vec![],
         ))
-    } else if data.starts_with(b"070701") || data.starts_with(b"070702") || data.starts_with(b"070707") {
+    } else if data.starts_with(b"070701")
+        || data.starts_with(b"070702")
+        || data.starts_with(b"070707")
+    {
         Some(info(
             "application/x-cpio",
             path,
@@ -1075,7 +1085,12 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             vec![],
         ))
-    } else if data.len() >= 7 && data[0] == 0xe9 && data[1] == 0x2c && data[2] == 0x01 && &data[3..7] == b"JAM\x20" {
+    } else if data.len() >= 7
+        && data[0] == 0xe9
+        && data[1] == 0x2c
+        && data[2] == 0x01
+        && &data[3..7] == b"JAM\x20"
+    {
         Some(info(
             "application/x-jam-archive",
             path,
@@ -1111,7 +1126,11 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             vec![],
         ))
-    } else if data.len() >= 12 && data[0] == 0 && data[1..11].iter().all(|&b| b == b' ') && data[11] == 0 {
+    } else if data.len() >= 12
+        && data[0] == 0
+        && data[1..11].iter().all(|&b| b == b' ')
+        && data[11] == 0
+    {
         Some(info(
             "application/x-lbr",
             path,
@@ -1383,6 +1402,7 @@ fn format_from_mime_type(mime_type: &str) -> Option<&'static str> {
         "audio/x-s3m" => Some("Scream Tracker module"),
         "audio/x-xm" => Some("FastTracker module"),
         "audio/x-it" => Some("Impulse Tracker module"),
+        "audio/x-sid" => Some("Commodore 64 SID music"),
         "audio/x-mod" => Some("ProTracker module"),
         "audio/x-vgm" => Some("VGM audio"),
         "application/x-lzop" => Some("LZOP compressed archive"),
@@ -1414,10 +1434,10 @@ fn format_from_mime_type(mime_type: &str) -> Option<&'static str> {
         "application/x-amiga-adf-ofs" => Some("Amiga Disk Format (OFS) image"),
         "application/x-amiga-adf-ffs" => Some("Amiga Disk Format (FFS) image"),
         "application/x-c64-d64" => Some("Commodore 64 D64 disk image"),
-            "application/x-powerpacker" => Some("PowerPacker compressed file"),
-            "application/x-xpk" => Some("XPK compressed file"),
-            "application/x-amiga-dms" => Some("Amiga DMS disk image"),
-            "application/x-amiga-imploder" => Some("Amiga Imploder compressed file"),
+        "application/x-powerpacker" => Some("PowerPacker compressed file"),
+        "application/x-xpk" => Some("XPK compressed file"),
+        "application/x-amiga-dms" => Some("Amiga DMS disk image"),
+        "application/x-amiga-imploder" => Some("Amiga Imploder compressed file"),
         "application/x-bittorrent" => Some("BitTorrent metadata"),
         "application/x-sqlite3" => Some("SQLite database"),
         "application/x-apple-diskimage" => Some("Apple Disk Image"),
@@ -3617,43 +3637,43 @@ fn amiga_adf_mime_type(data: &[u8], file_len: usize, ext: &str) -> Option<&'stat
     }
 }
 
-    fn powerpacker_lines(data: &[u8]) -> Vec<String> {
-        let mut lines = Vec::new();
-        if data.len() < 8 {
-            return lines;
-        }
-        let version = if data.starts_with(b"PP20") {
-            "PowerPacker 2.0"
-        } else {
-            "PowerPacker 1.1"
-        };
-        lines.push(version.to_string());
-        if data.len() >= 8 {
-            let efficiency = match (data[4], data[5], data[6], data[7]) {
-                (9, 9, 9, 9) => "Efficiency: Fast",
-                (9, 10, 10, 10) => "Efficiency: Mediocre",
-                (9, 10, 11, 11) => "Efficiency: Good",
-                (9, 10, 12, 12) => "Efficiency: Very Good",
-                (9, 10, 12, 13) => "Efficiency: Best",
-                _ => "Efficiency: Unknown",
-            };
-            lines.push(efficiency.to_string());
-        }
-        lines
+fn powerpacker_lines(data: &[u8]) -> Vec<String> {
+    let mut lines = Vec::new();
+    if data.len() < 8 {
+        return lines;
     }
+    let version = if data.starts_with(b"PP20") {
+        "PowerPacker 2.0"
+    } else {
+        "PowerPacker 1.1"
+    };
+    lines.push(version.to_string());
+    if data.len() >= 8 {
+        let efficiency = match (data[4], data[5], data[6], data[7]) {
+            (9, 9, 9, 9) => "Efficiency: Fast",
+            (9, 10, 10, 10) => "Efficiency: Mediocre",
+            (9, 10, 11, 11) => "Efficiency: Good",
+            (9, 10, 12, 12) => "Efficiency: Very Good",
+            (9, 10, 12, 13) => "Efficiency: Best",
+            _ => "Efficiency: Unknown",
+        };
+        lines.push(efficiency.to_string());
+    }
+    lines
+}
 
-    fn xpk_lines(data: &[u8]) -> Vec<String> {
-        let mut lines = Vec::new();
-        if data.len() >= 12 {
-            // XPK packer ID is at offset 8, 4 bytes
-            if let Ok(name) = std::str::from_utf8(&data[8..12]) {
-                if name.chars().all(|c| c.is_ascii_alphanumeric()) {
-                    lines.push(format!("XPK sub-packer: {}", name));
-                }
+fn xpk_lines(data: &[u8]) -> Vec<String> {
+    let mut lines = Vec::new();
+    if data.len() >= 12 {
+        // XPK packer ID is at offset 8, 4 bytes
+        if let Ok(name) = std::str::from_utf8(&data[8..12]) {
+            if name.chars().all(|c| c.is_ascii_alphanumeric()) {
+                lines.push(format!("XPK sub-packer: {}", name));
             }
         }
-        lines
     }
+    lines
+}
 
 fn is_plausible_amsdos_name_byte(byte: u8) -> bool {
     byte.is_ascii_uppercase() || byte.is_ascii_digit() || matches!(byte, b' ' | b'_' | b'-' | b'.')
@@ -3969,10 +3989,60 @@ fn is_it(data: &[u8]) -> bool {
     data.starts_with(b"IMPM")
 }
 
+fn is_sid(data: &[u8]) -> bool {
+    data.len() >= 0x76 && (data.starts_with(b"PSID") || data.starts_with(b"RSID"))
+}
+
+fn sid_title(data: &[u8]) -> Option<String> {
+    fixed_text(data.get(0x16..0x36)?)
+}
+
+fn sid_author(data: &[u8]) -> Option<String> {
+    fixed_text(data.get(0x36..0x56)?)
+}
+
+fn sid_lines(data: &[u8]) -> Vec<String> {
+    if data.len() < 0x76 {
+        return Vec::new();
+    }
+
+    let mut out = Vec::new();
+    let format = if data.starts_with(b"RSID") {
+        "RSID"
+    } else {
+        "PSID"
+    };
+    let version = u16::from_be_bytes([data[4], data[5]]);
+    let data_offset = u16::from_be_bytes([data[6], data[7]]);
+    let load_address = u16::from_be_bytes([data[8], data[9]]);
+    let init_address = u16::from_be_bytes([data[10], data[11]]);
+    let play_address = u16::from_be_bytes([data[12], data[13]]);
+    let songs = u16::from_be_bytes([data[14], data[15]]);
+    let start_song = u16::from_be_bytes([data[16], data[17]]);
+
+    out.push(format!(" {} v{}", format, version));
+    out.push(format!(" {} song(s), start song {}", songs, start_song));
+    out.push(format!(" Data offset: 0x{:04X}", data_offset));
+    out.push(format!(" Load address: 0x{:04X}", load_address));
+    out.push(format!(" Init address: 0x{:04X}", init_address));
+    out.push(format!(" Play address: 0x{:04X}", play_address));
+    if let Some(released) = fixed_text(&data[0x56..0x76]) {
+        out.push(format!(" Released: {}", released));
+    }
+
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Write;
+
+    fn write_test_fixed_text(target: &mut [u8], value: &str) {
+        let bytes = value.as_bytes();
+        let len = bytes.len().min(target.len());
+        target[..len].copy_from_slice(&bytes[..len]);
+    }
 
     #[test]
     fn docx_zip_is_detected_as_office_document() {
@@ -4454,6 +4524,40 @@ mod tests {
             info.extra
                 .iter()
                 .any(|line| line.contains("MPEG audio stream"))
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn sid_files_are_detected() {
+        let path = std::env::temp_dir().join(format!("kkc-idf-sid-{}.sid", std::process::id()));
+        let mut data = vec![0u8; 0x76];
+        data[0..4].copy_from_slice(b"PSID");
+        data[4..6].copy_from_slice(&2u16.to_be_bytes());
+        data[6..8].copy_from_slice(&0x007cu16.to_be_bytes());
+        data[8..10].copy_from_slice(&0x1000u16.to_be_bytes());
+        data[10..12].copy_from_slice(&0x1000u16.to_be_bytes());
+        data[12..14].copy_from_slice(&0x1003u16.to_be_bytes());
+        data[14..16].copy_from_slice(&3u16.to_be_bytes());
+        data[16..18].copy_from_slice(&1u16.to_be_bytes());
+        write_test_fixed_text(&mut data[0x16..0x36], "Demo SID");
+        write_test_fixed_text(&mut data[0x36..0x56], "Demo Composer");
+        write_test_fixed_text(&mut data[0x56..0x76], "2026 KKC");
+        fs::write(&path, data).expect("write sid");
+
+        let info = probe_file(&path)
+            .expect("probe should not fail")
+            .expect("sid should be detected");
+        assert_eq!(info.mime_types[0], "audio/x-sid");
+        assert_eq!(info.kind, IdfKind::Module);
+        assert_eq!(info.title.as_deref(), Some("Demo SID"));
+        assert_eq!(info.composer.as_deref(), Some("Demo Composer"));
+        assert!(info.extra.iter().any(|line| line.contains("PSID v2")));
+        assert!(
+            info.extra
+                .iter()
+                .any(|line| line.contains("3 song(s), start song 1"))
         );
 
         let _ = fs::remove_file(path);
