@@ -47,7 +47,7 @@ pub(crate) fn remote_add_menu_shortcuts() -> Vec<FooterShortcut> {
 pub(crate) fn remote_edit_shortcuts(state: &RemoteEditState) -> Vec<FooterShortcut> {
     if state.plugin_auth_enabled
         && state.is_remote_plugin()
-        && state.cursor == RemoteEditState::PORT
+        && state.cursor == state.auth_field_index().unwrap_or(usize::MAX)
     {
         vec![
             FooterShortcut {
@@ -68,7 +68,7 @@ pub(crate) fn remote_edit_shortcuts(state: &RemoteEditState) -> Vec<FooterShortc
             },
         ]
     } else if matches!(&state.kind, crate::app::RemoteEditKind::Smb)
-        && state.cursor == RemoteEditState::PATH
+        && state.cursor == state.path_field_index()
         && state.share_picker.is_none()
     {
         vec![
@@ -418,7 +418,9 @@ pub(super) fn render_remote_add_menu(
 
 pub(super) fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: Rect) {
     let width = 72u16.min(area.width.saturating_sub(4));
-    let height = 14u16.min(area.height.saturating_sub(2)).max(10);
+    let labels = state.kind.field_labels();
+    let body_height = labels.len() as u16 + 5;
+    let height = body_height.min(area.height.saturating_sub(2)).max(10);
     let popup = clamp_rect(
         area,
         Rect {
@@ -442,7 +444,6 @@ pub(super) fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: R
         .style(Style::default().bg(CLR_MENU_DD_BG));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
-    let labels = state.kind.field_labels();
     let value_w = (inner.width as usize).saturating_sub(9);
     let mut lines = Vec::new();
     for (idx, label) in labels.iter().enumerate() {
@@ -472,7 +473,7 @@ pub(super) fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: R
         ]));
     }
     lines.push(Line::default());
-    let save_style = if state.cursor == RemoteEditState::SAVE {
+    let save_style = if state.cursor == state.save_index() {
         Style::default()
             .fg(CLR_MENU_SEL_FG)
             .bg(CLR_MENU_SEL_BG)
@@ -480,7 +481,7 @@ pub(super) fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: R
     } else {
         Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
     };
-    let cancel_style = if state.cursor == RemoteEditState::CANCEL {
+    let cancel_style = if state.cursor == state.cancel_index() {
         Style::default()
             .fg(CLR_MENU_SEL_FG)
             .bg(CLR_MENU_SEL_BG)
@@ -508,7 +509,7 @@ pub(super) fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: R
     };
     let hint_items = footer_shortcut_items(&remote_edit_shortcuts(state));
     render_shortcut_bar(f, hint_row, &hint_items, secondary_shortcut_bar_style());
-    if state.cursor < 6 {
+    if state.cursor < state.input_count() {
         let cursor_x =
             (inner.x + 9 + state.input_cursor as u16).min(inner.x + inner.width.saturating_sub(2));
         let cursor_y = inner.y + state.cursor as u16;
@@ -518,9 +519,9 @@ pub(super) fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: R
     // ── SMB share picker dropdown ─────────────────────────────────────────
     if let Some((ref shares, picker_cur)) = state.share_picker {
         // Anchor: Share field is at cursor row PATH (4); dropdown sits below it.
-        const PATH_ROW: u16 = crate::app::RemoteEditState::PATH as u16;
+        let path_row: u16 = state.path_field_index() as u16;
         let dd_x = inner.x + 9;
-        let dd_y = inner.y + PATH_ROW + 1;
+        let dd_y = inner.y + path_row + 1;
         let dd_w = inner.width.saturating_sub(9).min(40).max(16);
         let max_visible: usize = 8;
         let visible = shares.len().min(max_visible);

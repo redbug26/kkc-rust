@@ -358,7 +358,10 @@ fn handle_mouse_remote_edit(app: &mut App, mouse: MouseEvent) -> Result<bool> {
     if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
         return Ok(false);
     }
-    let (popup, inner) = remote_edit_rect(area);
+    let AppMode::RemoteEdit(ref state) = app.mode else {
+        return Ok(false);
+    };
+    let (popup, inner) = remote_edit_rect(area, state);
     if !point_in_rect(mouse.column, mouse.row, popup) {
         return Ok(false);
     }
@@ -373,8 +376,13 @@ fn handle_mouse_remote_edit(app: &mut App, mouse: MouseEvent) -> Result<bool> {
 
     if let AppMode::RemoteEdit(ref mut s) = app.mode {
         if let Some((ref shares, picker_cur)) = s.share_picker {
-            if let Some((dd_area, dd_inner, scroll)) =
-                remote_edit_share_picker_rect(area, inner, shares.len(), picker_cur)
+            if let Some((dd_area, dd_inner, scroll)) = remote_edit_share_picker_rect(
+                area,
+                inner,
+                s.path_field_index() as u16,
+                shares.len(),
+                picker_cur,
+            )
             {
                 if point_in_rect(mouse.column, mouse.row, dd_area)
                     && point_in_rect(mouse.column, mouse.row, dd_inner)
@@ -382,8 +390,10 @@ fn handle_mouse_remote_edit(app: &mut App, mouse: MouseEvent) -> Result<bool> {
                     let rel = (mouse.row - dd_inner.y) as usize;
                     let idx = scroll + rel;
                     if idx < shares.len() {
-                        s.fields[crate::app::RemoteEditState::PATH] = shares[idx].clone();
-                        s.input_cursor = s.fields[crate::app::RemoteEditState::PATH].len();
+                        let path_idx = s.path_field_index();
+                        let next_cursor = s.fields[path_idx].len();
+                        s.fields[path_idx] = shares[idx].clone();
+                        s.input_cursor = next_cursor;
                         s.share_picker = None;
                         s.cursor = crate::app::RemoteEditState::SECRET;
                         s.sync_cursor();
@@ -398,8 +408,8 @@ fn handle_mouse_remote_edit(app: &mut App, mouse: MouseEvent) -> Result<bool> {
         let labels = s.kind.field_labels();
         if mouse.row >= inner.y && mouse.row < inner.y + labels.len() as u16 {
             let idx = (mouse.row - inner.y) as usize;
-            let label = labels.get(idx).copied().unwrap_or_default();
-            if idx < 6 && !label.is_empty() {
+            let label = labels.get(idx).map(String::as_str).unwrap_or_default();
+            if idx < s.input_count() && !label.is_empty() {
                 s.cursor = idx;
                 let value_x = inner.x + 9;
                 let col = mouse.column.saturating_sub(value_x) as usize;
@@ -425,10 +435,10 @@ fn handle_mouse_remote_edit(app: &mut App, mouse: MouseEvent) -> Result<bool> {
                 height: 1,
             };
             if point_in_rect(mouse.column, mouse.row, save_rect) {
-                s.cursor = crate::app::RemoteEditState::SAVE;
+                s.cursor = s.save_index();
                 action = ClickAction::Submit;
             } else if point_in_rect(mouse.column, mouse.row, cancel_rect) {
-                s.cursor = crate::app::RemoteEditState::CANCEL;
+                s.cursor = s.cancel_index();
                 action = ClickAction::Cancel;
             }
         }
@@ -1688,9 +1698,11 @@ fn remote_add_menu_rect(area: Rect, choices_len: usize) -> (Rect, Rect) {
     (popup, inset_rect(popup, 1, 1))
 }
 
-fn remote_edit_rect(area: Rect) -> (Rect, Rect) {
+fn remote_edit_rect(area: Rect, state: &crate::app::RemoteEditState) -> (Rect, Rect) {
     let width = 72u16.min(area.width.saturating_sub(4));
-    let height = 14u16.min(area.height.saturating_sub(2)).max(10);
+    let labels = state.kind.field_labels();
+    let body_height = labels.len() as u16 + 5;
+    let height = body_height.min(area.height.saturating_sub(2)).max(10);
     let popup = clamp_rect_local(
         area,
         Rect {
@@ -1706,12 +1718,12 @@ fn remote_edit_rect(area: Rect) -> (Rect, Rect) {
 fn remote_edit_share_picker_rect(
     area: Rect,
     inner: Rect,
+    path_row: u16,
     shares_len: usize,
     picker_cur: usize,
 ) -> Option<(Rect, Rect, usize)> {
-    const PATH_ROW: u16 = crate::app::RemoteEditState::PATH as u16;
     let dd_x = inner.x + 9;
-    let dd_y = inner.y + PATH_ROW + 1;
+    let dd_y = inner.y + path_row + 1;
     let dd_w = inner.width.saturating_sub(9).min(40).max(16);
     let max_visible: usize = 8;
     let visible = shares_len.min(max_visible);
@@ -4773,8 +4785,9 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
             }
             KeyCode::Enter => {
                 if let Some((ref shares, cur)) = s.share_picker {
-                    s.fields[crate::app::RemoteEditState::PATH] = shares[cur].clone();
-                    s.input_cursor = s.fields[crate::app::RemoteEditState::PATH].len();
+                    let path_idx = s.path_field_index();
+                    s.fields[path_idx] = shares[cur].clone();
+                    s.input_cursor = s.fields[path_idx].len();
                 }
                 s.share_picker = None;
                 // Move cursor to Password field after selecting share
@@ -4792,27 +4805,24 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
             let Some(plugin_id) = s.kind.plugin_id().map(str::to_string) else {
                 return Ok(false);
             };
-            let config_json = s.plugin_config_json().unwrap_or("{}");
+            let config_json = s.plugin_config_json().unwrap_or_else(|| "{}".to_string());
             crate::viewer::debug_log(&format!(
                 "remote-plugin-auth: start requested for '{}'",
                 plugin_id
             ));
-            if serde_json::from_str::<serde_json::Value>(config_json).is_err() {
-                app.set_status("Config JSON must be valid before starting auth");
-                crate::viewer::debug_log(&format!(
-                    "remote-plugin-auth: start rejected for '{}': invalid config json",
-                    plugin_id
-                ));
+            if s.build_profile().is_none() {
+                let message = s.kind.validation_message();
+                app.set_status(message);
                 return Ok(false);
             }
-            match crate::remote::remote_plugin_auth_start(&plugin_id, config_json) {
+            match crate::remote::remote_plugin_auth_start(&plugin_id, &config_json) {
                 Ok(auth_session) => {
                     let (status, details) = remote_plugin_auth_start_feedback(&auth_session);
                     for line in details {
                         crate::viewer::debug_log(&format!("remote-plugin-auth: {}", line));
                     }
                     s.plugin_auth_session_json = Some(auth_session);
-                    s.cursor = crate::app::RemoteEditState::PORT;
+                    s.cursor = s.auth_field_index().unwrap_or(s.cursor);
                     s.sync_cursor();
                     app.set_status(status);
                 }
@@ -4834,7 +4844,7 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
                 app.set_status("Start plugin auth first with F5");
                 return Ok(false);
             };
-            let config_json = s.plugin_config_json().unwrap_or("{}");
+            let config_json = s.plugin_config_json().unwrap_or_else(|| "{}".to_string());
             let input = s.plugin_auth_input().unwrap_or("");
             crate::viewer::debug_log(&format!(
                 "remote-plugin-auth: complete requested for '{}'",
@@ -4842,7 +4852,7 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
             ));
             match crate::remote::remote_plugin_auth_complete(
                 &plugin_id,
-                config_json,
+                &config_json,
                 &auth_session,
                 input,
             ) {
@@ -4851,8 +4861,10 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
                         app.set_status("Plugin auth returned invalid config JSON");
                         return Ok(false);
                     }
-                    s.fields[crate::app::RemoteEditState::HOST] = updated_config_json;
-                    s.fields[crate::app::RemoteEditState::PORT].clear();
+                    s.set_remote_plugin_config_json(&updated_config_json);
+                    if let Some(auth_idx) = s.auth_field_index() {
+                        s.fields[auth_idx].clear();
+                    }
                     s.plugin_auth_session_json = None;
                     app.set_status("Plugin auth completed");
                 }
@@ -4871,7 +4883,7 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
     // ── F5: fetch SMB share list ──────────────────────────────────────────
     if fn_key == Some(5)
         && matches!(&s.kind, crate::app::RemoteEditKind::Smb)
-        && s.cursor == crate::app::RemoteEditState::PATH
+        && s.cursor == s.path_field_index()
     {
         let host = s.fields[crate::app::RemoteEditState::HOST]
             .trim()
@@ -4910,7 +4922,7 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
         };
         match crate::remote::list_smb_shares(&profile) {
             Ok(shares) => {
-                let current = s.fields[crate::app::RemoteEditState::PATH]
+                let current = s.fields[s.path_field_index()]
                     .trim()
                     .to_lowercase();
                 let cur = shares
@@ -4929,7 +4941,7 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
     match key.code {
         KeyCode::Esc => app.mode = AppMode::RemoteConnect(crate::app::RemoteConnectState::load()),
         KeyCode::Tab | KeyCode::Down => {
-            s.cursor = (s.cursor + 1).min(crate::app::RemoteEditState::CANCEL);
+            s.cursor = (s.cursor + 1).min(s.cancel_index());
             s.sync_cursor();
         }
         KeyCode::BackTab | KeyCode::Up => {
@@ -4937,19 +4949,19 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
             s.sync_cursor();
         }
         KeyCode::Left => {
-            if s.cursor < 6 && s.input_cursor > 0 {
+            if s.cursor < s.input_count() && s.input_cursor > 0 {
                 s.input_cursor -= 1;
             }
         }
         KeyCode::Right => {
-            if s.cursor < 6 {
+            if s.cursor < s.input_count() {
                 s.input_cursor =
                     (s.input_cursor + 1).min(s.current_value().map(|v| v.len()).unwrap_or(0));
             }
         }
         KeyCode::Backspace => {
             let pos = s.input_cursor;
-            if s.cursor < 6 && pos > 0 {
+            if s.cursor < s.input_count() && pos > 0 {
                 if let Some(value) = s.current_value_mut() {
                     value.remove(pos - 1);
                 }
@@ -4957,7 +4969,7 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
             }
         }
         KeyCode::Delete => {
-            if s.cursor < 6 {
+            if s.cursor < s.input_count() {
                 let pos = s.input_cursor;
                 if let Some(value) = s.current_value_mut()
                     && pos < value.len()
@@ -4967,7 +4979,7 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
             }
         }
         KeyCode::Char(ch) => {
-            if s.cursor < 6
+            if s.cursor < s.input_count()
                 && !key.modifiers.contains(KeyModifiers::CONTROL)
                 && !key.modifiers.contains(KeyModifiers::ALT)
             {
@@ -4975,18 +4987,20 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
                 if let Some(value) = s.current_value_mut() {
                     value.insert(pos, ch);
                     s.input_cursor += ch.len_utf8();
-                    if s.is_remote_plugin() && s.cursor == crate::app::RemoteEditState::HOST {
+                    if s.is_remote_plugin() && s.is_remote_plugin_config_cursor() {
                         s.plugin_auth_session_json = None;
                     }
                 }
             }
         }
         KeyCode::Enter => {
-            if s.cursor == crate::app::RemoteEditState::CANCEL {
+            if s.cursor == s.cancel_index() {
                 app.mode = AppMode::RemoteConnect(crate::app::RemoteConnectState::load());
-            } else if s.cursor == crate::app::RemoteEditState::SAVE {
-                if let Some(profile) = s.build_profile() {
-                    let old_name = s.edit_original_name.clone();
+            } else if s.cursor == s.save_index() {
+                let save_request = s
+                    .build_profile()
+                    .map(|profile| (profile, s.edit_original_name.clone()));
+                if let Some((profile, old_name)) = save_request {
                     match app.save_remote_profile(profile, old_name) {
                         Ok(()) => {
                             app.mode =
@@ -4995,11 +5009,11 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
                         Err(e) => app.set_status(format!("Cannot save connection: {}", e)),
                     }
                 } else {
-                    let msg = s.kind.validation_message().to_string();
-                    app.set_status(msg);
+                    let message = s.kind.validation_message();
+                    app.set_status(message);
                 }
             } else {
-                s.cursor = (s.cursor + 1).min(crate::app::RemoteEditState::CANCEL);
+                s.cursor = (s.cursor + 1).min(s.cancel_index());
                 s.sync_cursor();
             }
         }

@@ -2293,6 +2293,7 @@ fn load_plugins() -> Result<PluginRegistry> {
             version: manifest.version,
             description: format!("{} (library not loaded)", manifest.description),
             scheme: manifest.id,
+            config_fields: Vec::new(),
             dir: manifest.dir,
         });
     }

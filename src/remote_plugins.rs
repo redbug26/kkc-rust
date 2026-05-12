@@ -14,7 +14,17 @@ pub struct RemoteRustPluginInfo {
     pub version: String,
     pub description: String,
     pub scheme: String,
+    pub config_fields: Vec<RemoteRustConfigField>,
     pub dir: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteRustConfigField {
+    pub key: String,
+    pub label: String,
+    pub secret: bool,
+    pub required: bool,
+    pub default_value: String,
 }
 
 #[derive(Debug, Clone)]
@@ -136,6 +146,18 @@ pub fn discover_remote_rust_plugins_from_manifests(
             version: metadata.version.to_string(),
             description: metadata.description.to_string(),
             scheme: metadata.scheme.to_string(),
+            config_fields: metadata
+                .fields
+                .iter()
+                .map(|field| RemoteRustConfigField {
+                    key: field.key.as_str().trim().to_string(),
+                    label: field.label.as_str().trim().to_string(),
+                    secret: field.secret,
+                    required: field.required,
+                    default_value: field.default_value.as_str().to_string(),
+                })
+                .filter(|field| !field.key.is_empty())
+                .collect(),
             dir: manifest_info.dir,
         });
     }

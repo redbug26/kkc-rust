@@ -8,6 +8,7 @@ pub enum RemoteEditKind {
         plugin_id: String,
         display_name: String,
         scheme: String,
+        config_fields: Vec<crate::remote_plugins::RemoteRustConfigField>,
     },
 }
 
@@ -20,10 +21,11 @@ impl RemoteEditKind {
         out.extend(
             remote_plugins
                 .into_iter()
-                .map(|(plugin_id, display_name, scheme)| Self::RemotePlugin {
+                .map(|(plugin_id, display_name, scheme, config_fields)| Self::RemotePlugin {
                     plugin_id,
                     display_name,
                     scheme,
+                    config_fields,
                 }),
         );
         out
@@ -56,19 +58,33 @@ impl RemoteEditKind {
         }
     }
 
-    pub fn field_labels(&self) -> [&'static str; 6] {
+    pub fn field_labels(&self) -> Vec<String> {
         match self {
-            Self::Sftp => ["Name", "Host", "User", "Port", "Path", "Identity"],
-            Self::Smb => ["Name", "Host", "User", "Workgroup", "Share", "Password"],
-            Self::RemotePlugin { .. } => ["Name", "Config JSON", "Path", "Auth input", "", ""],
+            Self::Sftp => vec!["Name", "Host", "User", "Port", "Path", "Identity"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            Self::Smb => vec!["Name", "Host", "User", "Workgroup", "Share", "Password"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            Self::RemotePlugin { config_fields, .. } => {
+                let mut labels = vec!["Name".to_string()];
+                labels.extend(config_fields.iter().map(|field| field.label.clone()));
+                labels.push("Path".to_string());
+                labels.push("Auth input".to_string());
+                labels
+            }
         }
     }
 
-    pub fn validation_message(&self) -> &'static str {
+    pub fn validation_message(&self) -> String {
         match self {
-            Self::Sftp => "SFTP name is required",
-            Self::Smb => "SMB name and host are required",
-            Self::RemotePlugin { .. } => "Remote plugin name and valid config JSON are required",
+            Self::Sftp => "SFTP name is required".to_string(),
+            Self::Smb => "SMB name and host are required".to_string(),
+            Self::RemotePlugin { .. } => {
+                "Remote plugin name and required configuration fields are required".to_string()
+            }
         }
     }
 
@@ -83,7 +99,7 @@ impl RemoteEditKind {
 #[derive(Debug, Clone)]
 pub struct RemoteEditState {
     pub kind: RemoteEditKind,
-    pub fields: [String; 6],
+    pub fields: Vec<String>,
     pub cursor: usize,
     pub input_cursor: usize,
     /// Original name when editing an existing profile (for rename support).
@@ -103,12 +119,10 @@ impl RemoteEditState {
     pub const PORT: usize = 3;
     pub const PATH: usize = 4;
     pub const SECRET: usize = 5;
-    pub const SAVE: usize = 6;
-    pub const CANCEL: usize = 7;
 
     pub fn new(kind: RemoteEditKind) -> Self {
         let fields = match &kind {
-            RemoteEditKind::Sftp => [
+            RemoteEditKind::Sftp => vec![
                 String::new(),
                 String::new(),
                 String::new(),
@@ -116,15 +130,25 @@ impl RemoteEditState {
                 "~".into(),
                 String::new(),
             ],
-            RemoteEditKind::RemotePlugin { display_name, .. } => [
-                display_name.clone(),
-                "{}".into(),
-                "/".into(),
+            RemoteEditKind::Smb => vec![
+                String::new(),
+                String::new(),
+                String::new(),
                 String::new(),
                 String::new(),
                 String::new(),
             ],
-            _ => Default::default(),
+            RemoteEditKind::RemotePlugin {
+                display_name,
+                config_fields,
+                ..
+            } => {
+                let mut fields = vec![display_name.clone()];
+                fields.extend(config_fields.iter().map(|field| field.default_value.clone()));
+                fields.push("/".into());
+                fields.push(String::new());
+                fields
+            }
         };
         let input_cursor = fields[Self::NAME].len();
         Self {
@@ -143,7 +167,7 @@ impl RemoteEditState {
         let (kind, fields) = match &profile.kind {
             RemoteKind::Sftp(sftp) => (
                 RemoteEditKind::Sftp,
-                [
+                vec![
                     profile.name.clone(),
                     sftp.host.clone().unwrap_or_default(),
                     sftp.user.clone().unwrap_or_default(),
@@ -154,7 +178,7 @@ impl RemoteEditState {
             ),
             RemoteKind::Smb(smb) => (
                 RemoteEditKind::Smb,
-                [
+                vec![
                     profile.name.clone(),
                     smb.host.clone(),
                     smb.user.clone().unwrap_or_default(),
@@ -164,25 +188,27 @@ impl RemoteEditState {
                 ],
             ),
             RemoteKind::RemotePlugin(plugin) => {
-                let display_name = discover_remote_plugin_choices()
+                let discovered = discover_remote_plugin_choices();
+                let (display_name, config_fields) = discovered
                     .into_iter()
-                    .find(|(id, _, _)| *id == plugin.plugin_id)
-                    .map(|(_, name, _)| name)
-                    .unwrap_or_else(|| plugin.plugin_id.clone());
+                    .find(|(id, _, _, _)| *id == plugin.plugin_id)
+                    .map(|(_, name, _, fields)| (name, fields))
+                    .unwrap_or_else(|| (plugin.plugin_id.clone(), Vec::new()));
+                let mut fields = vec![profile.name.clone()];
+                fields.extend(load_remote_plugin_config_values(
+                    &plugin.config_json,
+                    &config_fields,
+                ));
+                fields.push(plugin.path.clone().unwrap_or_else(|| "/".to_string()));
+                fields.push(String::new());
                 (
                     RemoteEditKind::RemotePlugin {
                         plugin_id: plugin.plugin_id.clone(),
                         display_name,
                         scheme: plugin.scheme.clone(),
+                        config_fields,
                     },
-                    [
-                        profile.name.clone(),
-                        plugin.config_json.clone(),
-                        plugin.path.clone().unwrap_or_else(|| "/".to_string()),
-                        String::new(),
-                        String::new(),
-                        String::new(),
-                    ],
+                    fields,
                 )
             }
         };
@@ -210,28 +236,79 @@ impl RemoteEditState {
         self.input_cursor = self.current_value().map(|s| s.len()).unwrap_or(0);
     }
 
+    pub fn input_count(&self) -> usize {
+        self.fields.len()
+    }
+
+    pub fn save_index(&self) -> usize {
+        self.input_count()
+    }
+
+    pub fn cancel_index(&self) -> usize {
+        self.input_count() + 1
+    }
+
+    pub fn path_field_index(&self) -> usize {
+        match &self.kind {
+            RemoteEditKind::RemotePlugin { config_fields, .. } => 1 + config_fields.len(),
+            _ => Self::PATH,
+        }
+    }
+
+    pub fn auth_field_index(&self) -> Option<usize> {
+        match &self.kind {
+            RemoteEditKind::RemotePlugin { config_fields, .. } => Some(2 + config_fields.len()),
+            _ => None,
+        }
+    }
+
+    pub fn is_remote_plugin_config_cursor(&self) -> bool {
+        match &self.kind {
+            RemoteEditKind::RemotePlugin { config_fields, .. } => {
+                self.cursor >= 1 && self.cursor < 1 + config_fields.len()
+            }
+            _ => false,
+        }
+    }
+
+    pub fn set_remote_plugin_config_json(&mut self, config_json: &str) -> bool {
+        let RemoteEditKind::RemotePlugin { config_fields, .. } = &self.kind else {
+            return false;
+        };
+        let values = load_remote_plugin_config_values(config_json, config_fields);
+        for (offset, value) in values.into_iter().enumerate() {
+            let idx = 1 + offset;
+            if let Some(slot) = self.fields.get_mut(idx) {
+                *slot = value;
+            }
+        }
+        true
+    }
+
     pub fn build_profile(&self) -> Option<RemoteProfile> {
         let name = self.fields[Self::NAME].trim();
         if name.is_empty() {
             return None;
         }
-        let port = if self.fields[Self::PORT].trim().is_empty() {
-            None
-        } else {
-            self.fields[Self::PORT].trim().parse::<u16>().ok()
-        };
         Some(match &self.kind {
-            RemoteEditKind::Sftp => RemoteProfile {
-                name: name.to_string(),
-                source: RemoteSource::UserToml,
-                kind: RemoteKind::Sftp(crate::remote::SftpProfile {
-                    host: trim_opt(&self.fields[Self::HOST]),
-                    user: trim_opt(&self.fields[Self::USER]),
-                    port,
-                    path: trim_opt(&self.fields[Self::PATH]),
-                    identity_file: trim_opt(&self.fields[Self::SECRET]),
-                }),
-            },
+            RemoteEditKind::Sftp => {
+                let port = if self.fields[Self::PORT].trim().is_empty() {
+                    None
+                } else {
+                    self.fields[Self::PORT].trim().parse::<u16>().ok()
+                };
+                RemoteProfile {
+                    name: name.to_string(),
+                    source: RemoteSource::UserToml,
+                    kind: RemoteKind::Sftp(crate::remote::SftpProfile {
+                        host: trim_opt(&self.fields[Self::HOST]),
+                        user: trim_opt(&self.fields[Self::USER]),
+                        port,
+                        path: trim_opt(&self.fields[Self::PATH]),
+                        identity_file: trim_opt(&self.fields[Self::SECRET]),
+                    }),
+                }
+            }
             RemoteEditKind::Smb => {
                 let host = self.fields[Self::HOST].trim();
                 if host.is_empty() {
@@ -251,23 +328,23 @@ impl RemoteEditState {
                 }
             }
             RemoteEditKind::RemotePlugin {
-                plugin_id, scheme, ..
+                plugin_id,
+                scheme,
+                config_fields,
+                ..
             } => {
-                let config_json = self.fields[Self::HOST].trim();
-                if config_json.is_empty() {
+                let parsed = build_remote_plugin_config_value(&self.fields, config_fields);
+                if validate_remote_plugin_config_json(&parsed, config_fields).is_err() {
                     return None;
                 }
-                if serde_json::from_str::<serde_json::Value>(config_json).is_err() {
-                    return None;
-                }
-                let path = trim_opt(&self.fields[Self::USER]);
+                let path = trim_opt(&self.fields[self.path_field_index()]);
                 RemoteProfile {
                     name: name.to_string(),
                     source: RemoteSource::UserToml,
                     kind: RemoteKind::RemotePlugin(crate::remote::RemotePluginProfile {
                         plugin_id: plugin_id.clone(),
                         scheme: scheme.clone(),
-                        config_json: config_json.to_string(),
+                        config_json: parsed.to_string(),
                         path,
                     }),
                 }
@@ -279,24 +356,27 @@ impl RemoteEditState {
         matches!(&self.kind, RemoteEditKind::RemotePlugin { .. })
     }
 
-    pub fn plugin_config_json(&self) -> Option<&str> {
-        if self.is_remote_plugin() {
-            Some(self.fields[Self::HOST].trim())
-        } else {
-            None
-        }
+    pub fn plugin_config_json(&self) -> Option<String> {
+        let RemoteEditKind::RemotePlugin { config_fields, .. } = &self.kind else {
+            return None;
+        };
+        Some(build_remote_plugin_config_value(&self.fields, config_fields).to_string())
     }
 
     pub fn plugin_auth_input(&self) -> Option<&str> {
-        if self.is_remote_plugin() {
-            Some(self.fields[Self::PORT].trim())
-        } else {
-            None
-        }
+        self.auth_field_index()
+            .and_then(|idx| self.fields.get(idx))
+            .map(|value| value.trim())
     }
 }
 
-fn discover_remote_plugin_choices() -> Vec<(String, String, String)> {
+fn discover_remote_plugin_choices(
+) -> Vec<(
+    String,
+    String,
+    String,
+    Vec<crate::remote_plugins::RemoteRustConfigField>,
+)> {
     let Ok(plugins_dir) = crate::plugins::plugins_dir() else {
         crate::viewer::debug_log("remote-edit: no plugins_dir available");
         return Vec::new();
@@ -341,12 +421,12 @@ fn discover_remote_plugin_choices() -> Vec<(String, String, String)> {
 
     let mut choices = loaded
         .into_iter()
-        .map(|plugin| (plugin.id, plugin.name, plugin.scheme))
+        .map(|plugin| (plugin.id, plugin.name, plugin.scheme, plugin.config_fields))
         .collect::<Vec<_>>();
 
     let loaded_ids = choices
         .iter()
-        .map(|(plugin_id, _, _)| plugin_id.clone())
+        .map(|(plugin_id, _, _, _)| plugin_id.clone())
         .collect::<std::collections::HashSet<_>>();
     for manifest in manifests {
         if loaded_ids.contains(&manifest.id) {
@@ -357,6 +437,7 @@ fn discover_remote_plugin_choices() -> Vec<(String, String, String)> {
             manifest.id.clone(),
             format!("{} (library not loaded)", manifest.name),
             manifest.id,
+            Vec::new(),
         ));
     }
 
@@ -365,7 +446,7 @@ fn discover_remote_plugin_choices() -> Vec<(String, String, String)> {
         choices.len(),
         choices
             .iter()
-            .map(|(plugin_id, _, _)| plugin_id.as_str())
+            .map(|(plugin_id, _, _, _)| plugin_id.as_str())
             .collect::<Vec<_>>()
             .join(",")
     ));
@@ -380,4 +461,62 @@ fn trim_opt(value: &str) -> Option<String> {
     } else {
         Some(trimmed.to_string())
     }
+}
+
+fn validate_remote_plugin_config_json(
+    parsed: &serde_json::Value,
+    config_fields: &[crate::remote_plugins::RemoteRustConfigField],
+) -> Result<(), ()> {
+    if !parsed.is_object() {
+        return Err(());
+    }
+
+    for field in config_fields.iter().filter(|field| field.required) {
+        let Some(value) = parsed.get(&field.key) else {
+            return Err(());
+        };
+        if matches!(value, serde_json::Value::Null) {
+            return Err(());
+        }
+        if let serde_json::Value::String(text) = value
+            && text.trim().is_empty()
+        {
+            return Err(());
+        }
+    }
+
+    Ok(())
+}
+
+fn build_remote_plugin_config_value(
+    fields: &[String],
+    config_fields: &[crate::remote_plugins::RemoteRustConfigField],
+) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    for (offset, field) in config_fields.iter().enumerate() {
+        let value = fields
+            .get(1 + offset)
+            .cloned()
+            .unwrap_or_else(|| field.default_value.clone());
+        map.insert(field.key.clone(), serde_json::Value::String(value));
+    }
+    serde_json::Value::Object(map)
+}
+
+fn load_remote_plugin_config_values(
+    config_json: &str,
+    config_fields: &[crate::remote_plugins::RemoteRustConfigField],
+) -> Vec<String> {
+    let parsed = serde_json::from_str::<serde_json::Value>(config_json).ok();
+    config_fields
+        .iter()
+        .map(|field| {
+            parsed
+                .as_ref()
+                .and_then(|value| value.get(&field.key))
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+                .unwrap_or_else(|| field.default_value.clone())
+        })
+        .collect()
 }
