@@ -92,7 +92,7 @@ fn detect_lang(path: &Path) -> Option<MaskKind> {
         "js" | "ts" | "mjs" | "cjs" | "jsx" | "tsx" | "vue" => MaskKind::JavaScript,
         "py" | "pyw" | "pyi" => MaskKind::Python,
         "php" | "php3" | "php4" | "php5" | "phtml" | "phps" => MaskKind::Php,
-        "html" | "htm" | "xhtml" | "xml" | "svg" | "xsl" => MaskKind::Html,
+        "html" | "htm" | "xhtml" | "xml" | "svg" | "xsl" | "opf" => MaskKind::Html,
         "css" | "scss" | "less" | "sass" => MaskKind::Css,
         "toml" => MaskKind::Toml,
         "sql" | "ddl" | "dml" => MaskKind::Sql,

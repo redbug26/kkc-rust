@@ -126,9 +126,9 @@ local function unique_name(used, page, ext)
     while true do
         local name
         if idx == 0 then
-            name = string.format("Page %d.%s", page, ext)
+            name = string.format("Page %03d.%s", page, ext)
         else
-            name = string.format("Page %d (%d).%s", page, idx, ext)
+            name = string.format("Page %03d (%d).%s", page, idx, ext)
         end
         if not used[name] then
             used[name] = true
