@@ -1935,17 +1935,26 @@ impl App {
     fn next_audio_entry_index(&self) -> Option<usize> {
         let panel = self.active_panel();
         let start = panel.cursor.saturating_add(1);
+        let is_audio_entry = |entry: &crate::panel::Entry| {
+            !entry.is_dir
+                && entry.name != ".."
+                && !entry.cloud_only
+                && crate::tracker_audio::is_audio_path(&entry.path)
+        };
+
         panel
             .entries
             .iter()
             .enumerate()
             .skip(start)
-            .find_map(|(idx, entry)| {
-                (!entry.is_dir
-                    && entry.name != ".."
-                    && !entry.cloud_only
-                    && crate::tracker_audio::is_audio_path(&entry.path))
-                .then_some(idx)
+            .find_map(|(idx, entry)| is_audio_entry(entry).then_some(idx))
+            .or_else(|| {
+                panel
+                    .entries
+                    .iter()
+                    .enumerate()
+                    .take(start.min(panel.entries.len()))
+                    .find_map(|(idx, entry)| is_audio_entry(entry).then_some(idx))
             })
     }
 

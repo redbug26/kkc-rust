@@ -2,6 +2,7 @@ use anyhow::{Context, Result, anyhow};
 use kkc_plugin_api::{AudioPlaybackSnapshot as PluginSnapshot, AudioPluginModRef};
 use rodio::Source;
 use rustfft::{FftPlanner, num_complex::Complex};
+use std::collections::HashMap;
 use std::io::Cursor;
 use std::num::NonZero;
 use std::path::{Path, PathBuf};
@@ -15,6 +16,25 @@ use xmrsplayer::prelude::XmrsPlayer;
 const SAMPLE_RATE: u32 = 48_000;
 const BUFFER_SIZE: usize = 2048;
 const SPECTRUM_BANDS: usize = 96;
+
+static AUDIO_PLUGIN_HINTS: OnceLock<Mutex<HashMap<PathBuf, String>>> = OnceLock::new();
+
+fn audio_plugin_hints() -> &'static Mutex<HashMap<PathBuf, String>> {
+    AUDIO_PLUGIN_HINTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn remember_audio_plugin_for_path(path: &Path, plugin_id: &str) {
+    if let Ok(mut hints) = audio_plugin_hints().lock() {
+        hints.insert(path.to_path_buf(), plugin_id.to_string());
+    }
+}
+
+fn hinted_audio_plugin_for_path(path: &Path) -> Option<String> {
+    audio_plugin_hints()
+        .lock()
+        .ok()
+        .and_then(|hints| hints.get(path).cloned())
+}
 
 #[derive(Debug, Clone)]
 pub struct TrackerModuleInfo {
@@ -391,7 +411,8 @@ pub fn try_audio_info(path: &Path, bytes: &[u8]) -> Option<TrackerModuleInfo> {
         path.display()
     ));
 
-    if let Some((_, module)) = select_audio_plugin(path, &preferred_audio_plugin_ids_for_path(path)) {
+    if let Some((plugin, module)) = select_audio_plugin(path, &preferred_audio_plugin_ids_for_path(path)) {
+        remember_audio_plugin_for_path(path, &plugin.id);
         let path_text = path.to_string_lossy();
         let info = module.open()(path_text.as_ref().into()).into_result().ok()?;
         let _ = module.close()(path_text.as_ref().into());
@@ -475,7 +496,23 @@ fn play_audio_bytes_with_preferences(
         preferred_plugin_ids
     ));
 
+    // If info probing already selected a plugin for this path, try it directly
+    // to avoid re-probing the exact same file in the same open flow.
+    if preferred_plugin_ids.is_empty()
+        && let Some(hinted_plugin_id) = hinted_audio_plugin_for_path(&path)
+        && let Ok(plugins_dir) = crate::plugins::plugins_dir()
+        && let Ok(discovered) = crate::audio_plugins::discover_audio_rust_plugins(&plugins_dir)
+        && let Some(plugin_info) = discovered
+            .iter()
+            .find(|plugin| plugin.id == hinted_plugin_id)
+            .cloned()
+        && let Ok(module) = crate::audio_plugins::load_audio_plugin(&hinted_plugin_id)
+    {
+        return play_audio_plugin_path(path, plugin_info, module);
+    }
+
     if let Some((plugin_info, module)) = select_audio_plugin(&path, preferred_plugin_ids) {
+        remember_audio_plugin_for_path(&path, &plugin_info.id);
         play_audio_plugin_path(path, plugin_info, module)
     } else if decoded_audio_format(&path).is_some() {
         play_decoded_audio_bytes(path, bytes)
