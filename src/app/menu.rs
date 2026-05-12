@@ -731,22 +731,24 @@ impl ViewerMenuState {
             },
             ViewerMenuKind::Mask => {
                 if !viewer.mask_enabled {
-                    13 // "Syntax OFF" is the last item
+                    15 // "Syntax OFF" is the last item
                 } else {
                     match viewer.mask {
                         MaskKind::Auto => 0,
-                        MaskKind::C => 1,
-                        MaskKind::Rust => 2,
-                        MaskKind::JavaScript => 3,
-                        MaskKind::Python => 4,
-                        MaskKind::Php => 5,
-                        MaskKind::Html => 6,
-                        MaskKind::Css => 7,
-                        MaskKind::Sql => 8,
-                        MaskKind::Shell => 9,
-                        MaskKind::Pascal => 10,
-                        MaskKind::Assembler => 11,
-                        MaskKind::Ketchup => 12,
+                        MaskKind::Markdown => 1,
+                        MaskKind::C => 2,
+                        MaskKind::Rust => 3,
+                        MaskKind::JavaScript => 4,
+                        MaskKind::Python => 5,
+                        MaskKind::Php => 6,
+                        MaskKind::Html => 7,
+                        MaskKind::Css => 8,
+                        MaskKind::Toml => 9,
+                        MaskKind::Sql => 10,
+                        MaskKind::Shell => 11,
+                        MaskKind::Pascal => 12,
+                        MaskKind::Assembler => 13,
+                        MaskKind::Ketchup => 14,
                     }
                 }
             }

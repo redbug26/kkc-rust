@@ -86,6 +86,7 @@ fn detect_lang(path: &Path) -> Option<MaskKind> {
         .unwrap_or("")
         .to_ascii_lowercase();
     Some(match ext.as_str() {
+        "md" | "markdown" | "mdown" | "mkd" => MaskKind::Markdown,
         "c" | "h" | "cpp" | "cc" | "cxx" | "hpp" | "hxx" | "inl" | "c++" => MaskKind::C,
         "rs" => MaskKind::Rust,
         "js" | "ts" | "mjs" | "cjs" | "jsx" | "tsx" | "vue" => MaskKind::JavaScript,
@@ -93,21 +94,13 @@ fn detect_lang(path: &Path) -> Option<MaskKind> {
         "php" | "php3" | "php4" | "php5" | "phtml" | "phps" => MaskKind::Php,
         "html" | "htm" | "xhtml" | "xml" | "svg" | "xsl" => MaskKind::Html,
         "css" | "scss" | "less" | "sass" => MaskKind::Css,
+        "toml" => MaskKind::Toml,
         "sql" | "ddl" | "dml" => MaskKind::Sql,
         "sh" | "bash" | "zsh" | "fish" | "ksh" | "csh" => MaskKind::Shell,
         "pas" | "pp" | "dpr" | "lpr" => MaskKind::Pascal,
         "asm" | "s" | "a86" | "a51" => MaskKind::Assembler,
         _ => return None,
     })
-}
-
-pub(super) fn is_markdown_path(path: &Path) -> bool {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    matches!(ext.as_str(), "md" | "markdown" | "mdown" | "mkd")
 }
 
 pub(super) fn highlight_markdown_line(line: &str) -> Line<'static> {
@@ -324,6 +317,7 @@ pub(super) fn highlight_line(
 ) -> Line<'static> {
     let spans: Vec<Span<'static>> = match lang {
         MaskKind::Auto => unreachable!("Auto must be resolved before calling highlight_line"),
+        MaskKind::Markdown => highlight_markdown_line(line).spans,
         MaskKind::C => Tok::c(line).run(block_comment),
         MaskKind::Rust => tokenize_rust(line, block_comment),
         MaskKind::JavaScript => Tok::js(line).run(block_comment),
@@ -331,6 +325,7 @@ pub(super) fn highlight_line(
         MaskKind::Php => Tok::php(line).run(block_comment),
         MaskKind::Html => tokenize_html(line, block_comment),
         MaskKind::Css => Tok::css(line).run(block_comment),
+        MaskKind::Toml => tokenize_toml(line),
         MaskKind::Sql => Tok::sql(line).run(block_comment),
         MaskKind::Shell => tokenize_shell(line),
         MaskKind::Pascal => tokenize_pascal(line, block_comment),
@@ -353,7 +348,7 @@ pub(super) fn scan_line_state(line: &str, lang: MaskKind, bc: &mut bool) {
         | MaskKind::Sql => scan_c_block(line, "/*", "*/", bc),
         MaskKind::Html => scan_html_block(line, bc),
         MaskKind::Pascal => scan_pascal_block(line, bc),
-        // Python / Shell / Asm / Ketchup: no multi-line block comments
+        // Markdown / Python / TOML / Shell / Asm / Ketchup: no multi-line block comments
         _ => {}
     }
 }
@@ -1178,6 +1173,95 @@ fn tokenize_python(line: &str) -> Vec<Span<'static>> {
         spans.push(Span::styled(s, style));
         pos += ch.len_utf8();
     }
+    spans
+}
+
+// ── TOML tokeniser ───────────────────────────────────────────────────────
+
+fn tokenize_toml(line: &str) -> Vec<Span<'static>> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut pos = 0usize;
+    let src = line;
+    let bytes = src.as_bytes();
+
+    while pos < src.len() {
+        let rem = &src[pos..];
+        let ch = rem.chars().next().unwrap();
+
+        if ch == '#' {
+            spans.push(Span::styled(rem.to_owned(), cmt()));
+            break;
+        }
+
+        if ch == '"' || ch == '\'' {
+            let (t, p) = eat_string_from(src, pos, ch);
+            spans.push(Span::styled(t, str_s()));
+            pos = p;
+            continue;
+        }
+
+        if ch.is_ascii_digit()
+            || ((ch == '+' || ch == '-')
+                && matches!(src[pos + 1..].chars().next(), Some('0'..='9')))
+        {
+            let start = pos;
+            pos += ch.len_utf8();
+            while matches!(src[pos..].chars().next(), Some(c) if c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | ':' | '-' | '+' | 'T' | 'Z'))
+            {
+                pos += src[pos..].chars().next().map_or(1, |c| c.len_utf8());
+            }
+            spans.push(Span::styled(src[start..pos].to_owned(), num()));
+            continue;
+        }
+
+        if ch == '[' {
+            let start = pos;
+            pos += 1;
+            while pos < src.len() && bytes[pos] != b']' {
+                pos += src[pos..].chars().next().map_or(1, |c| c.len_utf8());
+            }
+            if pos < src.len() && bytes[pos] == b']' {
+                pos += 1;
+            }
+            if pos < src.len() && bytes[pos] == b']' {
+                pos += 1;
+            }
+            spans.push(Span::styled(src[start..pos].to_owned(), pre()));
+            continue;
+        }
+
+        if ch.is_ascii_alphabetic() || ch == '_' {
+            let start = pos;
+            while matches!(src[pos..].chars().next(), Some(c) if c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
+            {
+                pos += src[pos..].chars().next().map_or(1, |c| c.len_utf8());
+            }
+            let token = &src[start..pos];
+            let style = if matches!(token, "true" | "false") {
+                kw()
+            } else {
+                pl()
+            };
+            spans.push(Span::styled(token.to_owned(), style));
+            continue;
+        }
+
+        if ch == '=' {
+            spans.push(Span::styled("=".to_owned(), op()));
+            pos += 1;
+            continue;
+        }
+
+        if ch.is_whitespace() {
+            spans.push(Span::styled(ch.to_string(), pl()));
+            pos += ch.len_utf8();
+            continue;
+        }
+
+        spans.push(Span::styled(ch.to_string(), op()));
+        pos += ch.len_utf8();
+    }
+
     spans
 }
 

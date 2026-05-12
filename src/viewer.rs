@@ -249,6 +249,7 @@ pub enum LineFeedMode {
 pub enum MaskKind {
     /// Auto-detect language from the file extension.
     Auto,
+    Markdown,
     C,
     Rust,
     JavaScript,
@@ -256,6 +257,7 @@ pub enum MaskKind {
     Php,
     Html,
     Css,
+    Toml,
     Sql,
     Shell,
     Pascal,
@@ -478,6 +480,7 @@ impl Viewer {
         } else {
             match self.mask {
                 MaskKind::Auto => "Auto",
+                MaskKind::Markdown => "Markdown",
                 MaskKind::C => "C/C++",
                 MaskKind::Rust => "Rust",
                 MaskKind::JavaScript => "JS",
@@ -485,6 +488,7 @@ impl Viewer {
                 MaskKind::Php => "PHP",
                 MaskKind::Html => "HTML",
                 MaskKind::Css => "CSS",
+                MaskKind::Toml => "TOML",
                 MaskKind::Sql => "SQL",
                 MaskKind::Shell => "Shell",
                 MaskKind::Pascal => "Pascal",
@@ -492,6 +496,30 @@ impl Viewer {
                 MaskKind::Ketchup => "Ketchup",
             }
         }
+    }
+
+    pub fn detected_mask_label(&self) -> Option<&'static str> {
+        if !self.mask_enabled || !matches!(self.mask, MaskKind::Auto) {
+            return None;
+        }
+        let detected = syntax::effective_lang(MaskKind::Auto, &self.path)?;
+        Some(match detected {
+            MaskKind::Auto => "Auto",
+            MaskKind::Markdown => "Markdown",
+            MaskKind::C => "C/C++",
+            MaskKind::Rust => "Rust",
+            MaskKind::JavaScript => "JS",
+            MaskKind::Python => "Python",
+            MaskKind::Php => "PHP",
+            MaskKind::Html => "HTML",
+            MaskKind::Css => "CSS",
+            MaskKind::Toml => "TOML",
+            MaskKind::Sql => "SQL",
+            MaskKind::Shell => "Shell",
+            MaskKind::Pascal => "Pascal",
+            MaskKind::Assembler => "Asm",
+            MaskKind::Ketchup => "Ketchup",
+        })
     }
 
     pub fn preproc_label(&self) -> String {
@@ -1733,13 +1761,6 @@ impl Viewer {
 
         if let Some(highlighted) = self.render_plugin_lines(&display_lines, selected_width) {
             return highlighted;
-        }
-
-        if syntax::is_markdown_path(&self.path) {
-            return display_lines
-                .into_iter()
-                .map(|line| syntax::highlight_markdown_line(&line))
-                .collect();
         }
 
         // Syntax highlight ─────────────────────────────────────────────────

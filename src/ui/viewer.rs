@@ -195,7 +195,7 @@ fn render_viewer_backdrop(f: &mut Frame, host: Rect, panel: Rect) {
     }
 }
 
-fn render_viewer_full_width_header(f: &mut Frame, host: Rect, title: &str, active: bool) {
+fn render_viewer_full_width_header(f: &mut Frame, host: Rect, title: Line<'static>, active: bool) {
     if host.width == 0 || host.height == 0 {
         return;
     }
@@ -215,10 +215,7 @@ fn render_viewer_full_width_header(f: &mut Frame, host: Rect, title: &str, activ
         width: host.width,
         height: 1,
     };
-    f.render_widget(
-        Paragraph::new(truncate_str(title, header.width as usize)).style(style),
-        header,
-    );
+    f.render_widget(Paragraph::new(title).style(style), header);
 }
 
 fn line_with_default_viewer_style(mut line: Line<'static>) -> Line<'static> {
@@ -395,44 +392,26 @@ pub(super) fn render_viewer(
     } else {
         String::new()
     };
-    let col_info = if matches!(v.mode, ViewMode::Text | ViewMode::Ansi) && !v.wrap && v.hscroll > 0
-    {
-        format!(" Col:{} ", v.hscroll)
+    let col_info = (matches!(v.mode, ViewMode::Text | ViewMode::Ansi) && !v.wrap && v.hscroll > 0)
+        .then(|| v.hscroll.to_string());
+    let lf_info = matches!(v.mode, ViewMode::Text | ViewMode::Ansi).then(|| v.line_feed_label());
+    let pre_info =
+        matches!(v.mode, ViewMode::Text | ViewMode::Ansi).then(|| v.preproc_label());
+    let enc_info =
+        matches!(v.mode, ViewMode::Text | ViewMode::Ansi | ViewMode::Hex).then(|| v.encoding_label());
+    let mask_info = matches!(v.mode, ViewMode::Text | ViewMode::Ansi).then(|| v.mask_label());
+    let ansi_canvas_info =
+        matches!(v.mode, ViewMode::Ansi).then(|| v.ansi_canvas_label());
+    let plugin_info = v.viewer_plugin.as_deref();
+    let zoom_info = v.zoom_label();
+    let autoplay_info = v.autoplay_display(autoplay_delay_secs);
+    let auto_detected_info = if matches!(v.mode, ViewMode::Text | ViewMode::Ansi) {
+        v.detected_mask_label()
+            .map(|label| format!("({label}) "))
+            .unwrap_or_default()
     } else {
         String::new()
     };
-    let lf_info = if matches!(v.mode, ViewMode::Text | ViewMode::Ansi) {
-        format!(" LF:{} ", v.line_feed_label())
-    } else {
-        String::new()
-    };
-    let pre_info = if matches!(v.mode, ViewMode::Text | ViewMode::Ansi) {
-        format!(" Pre:{} ", v.preproc_label())
-    } else {
-        String::new()
-    };
-    let enc_info = if matches!(v.mode, ViewMode::Text | ViewMode::Ansi | ViewMode::Hex) {
-        format!(" Enc:{} ", v.encoding_label())
-    } else {
-        String::new()
-    };
-    let mask_info = if matches!(v.mode, ViewMode::Text | ViewMode::Ansi) {
-        format!(" Syn:{} ", v.mask_label())
-    } else {
-        String::new()
-    };
-    let ansi_canvas_info = if matches!(v.mode, ViewMode::Ansi) {
-        format!(" Canvas:{} ", v.ansi_canvas_label())
-    } else {
-        String::new()
-    };
-    let plugin_info = v
-        .viewer_plugin
-        .as_ref()
-        .map(|name| format!(" Plugin:{} ", name))
-        .unwrap_or_default();
-    let zoom_info = format!(" Zoom:{} ", v.zoom_label());
-    let autoplay_info = format!(" Autoplay:{} ", v.autoplay_display(autoplay_delay_secs));
     let image_info = if let Some(image) = v.image_info() {
         match (image.width, image.height) {
             (Some(w), Some(h)) => format!(" {} {}x{} ", image.format, w, h),
@@ -441,26 +420,88 @@ pub(super) fn render_viewer(
     } else {
         String::new()
     };
-    let title = format!(
-        " {} [{}] {}/{}{}{}{}{}{}{}{}{}{}{}{} ",
-        file_name,
-        v.mode_label(),
-        v.scroll + 1,
-        v.line_count(),
-        image_info,
-        lf_info,
-        pre_info,
-        enc_info,
-        mask_info,
-        ansi_canvas_info,
-        plugin_info,
-        zoom_info,
+    let key_style = Style::default()
+        .fg(Color::White)
+        .add_modifier(Modifier::BOLD);
+    let value_style = Style::default().fg(Color::LightBlue).add_modifier(Modifier::BOLD);
+    let mut title_spans = vec![
+        Span::styled(
+            format!(" {} ", file_name),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("[{}] ", v.mode_label()),
+            Style::default()
+                .fg(Color::LightCyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("{}/{}", v.scroll + 1, v.line_count()),
+            Style::default().fg(Color::LightYellow),
+        ),
+    ];
+    let push_kv = |spans: &mut Vec<Span<'static>>, key: &str, value: &str| {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(format!("{key}:"), key_style));
+        spans.push(Span::styled(value.to_string(), value_style));
+    };
+    if !image_info.is_empty() {
+        title_spans.push(Span::raw(image_info));
+    }
+    if let Some(lf) = lf_info {
+        push_kv(&mut title_spans, "LF", lf);
+    }
+    if let Some(preproc) = pre_info {
+        push_kv(&mut title_spans, "Pre", preproc.as_str());
+    }
+    if let Some(enc) = enc_info {
+        push_kv(&mut title_spans, "Enc", enc);
+    }
+    if let Some(mask) = mask_info {
+        push_kv(&mut title_spans, "Syn", mask);
+    }
+    if !auto_detected_info.is_empty() {
+        title_spans.push(Span::styled(
+            format!(" {auto_detected_info}"),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+    if let Some(canvas) = ansi_canvas_info {
+        push_kv(&mut title_spans, "Canvas", canvas);
+    }
+    if let Some(plugin) = plugin_info {
+        push_kv(&mut title_spans, "Plugin", plugin);
+    }
+    push_kv(&mut title_spans, "Zoom", zoom_info);
+    title_spans.push(Span::raw(" "));
+    title_spans.push(Span::styled("Autoplay:", key_style));
+    title_spans.push(Span::styled(
         autoplay_info,
-        col_info,
-        match_info,
-    );
+        if v.autoplay {
+            Style::default()
+                .fg(Color::LightGreen)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            value_style
+        },
+    ));
+    if let Some(col) = col_info {
+        push_kv(&mut title_spans, "Col", col.as_str());
+    }
+    if !match_info.is_empty() {
+        title_spans.push(Span::styled(
+            match_info,
+            Style::default().fg(Color::Black).bg(Color::LightYellow),
+        ));
+    }
+    title_spans.push(Span::raw(" "));
+    let title_line = Line::from(title_spans);
 
-    let (border_style, border_type, title_span) = if let Some(label) = quick_preview_label {
+    let (border_style, border_type, title_line_for_block) = if let Some(label) = quick_preview_label {
         // Quick-preview embedded panel: custom compact title
         if active {
             (
@@ -468,21 +509,21 @@ pub(super) fn render_viewer(
                     .fg(CLR_HEADER_FG)
                     .add_modifier(Modifier::BOLD),
                 BorderType::Thick,
-                Span::styled(
+                Line::from(Span::styled(
                     format!(" {} ", label),
                     Style::default()
                         .fg(CLR_HEADER_FG)
                         .add_modifier(Modifier::BOLD),
-                ),
+                )),
             )
         } else {
             (
                 Style::default().fg(CLR_PANEL_BORDER_DIM),
                 BorderType::Rounded,
-                Span::styled(
+                Line::from(Span::styled(
                     format!(" {} ", label),
                     Style::default().fg(CLR_PANEL_BORDER_DIM),
-                ),
+                )),
             )
         }
     } else if full_width_header {
@@ -491,7 +532,7 @@ pub(super) fn render_viewer(
                 .fg(CLR_PANEL_BORDER)
                 .add_modifier(Modifier::BOLD),
             BorderType::Thick,
-            Span::raw(String::new()),
+            Line::from(Span::raw(String::new())),
         )
     } else if active {
         (
@@ -499,20 +540,20 @@ pub(super) fn render_viewer(
                 .fg(CLR_PANEL_BORDER)
                 .add_modifier(Modifier::BOLD),
             BorderType::Thick,
-            Span::raw(title.clone()),
+            title_line.clone(),
         )
     } else {
         (
             Style::default().fg(CLR_PANEL_BORDER_DIM),
             BorderType::Rounded,
-            Span::raw(title.clone()),
+            title_line.clone(),
         )
     };
     if full_width_header {
-        render_viewer_full_width_header(f, viewer_host, &title, active);
+        render_viewer_full_width_header(f, viewer_host, title_line.clone(), active);
     }
     let block = Block::default()
-        .title(title_span)
+        .title(title_line_for_block)
         .borders(Borders::ALL)
         .border_type(border_type)
         .border_style(border_style);
@@ -830,6 +871,7 @@ pub(super) fn render_viewer_menu(
         ViewerMenuKind::Encoding => vec!["Plain ASCII".into(), "DOS CP437".into()],
         ViewerMenuKind::Mask => vec![
             "Auto detect",
+            "Markdown",
             "C / C++",
             "Rust",
             "JavaScript / TS",
@@ -837,6 +879,7 @@ pub(super) fn render_viewer_menu(
             "PHP",
             "HTML / XML",
             "CSS / SCSS",
+            "TOML",
             "SQL",
             "Shell / Bash",
             "Pascal",
@@ -1045,11 +1088,22 @@ fn viewer_menu_render_labels(viewer: &Viewer, kind: ViewerMenuKind) -> Vec<Strin
             .map(String::from)
             .collect(),
         ViewerMenuKind::Mask => vec![
-            "C Style",
-            "Pascal Style",
-            "Assembler Style",
-            "Ketchup Style",
-            "Mask OFF",
+            "Auto detect",
+            "Markdown",
+            "C / C++",
+            "Rust",
+            "JavaScript / TS",
+            "Python",
+            "PHP",
+            "HTML / XML",
+            "CSS / SCSS",
+            "TOML",
+            "SQL",
+            "Shell / Bash",
+            "Pascal",
+            "Assembler",
+            "Ketchup",
+            "Syntax OFF",
         ]
         .into_iter()
         .map(String::from)
