@@ -35,6 +35,17 @@ struct NativePluginManifest {
 }
 
 #[derive(Debug, Deserialize)]
+struct GenericPluginMetadata {
+    #[serde(rename = "type")]
+    plugin_type: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GenericManifest {
+    plugin: GenericPluginMetadata,
+}
+
+#[derive(Debug, Deserialize)]
 struct NativePluginMetadata {
     id: String,
     name: String,
@@ -53,26 +64,36 @@ pub fn discover_viewer_rust_plugins(plugins_dir: &Path) -> Result<Vec<ViewerRust
     let manifests = discover_viewer_rust_plugin_manifests(plugins_dir)?;
     let mut plugins = Vec::new();
     for manifest_info in manifests {
-        let manifest = read_manifest(&manifest_info.dir.join("plugin.toml"))?;
+        let manifest = match read_manifest(&manifest_info.dir.join("plugin.toml")) {
+            Ok(manifest) => manifest,
+            Err(err) => {
+                log_manifest_problem(
+                    "startup: viewer-rust plugin manifest reload failed",
+                    &manifest_info.dir.join("plugin.toml"),
+                    &err,
+                );
+                continue;
+            }
+        };
         let Some(library_path) = resolve_viewer_library_path(
             &manifest_info.dir,
             &manifest.viewer.as_ref().expect("viewer section").library,
         ) else {
             crate::viewer::debug_log(&format!(
-                "startup: native viewer plugin '{}' has no built library at {}",
+                "startup: {} - viewer-rust plugin: '{}' not found",
                 manifest.plugin.id,
-                manifest_info
-                    .dir
-                    .join(&manifest.viewer.as_ref().expect("viewer section").library)
-                    .display()
+                manifest.viewer.as_ref().expect("viewer section").library
             ));
             continue;
         };
 
         crate::viewer::debug_log(&format!(
-            "startup: loading native viewer plugin '{}' from {}",
+            "startup: {} - viewer-rust plugin: '{}'",
             manifest.plugin.id,
-            library_path.display()
+            library_path
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| library_path.display().to_string())
         ));
 
         let module = match lib_header_from_path(&library_path)
@@ -81,7 +102,7 @@ pub fn discover_viewer_rust_plugins(plugins_dir: &Path) -> Result<Vec<ViewerRust
             Ok(module) => module,
             Err(err) => {
                 crate::viewer::debug_log(&format!(
-                    "startup: failed to load native viewer plugin '{}': {err}",
+                    "startup: {} - failed to load viewer-rust plugin: {err}",
                     manifest.plugin.id
                 ));
                 continue;
@@ -91,7 +112,7 @@ pub fn discover_viewer_rust_plugins(plugins_dir: &Path) -> Result<Vec<ViewerRust
         let api_version = module.api_version()();
         if api_version != KKC_VIEWER_PLUGIN_API_VERSION {
             crate::viewer::debug_log(&format!(
-                "Viewer plugin '{}' uses API version {}, expected {}",
+                "startup: {} - native viewer plugin uses API version {}, expected {}",
                 manifest.plugin.id, api_version, KKC_VIEWER_PLUGIN_API_VERSION
             ));
             continue;
@@ -100,10 +121,13 @@ pub fn discover_viewer_rust_plugins(plugins_dir: &Path) -> Result<Vec<ViewerRust
         let metadata = module.metadata()();
         if metadata.id.as_str() != manifest.plugin.id {
             crate::viewer::debug_log(&format!(
-                "Viewer plugin '{}' exported id '{}' (loaded from {})",
+                "startup: {} - native viewer plugin exported id '{}' (library='{}')",
                 manifest.plugin.id,
                 metadata.id,
-                library_path.display()
+                library_path
+                    .file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| library_path.display().to_string())
             ));
             continue;
         }
@@ -173,7 +197,30 @@ pub fn discover_viewer_rust_plugin_manifests(
         if !manifest_path.is_file() {
             continue;
         }
-        let manifest = read_manifest(&manifest_path)?;
+        // Check plugin type first without full parsing
+        let text = match fs::read_to_string(&manifest_path) {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        let generic: GenericManifest = match toml::from_str(&text) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if generic.plugin.plugin_type != "viewer-rust" {
+            continue;
+        }
+        // Now parse with full structure
+        let manifest = match read_manifest(&manifest_path) {
+            Ok(manifest) => manifest,
+            Err(err) => {
+                log_manifest_problem(
+                    "startup: native viewer plugin manifest parse error",
+                    &manifest_path,
+                    &err,
+                );
+                continue;
+            }
+        };
         if manifest.plugin.plugin_type != "viewer-rust" {
             continue;
         }
@@ -353,4 +400,60 @@ fn read_manifest(path: &Path) -> Result<NativePluginManifest> {
         }
     }
     Ok(manifest)
+}
+
+fn log_manifest_problem(prefix: &str, path: &Path, err: &anyhow::Error) {
+    let mut message = format!("{prefix} {} ({err})", path.display());
+    if let Ok(text) = fs::read_to_string(path) {
+        if let Ok(raw) = text.parse::<toml::Value>() {
+            if let Some(plugin) = raw.get("plugin").and_then(|value| value.as_table()) {
+                let mut missing = Vec::new();
+                for key in ["id", "name", "version", "description", "type"] {
+                    if plugin.get(key).is_none() {
+                        missing.push(key);
+                    }
+                }
+                if !missing.is_empty() {
+                    message.push_str(&format!(
+                        "; plugin table keys present: [{}], missing: [{}]",
+                        plugin
+                            .keys()
+                            .map(|key| key.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        missing.join(", ")
+                    ));
+                } else {
+                    message.push_str(&format!(
+                        "; plugin table keys present: [{}]",
+                        plugin
+                            .keys()
+                            .map(|key| key.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
+                if let Some(plugin_type) = plugin.get("type").and_then(|value| value.as_str()) {
+                    message.push_str(&format!("; plugin.type={plugin_type}"));
+                }
+            }
+        }
+
+        let excerpt = numbered_excerpt(&text, 20);
+        if !excerpt.is_empty() {
+            message.push_str("; excerpt:\n");
+            message.push_str(&excerpt);
+        }
+    }
+
+    crate::viewer::debug_log(&message);
+}
+
+fn numbered_excerpt(text: &str, max_lines: usize) -> String {
+    text.lines()
+        .take(max_lines)
+        .enumerate()
+        .map(|(idx, line)| format!("{:>3}: {}", idx + 1, line))
+        .collect::<Vec<_>>()
+        .join("\n")
 }

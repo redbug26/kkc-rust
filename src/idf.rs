@@ -1016,6 +1016,15 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             vec![format!(" Format: {}", gme.label), " Decoder family: Game Music Emu".into()],
         ))
+    } else if is_amstrad_dsk(&data, &ext) {
+        Some(info(
+            "application/x-amstrad-cpc-dsk",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
     } else if ext == "ayt" || looks_like_ayt(&data) {
         match parse_ayt_info(&data) {
             Ok(song) => Some(info(
@@ -1072,15 +1081,6 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             None,
             amsdos_lines(&data),
-        ))
-    } else if is_amstrad_dsk(&data, &ext) {
-        Some(info(
-            "application/x-amstrad-cpc-dsk",
-            path,
-            IdfKind::Archive,
-            None,
-            None,
-            vec![],
         ))
     } else if data.starts_with(b"ZXTape!\x1a") {
         Some(info(

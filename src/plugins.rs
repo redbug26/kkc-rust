@@ -2240,6 +2240,7 @@ fn load_plugins() -> Result<PluginRegistry> {
             ));
             Vec::new()
         });
+    let viewer_rust_loaded_count = viewer_rust_plugins.len();
     let loaded_viewers_by_id = viewer_rust_plugins
         .iter()
         .map(|plugin| plugin.id.clone())
@@ -2269,13 +2270,15 @@ fn load_plugins() -> Result<PluginRegistry> {
         ));
         Vec::new()
     });
-    let mut remote_rust_plugins = crate::remote_plugins::discover_remote_rust_plugins(&plugins_dir)
-        .unwrap_or_else(|err| {
-            crate::viewer::debug_log(&format!(
-                "startup: native remote plugin discovery failed: {err}"
-            ));
-            Vec::new()
-        });
+    let mut remote_rust_plugins =
+        crate::remote_plugins::discover_remote_rust_plugins_from_manifests(&remote_rust_manifests)
+            .unwrap_or_else(|err| {
+                crate::viewer::debug_log(&format!(
+                    "startup: native remote plugin discovery failed: {err}"
+                ));
+                Vec::new()
+            });
+    let remote_rust_loaded_count = remote_rust_plugins.len();
     let loaded_by_id = remote_rust_plugins
         .iter()
         .map(|plugin| plugin.id.clone())
@@ -2358,10 +2361,10 @@ fn load_plugins() -> Result<PluginRegistry> {
         load_start.elapsed().as_secs_f64() * 1000.0,
         archive_plugins.len(),
         viewer_plugins.len(),
-        viewer_rust_plugins.len(),
+        viewer_rust_loaded_count,
         audio_rust_plugins.len(),
         action_plugins.len(),
-        remote_rust_plugins.len()
+        remote_rust_loaded_count
     ));
     Ok(PluginRegistry {
         archive_plugins,
@@ -2867,13 +2870,46 @@ fn inspect_plugins(
         .set_name(script_path.to_string_lossy())
         .exec()?;
 
-    let manifest = load_lua_plugin_manifest(script_path.parent().unwrap_or(Path::new("")))?;
+    let plugin_dir = script_path.parent().unwrap_or(Path::new(""));
+    let manifest = load_lua_plugin_manifest(plugin_dir)?;
+    let plugin_id = manifest
+        .id
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            plugin_dir
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "unknown".to_string());
     let mut archives = registered_archives.borrow().clone();
     let mut viewers = registered_viewers.borrow().clone();
     let mut actions = registered_actions.borrow().clone();
     apply_lua_manifest_to_archive_plugins(&manifest, &mut archives);
     apply_lua_manifest_to_viewer_plugins(&manifest, &mut viewers);
     apply_lua_manifest_to_action_plugins(&manifest, &mut actions);
+
+    let mut plugin_types = Vec::new();
+    if !archives.is_empty() {
+        plugin_types.push("archive");
+    }
+    if !viewers.is_empty() {
+        plugin_types.push("viewer");
+    }
+    if !actions.is_empty() {
+        plugin_types.push("action");
+    }
+    let plugin_type = if plugin_types.is_empty() {
+        "unknown".to_string()
+    } else {
+        plugin_types.join(",")
+    };
+    crate::viewer::debug_log(&format!(
+        "startup: {} - {} lua plugin: 'plugin.toml'",
+        plugin_id, plugin_type
+    ));
 
     Ok((archives, viewers, actions))
 }

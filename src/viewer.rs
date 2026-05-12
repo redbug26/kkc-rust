@@ -377,10 +377,12 @@ impl Viewer {
             .bytes;
         let line_feed = LineFeedMode::Mixed;
         let image = detect_image_info(path, &raw);
-        let music = crate::tracker_audio::is_audio_path(path)
-            .then(|| crate::tracker_audio::audio_info(path, &raw).ok())
-            .flatten();
-        let mode = detect_mode(path, &raw);
+        let music = crate::tracker_audio::try_audio_info(path, &raw);
+        let mode = if music.is_some() {
+            ViewMode::Module
+        } else {
+            detect_mode(path, &raw)
+        };
         let encoding = default_encoding_for_mode(mode);
         let ansi_canvas_mode = if matches!(mode, ViewMode::Ansi) {
             detect_ansi_canvas_mode(&raw)
@@ -2148,14 +2150,15 @@ impl Viewer {
     }
 
     fn rebuild_decoded_lines(&mut self) {
+
+        crate::viewer::debug_log(&format!("Rebuilding decoded lines for {}", self.path.display()));
+
         // Clear cached lines — other modes will be rebuilt lazily when accessed.
         self.text_lines = Vec::new();
         self.ansi_lines = Vec::new();
         self.ansi_screen_lines = Vec::new();
         self.image = detect_image_info(&self.path, &self.raw);
-        self.music = crate::tracker_audio::is_audio_path(&self.path)
-            .then(|| crate::tracker_audio::audio_info(&self.path, &self.raw).ok())
-            .flatten();
+        self.music = crate::tracker_audio::try_audio_info(&self.path, &self.raw);
         // Immediately rebuild only the currently active mode.
         let mode = self.mode;
         self.ensure_mode_decoded(mode);

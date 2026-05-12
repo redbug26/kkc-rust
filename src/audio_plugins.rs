@@ -6,6 +6,10 @@ use std::env;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{OnceLock, RwLock};
+
+static AUDIO_PLUGIN_DISCOVERY_CACHE: OnceLock<RwLock<Option<Vec<AudioRustPluginInfo>>>> =
+    OnceLock::new();
 
 #[derive(Debug, Clone)]
 pub struct AudioRustPluginInfo {
@@ -22,6 +26,17 @@ pub struct AudioRustPluginInfo {
 struct NativePluginManifest {
     plugin: NativePluginMetadata,
     audio: Option<NativeAudioMetadata>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GenericPluginMetadata {
+    #[serde(rename = "type")]
+    plugin_type: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GenericManifest {
+    plugin: GenericPluginMetadata,
 }
 
 #[derive(Debug, Deserialize)]
@@ -42,6 +57,13 @@ struct NativeAudioMetadata {
 }
 
 pub fn discover_audio_rust_plugins(plugins_dir: &Path) -> Result<Vec<AudioRustPluginInfo>> {
+    let cache = AUDIO_PLUGIN_DISCOVERY_CACHE.get_or_init(|| RwLock::new(None));
+    if let Ok(guard) = cache.read()
+        && let Some(plugins) = guard.as_ref()
+    {
+        return Ok(plugins.clone());
+    }
+
     let mut plugins = Vec::new();
     for entry in fs::read_dir(plugins_dir)? {
         let entry = entry?;
@@ -53,6 +75,19 @@ pub fn discover_audio_rust_plugins(plugins_dir: &Path) -> Result<Vec<AudioRustPl
         if !manifest_path.is_file() {
             continue;
         }
+        // Check plugin type first without full parsing
+        let text = match fs::read_to_string(&manifest_path) {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        let generic: GenericManifest = match toml::from_str(&text) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if generic.plugin.plugin_type != "audio-rust" {
+            continue;
+        }
+        // Now parse with full structure
         let manifest = match read_manifest(&manifest_path) {
             Ok(manifest) => manifest,
             Err(err) => {
@@ -68,7 +103,7 @@ pub fn discover_audio_rust_plugins(plugins_dir: &Path) -> Result<Vec<AudioRustPl
 
         let Some(audio) = manifest.audio.as_ref() else {
             crate::viewer::debug_log(&format!(
-                "startup: native audio plugin '{}' missing [audio] section",
+                "startup: {} - native audio plugin missing [audio] section",
                 manifest.plugin.id
             ));
             continue;
@@ -76,11 +111,21 @@ pub fn discover_audio_rust_plugins(plugins_dir: &Path) -> Result<Vec<AudioRustPl
 
         let Some(library_path) = resolve_audio_library_path(&path, &audio.library) else {
             crate::viewer::debug_log(&format!(
-                "startup: native audio plugin '{}' has no built library",
-                manifest.plugin.id
+                "startup: {} - audio-rust plugin: '{}' not found",
+                manifest.plugin.id,
+                audio.library
             ));
             continue;
         };
+
+        crate::viewer::debug_log(&format!(
+            "startup: {} - audio-rust plugin: '{}'",
+            manifest.plugin.id,
+            library_path
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| library_path.display().to_string())
+        ));
 
         let module = match lib_header_from_path(&library_path)
             .and_then(|h| h.init_root_module::<AudioPluginModRef>())
@@ -88,7 +133,7 @@ pub fn discover_audio_rust_plugins(plugins_dir: &Path) -> Result<Vec<AudioRustPl
             Ok(module) => module,
             Err(err) => {
                 crate::viewer::debug_log(&format!(
-                    "startup: failed to load native audio plugin '{}': {err}",
+                    "startup: {} - failed to load native audio plugin: {err}",
                     manifest.plugin.id
                 ));
                 continue;
@@ -98,7 +143,7 @@ pub fn discover_audio_rust_plugins(plugins_dir: &Path) -> Result<Vec<AudioRustPl
         let api_version = module.api_version()();
         if api_version != KKC_AUDIO_PLUGIN_API_VERSION {
             crate::viewer::debug_log(&format!(
-                "Audio plugin '{}' uses API version {}, expected {}",
+                "startup: {} - native audio plugin uses API version {}, expected {}",
                 manifest.plugin.id, api_version, KKC_AUDIO_PLUGIN_API_VERSION
             ));
             continue;
@@ -107,7 +152,7 @@ pub fn discover_audio_rust_plugins(plugins_dir: &Path) -> Result<Vec<AudioRustPl
         let metadata = module.metadata()();
         if metadata.id.as_str() != manifest.plugin.id {
             crate::viewer::debug_log(&format!(
-                "Audio plugin '{}' exported id '{}'",
+                "startup: {} - native audio plugin exported id '{}'",
                 manifest.plugin.id, metadata.id
             ));
             continue;
@@ -153,6 +198,9 @@ pub fn discover_audio_rust_plugins(plugins_dir: &Path) -> Result<Vec<AudioRustPl
     }
 
     plugins.sort_by(|a, b| a.id.cmp(&b.id));
+    if let Ok(mut guard) = cache.write() {
+        *guard = Some(plugins.clone());
+    }
     Ok(plugins)
 }
 

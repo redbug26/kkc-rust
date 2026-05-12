@@ -76,6 +76,7 @@ pub enum MenuAction {
     QuickPreview,
     DebugLog,
     DownloadCloudFile,
+    CreateSelectionM3u,
     EnterArchivePlugin,
     ComparePanelFiles,
     ComparePanelInternal,

@@ -586,6 +586,9 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
         MenuAction::DownloadCloudFile => {
             app.cmd_download_cloud_files();
         }
+        MenuAction::CreateSelectionM3u => {
+            app.cmd_create_selection_m3u();
+        }
     }
     Ok(false)
 }

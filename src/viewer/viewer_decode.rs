@@ -118,11 +118,7 @@ fn ansi_cursor_targets_large_canvas(data: &[u8]) -> bool {
 }
 
 pub(super) fn detect_mode(path: &Path, data: &[u8]) -> ViewMode {
-    if crate::tracker_audio::is_audio_path(path)
-        && crate::tracker_audio::audio_info(path, data).is_ok()
-    {
-        ViewMode::Module
-    } else if looks_like_image(path, data) {
+    if looks_like_image(path, data) {
         ViewMode::Image
     } else if contains_ansi_escape(data) {
         ViewMode::Ansi

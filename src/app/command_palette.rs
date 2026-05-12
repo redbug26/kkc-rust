@@ -309,6 +309,14 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     },
     PaletteEntry {
         category: "Tools",
+        label: "Create m3u from selection",
+        shortname: "MakeM3U",
+        shortcut: None,
+        fn_name: "create_selection_m3u",
+        action: MenuAction::CreateSelectionM3u,
+    },
+    PaletteEntry {
+        category: "Tools",
         label: "Bookmarks",
         shortname: "QuickDir",
         shortcut: Some("Ctrl+D"),

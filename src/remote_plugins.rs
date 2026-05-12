@@ -33,6 +33,17 @@ struct NativePluginManifest {
 }
 
 #[derive(Debug, Deserialize)]
+struct GenericPluginMetadata {
+    #[serde(rename = "type")]
+    plugin_type: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GenericManifest {
+    plugin: GenericPluginMetadata,
+}
+
+#[derive(Debug, Deserialize)]
 struct NativePluginMetadata {
     id: String,
     name: String,
@@ -49,27 +60,39 @@ struct NativeRemoteMetadata {
 
 pub fn discover_remote_rust_plugins(plugins_dir: &Path) -> Result<Vec<RemoteRustPluginInfo>> {
     let manifests = discover_remote_rust_plugin_manifests(plugins_dir)?;
+    discover_remote_rust_plugins_from_manifests(&manifests)
+}
+
+pub fn discover_remote_rust_plugins_from_manifests(
+    manifests: &[RemoteRustPluginManifestInfo],
+) -> Result<Vec<RemoteRustPluginInfo>> {
     let mut plugins = Vec::new();
-    for manifest_info in manifests {
+    for manifest_info in manifests.iter().cloned() {
         let manifest = read_manifest(&manifest_info.dir.join("plugin.toml"))?;
+        let configured_library = manifest
+            .remote
+            .as_ref()
+            .expect("remote section")
+            .library
+            .clone();
         let Some(library_path) = resolve_remote_library_path(
             &manifest_info.dir,
-            &manifest.remote.as_ref().expect("remote section").library,
+            &configured_library,
         ) else {
             crate::viewer::debug_log(&format!(
-                "startup: native remote plugin '{}' has no built library at {}",
+                "startup: {} - remote-rust plugin: '{}' not found",
                 manifest.plugin.id,
-                manifest_info
-                    .dir
-                    .join(&manifest.remote.as_ref().expect("remote section").library)
-                    .display()
+                configured_library
             ));
             continue;
         };
         crate::viewer::debug_log(&format!(
-            "startup: loading native remote plugin '{}' from {}",
+            "startup: {} - remote-rust plugin: '{}'",
             manifest.plugin.id,
-            library_path.display()
+            library_path
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| library_path.display().to_string())
         ));
         // Use lib_header_from_path + init_root_module instead of load_from_file.
         // load_from_file caches in a process-global static (one per RootModule type),
@@ -80,7 +103,7 @@ pub fn discover_remote_rust_plugins(plugins_dir: &Path) -> Result<Vec<RemoteRust
             Ok(module) => module,
             Err(err) => {
                 crate::viewer::debug_log(&format!(
-                    "startup: failed to load native remote plugin '{}': {err}",
+                    "startup: {} - failed to load remote-rust plugin: {err}",
                     manifest.plugin.id
                 ));
                 continue;
@@ -89,7 +112,7 @@ pub fn discover_remote_rust_plugins(plugins_dir: &Path) -> Result<Vec<RemoteRust
         let api_version = module.api_version()();
         if api_version != KKC_REMOTE_PLUGIN_API_VERSION {
             crate::viewer::debug_log(&format!(
-                "Remote plugin '{}' uses API version {}, expected {}",
+                "startup: {} - native remote plugin uses API version {}, expected {}",
                 manifest.plugin.id, api_version, KKC_REMOTE_PLUGIN_API_VERSION
             ));
             continue;
@@ -97,10 +120,13 @@ pub fn discover_remote_rust_plugins(plugins_dir: &Path) -> Result<Vec<RemoteRust
         let metadata = module.metadata()();
         if metadata.id.as_str() != manifest.plugin.id {
             crate::viewer::debug_log(&format!(
-                "Remote plugin '{}' exported id '{}' (loaded from {})",
+                "startup: {} - native remote plugin exported id '{}' (library='{}')",
                 manifest.plugin.id,
                 metadata.id,
-                library_path.display()
+                library_path
+                    .file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| library_path.display().to_string())
             ));
             continue;
         }
@@ -131,6 +157,19 @@ pub fn discover_remote_rust_plugin_manifests(
         if !manifest_path.is_file() {
             continue;
         }
+        // Check plugin type first without full parsing
+        let text = match fs::read_to_string(&manifest_path) {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        let generic: GenericManifest = match toml::from_str(&text) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if generic.plugin.plugin_type != "remote-rust" {
+            continue;
+        }
+        // Now parse with full structure
         let manifest = match read_manifest(&manifest_path) {
             Ok(manifest) => manifest,
             Err(err) => {
@@ -144,11 +183,6 @@ pub fn discover_remote_rust_plugin_manifests(
         if manifest.plugin.plugin_type != "remote-rust" {
             continue;
         }
-        crate::viewer::debug_log(&format!(
-            "startup: remote plugin manifest accepted id='{}' dir={}",
-            manifest.plugin.id,
-            path.display()
-        ));
         plugins.push(RemoteRustPluginManifestInfo {
             id: manifest.plugin.id,
             name: manifest.plugin.name,
@@ -158,10 +192,6 @@ pub fn discover_remote_rust_plugin_manifests(
         });
     }
     plugins.sort_by(|a, b| a.id.cmp(&b.id));
-    crate::viewer::debug_log(&format!(
-        "startup: remote plugin manifest discovery result count={}",
-        plugins.len()
-    ));
     Ok(plugins)
 }
 

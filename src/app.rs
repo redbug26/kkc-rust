@@ -2720,6 +2720,57 @@ impl App {
         }
     }
 
+    pub fn cmd_create_selection_m3u(&mut self) {
+        if self.active_panel().is_remote_view() || self.active_panel().is_archive_view() {
+            self.notify("Create m3u is available on local directories only");
+            return;
+        }
+
+        let panel_path = self.active_panel().path.clone();
+        let playlist_name = panel_path
+            .file_name()
+            .map(|name| format!("{}.m3u", name.to_string_lossy()))
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| "playlist.m3u".to_string());
+        let output_path = panel_path.join(playlist_name);
+        let mut entries = self
+            .active_panel()
+            .effective_selection()
+            .into_iter()
+            .filter(|entry| {
+                !entry.is_dir
+                    && entry.name != ".."
+                    && entry.name != "[disconnect]"
+                    && entry.path != output_path
+            })
+            .map(|entry| entry.name.clone())
+            .collect::<Vec<_>>();
+
+        if entries.is_empty() {
+            self.notify("No file selected");
+            return;
+        }
+
+        entries.sort();
+        let mut text = entries.join("\n");
+        text.push('\n');
+
+        match fs::write(&output_path, text) {
+            Ok(()) => {
+                if self.config.auto_reload {
+                    self.reload_panels();
+                }
+                self.notify(format!(
+                    "Created {} with {} entr{}",
+                    output_path.display(),
+                    entries.len(),
+                    if entries.len() > 1 { "ies" } else { "y" }
+                ));
+            }
+            Err(e) => self.notify(format!("Cannot create m3u: {}", e)),
+        }
+    }
+
     /// Initiate a delete — show confirmation if enabled, else delete immediately.
     pub fn cmd_delete(&mut self) {
         let entries = self
