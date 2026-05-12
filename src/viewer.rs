@@ -2429,8 +2429,22 @@ fn fit_to_width(text: &str, width: usize) -> String {
     out
 }
 
+fn sanitize_tui_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '\r' | '\n' => out.push(' '),
+            '\t' => out.push_str("    "),
+            c if c.is_control() => {}
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 fn pad_to_width(text: &str, width: usize) -> String {
-    let mut out = fit_to_width(text, width);
+    let sanitized = sanitize_tui_text(text);
+    let mut out = fit_to_width(&sanitized, width);
     let used = UnicodeWidthStr::width(out.as_str());
     if used < width {
         out.push_str(&" ".repeat(width - used));
