@@ -184,34 +184,104 @@ pub fn render(f: &mut Frame, app: &App) {
             return;
         }
         AppMode::Viewer(v) => {
-            render_viewer(f, v, false, None, f.area(), true, true, None);
+            render_viewer(
+                f,
+                v,
+                false,
+                None,
+                f.area(),
+                true,
+                true,
+                None,
+                app.config.viewer.autoplay_delay_secs,
+            );
             return;
         }
         AppMode::ViewerSearching(v) => {
-            render_viewer(f, v, true, None, f.area(), true, true, None);
+            render_viewer(
+                f,
+                v,
+                true,
+                None,
+                f.area(),
+                true,
+                true,
+                None,
+                app.config.viewer.autoplay_delay_secs,
+            );
             return;
         }
         AppMode::ViewerGotoLine(v, input) => {
-            render_viewer(f, v, false, Some(input), f.area(), true, true, None);
+            render_viewer(
+                f,
+                v,
+                false,
+                Some(input),
+                f.area(),
+                true,
+                true,
+                None,
+                app.config.viewer.autoplay_delay_secs,
+            );
             return;
         }
         AppMode::ViewerGoto(v, state) => {
-            render_viewer(f, v, false, None, f.area(), true, true, None);
+            render_viewer(
+                f,
+                v,
+                false,
+                None,
+                f.area(),
+                true,
+                true,
+                None,
+                app.config.viewer.autoplay_delay_secs,
+            );
             render_viewer_goto(f, state, f.area());
             return;
         }
         AppMode::ViewerMenu(v, menu) => {
-            render_viewer(f, v, false, None, f.area(), true, true, None);
+            render_viewer(
+                f,
+                v,
+                false,
+                None,
+                f.area(),
+                true,
+                true,
+                None,
+                app.config.viewer.autoplay_delay_secs,
+            );
             render_viewer_menu(f, v, menu, f.area());
             return;
         }
         AppMode::ViewerPluginPalette(v, state) => {
-            render_viewer(f, v, false, None, f.area(), true, true, None);
+            render_viewer(
+                f,
+                v,
+                false,
+                None,
+                f.area(),
+                true,
+                true,
+                None,
+                app.config.viewer.autoplay_delay_secs,
+            );
             render_viewer_plugin_palette(f, state, f.area());
             return;
         }
         AppMode::AudioPlayerPalette(v, state) => {
-            render_viewer(f, v, false, None, f.area(), true, true, None);
+            render_viewer(
+                f,
+                v,
+                false,
+                None,
+                f.area(),
+                true,
+                true,
+                None,
+                app.config.viewer.autoplay_delay_secs,
+            );
             render_audio_player_palette(f, state, f.area());
             return;
         }

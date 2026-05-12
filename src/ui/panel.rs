@@ -56,7 +56,17 @@ fn render_quick_preview(
     } else {
         format!("[{}]  Tab=focus", mode_str)
     };
-    super::render_viewer(f, viewer, false, None, area, false, active, Some(&label));
+    super::render_viewer(
+        f,
+        viewer,
+        false,
+        None,
+        area,
+        false,
+        active,
+        Some(&label),
+        app.config.viewer.autoplay_delay_secs,
+    );
 }
 
 pub(super) fn render_center_buttons(f: &mut Frame, app: &App, area: Rect) {

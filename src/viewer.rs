@@ -19,6 +19,7 @@ use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 mod syntax;
@@ -112,7 +113,9 @@ pub struct Viewer {
     pub matches: Vec<usize>,
     pub match_pos: usize,
     pub zoomed: bool,
+    pub autoplay: bool,
     pub save_position: bool,
+    opened_at: Instant,
     pub encoding: EncodingMode,
     pub line_feed: LineFeedMode,
     ansi_canvas_mode: AnsiCanvasMode,
@@ -331,7 +334,9 @@ impl Viewer {
             matches: Vec::new(),
             match_pos: 0,
             zoomed: false,
+            autoplay: false,
             save_position: false,
+            opened_at: Instant::now(),
             encoding: EncodingMode::Plain,
             line_feed: LineFeedMode::UnixLf,
             ansi_canvas_mode: AnsiCanvasMode::Fixed80x25,
@@ -403,7 +408,9 @@ impl Viewer {
             matches: Vec::new(),
             match_pos: 0,
             zoomed: false,
+            autoplay: matches!(mode, ViewMode::Module),
             save_position: true,
+            opened_at: Instant::now(),
             encoding,
             line_feed,
             ansi_canvas_mode,
@@ -505,6 +512,19 @@ impl Viewer {
         if self.zoomed { "Full" } else { "Auto" }
     }
 
+    pub fn autoplay_display(&self, delay_secs: u64) -> String {
+        if !self.autoplay {
+            return "Off".into();
+        }
+        if matches!(self.mode, ViewMode::Module) {
+            "On".into()
+        } else {
+            let elapsed = self.autoplay_elapsed().as_secs();
+            let remaining = delay_secs.saturating_sub(elapsed);
+            format!("{}", remaining)
+        }
+    }
+
     pub fn encoding_label(&self) -> &'static str {
         match self.encoding {
             EncodingMode::Plain => "Plain",
@@ -549,10 +569,13 @@ impl Viewer {
         self.plugin_state = HashMap::new();
         self.ensure_mode_decoded(mode);
         if matches!(mode, ViewMode::Module) {
+            self.autoplay = true;
             self.start_module_playback();
         } else {
+            self.autoplay = false;
             crate::tracker_audio::stop_module_if_path(&self.path);
         }
+        self.opened_at = Instant::now();
         self.scroll = 0;
         self.hscroll = 0;
         self.rebuild_matches();
@@ -568,12 +591,27 @@ impl Viewer {
         self.viewer_plugin = Some(plugin_name);
         self.plugin_state = HashMap::new();
         self.ensure_mode_decoded(mode);
+        self.autoplay = false;
+        self.opened_at = Instant::now();
         if matches!(mode, ViewMode::Image) {
             self.zoomed = true;
         }
         self.scroll = 0;
         self.hscroll = 0;
         self.rebuild_matches();
+    }
+
+    pub fn set_autoplay(&mut self, enabled: bool) {
+        self.autoplay = enabled;
+        self.opened_at = Instant::now();
+    }
+
+    pub fn toggle_autoplay(&mut self) {
+        self.set_autoplay(!self.autoplay);
+    }
+
+    pub fn autoplay_elapsed(&self) -> Duration {
+        self.opened_at.elapsed()
     }
 
     pub fn set_line_feed(&mut self, mode: LineFeedMode) {

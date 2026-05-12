@@ -1762,7 +1762,7 @@ impl App {
         self.poll_tree_view();
         self.poll_store_install();
         self.poll_quick_preview();
-        self.poll_audio_autoadvance();
+        self.poll_viewer_autoplay();
         // Auto-clear status bar text after 30 seconds.
         if let Some(set_at) = self.status.set_at {
             if set_at.elapsed() >= std::time::Duration::from_secs(30) {
@@ -1904,23 +1904,47 @@ impl App {
         }
     }
 
-    fn poll_audio_autoadvance(&mut self) {
-        let Some(path) = (match &self.mode {
-            AppMode::Viewer(viewer) if matches!(viewer.mode, ViewMode::Module) => {
-                Some(viewer.path.clone())
-            }
+    fn poll_viewer_autoplay(&mut self) {
+        let Some((path, mode, autoplay, elapsed)) = (match &self.mode {
+            AppMode::Viewer(viewer) => Some((
+                viewer.path.clone(),
+                viewer.mode,
+                viewer.autoplay,
+                viewer.autoplay_elapsed(),
+            )),
             _ => None,
         }) else {
             return;
         };
 
-        if !crate::tracker_audio::playback_finished_for_path(&path) {
+        if !autoplay {
             return;
         }
 
-        crate::tracker_audio::stop_module_if_path(&path);
-        let Some(next_idx) = self.next_audio_entry_index() else {
-            self.notify("Audio playback finished");
+        if matches!(mode, ViewMode::Module) {
+            if !crate::tracker_audio::playback_finished_for_path(&path) {
+                return;
+            }
+
+            crate::tracker_audio::stop_module_if_path(&path);
+            let Some(next_idx) = self.next_audio_entry_index() else {
+                return;
+            };
+
+            let panel = self.active_panel_mut();
+            panel.cursor = next_idx;
+            if panel.cursor < panel.scroll {
+                panel.scroll = panel.cursor;
+            }
+            self.open_viewer_with_autoplay(Some(true));
+            return;
+        }
+
+        if elapsed.as_secs() < self.config.viewer.autoplay_delay_secs {
+            return;
+        }
+
+        let Some(next_idx) = self.adjacent_viewer_file_index(1) else {
             return;
         };
 
@@ -1929,7 +1953,7 @@ impl App {
         if panel.cursor < panel.scroll {
             panel.scroll = panel.cursor;
         }
-        self.open_viewer();
+        self.open_viewer_with_autoplay(Some(true));
     }
 
     fn next_audio_entry_index(&self) -> Option<usize> {
@@ -2890,6 +2914,10 @@ impl App {
     }
 
     pub fn open_viewer(&mut self) {
+        self.open_viewer_with_autoplay(None);
+    }
+
+    fn open_viewer_with_autoplay(&mut self, force_autoplay: Option<bool>) {
         if let Some(entry) = self.active_panel().current_entry().cloned() {
             if entry.is_dir || entry.name == ".." {
                 let v = Viewer::placeholder(&entry.path, "Folder", self.config.viewer.word_wrap);
@@ -2931,6 +2959,8 @@ impl App {
                     } else if !matches!(v.mode, ViewMode::Image) {
                         v.zoomed = self.config.viewer.default_zoom;
                     }
+                    let autoplay = force_autoplay.unwrap_or(matches!(v.mode, ViewMode::Module));
+                    v.set_autoplay(autoplay);
                     self.mode = AppMode::Viewer(v);
                 }
                 Err(e) => self.notify(format!("Cannot open viewer: {}", e)),

@@ -114,20 +114,6 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
     }
 
     match fn_key {
-        Some(10) => {
-            if let AppMode::Viewer(ref v) = app.mode {
-                v.save_position();
-            }
-            app.mode = AppMode::Browse;
-            return Ok(false);
-        }
-        Some(7) => {
-            let AppMode::Viewer(v) = std::mem::replace(&mut app.mode, AppMode::Browse) else {
-                return Ok(false);
-            };
-            app.mode = AppMode::ViewerSearching(v);
-            return Ok(false);
-        }
         Some(3) => {
             let AppMode::Viewer(v) = std::mem::replace(&mut app.mode, AppMode::Browse) else {
                 return Ok(false);
@@ -218,6 +204,7 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
             KeyCode::Left => v.scroll_left(8),
             KeyCode::Right => v.scroll_right(8),
             KeyCode::Char('a') if matches!(v.mode, ViewMode::Ansi) => v.toggle_ansi_canvas_mode(),
+            KeyCode::Char('p') => v.toggle_autoplay(),
             KeyCode::Char('n') => v.search_next(),
             KeyCode::Char('N') => v.search_prev(),
             _ => {}

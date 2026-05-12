@@ -238,6 +238,9 @@ pub struct ViewerConfig {
     /// Open the viewer in zoomed (full-screen) mode by default.
     #[serde(default = "t")]
     pub default_zoom: bool,
+    /// Delay before autoplay advances to next non-audio file.
+    #[serde(default = "viewer_autoplay_delay_secs_default")]
+    pub autoplay_delay_secs: u64,
 }
 
 impl Default for ViewerConfig {
@@ -246,6 +249,7 @@ impl Default for ViewerConfig {
             word_wrap: true,
             tab_width: 4,
             default_zoom: true,
+            autoplay_delay_secs: viewer_autoplay_delay_secs_default(),
         }
     }
 }
@@ -614,6 +618,10 @@ impl Config {
             "viewer.default_zoom = {}\n",
             self.viewer.default_zoom
         ));
+        out.push_str(&format!(
+            "viewer.autoplay_delay_secs = {}\n",
+            self.viewer.autoplay_delay_secs
+        ));
         out.push('\n');
 
         // ─── External ─────────────────────────────────────────────────────
@@ -884,6 +892,10 @@ fn transition_quit_effect_default() -> String {
     ScreenTransitionEffect::Melt.as_config_name().to_string()
 }
 
+fn viewer_autoplay_delay_secs_default() -> u64 {
+    15
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -908,6 +920,7 @@ mod tests {
         cfg.viewer.word_wrap = false;
         cfg.viewer.tab_width = 8;
         cfg.viewer.default_zoom = false;
+        cfg.viewer.autoplay_delay_secs = 9;
         cfg.editor = "vim".into();
         cfg.pager = "less -R".into();
         cfg.store_index_path = "/tmp/store-index.json".into();
@@ -943,6 +956,7 @@ mod tests {
         assert_eq!(parsed.transition.quit_effect, "melt");
         assert!(!parsed.viewer.word_wrap);
         assert_eq!(parsed.viewer.tab_width, 8);
+        assert_eq!(parsed.viewer.autoplay_delay_secs, 9);
         assert_eq!(parsed.editor, "vim");
         assert_eq!(parsed.store_index_path, "/tmp/store-index.json");
         assert_eq!(parsed.dir_history_max, 64);

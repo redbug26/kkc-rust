@@ -15,6 +15,10 @@ pub(crate) fn viewer_footer_shortcuts(v: &Viewer) -> Vec<FooterShortcut> {
                 label: "F5:Zoom",
                 key: KeyCode::F(5),
             },
+            FooterShortcut {
+                label: "p:Autoplay",
+                key: KeyCode::Char('p'),
+            },
         ]
     } else if matches!(v.mode, ViewMode::Module) {
         vec![
@@ -38,13 +42,13 @@ pub(crate) fn viewer_footer_shortcuts(v: &Viewer) -> Vec<FooterShortcut> {
                 label: "F5:Zoom",
                 key: KeyCode::F(5),
             },
+            FooterShortcut {
+                label: "p:Autoplay",
+                key: KeyCode::Char('p'),
+            },
         ]
     } else {
         let mut shortcuts = vec![
-            FooterShortcut {
-                label: "F10:Close",
-                key: KeyCode::F(10),
-            },
             FooterShortcut {
                 label: "F2:Wrap",
                 key: KeyCode::F(2),
@@ -66,10 +70,6 @@ pub(crate) fn viewer_footer_shortcuts(v: &Viewer) -> Vec<FooterShortcut> {
                 key: KeyCode::F(6),
             },
             FooterShortcut {
-                label: "F7:Search",
-                key: KeyCode::F(7),
-            },
-            FooterShortcut {
                 label: "F8:Enc",
                 key: KeyCode::F(8),
             },
@@ -77,6 +77,11 @@ pub(crate) fn viewer_footer_shortcuts(v: &Viewer) -> Vec<FooterShortcut> {
                 label: "F9:Syntax",
                 key: KeyCode::F(9),
             },
+            FooterShortcut {
+                label: "/:Search",
+                key: KeyCode::Char('/'),
+            },
+
         ];
         if matches!(v.mode, ViewMode::Ansi) {
             shortcuts.push(FooterShortcut {
@@ -84,6 +89,10 @@ pub(crate) fn viewer_footer_shortcuts(v: &Viewer) -> Vec<FooterShortcut> {
                 key: KeyCode::Char('a'),
             });
         }
+        shortcuts.push(FooterShortcut {
+            label: "p:Autoplay",
+            key: KeyCode::Char('p'),
+        });
         shortcuts.push(FooterShortcut {
             label: "g:Goto",
             key: KeyCode::Char('g'),
@@ -341,6 +350,7 @@ pub(super) fn render_viewer(
     show_footer: bool,
     active: bool,
     quick_preview_label: Option<&str>,
+    autoplay_delay_secs: u64,
 ) {
     let (footer_area, viewer_host) = if show_footer {
         let footer = clamp_rect(
@@ -422,6 +432,7 @@ pub(super) fn render_viewer(
         .map(|name| format!(" Plugin:{} ", name))
         .unwrap_or_default();
     let zoom_info = format!(" Zoom:{} ", v.zoom_label());
+    let autoplay_info = format!(" Autoplay:{} ", v.autoplay_display(autoplay_delay_secs));
     let image_info = if let Some(image) = v.image_info() {
         match (image.width, image.height) {
             (Some(w), Some(h)) => format!(" {} {}x{} ", image.format, w, h),
@@ -431,7 +442,7 @@ pub(super) fn render_viewer(
         String::new()
     };
     let title = format!(
-        " {} [{}] {}/{}{}{}{}{}{}{}{}{}{}{} ",
+        " {} [{}] {}/{}{}{}{}{}{}{}{}{}{}{}{} ",
         file_name,
         v.mode_label(),
         v.scroll + 1,
@@ -444,6 +455,7 @@ pub(super) fn render_viewer(
         ansi_canvas_info,
         plugin_info,
         zoom_info,
+        autoplay_info,
         col_info,
         match_info,
     );
