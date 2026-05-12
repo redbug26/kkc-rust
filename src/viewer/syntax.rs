@@ -101,6 +101,218 @@ fn detect_lang(path: &Path) -> Option<MaskKind> {
     })
 }
 
+pub(super) fn is_markdown_path(path: &Path) -> bool {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    matches!(ext.as_str(), "md" | "markdown" | "mdown" | "mkd")
+}
+
+pub(super) fn highlight_markdown_line(line: &str) -> Line<'static> {
+    if line.trim().is_empty() {
+        return Line::from(Span::raw(String::new()));
+    }
+
+    if let Some((marks, title)) = markdown_heading(line) {
+        return Line::from(vec![
+            Span::styled(marks.to_string(), pre().add_modifier(Modifier::BOLD)),
+            Span::raw(" "),
+            Span::styled(title.to_string(), kw().add_modifier(Modifier::BOLD)),
+        ]);
+    }
+
+    if line.trim_start().starts_with('>') {
+        let indent = line.len().saturating_sub(line.trim_start().len());
+        let text = line.trim_start().trim_start_matches('>').trim_start();
+        let mut spans = vec![
+            Span::raw(" ".repeat(indent)),
+            Span::styled("│ ", cmt().add_modifier(Modifier::BOLD)),
+        ];
+        spans.extend(markdown_inline_spans(text, cmt()));
+        return Line::from(spans);
+    }
+
+    if let Some((prefix, text)) = markdown_list_item(line) {
+        let mut spans = vec![Span::styled(
+            prefix.to_string(),
+            op().add_modifier(Modifier::BOLD),
+        )];
+        spans.extend(markdown_inline_spans(text, pl()));
+        return Line::from(spans);
+    }
+
+    if is_markdown_table_separator(line) {
+        return Line::from(Span::styled(line.to_string(), cmt()));
+    }
+
+    if line.contains('|') {
+        return markdown_table_line(line);
+    }
+
+    if line.trim_start().starts_with("---") || line.trim_start().starts_with("***") {
+        return Line::from(Span::styled(line.to_string(), cmt()));
+    }
+
+    Line::from(markdown_inline_spans(line, pl()))
+}
+
+fn markdown_heading(line: &str) -> Option<(&str, &str)> {
+    let trimmed = line.trim_start();
+    let indent = line.len().saturating_sub(trimmed.len());
+    if indent > 3 {
+        return None;
+    }
+    let count = trimmed.chars().take_while(|&ch| ch == '#').count();
+    if count == 0 || count > 6 {
+        return None;
+    }
+    let rest = &trimmed[count..];
+    rest.strip_prefix(' ')
+        .map(|title| (&trimmed[..count], title))
+}
+
+fn markdown_list_item(line: &str) -> Option<(&str, &str)> {
+    let trimmed = line.trim_start();
+    let indent = line.len().saturating_sub(trimmed.len());
+    if let Some(rest) = trimmed
+        .strip_prefix("- ")
+        .or_else(|| trimmed.strip_prefix("* "))
+        .or_else(|| trimmed.strip_prefix("+ "))
+    {
+        let prefix_len = indent + 2;
+        return Some((&line[..prefix_len], rest));
+    }
+
+    let marker_len = trimmed
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .map(char::len_utf8)
+        .sum::<usize>();
+    if marker_len > 0 {
+        let after_digits = &trimmed[marker_len..];
+        if let Some(rest) = after_digits
+            .strip_prefix(". ")
+            .or_else(|| after_digits.strip_prefix(") "))
+        {
+            let prefix_len = indent + marker_len + 2;
+            return Some((&line[..prefix_len], rest));
+        }
+    }
+
+    None
+}
+
+fn is_markdown_table_separator(line: &str) -> bool {
+    let trimmed = line.trim();
+    if !trimmed.contains('|') {
+        return false;
+    }
+    let cells = trimmed.trim_matches('|').split('|');
+    let mut count = 0;
+    for cell in cells {
+        let cell = cell.trim();
+        if cell.is_empty() || !cell.chars().all(|ch| matches!(ch, '-' | ':' | ' ')) {
+            return false;
+        }
+        count += 1;
+    }
+    count > 0
+}
+
+fn markdown_table_line(line: &str) -> Line<'static> {
+    let mut spans = Vec::new();
+    let mut current = String::new();
+    for ch in line.chars() {
+        if ch == '|' {
+            if !current.is_empty() {
+                spans.extend(markdown_inline_spans(&current, pl()));
+                current.clear();
+            }
+            spans.push(Span::styled("|".to_string(), op()));
+        } else {
+            current.push(ch);
+        }
+    }
+    if !current.is_empty() {
+        spans.extend(markdown_inline_spans(&current, pl()));
+    }
+    Line::from(spans)
+}
+
+fn markdown_inline_spans(text: &str, base: Style) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    let mut rest = text;
+
+    while !rest.is_empty() {
+        let candidates = [
+            rest.find('`').map(|idx| (idx, "`")),
+            rest.find("**").map(|idx| (idx, "**")),
+            rest.find('*').map(|idx| (idx, "*")),
+            rest.find('[').map(|idx| (idx, "[")),
+        ];
+        let Some((idx, marker)) = candidates.into_iter().flatten().min_by_key(|(idx, _)| *idx)
+        else {
+            spans.push(Span::styled(rest.to_string(), base));
+            break;
+        };
+
+        if idx > 0 {
+            spans.push(Span::styled(rest[..idx].to_string(), base));
+        }
+        rest = &rest[idx..];
+
+        if marker == "`"
+            && let Some(end) = rest[1..].find('`')
+        {
+            spans.push(Span::styled(rest[1..1 + end].to_string(), str_s()));
+            rest = &rest[1 + end + 1..];
+            continue;
+        }
+
+        if marker == "**"
+            && let Some(end) = rest[2..].find("**")
+        {
+            spans.push(Span::styled(
+                rest[2..2 + end].to_string(),
+                base.add_modifier(Modifier::BOLD),
+            ));
+            rest = &rest[2 + end + 2..];
+            continue;
+        }
+
+        if marker == "*"
+            && let Some(end) = rest[1..].find('*')
+        {
+            spans.push(Span::styled(rest[1..1 + end].to_string(), pre()));
+            rest = &rest[1 + end + 1..];
+            continue;
+        }
+
+        if marker == "["
+            && let Some(close) = rest.find("](")
+            && let Some(end) = rest[close + 2..].find(')')
+        {
+            let label = &rest[1..close];
+            let url = &rest[close + 2..close + 2 + end];
+            spans.push(Span::styled(
+                label.to_string(),
+                var_lang().add_modifier(Modifier::BOLD),
+            ));
+            spans.push(Span::styled(format!(" ({url})"), cmt()));
+            rest = &rest[close + 2 + end + 1..];
+            continue;
+        }
+
+        let ch_len = rest.chars().next().map(char::len_utf8).unwrap_or(1);
+        spans.push(Span::styled(rest[..ch_len].to_string(), base));
+        rest = &rest[ch_len..];
+    }
+
+    spans
+}
+
 // ── Public API ────────────────────────────────────────────────────────────
 
 /// Highlight one (display) line.

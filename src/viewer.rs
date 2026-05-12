@@ -336,7 +336,7 @@ impl Viewer {
             line_feed: LineFeedMode::UnixLf,
             ansi_canvas_mode: AnsiCanvasMode::Fixed80x25,
             mask: MaskKind::Auto,
-            mask_enabled: false,
+            mask_enabled: true,
             preproc_ops: Vec::new(),
             text_lines: lines,
             ansi_lines: Vec::new(),
@@ -1693,6 +1693,13 @@ impl Viewer {
 
         if let Some(highlighted) = self.render_plugin_lines(&display_lines, selected_width) {
             return highlighted;
+        }
+
+        if syntax::is_markdown_path(&self.path) {
+            return display_lines
+                .into_iter()
+                .map(|line| syntax::highlight_markdown_line(&line))
+                .collect();
         }
 
         // Syntax highlight ─────────────────────────────────────────────────

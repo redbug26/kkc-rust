@@ -7,15 +7,14 @@ use std::num::NonZero;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
+use xmrs::duration::ModuleDuration;
 use xmrs::fixed::units::Amplification;
 use xmrs::prelude::*;
 use xmrsplayer::prelude::XmrsPlayer;
 
 const SAMPLE_RATE: u32 = 48_000;
-const SAMPLE_RATE_FAST: u32 = 128;
 const BUFFER_SIZE: usize = 2048;
 const SPECTRUM_BANDS: usize = 96;
-const MAX_TRACKER_DURATION_SCAN_SAMPLES: u64 = SAMPLE_RATE_FAST as u64 * 60 * 60 * 6;
 
 #[derive(Debug, Clone)]
 pub struct TrackerModuleInfo {
@@ -363,7 +362,7 @@ pub fn play_audio_bytes(path: PathBuf, bytes: &[u8]) -> Result<TrackerModuleInfo
 fn play_tracker_bytes(path: PathBuf, bytes: &[u8]) -> Result<TrackerModuleInfo> {
     let module = Module::load(bytes).map_err(|err| anyhow!("Loading tracker module: {err:?}"))?;
     let mut info = info_from_module(&module);
-    info.duration = tracker_module_duration(&module);
+    info.duration = Some(module.duration(0));
 
     let module_ref: &'static Module = Box::leak(Box::new(module));
     let mut xmrs_player = XmrsPlayer::new(module_ref, SAMPLE_RATE, 0);
@@ -554,21 +553,6 @@ fn info_from_module(module: &Module) -> TrackerModuleInfo {
             .collect(),
         text_tracks: module_text_tracks(module),
     }
-}
-
-fn tracker_module_duration(module: &Module) -> Option<Duration> {
-    let mut player = XmrsPlayer::new(module, SAMPLE_RATE_FAST, 0);
-    player.set_max_loop_count(1);
-    let mut samples = 0u64;
-    while player.sample(false).is_some() {
-        samples += 1;
-        if samples > MAX_TRACKER_DURATION_SCAN_SAMPLES {
-            return None;
-        }
-    }
-    Some(Duration::from_secs_f64(
-        samples as f64 / SAMPLE_RATE_FAST as f64,
-    ))
 }
 
 fn decoded_audio_info(path: &Path, bytes: &[u8]) -> Result<TrackerModuleInfo> {

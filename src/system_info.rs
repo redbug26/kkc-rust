@@ -6,11 +6,17 @@ const CREDITS_JSON: &str = include_str!("../credits.json");
 
 pub fn render_system_info(app: &App) -> String {
     let mut out = String::new();
+    let crates = credits_crates(CREDITS_JSON);
 
-    push_header(&mut out, "KKC");
+    push_header(&mut out, 1, "KKC");
+    out.push_str("> ");
+    out.push_str(env!("CARGO_PKG_DESCRIPTION"));
+    out.push_str("\n\n");
+
+    push_header(&mut out, 2, "Application");
+    push_table_header(&mut out);
     push_kv(&mut out, "Name", env!("CARGO_PKG_NAME"));
     push_kv(&mut out, "Version", env!("CARGO_PKG_VERSION"));
-    push_kv(&mut out, "Description", env!("CARGO_PKG_DESCRIPTION"));
     push_kv(&mut out, "Authors", env!("CARGO_PKG_AUTHORS"));
     push_kv(&mut out, "Target", std::env::consts::OS);
     push_kv(&mut out, "Arch", std::env::consts::ARCH);
@@ -22,7 +28,8 @@ pub fn render_system_info(app: &App) -> String {
             .unwrap_or_else(|err| format!("<unavailable: {err}>")),
     );
 
-    push_header(&mut out, "Paths");
+    push_header(&mut out, 2, "Paths");
+    push_table_header(&mut out);
     push_result_path(&mut out, "Config", crate::config::config_path());
     push_result_path(&mut out, "State", crate::config::state_path());
     push_result_path(&mut out, "Data dir", crate::config::data_dir());
@@ -54,7 +61,8 @@ pub fn render_system_info(app: &App) -> String {
     push_kv(&mut out, "Active panel", app.active_panel().display_path());
     push_kv(&mut out, "Other panel", app.other_panel().display_path());
 
-    push_header(&mut out, "Runtime");
+    push_header(&mut out, 2, "Runtime");
+    push_table_header(&mut out);
     push_kv(
         &mut out,
         "Panel view",
@@ -85,46 +93,37 @@ pub fn render_system_info(app: &App) -> String {
         if app.config.debug_log { "on" } else { "off" },
     );
 
-    let crates = credits_crates(CREDITS_JSON);
-    push_header(&mut out, "Crates");
-    push_kv(&mut out, "Credited crates", crates.len().to_string());
-    for krate in crates {
-        out.push_str("  ");
-        out.push_str(&krate.name);
-        out.push(' ');
-        out.push_str(&krate.version);
-        if !krate.authors.is_empty() {
-            out.push_str("  by ");
-            out.push_str(&krate.authors.join(", "));
-        }
-        out.push('\n');
-        if !krate.description.is_empty() {
-            out.push_str("    ");
-            out.push_str(&single_line(&krate.description));
-            out.push('\n');
-        }
-        if let Some(url) = krate.repository.as_deref().or(krate.homepage.as_deref()) {
-            out.push_str("    ");
-            out.push_str(url);
-            out.push('\n');
-        }
-    }
+    push_header(&mut out, 2, "Open Source Credits");
+    out.push_str(&format!(
+        "**{} crates** credited from `credits.json`.\n\n",
+        crates.len()
+    ));
+    push_credit_groups(&mut out, &crates);
 
     out
 }
 
-fn push_header(out: &mut String, title: &str) {
+fn push_header(out: &mut String, level: usize, title: &str) {
     if !out.is_empty() {
         out.push('\n');
     }
+    out.push_str(&"#".repeat(level.clamp(1, 6)));
+    out.push(' ');
     out.push_str(title);
-    out.push('\n');
-    out.push_str(&"-".repeat(title.len()));
-    out.push('\n');
+    out.push_str("\n\n");
+}
+
+fn push_table_header(out: &mut String) {
+    out.push_str("| Item | Value |\n");
+    out.push_str("| --- | --- |\n");
 }
 
 fn push_kv(out: &mut String, key: &str, value: impl AsRef<str>) {
-    out.push_str(&format!("{key:<16} {}\n", value.as_ref()));
+    out.push_str("| **");
+    out.push_str(&escape_markdown_cell(key));
+    out.push_str("** | ");
+    out.push_str(&escape_markdown_cell(value.as_ref()));
+    out.push_str(" |\n");
 }
 
 fn push_result_path(out: &mut String, key: &str, path: anyhow::Result<PathBuf>) {
@@ -164,6 +163,67 @@ fn credits_crates(json: &str) -> Vec<CrateInfo> {
 
 fn single_line(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn push_credit_groups(out: &mut String, crates: &[CrateInfo]) {
+    let mut current_group: Option<char> = None;
+    for krate in crates {
+        let group = krate
+            .name
+            .chars()
+            .next()
+            .map(|ch| ch.to_ascii_uppercase())
+            .filter(|ch| ch.is_ascii_alphanumeric())
+            .unwrap_or('#');
+        if current_group != Some(group) {
+            current_group = Some(group);
+            push_header(out, 3, &group.to_string());
+        }
+        push_credit(out, krate);
+    }
+}
+
+fn push_credit(out: &mut String, krate: &CrateInfo) {
+    out.push_str("- **");
+    out.push_str(&escape_markdown_text(&krate.name));
+    out.push_str("** `");
+    out.push_str(&escape_markdown_text(&krate.version));
+    out.push('`');
+
+    if !krate.authors.is_empty() {
+        out.push_str(" - ");
+        out.push_str(&escape_markdown_text(&krate.authors.join(", ")));
+    }
+    out.push('\n');
+
+    if !krate.description.is_empty() {
+        out.push_str("  - ");
+        out.push_str(&escape_markdown_text(&single_line(&krate.description)));
+        out.push('\n');
+    }
+
+    if let Some(url) = krate.repository.as_deref().or(krate.homepage.as_deref()) {
+        out.push_str("  - [project](");
+        out.push_str(&escape_markdown_url(url));
+        out.push_str(")\n");
+    }
+}
+
+fn escape_markdown_cell(value: &str) -> String {
+    escape_markdown_text(&single_line(value)).replace('|', "\\|")
+}
+
+fn escape_markdown_text(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('`', "\\`")
+        .replace('*', "\\*")
+        .replace('[', "\\[")
+        .replace(']', "\\]")
+}
+
+fn escape_markdown_url(value: &str) -> String {
+    value.replace(')', "%29")
 }
 
 #[cfg(test)]

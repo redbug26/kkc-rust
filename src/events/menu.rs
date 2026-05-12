@@ -524,7 +524,7 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
         }
         MenuAction::SystemInfo => {
             let text = crate::system_info::render_system_info(app);
-            let path = std::path::Path::new("KKC information");
+            let path = std::path::Path::new("KKC information.md");
             app.mode = AppMode::Viewer(crate::viewer::Viewer::placeholder(
                 path,
                 &text,
