@@ -5,8 +5,9 @@ mod viewer;
 use self::menu::handle_menu;
 use self::palette::{handle_command_palette, handle_store_install_palette};
 use self::viewer::{
-    handle_mouse_viewer, handle_viewer, handle_viewer_goto, handle_viewer_goto_line,
-    handle_viewer_menu, handle_viewer_plugin_palette, handle_viewer_searching,
+    handle_audio_player_palette, handle_mouse_viewer, handle_viewer,
+    handle_viewer_goto, handle_viewer_goto_line, handle_viewer_menu,
+    handle_viewer_plugin_palette, handle_viewer_searching,
 };
 use crate::app::{
     ActivePanel, App, AppMode, AssocEditorState, AssocInputAction, AssocInputDialog,
@@ -119,6 +120,10 @@ pub fn handle_event(app: &mut App, event: Event) -> Result<bool> {
                 return Ok(false);
             }
 
+            if app.action_for_key(key) == Some(MenuAction::Quit) {
+                return menu::execute_menu_action(app, MenuAction::Quit);
+            }
+
             if let Some(result) = handle_key_mode(app, key) {
                 return result;
             }
@@ -143,6 +148,7 @@ fn handle_key_mode(app: &mut App, key: KeyEvent) -> Option<Result<bool>> {
         AppMode::ViewerGoto(_, _) => Some(handle_viewer_goto(app, key)),
         AppMode::ViewerMenu(_, _) => Some(handle_viewer_menu(app, key)),
         AppMode::ViewerPluginPalette(_, _) => Some(handle_viewer_plugin_palette(app, key)),
+        AppMode::AudioPlayerPalette(_, _) => Some(handle_audio_player_palette(app, key)),
         AppMode::Confirm(_) => Some(handle_confirm(app, key)),
         AppMode::Input(_) => Some(handle_input(app, key)),
         AppMode::AssocInput(_) => Some(handle_assoc_input(app, key)),

@@ -2197,8 +2197,22 @@ impl Viewer {
         }
     }
 
-    fn start_module_playback(&mut self) {
-        match crate::tracker_audio::play_audio_bytes(self.path.clone(), &self.raw) {
+    pub fn start_module_playback(&mut self) {
+        self.start_module_playback_with_preference(None);
+    }
+
+    pub fn start_module_playback_with_preference(&mut self, preferred_plugin_id: Option<&str>) {
+        let result = if let Some(plugin_id) = preferred_plugin_id {
+            crate::tracker_audio::play_audio_bytes_with_preferred_plugin(
+                self.path.clone(),
+                &self.raw,
+                plugin_id,
+            )
+        } else {
+            crate::tracker_audio::play_audio_bytes(self.path.clone(), &self.raw)
+        };
+
+        match result {
             Ok(info) => self.music = Some(info),
             Err(err) => {
                 debug_log(&format!(

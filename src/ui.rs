@@ -17,8 +17,8 @@ pub(crate) use self::assoc::assoc_editor_shortcuts;
 use self::assoc::{render_action_palette, render_assoc_editor, render_opener};
 pub(crate) use self::bookmarks::dir_bookmarks_shortcuts;
 use self::bookmarks::{
-    render_dir_bookmarks, render_quicksearch_palette, render_store_install_palette,
-    render_viewer_plugin_palette,
+    render_audio_player_palette, render_dir_bookmarks, render_quicksearch_palette,
+    render_store_install_palette, render_viewer_plugin_palette,
 };
 pub(crate) use self::bookmarks::{store_detect_shortcuts, store_install_shortcuts};
 use self::config::render_config;
@@ -52,7 +52,8 @@ use self::panel::{render_center_buttons, render_panel_or_file_id};
 pub(crate) use self::plugins::plugins_shortcuts;
 use self::plugins::render_plugins;
 use crate::app::{
-    ActionPaletteState, ActivePanel, App, AppMode, AssocEditorState, BookmarkListItem,
+    ActionPaletteState, ActivePanel, App, AppMode, AssocEditorState, AudioPlayerPaletteState,
+    BookmarkListItem,
     ComparePanelState, ConfigState, ConfirmAction, ConfirmDialog, InputDialog, MENU_DATA,
     MENU_HEADERS, MenuAction, MenuState, OpenerState, PluginsState, RemoteConnectState,
     RemoteConnectingState, RemoteEditKind, RemoteEditState, SearchState, StoreInstallPaletteState,
@@ -207,6 +208,11 @@ pub fn render(f: &mut Frame, app: &App) {
         AppMode::ViewerPluginPalette(v, state) => {
             render_viewer(f, v, false, None, f.area(), true, true, None);
             render_viewer_plugin_palette(f, state, f.area());
+            return;
+        }
+        AppMode::AudioPlayerPalette(v, state) => {
+            render_viewer(f, v, false, None, f.area(), true, true, None);
+            render_audio_player_palette(f, state, f.area());
             return;
         }
         AppMode::Help(state) => {

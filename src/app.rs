@@ -20,7 +20,8 @@ use self::helpers::{
 pub use self::menu::{
     MENU_DATA, MENU_HEADERS, MenuAction, MenuEntry, MenuState, StoreDetectChoice, StoreDetectItem,
     StoreDetectState, StoreInstallMethodsState, StoreInstallPaletteState, StoreInstallProgress,
-    ViewerGotoState, ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,
+    AudioPlayerPaletteState, ViewerGotoState, ViewerMenuKind, ViewerMenuState,
+    ViewerPluginPaletteState,
 };
 use self::panel_tabs::{PanelTabs, panel_config_for_save, restore_panel_side};
 pub use self::remote_edit::{RemoteEditKind, RemoteEditState};
@@ -103,6 +104,8 @@ pub enum AppMode {
     ViewerMenu(Viewer, ViewerMenuState),
     /// Viewer plugin picker with a quick-palette filter.
     ViewerPluginPalette(Viewer, ViewerPluginPaletteState),
+    /// Audio plugin picker for the current file MIME type.
+    AudioPlayerPalette(Viewer, AudioPlayerPaletteState),
     /// Search panel (Alt-F7).
     SearchPanel(SearchState),
     /// Friendly side-by-side comparison panel for left/right files.

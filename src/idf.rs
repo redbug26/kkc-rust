@@ -987,6 +987,35 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             vec![],
         ))
+    } else if ext == "ay" || looks_like_ay(&data) {
+        match parse_ay_info(&data) {
+            Ok(song) => Some(info(
+                "audio/x-ay",
+                path,
+                IdfKind::Module,
+                song.first_track_name.clone(),
+                song.author.clone(),
+                ay_lines(&song),
+            )),
+            Err(_) if ext == "ay" => Some(info(
+                "audio/x-ay",
+                path,
+                IdfKind::Module,
+                None,
+                None,
+                vec![" AY file (header parsing failed)".into()],
+            )),
+            Err(_) => None,
+        }
+    } else if let Some(gme) = detect_gme_module(&data, &ext) {
+        Some(info(
+            gme.mime_type,
+            path,
+            gme.kind,
+            None,
+            None,
+            vec![format!(" Format: {}", gme.label), " Decoder family: Game Music Emu".into()],
+        ))
     } else if ext == "ayt" || looks_like_ayt(&data) {
         match parse_ayt_info(&data) {
             Ok(song) => Some(info(
@@ -1751,12 +1780,202 @@ struct AytInfo {
     active_registers: Vec<u8>,
 }
 
+#[derive(Debug, Clone)]
+struct AyInfo {
+    version: u8,
+    track_count: usize,
+    first_track: usize,
+    author: Option<String>,
+    comment: Option<String>,
+    first_track_name: Option<String>,
+    first_track_length_ms: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct GmeModuleInfo {
+    mime_type: &'static str,
+    label: &'static str,
+    kind: IdfKind,
+}
+
 fn looks_like_ayt(data: &[u8]) -> bool {
     parse_ayt_info(data).is_ok()
 }
 
 fn looks_like_ym(data: &[u8]) -> bool {
     parse_ym_info(data).is_ok()
+}
+
+fn looks_like_ay(data: &[u8]) -> bool {
+    parse_ay_info(data).is_ok()
+}
+
+fn parse_ay_info(data: &[u8]) -> anyhow::Result<AyInfo> {
+    if data.len() < 20 || data.get(0..8) != Some(b"ZXAYEMUL") {
+        anyhow::bail!("Not an AY (ZXAYEMUL) file");
+    }
+
+    let version = data[8];
+    let max_track = *data
+        .get(16)
+        .ok_or_else(|| anyhow::anyhow!("AY header truncated (max track)"))?
+        as usize;
+    let first_track_raw = *data
+        .get(17)
+        .ok_or_else(|| anyhow::anyhow!("AY header truncated (first track)"))?
+        as usize;
+    let track_count = max_track.saturating_add(1);
+
+    let tracks_ptr = ay_get_data_ptr(data, 18, track_count.saturating_mul(4))
+        .ok_or_else(|| anyhow::anyhow!("Missing AY track table"))?;
+
+    let author = ay_get_data_ptr(data, 12, 1).and_then(|pos| ay_read_c_string(data, pos));
+    let comment = ay_get_data_ptr(data, 14, 1).and_then(|pos| ay_read_c_string(data, pos));
+
+    let first_track = first_track_raw.min(track_count.saturating_sub(1));
+    let entry_pos = tracks_ptr + first_track * 4;
+    let first_track_name =
+        ay_get_data_ptr(data, entry_pos, 1).and_then(|pos| ay_read_c_string(data, pos));
+
+    let first_track_length_ms = ay_get_data_ptr(data, entry_pos + 2, 6).and_then(|pos| {
+        if pos + 6 <= data.len() {
+            let frames = u16::from_be_bytes([data[pos + 4], data[pos + 5]]) as u32;
+            if frames == 0 {
+                None
+            } else {
+                Some(frames.saturating_mul(20))
+            }
+        } else {
+            None
+        }
+    });
+
+    Ok(AyInfo {
+        version,
+        track_count,
+        first_track,
+        author,
+        comment,
+        first_track_name,
+        first_track_length_ms,
+    })
+}
+
+fn ay_get_data_ptr(data: &[u8], ptr_pos: usize, min_size: usize) -> Option<usize> {
+    if ptr_pos + 2 > data.len() {
+        return None;
+    }
+    let offset = i16::from_be_bytes([data[ptr_pos], data[ptr_pos + 1]]) as isize;
+    if offset == 0 {
+        return None;
+    }
+    let target = ptr_pos as isize + offset;
+    if target < 0 {
+        return None;
+    }
+    let start = target as usize;
+    if start.checked_add(min_size)? > data.len() {
+        return None;
+    }
+    Some(start)
+}
+
+fn ay_read_c_string(data: &[u8], pos: usize) -> Option<String> {
+    if pos >= data.len() {
+        return None;
+    }
+    let end = data[pos..]
+        .iter()
+        .position(|&b| b == 0)
+        .map(|idx| pos + idx)
+        .unwrap_or(data.len());
+    let text = std::str::from_utf8(&data[pos..end]).ok()?.trim();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text.to_string())
+    }
+}
+
+fn ay_lines(song: &AyInfo) -> Vec<String> {
+    let mut lines = vec![
+        " Format: ZXAYEMUL".to_string(),
+        format!(" Version: {}", song.version),
+        format!(" Tracks: {}", song.track_count),
+        format!(" First track: {}", song.first_track + 1),
+    ];
+    if let Some(ms) = song.first_track_length_ms {
+        lines.push(format!(" First track length: {:.2} s", ms as f64 / 1000.0));
+    }
+    if let Some(name) = &song.first_track_name {
+        lines.push(format!(" Track name: {}", name));
+    }
+    if let Some(comment) = &song.comment {
+        if !comment.is_empty() {
+            lines.push(format!(" Comment: {}", comment));
+        }
+    }
+    lines
+}
+
+fn detect_gme_module(data: &[u8], ext: &str) -> Option<GmeModuleInfo> {
+    if data.starts_with(b"NSFE") || ext == "nsfe" {
+        return Some(GmeModuleInfo {
+            mime_type: "audio/x-nsfe",
+            label: "NSFE",
+            kind: IdfKind::Module,
+        });
+    }
+    if data.starts_with(b"NESM\x1A") || ext == "nsf" {
+        return Some(GmeModuleInfo {
+            mime_type: "audio/x-nsf",
+            label: "NSF",
+            kind: IdfKind::Module,
+        });
+    }
+    if data.starts_with(b"SNES-SPC700 Sound File Data") || ext == "spc" {
+        return Some(GmeModuleInfo {
+            mime_type: "audio/x-spc",
+            label: "SPC",
+            kind: IdfKind::Sample,
+        });
+    }
+    if data.starts_with(b"GBS") || ext == "gbs" {
+        return Some(GmeModuleInfo {
+            mime_type: "audio/x-gbs",
+            label: "GBS",
+            kind: IdfKind::Module,
+        });
+    }
+    if data.starts_with(b"GYMX") || data.starts_with(b"GYM ") || ext == "gym" {
+        return Some(GmeModuleInfo {
+            mime_type: "audio/x-gym",
+            label: "GYM",
+            kind: IdfKind::Module,
+        });
+    }
+    if data.starts_with(b"HESM") || ext == "hes" {
+        return Some(GmeModuleInfo {
+            mime_type: "audio/x-hes",
+            label: "HES",
+            kind: IdfKind::Module,
+        });
+    }
+    if data.starts_with(b"KSSX") || ext == "kss" {
+        return Some(GmeModuleInfo {
+            mime_type: "audio/x-kss",
+            label: "KSS",
+            kind: IdfKind::Module,
+        });
+    }
+    if data.starts_with(b"SAP\r\n") || data.starts_with(b"SAP\n") || ext == "sap" {
+        return Some(GmeModuleInfo {
+            mime_type: "audio/x-sap",
+            label: "SAP",
+            kind: IdfKind::Module,
+        });
+    }
+    None
 }
 
 fn parse_ayt_info(data: &[u8]) -> anyhow::Result<AytInfo> {

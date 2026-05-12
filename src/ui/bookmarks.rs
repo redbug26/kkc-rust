@@ -866,6 +866,201 @@ pub(super) fn render_viewer_plugin_palette(
     }
 }
 
+pub(super) fn render_audio_player_palette(
+    f: &mut Frame,
+    state: &AudioPlayerPaletteState,
+    area: Rect,
+) {
+    let query = &state.query;
+    let matches = state.filtered_indices();
+    let qs_pos = state.match_pos;
+    let total = matches.len();
+
+    let palette_w = ((area.width as u32 * 74 / 100) as u16)
+        .max(56)
+        .min(96)
+        .min(area.width.saturating_sub(4));
+    let visible_items = (total as u16).min(12);
+    let palette_h = (1 + 1 + 1 + visible_items.max(4) + 2).min(area.height.saturating_sub(3));
+
+    let popup = clamp_rect(
+        area,
+        Rect {
+            x: (area.width.saturating_sub(palette_w)) / 2 + area.x,
+            y: area.y + area.height.saturating_sub(palette_h) / 3,
+            width: palette_w,
+            height: palette_h,
+        },
+    );
+
+    safe_render_widget(f, Clear, popup);
+
+    let block = Block::default()
+        .title(" Audio Player ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(CLR_QS_BORDER))
+        .style(Style::default().bg(CLR_QS_BG));
+    let inner = block.inner(popup);
+    safe_render_widget(f, block, popup);
+
+    if inner.height < 2 {
+        return;
+    }
+
+    let input_area = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: inner.width,
+        height: 1,
+    };
+    let sep_area = Rect {
+        x: inner.x,
+        y: inner.y + 1,
+        width: inner.width,
+        height: 1,
+    };
+    let list_area = Rect {
+        x: inner.x,
+        y: inner.y + 2,
+        width: inner.width,
+        height: inner.height.saturating_sub(2),
+    };
+
+    let count_hint = if !query.is_empty() && total > 0 {
+        format!(" {}/{} ", qs_pos + 1, total)
+    } else if !query.is_empty() {
+        " 0/0 ".to_owned()
+    } else {
+        format!(" {} ", state.items.len())
+    };
+    let hint_w = count_hint.len() as u16;
+
+    let left_w = input_area.width.saturating_sub(hint_w);
+    let q = format!("> {}", query);
+    safe_render_widget(
+        f,
+        Paragraph::new(truncate_str(&q, left_w as usize)).style(
+            Style::default()
+                .fg(CLR_QS_INPUT_FG)
+                .bg(CLR_QS_INPUT_BG)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Rect {
+            x: input_area.x,
+            y: input_area.y,
+            width: left_w,
+            height: 1,
+        },
+    );
+    safe_render_widget(
+        f,
+        Paragraph::new(count_hint).style(Style::default().fg(CLR_QS_NO_MATCH).bg(CLR_QS_INPUT_BG)),
+        Rect {
+            x: input_area.x + left_w,
+            y: input_area.y,
+            width: hint_w,
+            height: 1,
+        },
+    );
+
+    safe_render_widget(
+        f,
+        Paragraph::new("─".repeat(sep_area.width as usize))
+            .style(Style::default().fg(CLR_QS_BORDER).bg(CLR_QS_BG)),
+        sep_area,
+    );
+
+    let list_h = list_area.height as usize;
+    let scroll: usize = if qs_pos >= list_h {
+        qs_pos - list_h + 1
+    } else {
+        0
+    };
+
+    let tokens: Vec<String> = query.split_whitespace().map(|t| t.to_lowercase()).collect();
+    let items: Vec<ListItem> = matches
+        .iter()
+        .enumerate()
+        .skip(scroll)
+        .take(list_h)
+        .map(|(match_idx, &idx)| {
+            let plugin = &state.items[idx];
+            let is_sel = match_idx == qs_pos;
+            let (bg, fg, hi) = if is_sel {
+                (CLR_QS_SEL_BG, CLR_QS_SEL_FG, CLR_QS_MATCH_HI_SEL)
+            } else {
+                (CLR_QS_BG, CLR_QS_LIST_FG, CLR_QS_MATCH_HI)
+            };
+
+            let name_label = if plugin.name == plugin.id {
+                plugin.name.clone()
+            } else {
+                format!("{} ({})", plugin.name, plugin.id)
+            };
+
+            let support_label = if !plugin.mime_types.is_empty() {
+                format!("{} MIME", plugin.mime_types.len())
+            } else if !plugin.extensions.is_empty() {
+                format!("{} ext", plugin.extensions.len())
+            } else {
+                "no format info".to_string()
+            };
+            let desc = if plugin.description.trim().is_empty() {
+                support_label
+            } else {
+                format!("{} - {}", plugin.description, support_label)
+            };
+
+            let mut line = highlight_tokens(&name_label, &tokens, fg, bg, hi);
+            line.spans.push(Span::styled(
+                format!("  {}", desc),
+                Style::default()
+                    .fg(if is_sel { Color::Rgb(220, 230, 255) } else { CLR_QS_NO_MATCH })
+                    .bg(bg),
+            ));
+            ListItem::new(line)
+        })
+        .collect();
+
+    let (render_area, sb_area) = if total > list_h {
+        let list_w = list_area.width.saturating_sub(1);
+        (
+            Rect {
+                width: list_w,
+                ..list_area
+            },
+            Some(Rect {
+                x: list_area.x + list_w,
+                y: list_area.y,
+                width: 1,
+                height: list_area.height,
+            }),
+        )
+    } else {
+        (list_area, None)
+    };
+
+    safe_render_widget(
+        f,
+        List::new(items).style(Style::default().bg(CLR_QS_BG)),
+        render_area,
+    );
+
+    if let Some(sb) = sb_area {
+        let mut sb_state = ScrollbarState::new(total).position(scroll);
+        safe_render_stateful_widget(
+            f,
+            Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .thumb_style(Style::default().fg(CLR_QS_BORDER))
+                .track_style(Style::default().bg(CLR_QS_BG))
+                .begin_symbol(None)
+                .end_symbol(None),
+            sb,
+            &mut sb_state,
+        );
+    }
+}
+
 pub(super) fn render_store_install_palette(
     f: &mut Frame,
     state: &StoreInstallPaletteState,

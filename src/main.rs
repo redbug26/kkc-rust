@@ -130,7 +130,8 @@ fn compose_window_title(app: &App) -> String {
         | AppMode::ViewerGotoLine(v, _)
         | AppMode::ViewerGoto(v, _)
         | AppMode::ViewerMenu(v, _)
-        | AppMode::ViewerPluginPalette(v, _) => {
+        | AppMode::ViewerPluginPalette(v, _)
+        | AppMode::AudioPlayerPalette(v, _) => {
             let file = short_file_for_title(&v.path);
             let label = palette_label_for_action(MenuAction::ViewFile);
             format!("KKC - {} - {}", label, sanitize_title_component(&file))

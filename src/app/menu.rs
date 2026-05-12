@@ -581,6 +581,126 @@ impl ViewerPluginPaletteState {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct AudioPlayerPaletteState {
+    pub items: Vec<crate::audio_plugins::AudioRustPluginInfo>,
+    pub query: String,
+    pub match_pos: usize,
+}
+
+impl AudioPlayerPaletteState {
+    pub fn load(viewer: &Viewer) -> Self {
+        let plugins_dir = crate::plugins::plugins_dir().unwrap_or_default();
+        let items = crate::audio_plugins::discover_audio_rust_plugins(&plugins_dir)
+            .unwrap_or_default();
+        let mut state = Self {
+            items,
+            query: String::new(),
+            match_pos: 0,
+        };
+
+        if let Some(plugin_id) = crate::tracker_audio::preferred_audio_plugin_ids_for_path(&viewer.path)
+            .first()
+            .cloned()
+            && let Some(pos) = state.items.iter().position(|plugin| plugin.id == plugin_id)
+        {
+            state.match_pos = pos;
+        }
+        state
+    }
+
+    pub fn filtered_indices(&self) -> Vec<usize> {
+        if self.query.trim().is_empty() {
+            return (0..self.items.len()).collect();
+        }
+
+        let tokens: Vec<String> = self
+            .query
+            .split_whitespace()
+            .map(|token| token.to_lowercase())
+            .filter(|token| !token.is_empty())
+            .collect();
+        if tokens.is_empty() {
+            return (0..self.items.len()).collect();
+        }
+
+        let first = &tokens[0];
+        let rest = &tokens[1..];
+        let mut starts = Vec::new();
+        let mut contains = Vec::new();
+
+        for (idx, item) in self.items.iter().enumerate() {
+            let searchable = format!(
+                "{} {} {} {} {}",
+                item.id,
+                item.name,
+                item.description,
+                item.mime_types.join(" "),
+                item.extensions.join(" ")
+            );
+            let lowered = searchable.to_lowercase();
+            if !rest.iter().all(|token| lowered.contains(token.as_str())) {
+                continue;
+            }
+            if lowered.starts_with(first.as_str()) || item.name.to_lowercase().starts_with(first.as_str()) {
+                starts.push(idx);
+            } else if lowered.contains(first.as_str()) {
+                contains.push(idx);
+            }
+        }
+
+        starts.extend(contains);
+        starts
+    }
+
+    pub fn append_query(&mut self, ch: char) {
+        self.query.push(ch);
+        self.match_pos = 0;
+        self.clamp_match();
+    }
+
+    pub fn pop_query(&mut self) {
+        self.query.pop();
+        self.match_pos = 0;
+        self.clamp_match();
+    }
+
+    pub fn move_prev(&mut self) {
+        let len = self.filtered_indices().len();
+        if len == 0 {
+            self.match_pos = 0;
+        } else if self.match_pos == 0 {
+            self.match_pos = len - 1;
+        } else {
+            self.match_pos -= 1;
+        }
+    }
+
+    pub fn move_next(&mut self) {
+        let len = self.filtered_indices().len();
+        if len == 0 {
+            self.match_pos = 0;
+        } else {
+            self.match_pos = (self.match_pos + 1) % len;
+        }
+    }
+
+    pub fn selected_item(&self) -> Option<&crate::audio_plugins::AudioRustPluginInfo> {
+        self.filtered_indices()
+            .get(self.match_pos)
+            .and_then(|idx| self.items.get(*idx))
+    }
+
+    fn clamp_match(&mut self) {
+        let len = self.filtered_indices().len();
+        if len == 0 {
+            self.match_pos = 0;
+        } else {
+            self.match_pos = self.match_pos.min(len.saturating_sub(1));
+        }
+    }
+}
+
 impl ViewerMenuState {
     pub fn new(kind: ViewerMenuKind, viewer: &Viewer) -> Self {
         let cursor = match kind {

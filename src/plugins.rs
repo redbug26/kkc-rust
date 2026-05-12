@@ -3254,7 +3254,11 @@ impl PluginRegistry {
             version: plugin.version.clone(),
             kind: "Audio Rust".into(),
             description: plugin.description.clone(),
-            extensions: plugin.extensions.clone(),
+            extensions: if !plugin.mime_types.is_empty() {
+                plugin.mime_types.clone()
+            } else {
+                plugin.extensions.clone()
+            },
             dir: plugin.dir.clone(),
         }));
         plugins.extend(self.action_plugins.iter().map(|plugin| PluginInfo {

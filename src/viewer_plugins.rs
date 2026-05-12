@@ -3,6 +3,7 @@ use anyhow::{Context, Result, anyhow};
 use kkc_plugin_api::{KKC_VIEWER_PLUGIN_API_VERSION, ViewerPluginModRef};
 use serde::Deserialize;
 use std::env;
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -258,33 +259,64 @@ fn resolve_viewer_library_path(plugin_dir: &Path, configured_library: &str) -> O
 
 fn candidate_viewer_library_paths(plugin_dir: &Path, configured_library: &str) -> Vec<PathBuf> {
     let mut out = Vec::new();
-    let configured = plugin_dir.join(configured_library);
+    let configured_rel = Path::new(configured_library);
+    let configured = plugin_dir.join(configured_rel);
     out.push(configured.clone());
 
-    let Some(file_name) = Path::new(configured_library)
-        .file_name()
-        .map(|s| s.to_os_string())
-    else {
+    let parent = configured_rel.parent().unwrap_or_else(|| Path::new(""));
+    let file_names = library_file_name_variants(configured_rel);
+    for file_name in &file_names {
+        out.push(plugin_dir.join(parent).join(file_name));
+    }
+
+    let Some(file_name) = file_names.first() else {
         return out;
     };
+
     for profile in ["release", "debug"] {
-        out.push(plugin_dir.join("target").join(profile).join(&file_name));
+        out.push(plugin_dir.join("target").join(profile).join(file_name));
     }
 
     if let Some(target_dir) = env::var_os("CARGO_TARGET_DIR") {
         let target_dir = PathBuf::from(target_dir);
         for profile in ["release", "debug"] {
-            out.push(target_dir.join(profile).join(&file_name));
+            out.push(target_dir.join(profile).join(file_name));
         }
     }
 
     if let Some(home) = env::var_os("HOME") {
         let home = PathBuf::from(home);
         for profile in ["release", "debug"] {
-            out.push(home.join(".rust-target").join(profile).join(&file_name));
+            out.push(home.join(".rust-target").join(profile).join(file_name));
         }
     }
 
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn library_file_name_variants(configured_library: &Path) -> Vec<OsString> {
+    let Some(file_name) = configured_library.file_name() else {
+        return Vec::new();
+    };
+
+    let mut out = vec![file_name.to_os_string()];
+    let stem = configured_library
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default();
+    if stem.is_empty() {
+        return out;
+    }
+
+    let native_ext = std::env::consts::DLL_EXTENSION;
+    for ext in [native_ext, "dylib", "so", "dll"] {
+        let candidate = OsString::from(format!("{stem}.{ext}"));
+        if !out.iter().any(|existing| existing == &candidate) {
+            out.push(candidate);
+        }
+    }
     out
 }
 

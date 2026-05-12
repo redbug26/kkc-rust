@@ -266,6 +266,14 @@ pub struct FileAssoc {
     pub openers: Vec<String>,
 }
 
+/// Maps a MIME type to the preferred native audio plugin id.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioPlayerAssoc {
+    #[serde(alias = "ext")]
+    pub mime_type: String,
+    pub plugin_id: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShortcutOverride {
     pub fn_name: String,
@@ -381,6 +389,10 @@ pub struct Config {
     #[serde(default)]
     pub file_assoc: Vec<FileAssoc>,
 
+    /// Preferred audio plugin (MIME type → native audio plugin id).
+    #[serde(default)]
+    pub audio_player_assoc: Vec<AudioPlayerAssoc>,
+
     // --- Command palette ---
     /// Recently-used command palette entries (fn_name values), most-recent first.
     #[serde(default, deserialize_with = "deserialize_palette_recent")]
@@ -437,6 +449,7 @@ impl Default for Config {
             dir_history: Vec::new(),
             bookmarks: default_bookmarks(),
             file_assoc: Vec::new(),
+            audio_player_assoc: Vec::new(),
             palette_recent: Vec::new(),
             shortcut_overrides: Vec::new(),
             debug_log: false,
@@ -630,11 +643,13 @@ impl Config {
         struct ConfigTail<'a> {
             bookmarks: &'a Vec<PathBuf>,
             file_assoc: &'a Vec<FileAssoc>,
+            audio_player_assoc: &'a Vec<AudioPlayerAssoc>,
             shortcut_overrides: &'a Vec<ShortcutOverride>,
         }
         let tail = toml::to_string_pretty(&ConfigTail {
             bookmarks: &self.bookmarks,
             file_assoc: &self.file_assoc,
+            audio_player_assoc: &self.audio_player_assoc,
             shortcut_overrides: &self.shortcut_overrides,
         })
         .context("Serialising panels config")?;
@@ -707,6 +722,36 @@ impl Config {
         self.file_assoc.retain(|assoc| !assoc.openers.is_empty());
         changed || self.file_assoc.len() != before
     }
+
+    /// Return the preferred native audio plugin id for the given MIME type.
+    pub fn audio_player_for_mime(&self, mime_type: &str) -> Option<&str> {
+        self.audio_player_assoc
+            .iter()
+            .find(|assoc| assoc.mime_type.eq_ignore_ascii_case(mime_type))
+            .map(|assoc| assoc.plugin_id.as_str())
+    }
+
+    pub fn set_audio_player_for_mime(&mut self, mime_type: &str, plugin_id: String) {
+        let mime_type = mime_type.trim().to_ascii_lowercase();
+        let plugin_id = plugin_id.trim().to_string();
+        if mime_type.is_empty() || plugin_id.is_empty() {
+            return;
+        }
+
+        if let Some(existing) = self
+            .audio_player_assoc
+            .iter_mut()
+            .find(|assoc| assoc.mime_type.eq_ignore_ascii_case(&mime_type))
+        {
+            existing.plugin_id = plugin_id;
+        } else {
+            self.audio_player_assoc.push(AudioPlayerAssoc {
+                mime_type,
+                plugin_id,
+            });
+        }
+    }
+
 }
 
 fn state_from_config(cfg: &Config) -> PersistedState {
@@ -873,6 +918,10 @@ mod tests {
             mime_type: "text/plain".into(),
             openers: vec!["vim %f".into()],
         }];
+        cfg.audio_player_assoc = vec![AudioPlayerAssoc {
+            mime_type: "audio/x-ay".into(),
+            plugin_id: "gme".into(),
+        }];
 
         let text = cfg.to_toml_string().expect("serialize config");
         assert!(text.contains("[transition]\n"));
@@ -899,6 +948,8 @@ mod tests {
         assert_eq!(parsed.dir_history_max, 64);
         assert_eq!(parsed.file_assoc[0].mime_type, "text/plain");
         assert_eq!(parsed.file_assoc[0].openers, vec!["vim %f"]);
+        assert_eq!(parsed.audio_player_assoc[0].mime_type, "audio/x-ay");
+        assert_eq!(parsed.audio_player_assoc[0].plugin_id, "gme");
     }
 
     #[test]

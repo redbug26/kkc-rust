@@ -1,6 +1,7 @@
 use super::fx_shortcut;
 use crate::app::{
-    App, AppMode, ViewerGotoState, ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,
+    App, AppMode, AudioPlayerPaletteState, ViewerGotoState, ViewerMenuKind, ViewerMenuState,
+    ViewerPluginPaletteState,
 };
 use crate::viewer::{EncodingMode, LineFeedMode, MaskKind, PreprocOpKind, ViewMode, Viewer};
 use anyhow::Result;
@@ -555,7 +556,15 @@ pub(super) fn handle_viewer_menu(app: &mut App, key: KeyEvent) -> Result<bool> {
 
 fn viewer_menu_items(kind: ViewerMenuKind) -> &'static [&'static str] {
     match kind {
-        ViewerMenuKind::Mode => &["Text", "Binary", "Ansi", "Image", "Audio", "Plugins viewer"],
+        ViewerMenuKind::Mode => &[
+            "Text",
+            "Binary",
+            "Ansi",
+            "Image",
+            "Audio",
+            "Plugins viewer",
+            "Audio player",
+        ],
         ViewerMenuKind::LineFeed => &["DOS (CR/LF)", "Unix (LF)", "Mac (CR)", "Mixed"],
         ViewerMenuKind::Encoding => &["Plain ASCII", "DOS CP437"],
         ViewerMenuKind::Mask => &[
@@ -589,6 +598,7 @@ const PREPROC_ADD_ITEMS: &[(&str, PreprocOpKind)] = &[
     ("Add Elite", PreprocOpKind::Elite),
 ];
 const VIEWER_PLUGIN_MENU_INDEX: usize = 5;
+const VIEWER_AUDIO_PLAYER_MENU_INDEX: usize = 6;
 
 fn viewer_menu_len(viewer: &crate::viewer::Viewer, kind: ViewerMenuKind) -> usize {
     match kind {
@@ -624,8 +634,17 @@ fn apply_viewer_menu_selection(
                 let state = ViewerPluginPaletteState::load(&viewer);
                 app.mode = AppMode::ViewerPluginPalette(viewer, state);
                 return;
+            } else if menu.cursor == VIEWER_AUDIO_PLAYER_MENU_INDEX {
+                let state = AudioPlayerPaletteState::load(&viewer);
+                app.mode = AppMode::AudioPlayerPalette(viewer, state);
+                return;
             }
             set_viewer_mode(&mut viewer, menu.cursor);
+            if menu.cursor == 4 {
+                let state = AudioPlayerPaletteState::load(&viewer);
+                app.mode = AppMode::AudioPlayerPalette(viewer, state);
+                return;
+            }
         }
         ViewerMenuKind::LineFeed => {
             let mode = match menu.cursor {
@@ -820,6 +839,68 @@ pub(super) fn handle_viewer_plugin_palette(app: &mut App, key: KeyEvent) -> Resu
     }
 
     app.mode = AppMode::ViewerPluginPalette(viewer, state);
+    Ok(false)
+}
+
+pub(super) fn handle_audio_player_palette(app: &mut App, key: KeyEvent) -> Result<bool> {
+    let (viewer, mut state) = match std::mem::replace(&mut app.mode, AppMode::Browse) {
+        AppMode::AudioPlayerPalette(viewer, state) => (viewer, state),
+        other => {
+            app.mode = other;
+            return Ok(false);
+        }
+    };
+
+    match key.code {
+        KeyCode::Esc => {
+            let mut menu = ViewerMenuState::new(ViewerMenuKind::Mode, &viewer);
+            menu.cursor = VIEWER_AUDIO_PLAYER_MENU_INDEX;
+            app.mode = AppMode::ViewerMenu(viewer, menu);
+            return Ok(false);
+        }
+        KeyCode::Up => state.move_prev(),
+        KeyCode::Down => state.move_next(),
+        KeyCode::Home => state.match_pos = 0,
+        KeyCode::End => {
+            state.match_pos = state.filtered_indices().len().saturating_sub(1);
+        }
+        KeyCode::Backspace => state.pop_query(),
+        KeyCode::Enter => {
+            let selected = state.selected_item().cloned();
+            let mut viewer = viewer;
+            if let Some(plugin) = selected {
+                let mime_types = crate::idf::probe_path(&viewer.path)
+                    .map(|info| info.mime_types)
+                    .unwrap_or_default();
+                let mut changed = false;
+                for mime_type in mime_types {
+                    if app.config.audio_player_for_mime(&mime_type) != Some(plugin.id.as_str()) {
+                        app.config
+                            .set_audio_player_for_mime(&mime_type, plugin.id.clone());
+                        changed = true;
+                    }
+                }
+                if changed {
+                    let _ = app.save_config();
+                }
+                viewer.start_module_playback_with_preference(Some(&plugin.id));
+                app.mode = AppMode::Viewer(viewer);
+            } else {
+                app.mode = AppMode::AudioPlayerPalette(viewer, state);
+            }
+            return Ok(false);
+        }
+        KeyCode::Char(ch)
+            if !key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::ALT)
+                && !ch.is_control() =>
+        {
+            state.append_query(ch);
+        }
+        _ => {}
+    }
+
+    app.mode = AppMode::AudioPlayerPalette(viewer, state);
     Ok(false)
 }
 

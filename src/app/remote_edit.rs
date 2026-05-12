@@ -298,15 +298,79 @@ impl RemoteEditState {
 
 fn discover_remote_plugin_choices() -> Vec<(String, String, String)> {
     let Ok(plugins_dir) = crate::plugins::plugins_dir() else {
+        crate::viewer::debug_log("remote-edit: no plugins_dir available");
         return Vec::new();
     };
-    let manifests = crate::remote_plugins::discover_remote_rust_plugin_manifests(&plugins_dir)
-        .unwrap_or_default();
+    crate::viewer::debug_log(&format!(
+        "remote-edit: discovering remote plugin choices from {}",
+        plugins_dir.display()
+    ));
+    let loaded = crate::remote_plugins::discover_remote_rust_plugins(&plugins_dir)
+        .unwrap_or_else(|err| {
+            crate::viewer::debug_log(&format!(
+                "remote-edit: loaded remote plugin discovery failed: {err}"
+            ));
+            Vec::new()
+        });
+    crate::viewer::debug_log(&format!(
+        "remote-edit: loaded remote plugin count={} ids=[{}]",
+        loaded.len(),
+        loaded
+            .iter()
+            .map(|plugin| plugin.id.as_str())
+            .collect::<Vec<_>>()
+            .join(",")
+    ));
 
-    manifests
+    let manifests = crate::remote_plugins::discover_remote_rust_plugin_manifests(&plugins_dir)
+        .unwrap_or_else(|err| {
+            crate::viewer::debug_log(&format!(
+                "remote-edit: remote manifest discovery failed: {err}"
+            ));
+            Vec::new()
+        });
+    crate::viewer::debug_log(&format!(
+        "remote-edit: remote manifest count={} ids=[{}]",
+        manifests.len(),
+        manifests
+            .iter()
+            .map(|manifest| manifest.id.as_str())
+            .collect::<Vec<_>>()
+            .join(",")
+    ));
+
+    let mut choices = loaded
         .into_iter()
-        .map(|manifest| (manifest.id.clone(), manifest.name, manifest.id))
-        .collect()
+        .map(|plugin| (plugin.id, plugin.name, plugin.scheme))
+        .collect::<Vec<_>>();
+
+    let loaded_ids = choices
+        .iter()
+        .map(|(plugin_id, _, _)| plugin_id.clone())
+        .collect::<std::collections::HashSet<_>>();
+    for manifest in manifests {
+        if loaded_ids.contains(&manifest.id) {
+            continue;
+        }
+        // Keep degraded entries visible so users can diagnose plugin load issues.
+        choices.push((
+            manifest.id.clone(),
+            format!("{} (library not loaded)", manifest.name),
+            manifest.id,
+        ));
+    }
+
+    crate::viewer::debug_log(&format!(
+        "remote-edit: final remote choices count={} ids=[{}]",
+        choices.len(),
+        choices
+            .iter()
+            .map(|(plugin_id, _, _)| plugin_id.as_str())
+            .collect::<Vec<_>>()
+            .join(",")
+    ));
+
+    choices
 }
 
 fn trim_opt(value: &str) -> Option<String> {
