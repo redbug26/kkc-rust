@@ -362,6 +362,15 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             vec![],
         ))
+    } else if data.starts_with(b"SZDD") {
+        Some(info(
+            "application/x-ms-compress",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(&[0x28, 0xB5, 0x2F, 0xFD]) {
         Some(info(
             "application/zstd",
@@ -471,6 +480,15 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             vec![],
         ))
+    } else if data.starts_with(&[0xB4, 0x4C, 0xCD, 0x21, 0x9D, 0x89, 0x64, 0x6C, 0x7A]) {
+        Some(info(
+            "application/x-diet",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            dlz_lines(&data),
+        ))
     } else if data.starts_with(b"Rar!\x1A\x07\x00") {
         Some(info(
             "application/vnd.rar",
@@ -509,6 +527,17 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             image_info_lines(w, h, &data, ImageExifContainer::Png),
         ))
+    } else if data.starts_with(&[0xD7, 0xCD, 0xC6, 0x9A]) {
+        Some(info("image/wmf", path, IdfKind::Bitmap, None, None, vec![]))
+    } else if data.starts_with(&[0xFF, 0x57, 0x50, 0x43]) {
+        Some(info(
+            "image/x-wpg",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(b"RIFF") && data.get(8..12) == Some(b"WEBP") {
         let (w, h) = webp_size(&data).unwrap_or((0, 0));
         Some(info(
@@ -545,7 +574,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             IdfKind::Bitmap,
             None,
             None,
-            wh_lines(w, h),
+            gif_lines(w, h, &data),
         ))
     } else if data.starts_with(b"\xFF\xD8\xFF") {
         let (w, h) = jpeg_size(&data).unwrap_or((0, 0));
@@ -565,7 +594,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             IdfKind::Bitmap,
             None,
             None,
-            wh_lines(w, h),
+            bmp_lines(w, h, &data),
         ))
     } else if is_tiff(&data) {
         Some(info(
@@ -607,6 +636,33 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         0x00, 0x00, 0x00, 0x0C, 0x6A, 0x50, 0x20, 0x20, 0x0D, 0x0A, 0x87, 0x0A,
     ]) {
         Some(info("image/jp2", path, IdfKind::Bitmap, None, None, vec![]))
+    } else if is_iff_bitmap(&data) {
+        Some(info(
+            "image/x-ilbm",
+            path,
+            IdfKind::Bitmap,
+            iff_title(&data),
+            None,
+            iff_lines(&data),
+        ))
+    } else if is_fli(&data) {
+        Some(info(
+            "video/x-fli",
+            path,
+            IdfKind::Animation,
+            None,
+            None,
+            fli_lines(&data),
+        ))
+    } else if is_flc(&data) {
+        Some(info(
+            "video/x-flc",
+            path,
+            IdfKind::Animation,
+            None,
+            None,
+            fli_lines(&data),
+        ))
     } else if data.starts_with(b"/* XPM */") {
         Some(info(
             "image/x-xpixmap",
@@ -726,7 +782,25 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             IdfKind::Sample,
             None,
             None,
-            vec![],
+            iff_size_lines(&data),
+        ))
+    } else if data.starts_with(b"FORM") && data.get(8..12) == Some(b"AIFC") {
+        Some(info(
+            "audio/x-aifc",
+            path,
+            IdfKind::Sample,
+            None,
+            None,
+            iff_size_lines(&data),
+        ))
+    } else if is_iff_sample(&data) {
+        Some(info(
+            "audio/x-8svx",
+            path,
+            IdfKind::Sample,
+            iff_title(&data),
+            None,
+            iff_lines(&data),
         ))
     } else if data.starts_with(b".snd") {
         Some(info(
@@ -735,7 +809,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             IdfKind::Sample,
             None,
             None,
-            vec![],
+            au_lines(&data),
         ))
     } else if data.starts_with(b"RIFF") && data.get(8..12) == Some(b"AVI ") {
         Some(info(
@@ -744,7 +818,16 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             IdfKind::Animation,
             None,
             None,
-            vec![],
+            riff_size_lines(&data),
+        ))
+    } else if data.starts_with(b"RIFF") && data.get(8..16) == Some(b"ACONLIST") {
+        Some(info(
+            "image/x-ani",
+            path,
+            IdfKind::Animation,
+            None,
+            None,
+            riff_size_lines(&data),
         ))
     } else if data.len() > 12 && &data[4..8] == b"ftyp" {
         Some(info(
@@ -782,6 +865,24 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             ogg_lines(&data),
         ))
+    } else if data.starts_with(b".ra\xFD\x00") || data.starts_with(b".RMF") {
+        Some(info(
+            "audio/vnd.rn-realaudio",
+            path,
+            IdfKind::Sample,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"DiamondWare Digitized") {
+        Some(info(
+            "audio/x-dwd",
+            path,
+            IdfKind::Sample,
+            None,
+            None,
+            vec![],
+        ))
     } else if let Some(mp3) = mp3_info(path, &data, &ext) {
         Some(mp3)
     } else if data.starts_with(b"MMD1") {
@@ -811,6 +912,15 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             vec![" OctaMED Compressed".into()],
         ))
+    } else if is_669(&data) {
+        Some(info(
+            "audio/x-669",
+            path,
+            IdfKind::Module,
+            None,
+            None,
+            tracker_669_lines(&data),
+        ))
     } else if data.starts_with(b"MThd   ") {
         // Standard MIDI with explicit length check
         Some(midi_info(path, &data))
@@ -824,6 +934,218 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             None,
             vec![" Future Composer 1.4 Module".into()],
+        ))
+    } else if data.starts_with(b"PS16\xFE") {
+        Some(info(
+            "audio/x-ps16",
+            path,
+            IdfKind::Module,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"DDMF") {
+        Some(info(
+            "audio/x-dmf",
+            path,
+            IdfKind::Module,
+            fixed_text(data.get(13..13 + 30).unwrap_or(&[])),
+            fixed_text(data.get(43..43 + 20).unwrap_or(&[])),
+            vec![],
+        ))
+    } else if data.starts_with(b"MTM") {
+        Some(info(
+            "audio/x-mtm",
+            path,
+            IdfKind::Module,
+            fixed_text(data.get(4..4 + 20).unwrap_or(&[])),
+            None,
+            mtm_lines(&data),
+        ))
+    } else if data.starts_with(b"OKTASONG") {
+        Some(info(
+            "audio/x-okt",
+            path,
+            IdfKind::Module,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"JMUSIC") {
+        Some(info(
+            "audio/x-jms",
+            path,
+            IdfKind::Module,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"F2RFAR") {
+        Some(info(
+            "audio/x-f2r",
+            path,
+            IdfKind::Module,
+            fixed_text(data.get(6..6 + 40).unwrap_or(&[])),
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"DMDL") {
+        Some(info(
+            "audio/x-mdl",
+            path,
+            IdfKind::Module,
+            mdl_title(&data),
+            mdl_composer(&data),
+            mdl_lines(&data),
+        ))
+    } else if data.starts_with(b"PSM ") {
+        Some(info(
+            "audio/x-psm",
+            path,
+            IdfKind::Module,
+            None,
+            None,
+            with_header_size(
+                Vec::new(),
+                le_u32_at(&data, 4).map(|size| u64::from(size) + 12),
+            ),
+        ))
+    } else if data.starts_with(b"AMShdr") {
+        Some(info(
+            "audio/x-ams",
+            path,
+            IdfKind::Module,
+            fixed_len_prefixed_text(&data, 7, 8),
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"MXM\0") {
+        Some(info(
+            "audio/x-mxm",
+            path,
+            IdfKind::Module,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"SAdT") {
+        Some(info(
+            "audio/x-sadt",
+            path,
+            IdfKind::Module,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"PACG") {
+        Some(info(
+            "audio/x-pac",
+            path,
+            IdfKind::Module,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"JCH") {
+        Some(info(
+            "audio/x-d00",
+            path,
+            IdfKind::Module,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(&[0x00, 0x06, 0xFE, 0xFD]) {
+        Some(info(
+            "audio/x-edlib",
+            path,
+            IdfKind::Module,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.get(1..8) == Some(b"AST 000") {
+        Some(info(
+            "audio/x-ast",
+            path,
+            IdfKind::Module,
+            ast_title(&data),
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"DSM\x10") || data.get(8..16) == Some(b"DSMFSONG") {
+        Some(info(
+            "audio/x-dsm",
+            path,
+            IdfKind::Module,
+            fixed_text(data.get(4..4 + 79).unwrap_or(&[])),
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"RAD by REALiTY!!") {
+        Some(info(
+            "audio/x-rad",
+            path,
+            IdfKind::Module,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"RTMM") {
+        Some(info(
+            "audio/x-rtm",
+            path,
+            IdfKind::Module,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"USLM") {
+        Some(info(
+            "audio/x-usm",
+            path,
+            IdfKind::Module,
+            fixed_text(data.get(6..6 + 32).unwrap_or(&[])),
+            None,
+            usm_lines(&data),
+        ))
+    } else if data.get(0x27..0x27 + 10)
+        == Some(&[0x00, 0x00, 0x00, 0x00, 0x00, b'P', b'T', b'M', b'F', 0x00])
+    {
+        Some(info(
+            "audio/x-ptm",
+            path,
+            IdfKind::Module,
+            fixed_text(data.get(0..28).unwrap_or(&[])),
+            None,
+            vec![],
+        ))
+    } else if data.get(0x165..0x165 + 7) == Some(&[0x01, 0x20, 0x05, 0x50, 0x05, 0xC0, 0x01]) {
+        Some(info(
+            "audio/x-mbm",
+            path,
+            IdfKind::Module,
+            fixed_text(data.get(0xcf..0xcf + 40).unwrap_or(&[])),
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"[MDF]") {
+        Some(info(
+            "audio/x-mdf",
+            path,
+            IdfKind::Module,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(&[0x47, 0x44, 0x4D, 0xFE]) {
+        Some(info(
+            "audio/x-gdm",
+            path,
+            IdfKind::Module,
+            fixed_text(data.get(4..4 + 32).unwrap_or(&[])),
+            fixed_text(data.get(36..36 + 32).unwrap_or(&[])),
+            vec![],
         ))
     } else if data.starts_with(b"SMOD") {
         Some(info(
@@ -897,6 +1219,150 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             vec![" Creative Music Format".into()],
         ))
+    } else if data.starts_with(b"Creative Voice File") {
+        Some(info(
+            "audio/x-voc",
+            path,
+            IdfKind::Sample,
+            None,
+            None,
+            voc_lines(&data),
+        ))
+    } else if data.starts_with(b"Extended Instrument: ") {
+        Some(info(
+            "audio/x-xi",
+            path,
+            IdfKind::Sample,
+            fixed_text(data.get(21..21 + 22).unwrap_or(&[])),
+            tracker_name(&data, 44, 64),
+            vec![],
+        ))
+    } else if data.get(0x14..0x1c) == Some(b"!Scream!") {
+        Some(info(
+            "audio/x-stm",
+            path,
+            IdfKind::Module,
+            fixed_text(data.get(0..20).unwrap_or(&[])),
+            None,
+            stm_lines(&data),
+        ))
+    } else if data.starts_with(b"FAR\xFE") {
+        Some(info(
+            "audio/x-far",
+            path,
+            IdfKind::Module,
+            fixed_text(data.get(4..4 + 40).unwrap_or(&[])),
+            None,
+            far_lines(&data),
+        ))
+    } else if data.starts_with(b"FSM\xFE") {
+        Some(info(
+            "audio/x-far-sample",
+            path,
+            IdfKind::Sample,
+            fixed_text(data.get(4..4 + 32).unwrap_or(&[])),
+            None,
+            vec![" Signed sample data".into()],
+        ))
+    } else if data.starts_with(b"USM\xFE") {
+        Some(info(
+            "audio/x-far-sample",
+            path,
+            IdfKind::Sample,
+            fixed_text(data.get(4..4 + 32).unwrap_or(&[])),
+            None,
+            vec![" Unsigned sample data".into()],
+        ))
+    } else if data.starts_with(b"FPT\xFE") {
+        Some(info(
+            "audio/x-far-pattern",
+            path,
+            IdfKind::Module,
+            fixed_text(data.get(4..4 + 32).unwrap_or(&[])),
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"GF1PATCH") {
+        Some(info(
+            "audio/x-gus-patch",
+            path,
+            IdfKind::Sample,
+            fixed_text(data.get(0x83..0x83 + 16).unwrap_or(&[])),
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"DSPL") {
+        Some(info(
+            "audio/x-digitrakker-sample",
+            path,
+            IdfKind::Sample,
+            fixed_text(data.get(5..5 + 22).unwrap_or(&[])),
+            None,
+            sample_rate_line(le_u16_at(&data, 45).map(u32::from)),
+        ))
+    } else if data.starts_with(b"IMPS") {
+        Some(info(
+            "audio/x-it-sample",
+            path,
+            IdfKind::Sample,
+            fixed_text(data.get(0x14..0x14 + 22).unwrap_or(&[])),
+            None,
+            vec![],
+        ))
+    } else if data.get(0x4c..0x51) == Some(b"SCRS\x80") {
+        Some(info(
+            "audio/x-s3m-sample",
+            path,
+            IdfKind::Sample,
+            fixed_text(data.get(0x30..0x30 + 22).unwrap_or(&[])),
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"DDSF") {
+        Some(info(
+            "audio/x-dsf-sample",
+            path,
+            IdfKind::Sample,
+            fixed_text(data.get(4..4 + 22).unwrap_or(&[])),
+            None,
+            vec![],
+        ))
+    } else if data.get(0x22..0x27) == Some(b"MUWFD") {
+        Some(info(
+            "audio/x-ultratracker-sample",
+            path,
+            IdfKind::Sample,
+            fixed_text(data.get(0..22).unwrap_or(&[])),
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"QLCM") {
+        Some(info(
+            "audio/qcelp",
+            path,
+            IdfKind::Sample,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(&[0xF0, 0x7E, 0x00, 0x01]) {
+        Some(info(
+            "audio/x-midi-sds",
+            path,
+            IdfKind::Sample,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(&[0xF0, 0x43, 0x00, 0x09, 0x20, 0x00]) {
+        Some(info(
+            "audio/x-yamaha-dx7",
+            path,
+            IdfKind::Sample,
+            None,
+            None,
+            vec![],
+        ))
     } else if data.starts_with(b"%PDF-") {
         Some(info(
             "application/pdf",
@@ -915,6 +1381,69 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             vec![],
         ))
+    } else if data.get(0x171..0x171 + 15) == Some(b"MICROSOFT PIFEX") {
+        Some(info(
+            "application/x-ms-pif",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.get(1..9) == Some(&[0xBE, 0, 0, 0, 0xAB, 0, 0, 0]) {
+        Some(info(
+            "application/x-mswrite",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(&[0x4C, 0, 0, 0, 0x01, 0x14, 0x02, 0]) {
+        Some(info(
+            "application/x-ms-shortcut",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(&[0x3F, 0x5F, 0x03, 0x00]) {
+        Some(info(
+            "application/winhlp",
+            path,
+            IdfKind::Other,
+            winhelp_title(&data),
+            None,
+            winhelp_lines(&data),
+        ))
+    } else if data.starts_with(&[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]) {
+        Some(info(
+            "application/x-ole-storage",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            ole_lines(&data),
+        ))
+    } else if data.starts_with(&[0xDB, 0xA5, 0x2D, 0x00]) {
+        Some(info(
+            "application/x-msword2",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if is_java_class(&data) {
+        Some(info(
+            "application/java-vm",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            java_class_lines(&data),
+        ))
     } else if data.starts_with(b"MZ") {
         Some(info(
             "application/vnd.microsoft.portable-executable",
@@ -922,7 +1451,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             IdfKind::Other,
             None,
             None,
-            vec![],
+            mz_lines(&data),
         ))
     } else if data.starts_with(b"SQLite format 3\x00") {
         Some(info(
@@ -941,6 +1470,15 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             None,
             vec![],
+        ))
+    } else if data.starts_with(b"IWAD") || data.starts_with(b"PWAD") {
+        Some(info(
+            "application/x-doom-wad",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            wad_lines(&data),
         ))
     } else if is_s3m(&data) {
         Some(info(
@@ -1014,7 +1552,564 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             gme.kind,
             None,
             None,
-            vec![format!(" Format: {}", gme.label), " Decoder family: Game Music Emu".into()],
+            vec![
+                format!(" Format: {}", gme.label),
+                " Decoder family: Game Music Emu".into(),
+            ],
+        ))
+    } else if data.starts_with(b"FIF") {
+        Some(info(
+            "image/x-fif",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            fif_lines(&data),
+        ))
+    } else if data.starts_with(b"PKM") {
+        Some(info(
+            "image/x-pkm",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            pkm_lines(&data),
+        ))
+    } else if data.starts_with(b"THNL") || data.starts_with(b"DISPTNL") {
+        Some(info(
+            "image/x-gws-thumbnail",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            tnl_lines(&data),
+        ))
+    } else if data.get(16..20) == Some(b"XIMG") {
+        Some(info(
+            "image/x-gem",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"PNT\0") {
+        Some(info(
+            "image/x-truepaint",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"TMS\0") {
+        Some(info(
+            "image/x-tms",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"B&W256") {
+        Some(info(
+            "image/x-imagelab",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"pM8") {
+        Some(info(
+            "image/x-stad",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"RIX3") {
+        Some(info(
+            "image/x-rix",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.get(0x20a..0x20a + 23)
+        == Some(&[
+            0x00, 0x11, 0x02, 0xFF, 0x0C, 0x00, 0xFF, 0xFE, 0x00, 0x00, 0x00, 0x48, 0x00, 0x00,
+            0x00, 0x48, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+        ])
+    {
+        Some(info(
+            "image/x-pict",
+            path,
+            IdfKind::Bitmap,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"LZANIM") {
+        Some(info(
+            "video/x-lza",
+            path,
+            IdfKind::Animation,
+            None,
+            None,
+            lza_lines(&data),
+        ))
+    } else if data.starts_with(b"SMK") {
+        Some(info(
+            "video/x-smacker",
+            path,
+            IdfKind::Animation,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"C64S tape file") || data.starts_with(b"C64 tape image") {
+        Some(info(
+            "application/x-c64-t64",
+            path,
+            IdfKind::Other,
+            fixed_text(data.get(0x28..0x28 + 24).unwrap_or(&[])),
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"C64File") {
+        Some(info(
+            "application/x-c64-p00",
+            path,
+            IdfKind::Other,
+            fixed_text(data.get(0x08..0x08 + 17).unwrap_or(&[])),
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"MV - CPCEMU") {
+        Some(info(
+            "application/x-amstrad-cpc-dsk",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"MV - SNA") {
+        Some(info(
+            "application/x-cpcemu-snapshot",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(&[0, 0, 3, 0xF3, 0, 0, 0, 0]) {
+        Some(info(
+            "application/x-amiga-executable",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(&[0xE3, 0x10, 0, 0x01, 0, 0, 0, 0]) {
+        Some(info(
+            "application/x-amiga-info",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.get(0x134..0x134 + 20)
+        == Some(&[
+            0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B, 0x03, 0x73, 0x00, 0x83, 0x00, 0x0C,
+            0x00, 0x0D, 0x00, 0x08, 0x11, 0x1F,
+        ])
+    {
+        Some(info(
+            "application/x-gameboy-rom",
+            path,
+            IdfKind::Other,
+            fixed_text(data.get(0x134..0x134 + 16).unwrap_or(&[])),
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(&[0x4E, 0x45, 0x53, 0x1A]) {
+        Some(info(
+            "application/x-nes-rom",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            nes_lines(&data),
+        ))
+    } else if data.get(0x100..0x105) == Some(b"SEGA ") {
+        Some(info(
+            "application/x-genesis-rom",
+            path,
+            IdfKind::Other,
+            fixed_text(data.get(0x150..0x150 + 32).unwrap_or(&[])),
+            None,
+            vec![],
+        ))
+    } else if data.get(0x7ff0..0x7ff8) == Some(b"TMR SEGA") {
+        Some(info(
+            "application/x-sms-rom",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.get(0x22c8..0x22c8 + 16)
+        == Some(&[
+            0x4A, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x00, 0x00, 0x00, 0xFF, 0x00, 0x00,
+            0x00, 0xFF,
+        ])
+    {
+        Some(info(
+            "application/x-smd-rom",
+            path,
+            IdfKind::Other,
+            fixed_text(data.get(0x2290..0x2290 + 32).unwrap_or(&[])),
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"HPHP48-") || data.starts_with(b"%%HP: T(3)A(D)F(.);") {
+        Some(info(
+            "application/x-hp48",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"NG\x00\x01\x00") {
+        Some(info(
+            "application/x-norton-guide",
+            path,
+            IdfKind::Other,
+            fixed_text(data.get(8..8 + 40).unwrap_or(&[])),
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"PNCI\x00") {
+        Some(info(
+            "application/x-norton-directory-list",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"HSP") {
+        Some(info(
+            "application/x-os2-help",
+            path,
+            IdfKind::Other,
+            fixed_text(data.get(0x6b..0x6b + 48).unwrap_or(&[])),
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"KKTm") {
+        Some(info(
+            "application/x-kkt",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"MCRB") {
+        Some(info(
+            "application/x-kkp",
+            path,
+            IdfKind::Other,
+            fixed_text(data.get(4..4 + 30).unwrap_or(&[])),
+            None,
+            kkp_lines(&data),
+        ))
+    } else if data.starts_with(b"AIL3DIG") {
+        Some(info(
+            "application/x-ail-dig-driver",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"AIL3MDI") {
+        Some(info(
+            "application/x-ail-midi-driver",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"Turbo C Project File") {
+        Some(info(
+            "application/x-turbo-c-project",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"Turbo C Context File") {
+        Some(info(
+            "application/x-turbo-c-desktop",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"PMCC") {
+        Some(info(
+            "application/x-ms-program-group",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.get(1044..1044 + 8) == Some(&[0, 0, 2, 0, 0, 0, 8, 0]) {
+        Some(info(
+            "application/x-mac-executor-volume",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"SWAGOLX.EXE") {
+        Some(info(
+            "application/x-swag",
+            path,
+            IdfKind::Other,
+            fixed_text(data.get(57..57 + 48).unwrap_or(&[])),
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"/IMPHOBIA Ressource Fil") {
+        Some(info(
+            "application/x-imphobia-resource",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"/IMPHOBIA Config/") {
+        Some(info(
+            "application/x-imphobia-config",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"KKRB") {
+        Some(info(
+            "application/x-kkr",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![" IAR description".into()],
+        ))
+    } else if data.starts_with(b"KKD") {
+        Some(info(
+            "application/x-kkr",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![" Disk description".into()],
+        ))
+    } else if data.starts_with(b"RBKK_VENUS") {
+        Some(info(
+            "application/x-ketchup-screensaver",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(&[0xCC, 0xDD, 0x59, 0x13, 0x61]) {
+        Some(info(
+            "application/x-watcom-help",
+            path,
+            IdfKind::Other,
+            fixed_text(data.get(0x3a..0x3a + 32).unwrap_or(&[])),
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(&[0x00, 0x00, 0x03, 0xE8, 0x00]) {
+        Some(info(
+            "audio/x-matlab-sound",
+            path,
+            IdfKind::Sample,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(&[
+        0xFC, 0x00, 0x01, 0x00, 0x0C, 0x00, 0x81, 0x01, 0x82, 0x01, 0x06, 0x00, 0x01, 0x02, 0x03,
+        0x04, 0x05, 0x08, 0x10,
+    ]) {
+        Some(info(
+            "text/x-qbasic",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"DFPv") {
+        Some(info(
+            "application/x-dfp-archive",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(b"Packed File ") {
+        Some(info(
+            "application/x-netware-packed",
+            path,
+            IdfKind::Archive,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(&[0x50, 0x4B, 0x08, 0x08, 0x42, 0x47, 0x49, 0x20]) {
+        Some(info(
+            "application/x-borland-chr",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(&[0x70, 0x6B, 0x08, 0x08, 0x42, 0x47, 0x49, 0x20]) {
+        Some(info(
+            "application/x-borland-bgi",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.get(8..12) == Some(b"SCDH") {
+        Some(info(
+            "application/x-simcity-2000-save",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.get(0x4e..0x4e + 7) == Some(b"code\x00\x01\x00") {
+        Some(info(
+            "application/x-palm-prc",
+            path,
+            IdfKind::Other,
+            fixed_text(data.get(0..32).unwrap_or(&[])),
+            None,
+            vec![],
+        ))
+    } else if data.get(0x85..0x85 + 16)
+        == Some(&[
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xE0, 0x01, 0x00, 0x00, 0x80, 0x02, 0x00, 0x00,
+            0xE0, 0xC5,
+        ])
+    {
+        Some(info(
+            "application/x-nfs-replay",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.get(138..138 + 24)
+        == Some(&[
+            0x00, 0x00, 0x00, 0x00, 0x13, 0x00, 0x81, 0x5A, 0x00, 0x00, 0x81, 0x5A, 0x00, 0x00,
+            0xFF, 0x7F, 0x00, 0x00, 0x7F, 0xA5, 0x00, 0x00, 0x81, 0x5A,
+        ])
+    {
+        Some(info(
+            "application/x-flight-simulator-mode",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(&[0xFF]) && data.get(1..8) == Some(b"FONT   ") {
+        Some(info(
+            "application/x-cpi",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![" Standard font code page".into()],
+        ))
+    } else if data.starts_with(&[0x7F]) && data.get(1..8) == Some(b"DRFONT ") {
+        Some(info(
+            "application/x-cpi",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![" Enhanced font code page".into()],
+        ))
+    } else if data.starts_with(b"CREG\x00\x00\x01\x00") {
+        Some(info(
+            "application/x-windows-policy",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            vec![],
+        ))
+    } else if data.starts_with(&[0x1A, 0x00, 0x00, 0x03, 0x00]) {
+        Some(info(
+            "application/vnd.lotus-notes",
+            path,
+            IdfKind::Other,
+            nsf_title(&data),
+            None,
+            nsf_lines(&data),
+        ))
+    } else if is_3ds(&data) {
+        Some(info(
+            "image/x-3ds",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            three_ds_lines(&data),
+        ))
+    } else if is_ttf(&data) {
+        Some(info("font/ttf", path, IdfKind::Other, None, None, vec![]))
+    } else if data.starts_with(b"OTTO") {
+        Some(info("font/otf", path, IdfKind::Other, None, None, vec![]))
+    } else if data.starts_with(b"FWS") || data.starts_with(b"CWS") || data.starts_with(b"ZWS") {
+        Some(info(
+            "application/x-shockwave-flash",
+            path,
+            IdfKind::Other,
+            None,
+            None,
+            swf_lines(&data),
         ))
     } else if is_amstrad_dsk(&data, &ext) {
         Some(info(
@@ -1450,11 +2545,13 @@ fn format_from_mime_type(mime_type: &str) -> Option<&'static str> {
         "application/x-bzip2" => Some("BZip2 archive"),
         "application/x-xz" => Some("XZ archive"),
         "application/x-arj" => Some("ARJ archive"),
+        "application/x-ms-compress" => Some("Microsoft SZDD compressed file"),
         "application/x-uc2" => Some("UC2 archive"),
         "application/x-packice" => Some("Pack-Ice compressed file"),
         "application/x-ice-compressed" => Some("ICE compressed file"),
         "application/x-ha" => Some("HA archive"),
         "application/x-hyp" => Some("HYP archive"),
+        "application/x-diet" => Some("DIET packed file"),
         "application/x-compressed-tar" => Some("TGZ archive"),
         "application/x-bzip-compressed-tar" => Some("TBZ archive"),
         "application/x-tarz" => Some("TAR.Z archive"),
@@ -1482,6 +2579,8 @@ fn format_from_mime_type(mime_type: &str) -> Option<&'static str> {
         "application/vnd.oasis.opendocument.spreadsheet" => Some("OpenDocument spreadsheet"),
         "application/vnd.oasis.opendocument.presentation" => Some("OpenDocument presentation"),
         "image/png" => Some("PNG bitmap"),
+        "image/wmf" => Some("Windows Metafile"),
+        "image/x-wpg" => Some("WordPerfect graphic"),
         "image/webp" => Some("WebP bitmap"),
         "image/vnd.microsoft.icon" => Some("ICO bitmap"),
         "image/x-pcx" => Some("PCX bitmap"),
@@ -1493,20 +2592,90 @@ fn format_from_mime_type(mime_type: &str) -> Option<&'static str> {
         "image/heic" => Some("HEIC bitmap"),
         "image/vnd.adobe.photoshop" => Some("Photoshop bitmap"),
         "image/x-tga" => Some("TGA bitmap"),
+        "image/x-ilbm" => Some("Amiga ILBM bitmap"),
+        "image/x-fif" => Some("Fractal Imager bitmap"),
+        "image/x-pkm" => Some("PKM bitmap"),
+        "image/x-gws-thumbnail" => Some("GWS thumbnail"),
+        "image/x-truepaint" => Some("Truepaint bitmap"),
+        "image/x-tms" => Some("Enhanced Simplex bitmap"),
+        "image/x-imagelab" => Some("Imagelab bitmap"),
+        "image/x-stad" => Some("STAD bitmap"),
+        "image/x-rix" => Some("ColoRIX bitmap"),
+        "image/x-pict" => Some("Macintosh PICT"),
+        "image/x-ani" => Some("Windows animated cursor"),
+        "image/x-3ds" => Some("3D Studio object"),
         "font/woff" => Some("WOFF font"),
         "font/woff2" => Some("WOFF2 font"),
+        "font/ttf" => Some("TrueType font"),
+        "font/otf" => Some("OpenType font"),
         "audio/wav" => Some("WAV sample"),
         "audio/aiff" => Some("AIFF audio"),
+        "audio/x-aifc" => Some("AIFF-C audio"),
         "audio/basic" => Some("AU audio"),
+        "audio/x-8svx" => Some("Amiga sampled voice"),
+        "audio/vnd.rn-realaudio" => Some("RealAudio sound"),
+        "audio/x-dwd" => Some("DiamondWare digitized sound"),
         "video/x-msvideo" => Some("AVI animation"),
         "video/mp4" => Some("MP4/MOV container"),
         "video/x-matroska" => Some("Matroska container"),
+        "video/x-fli" => Some("FLI animation"),
+        "video/x-flc" => Some("FLC animation"),
+        "video/x-lza" => Some("LZA animation"),
+        "video/x-smacker" => Some("Smacker animation"),
         "audio/flac" => Some("FLAC audio"),
         "application/ogg" => Some("Ogg stream"),
         "audio/mpeg" => Some("MP3 audio"),
         "audio/midi" => Some("MIDI song"),
         "application/pdf" => Some("PDF document"),
         "application/rtf" => Some("RTF document"),
+        "application/winhlp" => Some("Windows Help file"),
+        "application/x-ole-storage" => Some("Microsoft OLE file"),
+        "application/x-msword2" => Some("Microsoft Word 2 document"),
+        "application/x-ms-pif" => Some("Microsoft PIF file"),
+        "application/x-mswrite" => Some("Microsoft Write document"),
+        "application/x-ms-shortcut" => Some("Windows shortcut"),
+        "application/java-vm" => Some("Java class"),
+        "application/x-shockwave-flash" => Some("Shockwave Flash"),
+        "application/vnd.lotus-notes" => Some("Lotus Notes database"),
+        "application/x-c64-t64" => Some("C64S tape file"),
+        "application/x-c64-p00" => Some("C64 file"),
+        "application/x-gameboy-rom" => Some("Game Boy ROM"),
+        "application/x-nes-rom" => Some("NES ROM"),
+        "application/x-genesis-rom" => Some("Mega Drive ROM"),
+        "application/x-sms-rom" => Some("Master System/Game Gear ROM"),
+        "application/x-smd-rom" => Some("Mega Drive SMD ROM"),
+        "application/x-amiga-executable" => Some("Amiga executable"),
+        "application/x-amiga-info" => Some("Amiga information file"),
+        "application/x-cpcemu-snapshot" => Some("CPCEMU snapshot"),
+        "application/x-norton-guide" => Some("Norton Guide"),
+        "application/x-norton-directory-list" => Some("Norton Directory List"),
+        "application/x-os2-help" => Some("OS/2 Help file"),
+        "application/x-kkt" => Some("Ketchup Killers dialog box"),
+        "application/x-kkp" => Some("Ketchup Killers macro"),
+        "application/x-ail-dig-driver" => Some("AIL 3.0 DIG driver"),
+        "application/x-ail-midi-driver" => Some("AIL 3.0 MIDI driver"),
+        "application/x-turbo-c-project" => Some("Turbo C project"),
+        "application/x-turbo-c-desktop" => Some("Turbo C desktop"),
+        "application/x-ms-program-group" => Some("Windows Program Manager group"),
+        "application/x-mac-executor-volume" => Some("Mac Executor volume"),
+        "application/x-swag" => Some("SWAG source code archive"),
+        "application/x-imphobia-resource" => Some("IMPHOBIA resource file"),
+        "application/x-imphobia-config" => Some("IMPHOBIA config file"),
+        "application/x-kkr" => Some("Ketchup Killers description"),
+        "application/x-ketchup-screensaver" => Some("Ketchup Killers screen saver"),
+        "application/x-watcom-help" => Some("Watcom help file"),
+        "application/x-dfp-archive" => Some("DFP archive"),
+        "application/x-netware-packed" => Some("NetWare packed file"),
+        "application/x-borland-chr" => Some("Borland CHR font"),
+        "application/x-borland-bgi" => Some("Borland BGI driver"),
+        "application/x-simcity-2000-save" => Some("SimCity 2000 save"),
+        "application/x-palm-prc" => Some("Palm PRC executable"),
+        "application/x-nfs-replay" => Some("Need for Speed replay"),
+        "application/x-flight-simulator-mode" => Some("Flight Simulator mode"),
+        "application/x-hp48" => Some("HP48 file"),
+        "application/x-cpi" => Some("Code page font"),
+        "application/x-windows-policy" => Some("Windows registry policy"),
+        "application/x-doom-wad" => Some("Doom WAD file"),
         "application/vnd.microsoft.portable-executable" => Some("DOS/Windows executable"),
         "application/x-elf" => Some("ELF executable"),
         "audio/x-s3m" => Some("Scream Tracker module"),
@@ -1518,6 +2687,47 @@ fn format_from_mime_type(mime_type: &str) -> Option<&'static str> {
         "audio/x-ym" => Some("YM tracker stream"),
         "audio/x-ym6" => Some("YM tracker stream"),
         "audio/x-vgm" => Some("VGM audio"),
+        "audio/x-669" => Some("669 module"),
+        "audio/x-ps16" => Some("Protracker Studio 16 module"),
+        "audio/x-dmf" => Some("Digital Music module"),
+        "audio/x-mtm" => Some("Multitracker module"),
+        "audio/x-okt" => Some("Oktalyzer module"),
+        "audio/x-jms" => Some("Jmplayer module"),
+        "audio/x-f2r" => Some("Farandole linear module"),
+        "audio/x-mdl" => Some("Digitrakker module"),
+        "audio/x-psm" => Some("Epic PSM module"),
+        "audio/x-ams" => Some("Advanced Module System"),
+        "audio/x-mxm" => Some("MXM module"),
+        "audio/x-sadt" => Some("Surprise AdLib Tracker module"),
+        "audio/x-pac" => Some("SBStudio module"),
+        "audio/x-d00" => Some("EdLib compressed module"),
+        "audio/x-edlib" => Some("EdLib module"),
+        "audio/x-ast" => Some("All Sound Tracker module"),
+        "audio/x-dsm" => Some("DigiSound module"),
+        "audio/x-rad" => Some("Reality AdLib Tracker module"),
+        "audio/x-rtm" => Some("RTM module"),
+        "audio/x-usm" => Some("Useless module"),
+        "audio/x-ptm" => Some("PTM module"),
+        "audio/x-mbm" => Some("MoonBlaster module"),
+        "audio/x-mdf" => Some("MusicDisk Factory module"),
+        "audio/x-gdm" => Some("BWSB module"),
+        "audio/x-voc" => Some("Creative Voice sample"),
+        "audio/x-xi" => Some("FastTracker instrument"),
+        "audio/x-stm" => Some("Scream Tracker module"),
+        "audio/x-far" => Some("Farandole module"),
+        "audio/x-far-sample" => Some("Farandole sample"),
+        "audio/x-far-pattern" => Some("Farandole pattern"),
+        "audio/x-gus-patch" => Some("Gravis Ultrasound patch"),
+        "audio/x-digitrakker-sample" => Some("Digitrakker sample"),
+        "audio/x-it-sample" => Some("Impulse Tracker sample"),
+        "audio/x-s3m-sample" => Some("Scream Tracker sample"),
+        "audio/x-dsf-sample" => Some("X-Tracker sample"),
+        "audio/x-ultratracker-sample" => Some("Ultratracker sample"),
+        "audio/qcelp" => Some("Qualcomm PureVoice sample"),
+        "audio/x-midi-sds" => Some("MIDI sample dump"),
+        "audio/x-yamaha-dx7" => Some("Yamaha DX7 synthesizer data"),
+        "audio/x-matlab-sound" => Some("Matlab sound file"),
+        "text/x-qbasic" => Some("QuickBasic listing"),
         "application/x-lzop" => Some("LZOP compressed archive"),
         "application/x-cpio" => Some("CPIO archive"),
         "application/x-jam-archive" => Some("JAM archive"),
@@ -1765,6 +2975,37 @@ fn wh_lines(w: u32, h: u32) -> Vec<String> {
     } else {
         Vec::new()
     }
+}
+
+fn with_header_size(mut lines: Vec<String>, size: Option<u64>) -> Vec<String> {
+    if let Some(size) = size.filter(|size| *size > 0) {
+        lines.push(format!(" Header size: {} bytes", size));
+    }
+    lines
+}
+
+fn le_u16_at(data: &[u8], offset: usize) -> Option<u16> {
+    Some(u16::from_le_bytes(
+        data.get(offset..offset + 2)?.try_into().ok()?,
+    ))
+}
+
+fn be_u16_at(data: &[u8], offset: usize) -> Option<u16> {
+    Some(u16::from_be_bytes(
+        data.get(offset..offset + 2)?.try_into().ok()?,
+    ))
+}
+
+fn le_u32_at(data: &[u8], offset: usize) -> Option<u32> {
+    Some(u32::from_le_bytes(
+        data.get(offset..offset + 4)?.try_into().ok()?,
+    ))
+}
+
+fn be_u32_at(data: &[u8], offset: usize) -> Option<u32> {
+    Some(u32::from_be_bytes(
+        data.get(offset..offset + 4)?.try_into().ok()?,
+    ))
 }
 
 #[derive(Debug, Clone)]
@@ -3407,6 +4648,170 @@ fn pdf_version(data: &[u8]) -> Option<String> {
     (!version.is_empty()).then_some(version)
 }
 
+fn winhelp_title(data: &[u8]) -> Option<String> {
+    let len = le_u16_at(data, 0x27)? as usize;
+    if len == 0 || len >= 80 {
+        return None;
+    }
+    fixed_text(data.get(0x29..0x29 + len)?)
+}
+
+fn winhelp_lines(data: &[u8]) -> Vec<String> {
+    with_header_size(Vec::new(), le_u32_at(data, 12).map(u64::from))
+}
+
+fn ole_lines(data: &[u8]) -> Vec<String> {
+    let mut lines = Vec::new();
+    if let Some(sector_shift) = le_u16_at(data, 0x1e) {
+        lines.push(format!(" Sector size: {} bytes", 1u64 << sector_shift));
+    }
+    if let Some(mini_sector_shift) = le_u16_at(data, 0x20) {
+        lines.push(format!(
+            " Mini sector size: {} bytes",
+            1u64 << mini_sector_shift
+        ));
+    }
+    lines
+}
+
+fn is_java_class(data: &[u8]) -> bool {
+    data.starts_with(&[0xCA, 0xFE, 0xBA, 0xBE])
+}
+
+fn java_class_lines(data: &[u8]) -> Vec<String> {
+    if let (Some(minor), Some(major)) = (be_u16_at(data, 4), be_u16_at(data, 6)) {
+        vec![format!(" Class version: {}.{}", major, minor)]
+    } else {
+        Vec::new()
+    }
+}
+
+fn mz_lines(data: &[u8]) -> Vec<String> {
+    let mut lines = Vec::new();
+    if let Some(header_paragraphs) = le_u16_at(data, 8) {
+        lines.push(format!(
+            " Header size: {} bytes",
+            u64::from(header_paragraphs) * 16
+        ));
+    }
+    if let (Some(last_page_bytes), Some(page_count)) = (le_u16_at(data, 2), le_u16_at(data, 4)) {
+        let mut size = u64::from(page_count) * 512;
+        if last_page_bytes != 0 {
+            size = size.saturating_sub(512) + u64::from(last_page_bytes);
+        }
+        if size > 0 {
+            lines.push(format!(" Header file size: {} bytes", size));
+        }
+    }
+    if let Some(pe_offset) = le_u32_at(data, 0x3c).map(|offset| offset as usize)
+        && let Some(sig) = data.get(pe_offset..pe_offset + 2)
+    {
+        match sig {
+            b"PE" => lines.push(" Portable Executable".into()),
+            b"NE" => lines.push(" New Executable".into()),
+            b"LE" => lines.push(" Linear Executable".into()),
+            b"LX" => lines.push(" Linear Executable LX".into()),
+            _ => {}
+        }
+    }
+    lines
+}
+
+fn fif_lines(data: &[u8]) -> Vec<String> {
+    let lines = if let (Some(w), Some(h)) = (le_u32_at(data, 6), le_u32_at(data, 10)) {
+        wh_lines(w, h)
+    } else {
+        Vec::new()
+    };
+    with_header_size(lines, le_u32_at(data, 0x10).map(u64::from))
+}
+
+fn nsf_title(data: &[u8]) -> Option<String> {
+    let title = fixed_text(data.get(0xc8..0xc8 + 80)?)?;
+    title.lines().next().map(str::trim).and_then(|line| {
+        if line.is_empty() {
+            None
+        } else {
+            Some(line.to_string())
+        }
+    })
+}
+
+fn nsf_lines(data: &[u8]) -> Vec<String> {
+    with_header_size(Vec::new(), le_u32_at(data, 0x58).map(u64::from))
+}
+
+fn three_ds_lines(data: &[u8]) -> Vec<String> {
+    with_header_size(Vec::new(), le_u32_at(data, 2).map(u64::from))
+}
+
+fn is_3ds(data: &[u8]) -> bool {
+    data.get(5..5 + 12)
+        == Some(&[
+            0x00, 0x02, 0x00, 0x0A, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, b'=',
+        ])
+}
+
+fn is_ttf(data: &[u8]) -> bool {
+    data.starts_with(&[0x00, 0x01, 0x00, 0x00]) || data.starts_with(b"true")
+}
+
+fn swf_lines(data: &[u8]) -> Vec<String> {
+    let mut lines = Vec::new();
+    if let Some(version) = data.get(3) {
+        lines.push(format!(" SWF version {}", version));
+    }
+    with_header_size(lines, le_u32_at(data, 4).map(u64::from))
+}
+
+fn dlz_lines(data: &[u8]) -> Vec<String> {
+    let header_size = match (le_u16_at(data, 0x0a), data.get(0x09).copied()) {
+        (Some(low), Some(high)) => Some(u64::from(low) + 17 + (u64::from(high) * 65536)),
+        _ => None,
+    };
+    with_header_size(Vec::new(), header_size)
+}
+
+fn wad_lines(data: &[u8]) -> Vec<String> {
+    let mut lines = Vec::new();
+    if let Some(entries) = le_u32_at(data, 4) {
+        lines.push(format!(" {} lump(s)", entries));
+    }
+    if let Some(dir_offset) = le_u32_at(data, 8) {
+        lines.push(format!(" Directory offset: {}", dir_offset));
+    }
+    lines
+}
+
+fn riff_size_lines(data: &[u8]) -> Vec<String> {
+    with_header_size(
+        Vec::new(),
+        le_u32_at(data, 4).map(|size| u64::from(size) + 8),
+    )
+}
+
+fn lza_lines(data: &[u8]) -> Vec<String> {
+    let mut lines = Vec::new();
+    if let (Some(frames), Some(w), Some(h)) =
+        (le_u16_at(data, 7), le_u16_at(data, 9), le_u16_at(data, 11))
+    {
+        lines.push(format!(" {} x {} pixels", w, h));
+        lines.push(format!(" {} frame(s)", frames));
+    }
+    lines
+}
+
+fn nes_lines(data: &[u8]) -> Vec<String> {
+    let mut lines = Vec::new();
+    if data.len() >= 8 {
+        let prg = data[4] as u32 * 16;
+        let chr = data[5] as u32 * 8;
+        lines.push(format!(" PRG ROM: {} KiB", prg));
+        lines.push(format!(" CHR ROM: {} KiB", chr));
+    }
+    lines
+}
+
 fn pdf_page_count(text: &str) -> Option<usize> {
     let mut best: Option<usize> = None;
     for cap in text.match_indices("/Count") {
@@ -3549,12 +4954,31 @@ fn midi_info(path: &Path, data: &[u8]) -> IdInfo {
 
 fn wav_info(path: &Path, data: &[u8]) -> IdInfo {
     let mut extra = Vec::new();
+    extra = with_header_size(extra, le_u32_at(data, 4).map(|size| u64::from(size) + 8));
     if let Some((channels, rate, bits)) = wav_fmt(data) {
         extra.push(format!(" {} Hz", rate));
         extra.push(format!(" {} channel(s)", channels));
         extra.push(format!(" {} bit", bits));
     }
     info("audio/wav", path, IdfKind::Sample, None, None, extra)
+}
+
+fn au_lines(data: &[u8]) -> Vec<String> {
+    let mut lines = Vec::new();
+    if let Some(rate) = be_u32_at(data, 16).filter(|rate| *rate > 0) {
+        lines.push(format!(" {} Hz", rate));
+    }
+    if let Some(channels) = be_u32_at(data, 20).filter(|channels| *channels > 0) {
+        lines.push(format!(" {} channel(s)", channels));
+    }
+    let header_size = be_u32_at(data, 4).map(u64::from);
+    let data_size = be_u32_at(data, 8).filter(|size| *size != u32::MAX);
+    with_header_size(
+        lines,
+        header_size
+            .zip(data_size)
+            .map(|(header, data)| header + u64::from(data)),
+    )
 }
 
 fn wav_fmt(data: &[u8]) -> Option<(u16, u32, u16)> {
@@ -3596,6 +5020,20 @@ fn gif_size(data: &[u8]) -> Option<(u32, u32)> {
     }
 }
 
+fn gif_lines(w: u32, h: u32, data: &[u8]) -> Vec<String> {
+    let mut lines = wh_lines(w, h);
+    if data.len() >= 11 {
+        let packed = data[10];
+        let has_global_palette = packed & 0x80 != 0;
+        let bits = (packed & 0x07) + 1;
+        lines.push(format!(" {} bit", bits));
+        if has_global_palette {
+            lines.push(format!(" Global palette: {} colors", 1u32 << bits));
+        }
+    }
+    lines
+}
+
 fn bmp_size(data: &[u8]) -> Option<(u32, u32)> {
     if data.len() >= 26 {
         Some((
@@ -3605,6 +5043,14 @@ fn bmp_size(data: &[u8]) -> Option<(u32, u32)> {
     } else {
         None
     }
+}
+
+fn bmp_lines(w: u32, h: u32, data: &[u8]) -> Vec<String> {
+    let mut lines = wh_lines(w, h);
+    if let Some(bits) = le_u16_at(data, 28) {
+        lines.push(format!(" {} bit", bits));
+    }
+    with_header_size(lines, le_u32_at(data, 2).map(u64::from))
 }
 
 fn webp_size(data: &[u8]) -> Option<(u32, u32)> {
@@ -3691,7 +5137,318 @@ fn tga_lines(data: &[u8]) -> Vec<String> {
     if data.len() >= 16 {
         let w = u16::from_le_bytes([data[12], data[13]]) as u32;
         let h = u16::from_le_bytes([data[14], data[15]]) as u32;
-        wh_lines(w, h)
+        let mut lines = wh_lines(w, h);
+        if let Some(bits) = data.get(16).copied().filter(|bits| *bits > 0) {
+            lines.push(format!(" {} bit", bits));
+        }
+        lines
+    } else {
+        Vec::new()
+    }
+}
+
+fn is_iff_bitmap(data: &[u8]) -> bool {
+    data.starts_with(b"FORM") && matches!(data.get(8..12), Some(b"ILBM" | b"PBM " | b"ACBM"))
+}
+
+fn is_iff_sample(data: &[u8]) -> bool {
+    data.starts_with(b"FORM") && matches!(data.get(8..12), Some(b"8SVX" | b"16SV"))
+}
+
+fn iff_size_lines(data: &[u8]) -> Vec<String> {
+    with_header_size(
+        Vec::new(),
+        be_u32_at(data, 4).map(|size| u64::from(size) + 8),
+    )
+}
+
+fn iff_title(data: &[u8]) -> Option<String> {
+    iff_chunk(data, b"NAME").and_then(fixed_text)
+}
+
+fn iff_chunk<'a>(data: &'a [u8], chunk_id: &[u8; 4]) -> Option<&'a [u8]> {
+    if data.len() < 12 || !data.starts_with(b"FORM") {
+        return None;
+    }
+    let mut offset = 12usize;
+    while offset + 8 <= data.len() {
+        let id = data.get(offset..offset + 4)?;
+        let len = be_u32_at(data, offset + 4)? as usize;
+        offset += 8;
+        if offset + len > data.len() {
+            return None;
+        }
+        if id == chunk_id {
+            return data.get(offset..offset + len);
+        }
+        offset += len + (len & 1);
+    }
+    None
+}
+
+fn iff_lines(data: &[u8]) -> Vec<String> {
+    let mut lines = iff_size_lines(data);
+    if let Some(bmhd) = iff_chunk(data, b"BMHD")
+        && bmhd.len() >= 9
+    {
+        let w = u16::from_be_bytes([bmhd[0], bmhd[1]]) as u32;
+        let h = u16::from_be_bytes([bmhd[2], bmhd[3]]) as u32;
+        lines.extend(wh_lines(w, h));
+        lines.push(format!(" {} bit", bmhd[8]));
+    }
+    if let Some(vhdr) = iff_chunk(data, b"VHDR")
+        && vhdr.len() >= 14
+    {
+        let rate = u16::from_be_bytes([vhdr[12], vhdr[13]]);
+        lines.push(format!(" {} Hz", rate));
+    }
+    lines
+}
+
+fn is_fli(data: &[u8]) -> bool {
+    data.len() >= 16 && le_u16_at(data, 4) == Some(0xAF11)
+}
+
+fn is_flc(data: &[u8]) -> bool {
+    data.len() >= 16 && le_u16_at(data, 4) == Some(0xAF12)
+}
+
+fn fli_lines(data: &[u8]) -> Vec<String> {
+    let mut lines = with_header_size(Vec::new(), le_u32_at(data, 0).map(u64::from));
+    if data.len() >= 14 {
+        if let (Some(frames), Some(w), Some(h)) =
+            (le_u16_at(data, 6), le_u16_at(data, 8), le_u16_at(data, 10))
+        {
+            lines.push(format!(" {} x {} pixels", w, h));
+            lines.push(format!(" {} frame(s)", frames));
+        }
+        if let Some(bits) = le_u16_at(data, 12).filter(|bits| *bits > 0) {
+            lines.push(format!(" {} bit", bits));
+        }
+    }
+    lines
+}
+
+fn is_669(data: &[u8]) -> bool {
+    data.starts_with(b"if") || data.starts_with(b"JN")
+}
+
+fn tracker_669_lines(data: &[u8]) -> Vec<String> {
+    let mut lines = Vec::new();
+    for range in [2..38, 38..74, 74..110] {
+        if let Some(text) = data.get(range).and_then(fixed_text)
+            && !text.is_empty()
+        {
+            lines.push(format!(" {}", text));
+        }
+    }
+    if let (Some(instruments), Some(patterns)) = (data.get(0x6e), data.get(0x6f)) {
+        lines.push(format!(" {} instrument(s)", instruments));
+        lines.push(format!(" {} pattern(s)", patterns));
+        lines.push(" 8 channel(s)".into());
+    }
+    lines
+}
+
+fn mtm_lines(data: &[u8]) -> Vec<String> {
+    let mut lines = Vec::new();
+    if let Some(song_len) = data.get(27) {
+        lines.push(format!(" Song length: {}", u16::from(*song_len) + 1));
+    }
+    if let Some(channels) = data.get(33) {
+        lines.push(format!(" {} channel(s)", channels));
+    }
+    lines
+}
+
+fn sample_rate_line(rate: Option<u32>) -> Vec<String> {
+    rate.filter(|rate| *rate > 0)
+        .map(|rate| vec![format!(" {} Hz", rate)])
+        .unwrap_or_default()
+}
+
+fn ast_title(data: &[u8]) -> Option<String> {
+    let len = le_u16_at(data, 10)? as usize;
+    if len == 0 || len > 79 {
+        return None;
+    }
+    fixed_text(data.get(12..12 + len)?)
+}
+
+fn usm_lines(data: &[u8]) -> Vec<String> {
+    if let (Some(channels), Some(patterns), Some(instruments)) = (
+        le_u16_at(data, 42),
+        le_u16_at(data, 44),
+        le_u16_at(data, 46),
+    ) {
+        vec![
+            format!(" {} instrument(s)", instruments),
+            format!(" {} pattern(s)", patterns),
+            format!(" {} channel(s)", channels),
+        ]
+    } else {
+        Vec::new()
+    }
+}
+
+fn voc_lines(data: &[u8]) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut offset = le_u16_at(data, 0x14).map(usize::from).unwrap_or(0x1a);
+    while offset + 4 <= data.len() {
+        let block_type = data[offset];
+        if block_type == 0 {
+            break;
+        }
+        let block_len = usize::from(data[offset + 1])
+            | (usize::from(data[offset + 2]) << 8)
+            | (usize::from(data[offset + 3]) << 16);
+        let payload = offset + 4;
+        if payload + block_len > data.len() {
+            break;
+        }
+        match block_type {
+            1 if block_len >= 2 => {
+                let divisor = 256u32.saturating_sub(u32::from(data[payload]));
+                if divisor > 0 {
+                    lines.push(format!(" {} Hz", 1_000_000 / divisor));
+                }
+                if let Some(format) = voc_codec_label(data[payload + 1]) {
+                    lines.push(format!(" {}", format));
+                }
+                break;
+            }
+            8 if block_len >= 4 => {
+                let divisor = 65536u32.saturating_sub(u32::from(le_u16_at(data, payload).unwrap()));
+                let channels = u32::from(data[payload + 3]) + 1;
+                if divisor > 0 {
+                    lines.push(format!(" {} Hz", 256_000_000 / divisor));
+                }
+                lines.push(format!(" {} channel(s)", channels));
+            }
+            9 if block_len >= 12 => {
+                if let Some(rate) = le_u32_at(data, payload).filter(|rate| *rate > 0) {
+                    lines.push(format!(" {} Hz", rate));
+                }
+                if let Some(bits) = data.get(payload + 4).filter(|bits| **bits > 0) {
+                    lines.push(format!(" {} bit", bits));
+                }
+                if let Some(channels) = data.get(payload + 5).filter(|channels| **channels > 0) {
+                    lines.push(format!(" {} channel(s)", channels));
+                }
+                if let Some(format) = le_u16_at(data, payload + 6).and_then(voc_codec_label_u16) {
+                    lines.push(format!(" {}", format));
+                }
+                break;
+            }
+            _ => {}
+        }
+        offset = payload + block_len;
+    }
+    lines
+}
+
+fn voc_codec_label(codec: u8) -> Option<&'static str> {
+    match codec {
+        0 => Some("8-bit unsigned PCM"),
+        1 => Some("4-bit ADPCM"),
+        2 => Some("3-bit ADPCM"),
+        3 => Some("2-bit ADPCM"),
+        4 => Some("16-bit signed PCM"),
+        6 => Some("A-law"),
+        7 => Some("Mu-law"),
+        _ => None,
+    }
+}
+
+fn voc_codec_label_u16(codec: u16) -> Option<&'static str> {
+    match codec {
+        0x0000 => Some("8-bit unsigned PCM"),
+        0x0004 => Some("16-bit signed PCM"),
+        0x0006 => Some("A-law"),
+        0x0007 => Some("Mu-law"),
+        _ => None,
+    }
+}
+
+fn stm_lines(data: &[u8]) -> Vec<String> {
+    let mut lines = Vec::new();
+    match data.get(29) {
+        Some(1) => lines.push(" Song".into()),
+        Some(2) => lines.push(" Module".into()),
+        _ => {}
+    }
+    if let Some(patterns) = data.get(33) {
+        lines.push(format!(" {} pattern(s)", patterns));
+        lines.push(" 4 channel(s)".into());
+    }
+    if let (Some(major), Some(minor)) = (data.get(30), data.get(31)) {
+        lines.push(format!(" Scream Tracker {}.{:02}", major, minor));
+    }
+    lines
+}
+
+fn far_lines(data: &[u8]) -> Vec<String> {
+    data.get(49)
+        .map(|version| vec![format!(" Version {}.{}", version / 16, version & 15)])
+        .unwrap_or_default()
+}
+
+fn mdl_title(data: &[u8]) -> Option<String> {
+    mdl_info_block(data).and_then(|offset| fixed_text(data.get(offset..offset + 32)?))
+}
+
+fn mdl_composer(data: &[u8]) -> Option<String> {
+    mdl_info_block(data).and_then(|offset| fixed_text(data.get(offset + 32..offset + 52)?))
+}
+
+fn mdl_lines(data: &[u8]) -> Vec<String> {
+    mdl_info_block(data)
+        .map(|offset| vec![format!(" Info block offset: {}", offset)])
+        .unwrap_or_default()
+}
+
+fn mdl_info_block(data: &[u8]) -> Option<usize> {
+    let mut offset = 5usize;
+    while offset + 6 <= data.len() {
+        let id = data.get(offset..offset + 2)?;
+        let len = le_u32_at(data, offset + 2)? as usize;
+        let payload = offset + 6;
+        let next = payload.checked_add(len)?;
+        if next > data.len() {
+            return None;
+        }
+        if id == b"IN" {
+            return Some(payload);
+        }
+        offset = next;
+    }
+    None
+}
+
+fn pkm_lines(data: &[u8]) -> Vec<String> {
+    if let (Some(w), Some(h)) = (le_u16_at(data, 6), le_u16_at(data, 8)) {
+        let mut lines = wh_lines(u32::from(w), u32::from(h));
+        lines.push(" 8 bit".into());
+        lines
+    } else {
+        Vec::new()
+    }
+}
+
+fn tnl_lines(data: &[u8]) -> Vec<String> {
+    let mut lines = Vec::new();
+    if let (Some(w), Some(h)) = (le_u32_at(data, 8), le_u32_at(data, 12)) {
+        lines.push(format!(" {} x {} pixels", w, h));
+    }
+    if let (Some(w), Some(h)) = (le_u32_at(data, 16), le_u32_at(data, 20)) {
+        lines.push(format!(" Original: {} x {} pixels", w, h));
+    }
+    lines
+}
+
+fn kkp_lines(data: &[u8]) -> Vec<String> {
+    if data.get(34) == Some(&1) {
+        vec![" Pre-loading".into()]
     } else {
         Vec::new()
     }
@@ -3884,6 +5641,14 @@ fn fixed_text(data: &[u8]) -> Option<String> {
     let end = data.iter().position(|&b| b == 0).unwrap_or(data.len());
     let s = String::from_utf8_lossy(&data[..end]).trim().to_string();
     if s.is_empty() { None } else { Some(s) }
+}
+
+fn fixed_len_prefixed_text(data: &[u8], len_offset: usize, text_offset: usize) -> Option<String> {
+    let len = *data.get(len_offset)? as usize;
+    if len == 0 || len > 79 {
+        return None;
+    }
+    fixed_text(data.get(text_offset..text_offset + len)?)
 }
 
 fn tracker_name(data: &[u8], start: usize, end: usize) -> Option<String> {
@@ -4946,6 +6711,165 @@ mod tests {
                 .expect("sample should be detected");
             assert_eq!(info.mime_types[0], mime_type);
             assert_eq!(info.format, format);
+        }
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn legacy_idf_header_sizes_are_reported() {
+        let root = std::env::temp_dir().join(format!("kkc-idf-legacy-{}", std::process::id()));
+        fs::create_dir_all(&root).expect("temp dir");
+
+        let mut bmp = vec![0u8; 54];
+        bmp[0..2].copy_from_slice(b"BM");
+        bmp[2..6].copy_from_slice(&54u32.to_le_bytes());
+        bmp[14..18].copy_from_slice(&40u32.to_le_bytes());
+        bmp[18..22].copy_from_slice(&16i32.to_le_bytes());
+        bmp[22..26].copy_from_slice(&8i32.to_le_bytes());
+        bmp[28..30].copy_from_slice(&24u16.to_le_bytes());
+
+        let mut iff = Vec::new();
+        iff.extend_from_slice(b"FORM");
+        iff.extend_from_slice(&38u32.to_be_bytes());
+        iff.extend_from_slice(b"ILBM");
+        iff.extend_from_slice(b"BMHD");
+        iff.extend_from_slice(&20u32.to_be_bytes());
+        iff.extend_from_slice(&32u16.to_be_bytes());
+        iff.extend_from_slice(&16u16.to_be_bytes());
+        iff.extend_from_slice(&[0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+        let mut fli = vec![0u8; 128];
+        fli[0..4].copy_from_slice(&128u32.to_le_bytes());
+        fli[4..6].copy_from_slice(&0xAF11u16.to_le_bytes());
+        fli[6..8].copy_from_slice(&3u16.to_le_bytes());
+        fli[8..10].copy_from_slice(&320u16.to_le_bytes());
+        fli[10..12].copy_from_slice(&200u16.to_le_bytes());
+        fli[12..14].copy_from_slice(&8u16.to_le_bytes());
+
+        let cases = [
+            ("sample.bmp", bmp, "image/bmp", "Header size: 54 bytes"),
+            ("sample.lbm", iff, "image/x-ilbm", "Header size: 46 bytes"),
+            ("sample.fli", fli, "video/x-fli", "Header size: 128 bytes"),
+        ];
+
+        for (name, bytes, mime_type, size_line) in cases {
+            let path = root.join(name);
+            fs::write(&path, bytes).expect("write sample");
+            let info = probe_file(&path)
+                .expect("probe should not fail")
+                .expect("sample should be detected");
+            assert_eq!(info.mime_types[0], mime_type);
+            assert!(
+                info.extra.iter().any(|line| line.contains(size_line)),
+                "missing {size_line:?} in {:?}",
+                info.extra
+            );
+        }
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn legacy_idf_extra_signatures_are_detected() {
+        let root = std::env::temp_dir().join(format!("kkc-idf-extra-{}", std::process::id()));
+        fs::create_dir_all(&root).expect("temp dir");
+
+        let mut dmf = vec![0u8; 80];
+        dmf[0..4].copy_from_slice(b"DDMF");
+        write_test_fixed_text(&mut dmf[13..43], "Demo DMF");
+        write_test_fixed_text(&mut dmf[43..63], "Composer");
+
+        let mut pkm = vec![0u8; 16];
+        pkm[0..3].copy_from_slice(b"PKM");
+        pkm[6..8].copy_from_slice(&64u16.to_le_bytes());
+        pkm[8..10].copy_from_slice(&32u16.to_le_bytes());
+
+        let mut nes = vec![0u8; 16];
+        nes[0..4].copy_from_slice(&[0x4e, 0x45, 0x53, 0x1a]);
+        nes[4] = 2;
+        nes[5] = 1;
+
+        let cases = [
+            ("sample.dmf", dmf, "audio/x-dmf", IdfKind::Module),
+            ("sample.pkm", pkm, "image/x-pkm", IdfKind::Bitmap),
+            ("sample.nes", nes, "application/x-nes-rom", IdfKind::Other),
+        ];
+
+        for (name, bytes, mime_type, kind) in cases {
+            let path = root.join(name);
+            fs::write(&path, bytes).expect("write sample");
+            let info = probe_file(&path)
+                .expect("probe should not fail")
+                .expect("sample should be detected");
+            assert_eq!(info.mime_types[0], mime_type);
+            assert_eq!(info.kind, kind);
+        }
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn legacy_idf_tracker_and_sample_signatures_are_detected() {
+        let root = std::env::temp_dir().join(format!("kkc-idf-tracker-{}", std::process::id()));
+        fs::create_dir_all(&root).expect("temp dir");
+
+        let mut module_669 = vec![0u8; 0x70];
+        module_669[0..2].copy_from_slice(b"if");
+        write_test_fixed_text(&mut module_669[2..38], "Composer 669");
+        module_669[0x6e] = 12;
+        module_669[0x6f] = 3;
+
+        let mut voc = vec![0u8; 0x20];
+        voc[0..19].copy_from_slice(b"Creative Voice File");
+        voc[0x14..0x16].copy_from_slice(&0x1au16.to_le_bytes());
+        voc[0x1a] = 1;
+        voc[0x1b..0x1e].copy_from_slice(&[2, 0, 0]);
+        voc[0x1e] = 156;
+        voc[0x1f] = 0;
+
+        let mut far = vec![0u8; 64];
+        far[0..4].copy_from_slice(b"FAR\xFE");
+        write_test_fixed_text(&mut far[4..44], "Far Demo");
+        far[49] = 0x12;
+
+        let cases = [
+            (
+                "sample.669",
+                module_669,
+                "audio/x-669",
+                IdfKind::Module,
+                "12 instrument(s)",
+            ),
+            (
+                "sample.voc",
+                voc,
+                "audio/x-voc",
+                IdfKind::Sample,
+                "10000 Hz",
+            ),
+            (
+                "sample.far",
+                far,
+                "audio/x-far",
+                IdfKind::Module,
+                "Version 1.2",
+            ),
+        ];
+
+        for (name, bytes, mime_type, kind, detail) in cases {
+            let path = root.join(name);
+            fs::write(&path, bytes).expect("write sample");
+            let info = probe_file(&path)
+                .expect("probe should not fail")
+                .expect("sample should be detected");
+            assert_eq!(info.mime_types[0], mime_type);
+            assert_eq!(info.kind, kind);
+            assert!(
+                info.extra.iter().any(|line| line.contains(detail)),
+                "missing {detail:?} in {:?}",
+                info.extra
+            );
         }
 
         let _ = fs::remove_dir_all(root);

@@ -81,7 +81,6 @@ pub(crate) fn viewer_footer_shortcuts(v: &Viewer) -> Vec<FooterShortcut> {
                 label: "/:Search",
                 key: KeyCode::Char('/'),
             },
-
         ];
         if matches!(v.mode, ViewMode::Ansi) {
             shortcuts.push(FooterShortcut {
@@ -395,13 +394,11 @@ pub(super) fn render_viewer(
     let col_info = (matches!(v.mode, ViewMode::Text | ViewMode::Ansi) && !v.wrap && v.hscroll > 0)
         .then(|| v.hscroll.to_string());
     let lf_info = matches!(v.mode, ViewMode::Text | ViewMode::Ansi).then(|| v.line_feed_label());
-    let pre_info =
-        matches!(v.mode, ViewMode::Text | ViewMode::Ansi).then(|| v.preproc_label());
-    let enc_info =
-        matches!(v.mode, ViewMode::Text | ViewMode::Ansi | ViewMode::Hex).then(|| v.encoding_label());
+    let pre_info = matches!(v.mode, ViewMode::Text | ViewMode::Ansi).then(|| v.preproc_label());
+    let enc_info = matches!(v.mode, ViewMode::Text | ViewMode::Ansi | ViewMode::Hex)
+        .then(|| v.encoding_label());
     let mask_info = matches!(v.mode, ViewMode::Text | ViewMode::Ansi).then(|| v.mask_label());
-    let ansi_canvas_info =
-        matches!(v.mode, ViewMode::Ansi).then(|| v.ansi_canvas_label());
+    let ansi_canvas_info = matches!(v.mode, ViewMode::Ansi).then(|| v.ansi_canvas_label());
     let plugin_info = v.viewer_plugin.as_deref();
     let zoom_info = v.zoom_label();
     let autoplay_info = v.autoplay_display(autoplay_delay_secs);
@@ -423,7 +420,9 @@ pub(super) fn render_viewer(
     let key_style = Style::default()
         .fg(Color::White)
         .add_modifier(Modifier::BOLD);
-    let value_style = Style::default().fg(Color::LightBlue).add_modifier(Modifier::BOLD);
+    let value_style = Style::default()
+        .fg(Color::LightBlue)
+        .add_modifier(Modifier::BOLD);
     let mut title_spans = vec![
         Span::styled(
             format!(" {} ", file_name),
@@ -501,7 +500,8 @@ pub(super) fn render_viewer(
     title_spans.push(Span::raw(" "));
     let title_line = Line::from(title_spans);
 
-    let (border_style, border_type, title_line_for_block) = if let Some(label) = quick_preview_label {
+    let (border_style, border_type, title_line_for_block) = if let Some(label) = quick_preview_label
+    {
         // Quick-preview embedded panel: custom compact title
         if active {
             (

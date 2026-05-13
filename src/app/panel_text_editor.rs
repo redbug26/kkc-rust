@@ -175,10 +175,7 @@ impl App {
         let saved_path = self.panel_text_editor.as_ref().and_then(|e| e.path.clone());
         if let Some(editor) = self.panel_text_editor.as_mut() {
             editor.save()?;
-            if saved_path
-                .as_ref()
-                .is_some_and(|path| is_config_path(path))
-            {
+            if saved_path.as_ref().is_some_and(|path| is_config_path(path)) {
                 self.reload_config_from_disk()?;
                 return Ok(());
             }

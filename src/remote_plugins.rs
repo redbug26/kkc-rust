@@ -85,14 +85,12 @@ pub fn discover_remote_rust_plugins_from_manifests(
             .expect("remote section")
             .library
             .clone();
-        let Some(library_path) = resolve_remote_library_path(
-            &manifest_info.dir,
-            &configured_library,
-        ) else {
+        let Some(library_path) =
+            resolve_remote_library_path(&manifest_info.dir, &configured_library)
+        else {
             crate::viewer::debug_log(&format!(
                 "startup: {} - remote-rust plugin: '{}' not found",
-                manifest.plugin.id,
-                configured_library
+                manifest.plugin.id, configured_library
             ));
             continue;
         };

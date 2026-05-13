@@ -18,16 +18,14 @@ impl RemoteEditKind {
         let mut out = vec![Self::Sftp, Self::Smb];
         let mut remote_plugins = discover_remote_plugin_choices();
         remote_plugins.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
-        out.extend(
-            remote_plugins
-                .into_iter()
-                .map(|(plugin_id, display_name, scheme, config_fields)| Self::RemotePlugin {
-                    plugin_id,
-                    display_name,
-                    scheme,
-                    config_fields,
-                }),
-        );
+        out.extend(remote_plugins.into_iter().map(
+            |(plugin_id, display_name, scheme, config_fields)| Self::RemotePlugin {
+                plugin_id,
+                display_name,
+                scheme,
+                config_fields,
+            },
+        ));
         out
     }
 
@@ -144,7 +142,11 @@ impl RemoteEditState {
                 ..
             } => {
                 let mut fields = vec![display_name.clone()];
-                fields.extend(config_fields.iter().map(|field| field.default_value.clone()));
+                fields.extend(
+                    config_fields
+                        .iter()
+                        .map(|field| field.default_value.clone()),
+                );
                 fields.push("/".into());
                 fields.push(String::new());
                 fields
@@ -370,8 +372,7 @@ impl RemoteEditState {
     }
 }
 
-fn discover_remote_plugin_choices(
-) -> Vec<(
+fn discover_remote_plugin_choices() -> Vec<(
     String,
     String,
     String,
@@ -385,8 +386,8 @@ fn discover_remote_plugin_choices(
         "remote-edit: discovering remote plugin choices from {}",
         plugins_dir.display()
     ));
-    let loaded = crate::remote_plugins::discover_remote_rust_plugins(&plugins_dir)
-        .unwrap_or_else(|err| {
+    let loaded =
+        crate::remote_plugins::discover_remote_rust_plugins(&plugins_dir).unwrap_or_else(|err| {
             crate::viewer::debug_log(&format!(
                 "remote-edit: loaded remote plugin discovery failed: {err}"
             ));

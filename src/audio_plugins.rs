@@ -112,8 +112,7 @@ pub fn discover_audio_rust_plugins(plugins_dir: &Path) -> Result<Vec<AudioRustPl
         let Some(library_path) = resolve_audio_library_path(&path, &audio.library) else {
             crate::viewer::debug_log(&format!(
                 "startup: {} - audio-rust plugin: '{}' not found",
-                manifest.plugin.id,
-                audio.library
+                manifest.plugin.id, audio.library
             ));
             continue;
         };

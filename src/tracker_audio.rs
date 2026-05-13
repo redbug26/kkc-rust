@@ -243,7 +243,11 @@ fn select_audio_plugin(
     let plugins_dir = crate::plugins::plugins_dir().ok()?;
     let discovered = crate::audio_plugins::discover_audio_rust_plugins(&plugins_dir).ok()?;
 
-    crate::viewer::debug_log(&format!("audio: discovered {} plugins for '{}'", discovered.len(), path.display()));
+    crate::viewer::debug_log(&format!(
+        "audio: discovered {} plugins for '{}'",
+        discovered.len(),
+        path.display()
+    ));
 
     let mut tried_preferred = Vec::new();
     for preferred_id in preferred_plugin_ids {
@@ -263,9 +267,12 @@ fn select_audio_plugin(
     for plugin in discovered {
         let mime_match = path_mime_types.as_deref().is_some_and(|mime_types| {
             !plugin.mime_types.is_empty()
-                && mime_types
-                    .iter()
-                    .any(|mime_type| plugin.mime_types.iter().any(|candidate| candidate == mime_type))
+                && mime_types.iter().any(|mime_type| {
+                    plugin
+                        .mime_types
+                        .iter()
+                        .any(|candidate| candidate == mime_type)
+                })
         });
         let legacy_ext_match = !plugin.extensions.is_empty()
             && !extension.is_empty()
@@ -397,7 +404,7 @@ pub fn is_audio_path(path: &Path) -> bool {
 
     is_tracker_module_path(path)
         || decoded_audio_format(path).is_some()
-    || select_audio_plugin(path, &preferred_audio_plugin_ids_for_path(path)).is_some()
+        || select_audio_plugin(path, &preferred_audio_plugin_ids_for_path(path)).is_some()
 }
 
 pub fn module_info(bytes: &[u8]) -> Result<TrackerModuleInfo> {
@@ -411,10 +418,14 @@ pub fn try_audio_info(path: &Path, bytes: &[u8]) -> Option<TrackerModuleInfo> {
         path.display()
     ));
 
-    if let Some((plugin, module)) = select_audio_plugin(path, &preferred_audio_plugin_ids_for_path(path)) {
+    if let Some((plugin, module)) =
+        select_audio_plugin(path, &preferred_audio_plugin_ids_for_path(path))
+    {
         remember_audio_plugin_for_path(path, &plugin.id);
         let path_text = path.to_string_lossy();
-        let info = module.open()(path_text.as_ref().into()).into_result().ok()?;
+        let info = module.open()(path_text.as_ref().into())
+            .into_result()
+            .ok()?;
         let _ = module.close()(path_text.as_ref().into());
         Some(map_plugin_info(path, &info))
     } else if decoded_audio_format(path).is_some() {
@@ -489,7 +500,6 @@ fn play_audio_bytes_with_preferences(
     bytes: &[u8],
     preferred_plugin_ids: &[String],
 ) -> Result<TrackerModuleInfo> {
-
     crate::viewer::debug_log(&format!(
         "audio: attempting to play '{}' with preferred plugins: {:?}",
         path.display(),

@@ -1015,7 +1015,11 @@ pub(super) fn render_audio_player_palette(
             line.spans.push(Span::styled(
                 format!("  {}", desc),
                 Style::default()
-                    .fg(if is_sel { Color::Rgb(220, 230, 255) } else { CLR_QS_NO_MATCH })
+                    .fg(if is_sel {
+                        Color::Rgb(220, 230, 255)
+                    } else {
+                        CLR_QS_NO_MATCH
+                    })
                     .bg(bg),
             ));
             ListItem::new(line)
