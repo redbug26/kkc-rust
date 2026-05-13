@@ -1,13 +1,15 @@
 mod menu;
 mod palette;
+mod panel_text_editor;
 mod viewer;
 
 use self::menu::handle_menu;
 use self::palette::{handle_command_palette, handle_store_install_palette};
+use self::panel_text_editor::textarea_input_from_key_event;
 use self::viewer::{
-    handle_audio_player_palette, handle_mouse_viewer, handle_viewer,
-    handle_viewer_goto, handle_viewer_goto_line, handle_viewer_menu,
-    handle_viewer_plugin_palette, handle_viewer_searching,
+    handle_audio_player_palette, handle_mouse_viewer, handle_viewer, handle_viewer_goto,
+    handle_viewer_goto_line, handle_viewer_menu, handle_viewer_plugin_palette,
+    handle_viewer_searching,
 };
 use crate::app::{
     ActivePanel, App, AppMode, AssocEditorState, AssocInputAction, AssocInputDialog,
@@ -382,8 +384,7 @@ fn handle_mouse_remote_edit(app: &mut App, mouse: MouseEvent) -> Result<bool> {
                 s.path_field_index() as u16,
                 shares.len(),
                 picker_cur,
-            )
-            {
+            ) {
                 if point_in_rect(mouse.column, mouse.row, dd_area)
                     && point_in_rect(mouse.column, mouse.row, dd_inner)
                 {
@@ -1077,7 +1078,7 @@ fn handle_mouse_confirm(app: &mut App, mouse: MouseEvent) -> Result<bool> {
     if let Some(reject) = reject
         && point_in_rect(mouse.column, mouse.row, reject)
     {
-        return handle_confirm(app, KeyEvent::from(KeyCode::Esc));
+        return handle_confirm(app, KeyEvent::from(KeyCode::Char('n')));
     }
     Ok(false)
 }
@@ -1623,6 +1624,31 @@ fn confirm_button_rects(dlg: &ConfirmDialog, area: Rect) -> (Rect, Option<Rect>)
                 },
                 Some(Rect {
                     x: btn_x + 17,
+                    y: btn_y,
+                    width: 13,
+                    height: 1,
+                }),
+            )
+        }
+        ConfirmAction::CloseTextEditorUnsaved | ConfirmAction::SaveEditorBeforeQuit => {
+            let popup = Rect {
+                x: area.x + area.width.saturating_sub(58) / 2,
+                y: area.y + area.height.saturating_sub(9) / 2,
+                width: 58,
+                height: 9,
+            };
+            let inner = inset_rect(popup, 1, 1);
+            let btn_y = inner.y + 4;
+            let btn_x = inner.x + inner.width.saturating_sub(28) / 2;
+            (
+                Rect {
+                    x: btn_x,
+                    y: btn_y,
+                    width: 11,
+                    height: 1,
+                },
+                Some(Rect {
+                    x: btn_x + 15,
                     y: btn_y,
                     width: 13,
                     height: 1,
@@ -2190,6 +2216,41 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
     let alt = key.modifiers.contains(KeyModifiers::ALT);
     let fn_key = fx_shortcut(key);
 
+    // Side-panel text editor focus mode.
+    if app.panel_text_editor_active {
+        match key.code {
+            KeyCode::Tab => {
+                app.panel_text_editor_active = false;
+                // Move focus to the panel opposite the editor, regardless of
+                // what app.active currently is (important after a restore).
+                if let Some(editor_side) = app.panel_text_editor_side() {
+                    app.active = editor_side.other();
+                } else {
+                    app.switch_panel();
+                }
+            }
+            KeyCode::Esc => {
+                app.request_close_panel_text_editor()?;
+            }
+            _ if ctrl && matches!(key.code, KeyCode::Char('s') | KeyCode::Char('S')) => {
+                if let Err(e) = app.save_panel_text_editor() {
+                    app.notify(format!("Cannot save text editor file: {}", e));
+                }
+            }
+            _ if alt && matches!(key.code, KeyCode::Char('z') | KeyCode::Char('Z')) => {
+                app.toggle_panel_text_editor_wrap();
+            }
+            _ => {
+                if let Some(editor) = app.panel_text_editor.as_mut() {
+                    if let Some(input) = textarea_input_from_key_event(key) {
+                        editor.textarea.input(input);
+                    }
+                }
+            }
+        }
+        return Ok(false);
+    }
+
     // Quick-preview panel focus mode: Up/Down scroll the viewer
     if app.quick_preview_active {
         match key.code {
@@ -2393,7 +2454,9 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
         }
 
         KeyCode::Esc => {
-            if app.file_preview_info {
+            if app.panel_text_editor.is_some() {
+                app.request_close_panel_text_editor()?;
+            } else if app.file_preview_info {
                 app.close_file_id_view();
             } else {
                 app.mode = AppMode::Terminal;
@@ -2786,6 +2849,15 @@ fn wait_for_key_after_external() -> Result<()> {
 }
 
 fn confirm_quit(app: &mut App) -> Result<bool> {
+    // If the text editor has unsaved changes, ask about them first.
+    if app.panel_text_editor_modified() {
+        app.mode = AppMode::Confirm(crate::app::ConfirmDialog {
+            title: "Quit KKC".into(),
+            message: "The text editor has unsaved changes. Save before quitting?".into(),
+            action: ConfirmAction::SaveEditorBeforeQuit,
+        });
+        return Ok(false);
+    }
     if app.config.confirm_exit {
         app.mode = AppMode::Confirm(crate::app::ConfirmDialog {
             title: "Quit KKC".into(),
@@ -2809,6 +2881,15 @@ fn launch_editor(app: &mut App) -> Result<()> {
     };
 
     let editor = app.config.editor.clone();
+    if editor.trim().is_empty() {
+        if app.active_panel().is_remote_view() {
+            app.notify("Internal editor is only available for local files");
+            return Ok(());
+        }
+        app.open_panel_text_editor_with_path(entry.path.clone(), app.active)?;
+        return Ok(());
+    }
+
     let path = if app.active_panel().is_remote_view() {
         let Some(profile) = app.active_panel().remote_profile() else {
             app.notify("Remote profile missing");
@@ -2825,6 +2906,13 @@ fn launch_editor(app: &mut App) -> Result<()> {
         }
     } else {
         entry.path.clone()
+    };
+
+    let editing_config = is_config_path(&path);
+    let config_modified_before = if editing_config {
+        file_modified_time(&path)
+    } else {
+        None
     };
 
     // Restore normal terminal before handing control to an external editor.
@@ -2853,8 +2941,32 @@ fn launch_editor(app: &mut App) -> Result<()> {
     // Ratatui's buffer is stale after leaving/re-entering the alternate screen;
     // signal the main loop to call terminal.clear() before the next draw.
     app.needs_clear = true;
-    app.reload_panels();
+    if editing_config && config_modified_before != file_modified_time(&path) {
+        if let Err(e) = app.reload_config_from_disk() {
+            app.notify(format!("Config reload failed: {}", e));
+        }
+    } else {
+        app.reload_panels();
+    }
     Ok(())
+}
+
+fn file_modified_time(path: &std::path::Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok()
+}
+
+fn is_config_path(path: &std::path::Path) -> bool {
+    let Ok(config_path) = crate::config::config_path() else {
+        return false;
+    };
+    same_path(path, &config_path)
+}
+
+fn same_path(a: &std::path::Path, b: &std::path::Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
 }
 
 fn start_rename(app: &mut App) {
@@ -3097,10 +3209,52 @@ fn handle_confirm(app: &mut App, key: KeyEvent) -> Result<bool> {
                 ConfirmAction::DeleteRemote(targets) => {
                     app.cmd_delete_remote_confirmed(targets)?;
                 }
+                ConfirmAction::CloseTextEditorUnsaved => {
+                    if let Err(e) = app.save_panel_text_editor() {
+                        app.notify(format!("Cannot save text editor file: {}", e));
+                        app.panel_text_editor_active = true;
+                    } else {
+                        app.close_panel_text_editor();
+                    }
+                }
+                ConfirmAction::SaveEditorBeforeQuit => {
+                    if let Err(e) = app.save_panel_text_editor() {
+                        app.notify(format!("Cannot save text editor file: {}", e));
+                        app.panel_text_editor_active = true;
+                    } else {
+                        app.close_panel_text_editor();
+                        return confirm_quit(app);
+                    }
+                }
             }
         }
-        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+        KeyCode::Char('n') | KeyCode::Char('N') => {
+            let AppMode::Confirm(dlg) = std::mem::replace(&mut app.mode, AppMode::Browse) else {
+                return Ok(false);
+            };
+            if matches!(dlg.action, ConfirmAction::CloseTextEditorUnsaved) {
+                app.close_panel_text_editor();
+            } else if matches!(dlg.action, ConfirmAction::SaveEditorBeforeQuit) {
+                // Discard changes and proceed to quit.
+                app.close_panel_text_editor();
+                return confirm_quit(app);
+            }
+        }
+        KeyCode::Esc => {
+            let keep_editor_focused = matches!(
+                &app.mode,
+                AppMode::Confirm(ConfirmDialog {
+                    action: ConfirmAction::CloseTextEditorUnsaved,
+                    ..
+                }) | AppMode::Confirm(ConfirmDialog {
+                    action: ConfirmAction::SaveEditorBeforeQuit,
+                    ..
+                })
+            );
             app.mode = AppMode::Browse;
+            if keep_editor_focused {
+                app.panel_text_editor_active = true;
+            }
         }
         _ => {}
     }
@@ -4922,9 +5076,7 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
         };
         match crate::remote::list_smb_shares(&profile) {
             Ok(shares) => {
-                let current = s.fields[s.path_field_index()]
-                    .trim()
-                    .to_lowercase();
+                let current = s.fields[s.path_field_index()].trim().to_lowercase();
                 let cur = shares
                     .iter()
                     .position(|sh| sh.to_lowercase() == current)

@@ -42,6 +42,8 @@ pub(super) fn render_confirm(f: &mut Frame, dlg: &ConfirmDialog, area: Rect) {
         ConfirmAction::DeleteRemote(targets) => {
             render_confirm_delete(f, &dlg.message, targets.len(), area)
         }
+        ConfirmAction::CloseTextEditorUnsaved => render_confirm_text_editor_unsaved(f, area),
+        ConfirmAction::SaveEditorBeforeQuit => render_confirm_save_editor_before_quit(f, area),
     }
 }
 
@@ -455,6 +457,184 @@ fn render_confirm_delete(f: &mut Frame, message: &str, count: usize, area: Rect)
         Rect {
             x: inner.x,
             y: btn_y + 1,
+            width: inner.width,
+            height: 1,
+        },
+    );
+}
+
+fn render_confirm_text_editor_unsaved(f: &mut Frame, area: Rect) {
+    const W: u16 = 58;
+    const H: u16 = 9;
+    let x = (area.width.saturating_sub(W)) / 2 + area.x;
+    let y = (area.height.saturating_sub(H)) / 2 + area.y;
+    let popup = clamp_rect(
+        area,
+        Rect {
+            x,
+            y,
+            width: W,
+            height: H,
+        },
+    );
+    safe_render_widget(f, Clear, popup);
+
+    let title = Span::styled(
+        " Unsaved Changes ",
+        Style::default()
+            .fg(Color::Rgb(255, 210, 120))
+            .add_modifier(Modifier::BOLD),
+    );
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(CLR_PANEL_BORDER))
+        .style(Style::default().bg(CLR_APP_BG));
+    let inner = block.inner(popup);
+    safe_render_widget(f, block, popup);
+
+    safe_render_widget(
+        f,
+        Paragraph::new("Save changes before closing the text editor?")
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(CLR_MENU_DD_FG).bg(CLR_APP_BG)),
+        Rect {
+            x: inner.x,
+            y: inner.y + 1,
+            width: inner.width,
+            height: 2,
+        },
+    );
+
+    let btn_y = inner.y + 4;
+    let save_w: u16 = 11;
+    let discard_w: u16 = 13;
+    let gap: u16 = 4;
+    let btn_x = inner.x + (inner.width.saturating_sub(save_w + gap + discard_w)) / 2;
+
+    safe_render_widget(
+        f,
+        Paragraph::new(" [ Save ] ").style(
+            Style::default()
+                .fg(Color::Black)
+                .bg(CLR_PANEL_BORDER)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Rect {
+            x: btn_x,
+            y: btn_y,
+            width: save_w,
+            height: 1,
+        },
+    );
+    safe_render_widget(
+        f,
+        Paragraph::new(" [ Discard ] ").style(Style::default().fg(CLR_TEXT).bg(CLR_APP_BG)),
+        Rect {
+            x: btn_x + save_w + gap,
+            y: btn_y,
+            width: discard_w,
+            height: 1,
+        },
+    );
+
+    safe_render_widget(
+        f,
+        Paragraph::new("Enter/Y=Save  ·  N=Discard  ·  Esc=Cancel")
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(CLR_MENU_DD_SEP).bg(CLR_APP_BG)),
+        Rect {
+            x: inner.x,
+            y: btn_y + 2,
+            width: inner.width,
+            height: 1,
+        },
+    );
+}
+
+fn render_confirm_save_editor_before_quit(f: &mut Frame, area: Rect) {
+    const W: u16 = 58;
+    const H: u16 = 9;
+    let x = (area.width.saturating_sub(W)) / 2 + area.x;
+    let y = (area.height.saturating_sub(H)) / 2 + area.y;
+    let popup = clamp_rect(
+        area,
+        Rect {
+            x,
+            y,
+            width: W,
+            height: H,
+        },
+    );
+    safe_render_widget(f, Clear, popup);
+
+    let title = Span::styled(
+        " Unsaved Changes ",
+        Style::default()
+            .fg(Color::Rgb(255, 210, 120))
+            .add_modifier(Modifier::BOLD),
+    );
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(CLR_PANEL_BORDER))
+        .style(Style::default().bg(CLR_APP_BG));
+    let inner = block.inner(popup);
+    safe_render_widget(f, block, popup);
+
+    safe_render_widget(
+        f,
+        Paragraph::new("Save changes before quitting?")
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(CLR_MENU_DD_FG).bg(CLR_APP_BG)),
+        Rect {
+            x: inner.x,
+            y: inner.y + 1,
+            width: inner.width,
+            height: 2,
+        },
+    );
+
+    let btn_y = inner.y + 4;
+    let save_w: u16 = 11;
+    let discard_w: u16 = 13;
+    let gap: u16 = 4;
+    let btn_x = inner.x + (inner.width.saturating_sub(save_w + gap + discard_w)) / 2;
+
+    safe_render_widget(
+        f,
+        Paragraph::new(" [ Save ] ").style(
+            Style::default()
+                .fg(Color::Black)
+                .bg(CLR_PANEL_BORDER)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Rect {
+            x: btn_x,
+            y: btn_y,
+            width: save_w,
+            height: 1,
+        },
+    );
+    safe_render_widget(
+        f,
+        Paragraph::new(" [ Discard ] ").style(Style::default().fg(CLR_TEXT).bg(CLR_APP_BG)),
+        Rect {
+            x: btn_x + save_w + gap,
+            y: btn_y,
+            width: discard_w,
+            height: 1,
+        },
+    );
+
+    safe_render_widget(
+        f,
+        Paragraph::new("Enter/Y=Save  ·  N=Discard  ·  Esc=Cancel")
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(CLR_MENU_DD_SEP).bg(CLR_APP_BG)),
+        Rect {
+            x: inner.x,
+            y: btn_y + 2,
             width: inner.width,
             height: 1,
         },

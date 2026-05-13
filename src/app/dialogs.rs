@@ -15,6 +15,10 @@ pub enum ConfirmAction {
     Quit,
     Delete(Vec<PathBuf>),
     DeleteRemote(Vec<RemoteDeleteTarget>),
+    CloseTextEditorUnsaved,
+    /// Editor has unsaved changes and the user asked to quit (F10).
+    /// Y/Enter = save + close + quit, N = discard + close + quit, Esc = cancel.
+    SaveEditorBeforeQuit,
 }
 
 #[derive(Debug, Clone)]

@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use base64::Engine as _;
 use crossterm::{
     cursor::MoveTo,
     queue,
@@ -2209,8 +2210,10 @@ impl Viewer {
     }
 
     fn rebuild_decoded_lines(&mut self) {
-
-        crate::viewer::debug_log(&format!("Rebuilding decoded lines for {}", self.path.display()));
+        crate::viewer::debug_log(&format!(
+            "Rebuilding decoded lines for {}",
+            self.path.display()
+        ));
 
         // Clear cached lines — other modes will be rebuilt lazily when accessed.
         self.text_lines = Vec::new();
@@ -3202,7 +3205,7 @@ fn kitty_payload_cache_key(viewer: &Viewer, area: Rect) -> Option<(u32, u32)> {
 
 fn render_terminal_png<W: Write>(out: &mut W, payload: &[u8], fit: Rect) -> Result<()> {
     if iterm2_supported() {
-        let encoded = base64::encode(payload);
+        let encoded = base64::engine::general_purpose::STANDARD.encode(payload);
         write!(
             out,
             "\x1b]1337;File=inline=1;width={}chars;height={}chars;preserveAspectRatio=0:{}\x07",
@@ -3216,7 +3219,7 @@ fn render_terminal_png<W: Write>(out: &mut W, payload: &[u8], fit: Rect) -> Resu
     let mut chunks = payload.chunks(RAW_CHUNK_LEN).peekable();
     let mut first = true;
     while let Some(chunk) = chunks.next() {
-        let encoded = base64::encode(chunk);
+        let encoded = base64::engine::general_purpose::STANDARD.encode(chunk);
         if first {
             write!(
                 out,

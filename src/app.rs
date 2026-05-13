@@ -3,6 +3,7 @@ mod dialogs;
 mod helpers;
 mod menu;
 mod panel_tabs;
+mod panel_text_editor;
 mod remote_edit;
 
 pub use self::command_palette::{
@@ -18,12 +19,13 @@ use self::helpers::{
     spawn_remote_connect_task,
 };
 pub use self::menu::{
-    MENU_DATA, MENU_HEADERS, MenuAction, MenuEntry, MenuState, StoreDetectChoice, StoreDetectItem,
-    StoreDetectState, StoreInstallMethodsState, StoreInstallPaletteState, StoreInstallProgress,
-    AudioPlayerPaletteState, ViewerGotoState, ViewerMenuKind, ViewerMenuState,
-    ViewerPluginPaletteState,
+    AudioPlayerPaletteState, MENU_DATA, MENU_HEADERS, MenuAction, MenuEntry, MenuState,
+    StoreDetectChoice, StoreDetectItem, StoreDetectState, StoreInstallMethodsState,
+    StoreInstallPaletteState, StoreInstallProgress, ViewerGotoState, ViewerMenuKind,
+    ViewerMenuState, ViewerPluginPaletteState,
 };
 use self::panel_tabs::{PanelTabs, panel_config_for_save, restore_panel_side};
+pub use self::panel_text_editor::PanelTextEditorState;
 pub use self::remote_edit::{RemoteEditKind, RemoteEditState};
 use crate::about::AboutState;
 use crate::compare::CompareBuffer;
@@ -449,9 +451,7 @@ impl ConfigState {
         if let Ok(n) = self.screensaver_idle_minutes.trim().parse::<u64>() {
             cfg.screensaver_idle_minutes = n;
         }
-        if !self.editor.trim().is_empty() {
-            cfg.editor = self.editor.trim().to_owned();
-        }
+        cfg.editor = self.editor.trim().to_owned();
         if !self.pager.trim().is_empty() {
             cfg.pager = self.pager.trim().to_owned();
         }
@@ -966,6 +966,12 @@ pub struct App {
     pub quick_preview_active: bool,
     /// Forced view mode for quick-preview (`None` = auto-detect).
     pub quick_preview_forced_mode: Option<ViewMode>,
+    /// Side-panel internal text editor state.
+    pub panel_text_editor: Option<PanelTextEditorState>,
+    /// Side where the panel editor is mounted.
+    panel_text_editor_side: Option<ActivePanel>,
+    /// Whether keyboard focus is in the side-panel internal text editor.
+    pub panel_text_editor_active: bool,
     /// Recently-used command palette entries (fn_name values), most-recent first.
     pub palette_recent: Vec<String>,
     /// When true, the main loop calls terminal.clear() before the next draw to force
@@ -1024,12 +1030,9 @@ impl App {
             "startup: restored panels in {:.3} ms",
             panels_start.elapsed().as_secs_f64() * 1000.0
         ));
-        let max = config.dir_history_max;
-        let mut history: VecDeque<PathBuf> = config.dir_history.iter().cloned().take(max).collect();
-        // Always seed with the left panel path if history is empty
-        if history.is_empty() {
-            history.push_front(config.left.path.clone());
-        }
+        // Directory history is session-only; seed with current left panel path.
+        let mut history: VecDeque<PathBuf> = VecDeque::new();
+        history.push_front(config.left.path.clone());
 
         let bookmarks = {
             let mut bm = config.bookmarks.clone();
@@ -1137,6 +1140,9 @@ impl App {
             quick_preview: None,
             quick_preview_active: false,
             quick_preview_forced_mode: None,
+            panel_text_editor: None,
+            panel_text_editor_side: None,
+            panel_text_editor_active: false,
             palette_recent,
             needs_full_redraw: false,
             center_buttons: default_center_button_actions(),
@@ -1157,6 +1163,21 @@ impl App {
                     "startup: restored quick preview in {:.3} ms",
                     preview_start.elapsed().as_secs_f64() * 1000.0
                 ));
+            }
+            PanelViewType::TextEditorPanel => {
+                let side = match app.config.panel_text_editor_side {
+                    ActivePanelSide::Right => ActivePanel::Right,
+                    ActivePanelSide::Left => ActivePanel::Left,
+                };
+                if let Some(path) = app.config.panel_text_editor_path.clone() {
+                    if path.exists() {
+                        let _ = app.open_panel_text_editor_with_path(path, side);
+                    } else {
+                        let _ = app.open_panel_text_editor();
+                    }
+                } else {
+                    let _ = app.open_panel_text_editor();
+                }
             }
         }
 
@@ -2969,6 +2990,9 @@ impl App {
     }
 
     pub fn open_file_id_view(&mut self) {
+        if !self.close_panel_text_editor_or_confirm() {
+            return;
+        }
         let enable = !self.file_preview_info;
         self.file_preview_info = enable;
         self.file_id_active = false;
@@ -3004,6 +3028,9 @@ impl App {
         self.file_preview_info = false;
         self.file_id_active = false;
         self.file_id_scroll = 0;
+        if !self.close_panel_text_editor_or_confirm() {
+            return Ok(());
+        }
 
         self.start_quick_preview_for_entry(entry);
         Ok(())
@@ -3432,10 +3459,29 @@ impl App {
         }
     }
 
+    pub fn reload_config_from_disk(&mut self) -> Result<()> {
+        let mut loaded = Config::load()?;
+        let left_show_hidden = loaded.left.show_hidden;
+        let right_show_hidden = loaded.right.show_hidden;
+
+        loaded.left = panel_config_for_save(&self.left, &self.left_tabs);
+        loaded.right = panel_config_for_save(&self.right, &self.right_tabs);
+        loaded.left.show_hidden = left_show_hidden;
+        loaded.right.show_hidden = right_show_hidden;
+
+        self.config = loaded;
+        self.bookmarks = self.config.bookmarks.clone();
+        self.left.show_hidden = left_show_hidden;
+        self.right.show_hidden = right_show_hidden;
+        crate::viewer::set_debug_log_enabled(self.config.debug_log);
+        self.reload_panels();
+        self.set_status("Config reloaded");
+        Ok(())
+    }
+
     pub fn save_state(&mut self) -> Result<()> {
         self.config.left = panel_config_for_save(&self.left, &self.left_tabs);
         self.config.right = panel_config_for_save(&self.right, &self.right_tabs);
-        self.config.dir_history = self.dir_history.iter().cloned().collect();
         self.config.palette_recent = self.palette_recent.clone();
         self.config.active_panel = match self.active {
             ActivePanel::Left => ActivePanelSide::Left,
@@ -3443,10 +3489,18 @@ impl App {
         };
         self.config.panel_view_type = if self.quick_preview.is_some() {
             PanelViewType::QuickPreview
+        } else if self.panel_text_editor.is_some() {
+            PanelViewType::TextEditorPanel
         } else if self.file_preview_info {
             PanelViewType::FilePreviewInfo
         } else {
             PanelViewType::Normal
+        };
+        self.config.panel_text_editor_path =
+            self.panel_text_editor.as_ref().and_then(|e| e.path.clone());
+        self.config.panel_text_editor_side = match self.panel_text_editor_side {
+            Some(ActivePanel::Right) => ActivePanelSide::Right,
+            _ => ActivePanelSide::Left,
         };
         // Save terminal history and output to cache (not config)
         let len = self.terminal.output.len();

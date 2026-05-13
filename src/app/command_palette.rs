@@ -309,6 +309,14 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     },
     PaletteEntry {
         category: "Tools",
+        label: "Panel text editor",
+        shortname: "TextEd",
+        shortcut: None,
+        fn_name: "panel_text_editor",
+        action: MenuAction::PanelTextEditor,
+    },
+    PaletteEntry {
+        category: "Tools",
         label: "Create m3u from selection",
         shortname: "MakeM3U",
         shortcut: None,

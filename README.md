@@ -91,13 +91,26 @@ cargo build --release
 | `F1` | Help |
 | `F2` | Menu |
 | `F3` | View file (internal viewer) |
-| `F4` | Edit file (external editor) |
+| `F4` | Edit file (configured editor, or internal editor when `editor = ""`) |
 | `F5` | Copy |
 | `F6` | Move |
 | `Shift+F6` | Rename |
 | `F7` | Create directory |
 | `F8` | Delete |
 | `F10` / `q` | Quit |
+
+### Internal editor
+
+If `editor = ""` is set in `config.toml` (Options > Setup > Editor), `F4` opens the selected local file in the internal side-panel editor instead of launching an external command.
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+S` | Save file |
+| `Alt+Z` | Toggle word wrap (off by default) |
+| `Tab` | Leave editor focus |
+| `Esc` | Close editor, prompting when modified |
+
+When `config.toml` is saved from the internal editor, KKC reloads the configuration immediately. If an external editor is configured, KKC also reloads the configuration after the external editor exits when `config.toml` changed.
 
 ### Selection
 

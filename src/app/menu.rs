@@ -56,6 +56,7 @@ pub enum MenuAction {
     InstallPluginFromStore,
     RemoteConnect,
     FileIdPreview,
+    PanelTextEditor,
     DirBookmarks,
     ToggleFBar,
     SaveConfig,
@@ -592,17 +593,18 @@ pub struct AudioPlayerPaletteState {
 impl AudioPlayerPaletteState {
     pub fn load(viewer: &Viewer) -> Self {
         let plugins_dir = crate::plugins::plugins_dir().unwrap_or_default();
-        let items = crate::audio_plugins::discover_audio_rust_plugins(&plugins_dir)
-            .unwrap_or_default();
+        let items =
+            crate::audio_plugins::discover_audio_rust_plugins(&plugins_dir).unwrap_or_default();
         let mut state = Self {
             items,
             query: String::new(),
             match_pos: 0,
         };
 
-        if let Some(plugin_id) = crate::tracker_audio::preferred_audio_plugin_ids_for_path(&viewer.path)
-            .first()
-            .cloned()
+        if let Some(plugin_id) =
+            crate::tracker_audio::preferred_audio_plugin_ids_for_path(&viewer.path)
+                .first()
+                .cloned()
             && let Some(pos) = state.items.iter().position(|plugin| plugin.id == plugin_id)
         {
             state.match_pos = pos;
@@ -643,7 +645,9 @@ impl AudioPlayerPaletteState {
             if !rest.iter().all(|token| lowered.contains(token.as_str())) {
                 continue;
             }
-            if lowered.starts_with(first.as_str()) || item.name.to_lowercase().starts_with(first.as_str()) {
+            if lowered.starts_with(first.as_str())
+                || item.name.to_lowercase().starts_with(first.as_str())
+            {
                 starts.push(idx);
             } else if lowered.contains(first.as_str()) {
                 contains.push(idx);
@@ -812,6 +816,7 @@ pub static MENU_DATA: &[&[MenuEntry]] = &[
         MenuAction::InstallPluginFromStore,
         MenuAction::RemoteConnect,
         MenuAction::FileIdPreview,
+        MenuAction::PanelTextEditor,
         MenuAction::DirBookmarks,
     ],
     &[

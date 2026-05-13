@@ -7,6 +7,7 @@ mod confirm;
 mod copy;
 mod help;
 mod panel;
+mod panel_text_editor;
 mod plugins;
 mod remote;
 mod search;
@@ -53,9 +54,8 @@ pub(crate) use self::plugins::plugins_shortcuts;
 use self::plugins::render_plugins;
 use crate::app::{
     ActionPaletteState, ActivePanel, App, AppMode, AssocEditorState, AudioPlayerPaletteState,
-    BookmarkListItem,
-    ComparePanelState, ConfigState, ConfirmAction, ConfirmDialog, InputDialog, MENU_DATA,
-    MENU_HEADERS, MenuAction, MenuState, OpenerState, PluginsState, RemoteConnectState,
+    BookmarkListItem, ComparePanelState, ConfigState, ConfirmAction, ConfirmDialog, InputDialog,
+    MENU_DATA, MENU_HEADERS, MenuAction, MenuState, OpenerState, PluginsState, RemoteConnectState,
     RemoteConnectingState, RemoteEditKind, RemoteEditState, SearchState, StoreInstallPaletteState,
     ViewerGotoState, ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,
 };
@@ -311,6 +311,18 @@ pub fn render(f: &mut Frame, app: &App) {
     let status_area = main_vert[1];
 
     let left_active = app.active == ActivePanel::Left;
+    let editor_on_left = matches!(app.panel_text_editor_side(), Some(ActivePanel::Left));
+    let editor_on_right = matches!(app.panel_text_editor_side(), Some(ActivePanel::Right));
+    let left_panel_editor = if editor_on_left {
+        app.panel_text_editor.as_ref()
+    } else {
+        None
+    };
+    let right_panel_editor = if editor_on_right {
+        app.panel_text_editor.as_ref()
+    } else {
+        None
+    };
     let panel_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -336,6 +348,8 @@ pub fn render(f: &mut Frame, app: &App) {
             app.quick_preview.as_ref()
         },
         app.quick_preview_active && !left_active,
+        left_panel_editor,
+        app.panel_text_editor_active && editor_on_left && left_active,
         app.left_panel_tab_index(),
         app.left_panel_tab_count(),
     );
@@ -356,6 +370,8 @@ pub fn render(f: &mut Frame, app: &App) {
             app.quick_preview.as_ref()
         },
         app.quick_preview_active && left_active,
+        right_panel_editor,
+        app.panel_text_editor_active && editor_on_right && !left_active,
         app.right_panel_tab_index(),
         app.right_panel_tab_count(),
     );

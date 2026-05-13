@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, anyhow, bail};
+use base64::Engine as _;
 use mlua::{Function, Lua, Table, Value};
 use serde::Deserialize;
 use serde::Serialize;
@@ -2005,20 +2006,14 @@ fn fetch_url_text(url: &str) -> Result<String> {
 }
 
 fn fetch_url_bytes(url: &str) -> Result<Vec<u8>> {
-    let response = match ureq::get(url).set("User-Agent", "kkc-plugin-store").call() {
+    let mut response = match ureq::get(url)
+        .header("User-Agent", "kkc-plugin-store")
+        .config()
+        .http_status_as_error(false)
+        .build()
+        .call()
+    {
         Ok(response) => response,
-        Err(ureq::Error::Status(code, response)) => {
-            let body = response.into_string().unwrap_or_else(|_| String::new());
-            if body.trim().is_empty() {
-                bail!("HTTP GET failed for {}: status {}", url, code);
-            }
-            bail!(
-                "HTTP GET failed for {}: status {}: {}",
-                url,
-                code,
-                body.trim()
-            );
-        }
         Err(err) => {
             return fetch_url_bytes_with_curl(url).with_context(|| {
                 format!(
@@ -2029,12 +2024,27 @@ fn fetch_url_bytes(url: &str) -> Result<Vec<u8>> {
         }
     };
 
-    let mut reader = response.into_reader();
-    let mut buf = Vec::new();
-    reader
-        .read_to_end(&mut buf)
-        .with_context(|| format!("Reading HTTP response from {}", url))?;
-    Ok(buf)
+    let status = response.status();
+    if !status.is_success() {
+        let body = response
+            .body_mut()
+            .read_to_string()
+            .unwrap_or_else(|_| String::new());
+        if body.trim().is_empty() {
+            bail!("HTTP GET failed for {}: status {}", url, status.as_u16());
+        }
+        bail!(
+            "HTTP GET failed for {}: status {}: {}",
+            url,
+            status.as_u16(),
+            body.trim()
+        );
+    }
+
+    response
+        .body_mut()
+        .read_to_vec()
+        .with_context(|| format!("Reading HTTP response from {}", url))
 }
 
 fn fetch_url_bytes_with_curl(url: &str) -> Result<Vec<u8>> {
@@ -3519,7 +3529,8 @@ impl PluginRegistry {
         .into_result()
         .map_err(|err| anyhow!(err.to_string()))?;
 
-        let image_data = base64::decode(rendered.image.data.as_str())
+        let image_data = base64::engine::general_purpose::STANDARD
+            .decode(rendered.image.data.as_str())
             .map_err(|err| anyhow!("invalid base64 image payload from plugin: {err}"))?;
 
         let overlay_lines = rendered

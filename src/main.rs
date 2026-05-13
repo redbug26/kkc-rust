@@ -30,7 +30,7 @@ mod ui;
 mod viewer;
 mod viewer_plugins;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use app::{App, AppMode, MenuAction, palette_label_for_action};
 use config::Config;
 use crossterm::{
@@ -490,6 +490,9 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
             | AppMode::Terminal => terminal.show_cursor()?,
             _ => terminal.hide_cursor()?,
         }
+        if app.panel_text_editor_active {
+            terminal.show_cursor()?;
+        }
 
         // Poll for input (~60 fps)
         if quit_after_transition {
@@ -556,6 +559,9 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
 }
 
 fn main() -> Result<()> {
+    let resume_session_id = parse_resume_arg()?;
+    let _session_id = config::init_runtime_session(resume_session_id.as_deref())?;
+
     let mut terminal = setup_terminal()?;
     let result = run(&mut terminal);
     let _ = execute!(
@@ -566,7 +572,33 @@ fn main() -> Result<()> {
 
     if let Err(ref e) = result {
         eprintln!("KKC error: {e}");
+    } else {
+        // println!("To continue this session, run kkc resume {_session_id}");
     }
 
     result
+}
+
+fn parse_resume_arg() -> Result<Option<String>> {
+    let mut args = std::env::args().skip(1);
+    let Some(first) = args.next() else {
+        return Ok(None);
+    };
+
+    match first.as_str() {
+        "resume" => {
+            let Some(id) = args.next() else {
+                bail!("usage: kkc resume <session-id>");
+            };
+            if args.next().is_some() {
+                bail!("usage: kkc resume <session-id>");
+            }
+            Ok(Some(id))
+        }
+        "-h" | "--help" => {
+            println!("usage:\n  kkc\n  kkc resume <session-id>");
+            std::process::exit(0);
+        }
+        _ => bail!("unknown argument: {first}"),
+    }
 }

@@ -234,6 +234,19 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
         MenuAction::SwitchPanel => {
             if app.quick_preview.is_some() {
                 app.quick_preview_active = true;
+            } else if app.panel_text_editor.is_some() {
+                let Some(editor_side) = app.panel_text_editor_side() else {
+                    app.switch_panel();
+                    return Ok(false);
+                };
+                if app.active == editor_side {
+                    app.panel_text_editor_active = true;
+                } else {
+                    app.switch_panel();
+                    if app.active == editor_side {
+                        app.panel_text_editor_active = true;
+                    }
+                }
             } else if app.file_preview_info {
                 app.file_id_active = true;
                 app.file_id_scroll = 0;
@@ -492,6 +505,11 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
         }
         MenuAction::FileIdPreview => {
             app.open_file_id_view();
+        }
+        MenuAction::PanelTextEditor => {
+            if let Err(e) = app.open_panel_text_editor() {
+                app.notify(format!("Cannot open text editor: {}", e));
+            }
         }
         MenuAction::DirBookmarks => {
             app.open_dir_bookmarks();

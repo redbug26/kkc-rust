@@ -49,7 +49,7 @@
     F1           This Help.
     F2           Open <menu bar;Menu bar>.
     F3           <View;View file> (internal viewer).
-    F4           <Edit;Edit file> with configured editor.
+    F4           <Edit;Edit file> with configured or internal editor.
     F5           <Copy;Copy> selected files to other panel.
     F6           <Move;Move> selected files to other panel.
     F7           <Create directory;Create directory>.
@@ -246,15 +246,41 @@
 #Edit
 ^Edit file
 
-   F4 on any file launches the editor configured in Options > Setup.
+   F4 on any local file launches the editor configured in Options > Setup.
    The default editor is taken from the EDITOR environment variable
    or from the 'editor' setting in the config file.
 
+   If the editor field is empty (editor = ""), F4 opens the selected
+   local file in the <Internal editor;Internal editor> side panel instead.
+
    For remote files the file is downloaded, edited locally, then
-   uploaded back automatically when the editor exits.
+   uploaded back automatically when the external editor exits.
+
+   When config.toml is modified and saved, KKC reloads the configuration.
 
 % Default Command
     F4
+
+
+:Internal editor
+#InternalEditor
+^Internal editor
+
+   The internal editor is shown inside a side panel and is used by F4
+   when Options > Setup > Editor is empty (editor = "").
+
+% Keys
+
+    C-S          Save file.
+    A-Z          Toggle word wrap. Wrap is off by default.
+    TAB          Leave editor focus and return to the opposite panel.
+    ESC          Close editor; asks before discarding unsaved changes.
+
+   With wrap off, long lines scroll horizontally to keep the cursor visible.
+   With wrap on, long lines are wrapped to the panel width.
+
+   Saving config.toml from the internal editor reloads the configuration
+   immediately.
 
 
 :Copy file
@@ -484,6 +510,7 @@
 % Text fields
 
     Editor              Command to launch for F4 (e.g. nano, vim, code).
+                        Leave empty to use the internal editor for local files.
     Pager               Command for viewing large text files.
     Dir history max     Maximum number of entries in directory bookmarks.
 

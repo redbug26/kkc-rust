@@ -1,10 +1,23 @@
 use crate::screen_transition::ScreenTransitionEffect;
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use chrono::Local;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::env;
+use std::ffi::CStr;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+
+static RUNTIME_SESSION_ID: OnceLock<String> = OnceLock::new();
+static RUNTIME_RESUME_SOURCE_SESSION_ID: OnceLock<String> = OnceLock::new();
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct SessionTabMap {
+    #[serde(default)]
+    tabs: BTreeMap<String, String>,
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
@@ -42,10 +55,8 @@ pub fn config_path() -> Result<PathBuf> {
 
 /// Returns the path to the persisted runtime state file, creating parent dirs if needed.
 pub fn state_path() -> Result<PathBuf> {
-    let dirs = project_dirs()?;
-    let dir = dirs.preference_dir();
-    fs::create_dir_all(dir)?;
-    Ok(dir.join("state.toml"))
+    let session_id = init_runtime_session(None)?;
+    session_state_path(&session_id)
 }
 
 /// Returns the path to the data directory, creating it if needed.
@@ -87,6 +98,7 @@ pub enum PanelViewType {
     Normal,
     FilePreviewInfo,
     QuickPreview,
+    TextEditorPanel,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -199,14 +211,16 @@ struct PersistedState {
     left: PanelConfig,
     #[serde(default)]
     right: PanelConfig,
-    #[serde(default)]
-    dir_history: Vec<PathBuf>,
     #[serde(default, deserialize_with = "deserialize_palette_recent")]
     palette_recent: Vec<String>,
     #[serde(default)]
     panel_view_type: PanelViewType,
     #[serde(default)]
     active_panel: ActivePanelSide,
+    #[serde(default)]
+    panel_text_editor_path: Option<PathBuf>,
+    #[serde(default)]
+    panel_text_editor_side: ActivePanelSide,
 }
 
 impl Default for PersistedState {
@@ -215,10 +229,11 @@ impl Default for PersistedState {
         Self {
             left: defaults.left,
             right: defaults.right,
-            dir_history: defaults.dir_history,
             palette_recent: defaults.palette_recent,
             panel_view_type: defaults.panel_view_type,
             active_panel: defaults.active_panel,
+            panel_text_editor_path: defaults.panel_text_editor_path,
+            panel_text_editor_side: defaults.panel_text_editor_side,
         }
     }
 }
@@ -362,7 +377,7 @@ pub struct Config {
     pub show_file_icons: bool,
 
     // --- External programs ---
-    /// External editor command (defaults to $EDITOR or nano).
+    /// External editor command (defaults to internal editor).
     #[serde(default = "default_editor")]
     pub editor: String,
     /// External pager/viewer command.
@@ -380,9 +395,6 @@ pub struct Config {
     /// Maximum number of directory history entries.
     #[serde(default = "history_max")]
     pub dir_history_max: usize,
-    /// Persisted directory history (most recent first).
-    #[serde(default)]
-    pub dir_history: Vec<PathBuf>,
 
     // --- Bookmarks ---
     /// User-defined directory bookmarks.
@@ -419,6 +431,14 @@ pub struct Config {
     /// Active panel when the app was closed.
     #[serde(default)]
     pub active_panel: ActivePanelSide,
+
+    /// Path of the file open in the side panel text editor when the app was closed.
+    #[serde(default)]
+    pub panel_text_editor_path: Option<PathBuf>,
+
+    /// Which panel side the text editor was anchored to.
+    #[serde(default)]
+    pub panel_text_editor_side: ActivePanelSide,
 }
 
 impl Default for Config {
@@ -445,12 +465,11 @@ impl Default for Config {
             color_by_type: true,
             show_cloud_icons: true,
             show_file_icons: false,
-            editor: default_editor(),
+            editor: "".to_string(),
             pager: default_pager(),
             store_index_path: default_store_index_path(),
             viewer: ViewerConfig::default(),
             dir_history_max: 32,
-            dir_history: Vec::new(),
             bookmarks: default_bookmarks(),
             file_assoc: Vec::new(),
             audio_player_assoc: Vec::new(),
@@ -459,6 +478,8 @@ impl Default for Config {
             debug_log: false,
             panel_view_type: PanelViewType::Normal,
             active_panel: ActivePanelSide::Left,
+            panel_text_editor_path: None,
+            panel_text_editor_side: ActivePanelSide::Left,
         }
     }
 }
@@ -498,18 +519,6 @@ impl Config {
                                 .collect();
                             if !restored.is_empty() {
                                 cfg.bookmarks = restored;
-                            }
-                        }
-                    }
-
-                    if cfg.dir_history.is_empty() {
-                        if let Some(arr) = viewer.get("dir_history").and_then(|v| v.as_array()) {
-                            let restored: Vec<PathBuf> = arr
-                                .iter()
-                                .filter_map(|v| v.as_str().map(PathBuf::from))
-                                .collect();
-                            if !restored.is_empty() {
-                                cfg.dir_history = restored;
                             }
                         }
                     }
@@ -759,35 +768,55 @@ impl Config {
             });
         }
     }
-
 }
 
 fn state_from_config(cfg: &Config) -> PersistedState {
     PersistedState {
         left: cfg.left.clone(),
         right: cfg.right.clone(),
-        dir_history: cfg.dir_history.clone(),
         palette_recent: cfg.palette_recent.clone(),
         panel_view_type: cfg.panel_view_type,
         active_panel: cfg.active_panel,
+        panel_text_editor_path: cfg.panel_text_editor_path.clone(),
+        panel_text_editor_side: cfg.panel_text_editor_side,
     }
 }
 
 fn apply_state_to_config(cfg: &mut Config, state: PersistedState) {
     cfg.left = state.left;
     cfg.right = state.right;
-    cfg.dir_history = state.dir_history;
     cfg.palette_recent = state.palette_recent;
     cfg.panel_view_type = state.panel_view_type;
     cfg.active_panel = state.active_panel;
+    cfg.panel_text_editor_path = state.panel_text_editor_path;
+    cfg.panel_text_editor_side = state.panel_text_editor_side;
 }
 
 fn load_state_file() -> Result<Option<PersistedState>> {
     let path = state_path()?;
-    if !path.exists() {
-        return Ok(None);
+    if path.exists() {
+        return read_state_file(&path).map(Some);
     }
 
+    // When starting with `kkc resume <id>`, load from that source session,
+    // but persist future state updates under the newly allocated session id.
+    if let Some(source_id) = RUNTIME_RESUME_SOURCE_SESSION_ID.get() {
+        let source_path = session_state_path(source_id)?;
+        if source_path.exists() {
+            return read_state_file(&source_path).map(Some);
+        }
+    }
+
+    // Backward compatibility: older versions stored state.toml in preference_dir.
+    let legacy_path = legacy_state_path()?;
+    if legacy_path.exists() {
+        return read_state_file(&legacy_path).map(Some);
+    }
+
+    Ok(None)
+}
+
+fn read_state_file(path: &Path) -> Result<PersistedState> {
     let text =
         fs::read_to_string(&path).with_context(|| format!("Reading state: {}", path.display()))?;
     let state: PersistedState = match toml::from_str(&text) {
@@ -802,7 +831,7 @@ fn load_state_file() -> Result<Option<PersistedState>> {
             ));
         }
     };
-    Ok(Some(state))
+    Ok(state)
 }
 
 fn write_state_file(state: &PersistedState) -> Result<()> {
@@ -810,6 +839,101 @@ fn write_state_file(state: &PersistedState) -> Result<()> {
     let state_toml = toml::to_string_pretty(state).context("Serialising state config")?;
     fs::write(&path, state_toml).with_context(|| format!("Writing state: {}", path.display()))?;
     Ok(())
+}
+
+pub fn init_runtime_session(resume_id: Option<&str>) -> Result<String> {
+    if let Some(id) = RUNTIME_SESSION_ID.get() {
+        return Ok(id.clone());
+    }
+
+    let tab_key = session_tab_key();
+    let mut map = load_session_tab_map()?;
+
+    let resolved_id = if let Some(id) = resume_id {
+        let _ = RUNTIME_RESUME_SOURCE_SESSION_ID.set(id.to_string());
+        uuid::Uuid::now_v7().to_string()
+    } else if let Some(existing) = map.tabs.get(&tab_key).cloned() {
+        if session_state_path(&existing)?.exists() {
+            existing
+        } else {
+            uuid::Uuid::now_v7().to_string()
+        }
+    } else {
+        uuid::Uuid::now_v7().to_string()
+    };
+
+    map.tabs.insert(tab_key, resolved_id.clone());
+    save_session_tab_map(&map)?;
+
+    RUNTIME_SESSION_ID
+        .set(resolved_id.clone())
+        .map_err(|_| anyhow!("Runtime session id already initialised"))?;
+
+    Ok(resolved_id)
+}
+
+fn session_state_path(session_id: &str) -> Result<PathBuf> {
+    let dirs = project_dirs()?;
+    let dir = dirs.cache_dir().join("sessions");
+    fs::create_dir_all(&dir)?;
+    Ok(dir.join(format!("{session_id}.toml")))
+}
+
+fn session_map_path() -> Result<PathBuf> {
+    let dirs = project_dirs()?;
+    let dir = dirs.cache_dir();
+    fs::create_dir_all(dir)?;
+    Ok(dir.join("session-tabs.toml"))
+}
+
+fn legacy_state_path() -> Result<PathBuf> {
+    let dirs = project_dirs()?;
+    let dir = dirs.preference_dir();
+    fs::create_dir_all(dir)?;
+    Ok(dir.join("state.toml"))
+}
+
+fn load_session_tab_map() -> Result<SessionTabMap> {
+    let path = session_map_path()?;
+    if !path.exists() {
+        return Ok(SessionTabMap::default());
+    }
+    let text = fs::read_to_string(&path)
+        .with_context(|| format!("Reading session tab map: {}", path.display()))?;
+    Ok(toml::from_str(&text).unwrap_or_default())
+}
+
+fn save_session_tab_map(map: &SessionTabMap) -> Result<()> {
+    let path = session_map_path()?;
+    let text = toml::to_string_pretty(map).context("Serialising session tab map")?;
+    fs::write(&path, text).with_context(|| format!("Writing session tab map: {}", path.display()))
+}
+
+fn session_tab_key() -> String {
+    if let Ok(ssh_tty) = env::var("SSH_TTY")
+        && !ssh_tty.trim().is_empty()
+    {
+        return format!("ssh:{ssh_tty}");
+    }
+    if let Some(tty) = current_tty() {
+        return format!("tty:{tty}");
+    }
+    if let Ok(term_session_id) = env::var("TERM_SESSION_ID")
+        && !term_session_id.trim().is_empty()
+    {
+        return format!("term:{term_session_id}");
+    }
+    format!("pid:{}", std::process::id())
+}
+
+fn current_tty() -> Option<String> {
+    let mut buf = [0 as libc::c_char; 512];
+    let rc = unsafe { libc::ttyname_r(libc::STDIN_FILENO, buf.as_mut_ptr(), buf.len()) };
+    if rc != 0 {
+        return None;
+    }
+    let cstr = unsafe { CStr::from_ptr(buf.as_ptr()) };
+    cstr.to_str().ok().map(|s| s.to_string())
 }
 
 fn backup_invalid_config(path: &Path) -> Result<PathBuf> {
@@ -851,7 +975,7 @@ fn dirs_home() -> PathBuf {
 }
 
 fn default_editor() -> String {
-    std::env::var("EDITOR").unwrap_or_else(|_| "nano".into())
+    "".to_string()
 }
 
 fn default_pager() -> String {
@@ -970,7 +1094,6 @@ mod tests {
     fn state_toml_roundtrips_runtime_state() {
         let state: PersistedState = toml::from_str(
             r#"
-    dir_history = ["/tmp", "/var"]
     palette_recent = ["copy", "save_config"]
     panel_view_type = "quick_preview"
     active_panel = "right"
@@ -989,10 +1112,6 @@ sort = "date"
         assert_eq!(state.left.tabs.len(), 1);
         assert_eq!(state.left.tabs[0].path, dirs_home());
         assert_eq!(state.left.tabs[0].sort, SortMode::Date);
-        assert_eq!(
-            state.dir_history,
-            vec![PathBuf::from("/tmp"), PathBuf::from("/var")]
-        );
         assert_eq!(state.palette_recent, vec!["copy", "save_config"]);
         assert_eq!(state.panel_view_type, PanelViewType::QuickPreview);
         assert_eq!(state.active_panel, ActivePanelSide::Right);

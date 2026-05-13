@@ -12,11 +12,20 @@ pub(super) fn render_panel_or_file_id(
     show_file_id: bool,
     quick_preview: Option<&crate::viewer::Viewer>,
     quick_preview_active: bool,
+    panel_text_editor: Option<&crate::app::PanelTextEditorState>,
+    panel_text_editor_active: bool,
     tab_index: usize,
     tab_count: usize,
 ) {
     if show_file_id {
         render_file_id_panel(f, app, area);
+    } else if let Some(editor) = panel_text_editor {
+        super::panel_text_editor::render_panel_text_editor(
+            f,
+            editor,
+            area,
+            panel_text_editor_active,
+        );
     } else if let Some(viewer) = quick_preview {
         render_quick_preview(f, app, viewer, area, quick_preview_active);
     } else {
