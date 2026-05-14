@@ -1,3 +1,6 @@
+use super::helpers::{
+    clamp_index, move_index_next_wrapping, move_index_prev_wrapping, ranked_filtered_indices,
+};
 use crate::viewer::{EncodingMode, LineFeedMode, MaskKind, ViewMode, Viewer};
 use chrono::{DateTime, Local};
 use std::collections::HashMap;
@@ -347,70 +350,31 @@ impl StoreInstallPaletteState {
     }
 
     pub fn filtered_indices(&self) -> Vec<usize> {
-        let matches_installed = |item: &crate::plugins::StorePluginInfo| {
-            !self.installed_only || self.is_installed(item)
-        };
-
-        if self.query.trim().is_empty() {
-            return self
-                .items
-                .iter()
-                .enumerate()
-                .filter_map(|(idx, item)| matches_installed(item).then_some(idx))
-                .collect();
-        }
-
-        let tokens: Vec<String> = self
-            .query
-            .split_whitespace()
-            .map(|token| token.to_lowercase())
-            .filter(|token| !token.is_empty())
-            .collect();
-        if tokens.is_empty() {
-            return (0..self.items.len()).collect();
-        }
-
-        let first = &tokens[0];
-        let rest = &tokens[1..];
-        let mut starts = Vec::new();
-        let mut contains = Vec::new();
-
-        for (idx, item) in self.items.iter().enumerate() {
-            if !matches_installed(item) {
-                continue;
-            }
-            let searchable = format!(
-                "{} {} {} {} {} {} {}",
-                item.id,
-                item.name,
-                item.plugin_type,
-                item.version,
-                item.description,
-                match item.item_kind {
-                    crate::plugins::StoreItemKind::Plugin => "plugin",
-                    crate::plugins::StoreItemKind::Application => "application app",
-                },
+        ranked_filtered_indices(
+            &self.items,
+            &self.query,
+            |item| !self.installed_only || self.is_installed(item),
+            |item| {
                 format!(
-                    "{} {}",
+                    "{} {} {} {} {} {} {} {}",
+                    item.id,
+                    item.name,
+                    item.plugin_type,
+                    item.version,
+                    item.description,
+                    match item.item_kind {
+                        crate::plugins::StoreItemKind::Plugin => "plugin",
+                        crate::plugins::StoreItemKind::Application => "application app",
+                    },
                     item.install_method.as_deref().unwrap_or_default(),
-                    item.source_label
-                ),
-            );
-            let lowered = searchable.to_lowercase();
-            if !rest.iter().all(|token| lowered.contains(token.as_str())) {
-                continue;
-            }
-            if item.id.to_lowercase().starts_with(first.as_str())
-                || item.name.to_lowercase().starts_with(first.as_str())
-            {
-                starts.push(idx);
-            } else if lowered.contains(first.as_str()) {
-                contains.push(idx);
-            }
-        }
-
-        starts.extend(contains);
-        starts
+                    item.source_label,
+                )
+            },
+            |item, first, _| {
+                item.name.to_lowercase().starts_with(first)
+                    || item.id.to_lowercase().starts_with(first)
+            },
+        )
     }
 
     pub fn append_query(&mut self, ch: char) {
@@ -436,33 +400,19 @@ impl StoreInstallPaletteState {
 
     pub fn move_prev(&mut self) {
         let len = self.filtered_indices().len();
-        if len == 0 {
-            self.match_pos = 0;
-        } else if self.match_pos == 0 {
-            self.match_pos = len - 1;
-        } else {
-            self.match_pos -= 1;
-        }
+        move_index_prev_wrapping(&mut self.match_pos, len);
         self.clamp_match();
     }
 
     pub fn move_next(&mut self) {
         let len = self.filtered_indices().len();
-        if len == 0 {
-            self.match_pos = 0;
-        } else {
-            self.match_pos = (self.match_pos + 1) % len;
-        }
+        move_index_next_wrapping(&mut self.match_pos, len);
         self.clamp_match();
     }
 
     pub(crate) fn clamp_match(&mut self) {
         let len = self.filtered_indices().len();
-        if len == 0 {
-            self.match_pos = 0;
-        } else {
-            self.match_pos = self.match_pos.min(len.saturating_sub(1));
-        }
+        clamp_index(&mut self.match_pos, len);
     }
 }
 
@@ -502,45 +452,20 @@ impl ViewerPluginPaletteState {
     }
 
     pub fn filtered_indices(&self) -> Vec<usize> {
-        if self.query.trim().is_empty() {
-            return (0..self.items.len()).collect();
-        }
-
-        let tokens: Vec<String> = self
-            .query
-            .split_whitespace()
-            .map(|token| token.to_lowercase())
-            .filter(|token| !token.is_empty())
-            .collect();
-        if tokens.is_empty() {
-            return (0..self.items.len()).collect();
-        }
-
-        let first = &tokens[0];
-        let rest = &tokens[1..];
-        let mut starts = Vec::new();
-        let mut contains = Vec::new();
-
-        for (idx, item) in self.items.iter().enumerate() {
-            let searchable = format!(
-                "{} {} {}",
-                item.name,
-                item.description,
-                item.extensions.join(" ")
-            );
-            let lowered = searchable.to_lowercase();
-            if !rest.iter().all(|token| lowered.contains(token.as_str())) {
-                continue;
-            }
-            if item.name.to_lowercase().starts_with(first.as_str()) {
-                starts.push(idx);
-            } else if lowered.contains(first.as_str()) {
-                contains.push(idx);
-            }
-        }
-
-        starts.extend(contains);
-        starts
+        ranked_filtered_indices(
+            &self.items,
+            &self.query,
+            |_| true,
+            |item| {
+                format!(
+                    "{} {} {}",
+                    item.name,
+                    item.description,
+                    item.extensions.join(" ")
+                )
+            },
+            |item, first, _| item.name.to_lowercase().starts_with(first),
+        )
     }
 
     pub fn append_query(&mut self, ch: char) {
@@ -557,31 +482,17 @@ impl ViewerPluginPaletteState {
 
     pub fn move_prev(&mut self) {
         let len = self.filtered_indices().len();
-        if len == 0 {
-            self.match_pos = 0;
-        } else if self.match_pos == 0 {
-            self.match_pos = len - 1;
-        } else {
-            self.match_pos -= 1;
-        }
+        move_index_prev_wrapping(&mut self.match_pos, len);
     }
 
     pub fn move_next(&mut self) {
         let len = self.filtered_indices().len();
-        if len == 0 {
-            self.match_pos = 0;
-        } else {
-            self.match_pos = (self.match_pos + 1) % len;
-        }
+        move_index_next_wrapping(&mut self.match_pos, len);
     }
 
     fn clamp_match(&mut self) {
         let len = self.filtered_indices().len();
-        if len == 0 {
-            self.match_pos = 0;
-        } else {
-            self.match_pos = self.match_pos.min(len.saturating_sub(1));
-        }
+        clamp_index(&mut self.match_pos, len);
     }
 }
 
@@ -615,49 +526,24 @@ impl AudioPlayerPaletteState {
     }
 
     pub fn filtered_indices(&self) -> Vec<usize> {
-        if self.query.trim().is_empty() {
-            return (0..self.items.len()).collect();
-        }
-
-        let tokens: Vec<String> = self
-            .query
-            .split_whitespace()
-            .map(|token| token.to_lowercase())
-            .filter(|token| !token.is_empty())
-            .collect();
-        if tokens.is_empty() {
-            return (0..self.items.len()).collect();
-        }
-
-        let first = &tokens[0];
-        let rest = &tokens[1..];
-        let mut starts = Vec::new();
-        let mut contains = Vec::new();
-
-        for (idx, item) in self.items.iter().enumerate() {
-            let searchable = format!(
-                "{} {} {} {} {}",
-                item.id,
-                item.name,
-                item.description,
-                item.mime_types.join(" "),
-                item.extensions.join(" ")
-            );
-            let lowered = searchable.to_lowercase();
-            if !rest.iter().all(|token| lowered.contains(token.as_str())) {
-                continue;
-            }
-            if lowered.starts_with(first.as_str())
-                || item.name.to_lowercase().starts_with(first.as_str())
-            {
-                starts.push(idx);
-            } else if lowered.contains(first.as_str()) {
-                contains.push(idx);
-            }
-        }
-
-        starts.extend(contains);
-        starts
+        ranked_filtered_indices(
+            &self.items,
+            &self.query,
+            |_| true,
+            |item| {
+                format!(
+                    "{} {} {} {} {}",
+                    item.id,
+                    item.name,
+                    item.description,
+                    item.mime_types.join(" "),
+                    item.extensions.join(" ")
+                )
+            },
+            |item, first, lowered| {
+                lowered.starts_with(first) || item.name.to_lowercase().starts_with(first)
+            },
+        )
     }
 
     pub fn append_query(&mut self, ch: char) {
@@ -674,22 +560,12 @@ impl AudioPlayerPaletteState {
 
     pub fn move_prev(&mut self) {
         let len = self.filtered_indices().len();
-        if len == 0 {
-            self.match_pos = 0;
-        } else if self.match_pos == 0 {
-            self.match_pos = len - 1;
-        } else {
-            self.match_pos -= 1;
-        }
+        move_index_prev_wrapping(&mut self.match_pos, len);
     }
 
     pub fn move_next(&mut self) {
         let len = self.filtered_indices().len();
-        if len == 0 {
-            self.match_pos = 0;
-        } else {
-            self.match_pos = (self.match_pos + 1) % len;
-        }
+        move_index_next_wrapping(&mut self.match_pos, len);
     }
 
     pub fn selected_item(&self) -> Option<&crate::audio_plugins::AudioRustPluginInfo> {
@@ -700,11 +576,7 @@ impl AudioPlayerPaletteState {
 
     fn clamp_match(&mut self) {
         let len = self.filtered_indices().len();
-        if len == 0 {
-            self.match_pos = 0;
-        } else {
-            self.match_pos = self.match_pos.min(len.saturating_sub(1));
-        }
+        clamp_index(&mut self.match_pos, len);
     }
 }
 

@@ -1,5 +1,88 @@
 use super::*;
 
+pub(super) fn ranked_filtered_indices<T, Include, Searchable, Starts>(
+    items: &[T],
+    query: &str,
+    include: Include,
+    searchable: Searchable,
+    starts_with_first: Starts,
+) -> Vec<usize>
+where
+    Include: Fn(&T) -> bool,
+    Searchable: Fn(&T) -> String,
+    Starts: Fn(&T, &str, &str) -> bool,
+{
+    if query.trim().is_empty() {
+        return items
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, item)| include(item).then_some(idx))
+            .collect();
+    }
+
+    let tokens: Vec<String> = query
+        .split_whitespace()
+        .map(|token| token.to_lowercase())
+        .filter(|token| !token.is_empty())
+        .collect();
+    if tokens.is_empty() {
+        return items
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, item)| include(item).then_some(idx))
+            .collect();
+    }
+
+    let first = &tokens[0];
+    let rest = &tokens[1..];
+    let mut starts = Vec::new();
+    let mut contains = Vec::new();
+
+    for (idx, item) in items.iter().enumerate() {
+        if !include(item) {
+            continue;
+        }
+        let lowered = searchable(item).to_lowercase();
+        if !rest.iter().all(|token| lowered.contains(token.as_str())) {
+            continue;
+        }
+        if starts_with_first(item, first, &lowered) {
+            starts.push(idx);
+        } else if lowered.contains(first.as_str()) {
+            contains.push(idx);
+        }
+    }
+
+    starts.extend(contains);
+    starts
+}
+
+pub(super) fn clamp_index(index: &mut usize, len: usize) {
+    if len == 0 {
+        *index = 0;
+    } else {
+        *index = (*index).min(len.saturating_sub(1));
+    }
+}
+
+pub(super) fn move_index_prev_wrapping(index: &mut usize, len: usize) {
+    if len == 0 {
+        *index = 0;
+    } else if *index == 0 {
+        *index = len - 1;
+    } else {
+        *index -= 1;
+    }
+}
+
+pub(super) fn move_index_next_wrapping(index: &mut usize, len: usize) {
+    if len == 0 {
+        *index = 0;
+    } else {
+        *index = (*index + 1) % len;
+    }
+}
+
 pub(super) fn panel_config_needs_profiles(cfg: &PanelConfig) -> bool {
     cfg.remote_name.is_some() || cfg.tabs.iter().any(|tab| tab.remote_name.is_some())
 }

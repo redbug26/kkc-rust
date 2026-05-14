@@ -47,10 +47,7 @@ impl Entry {
 
         let is_dir = real_meta.is_dir();
         let size = if is_dir { 0 } else { real_meta.len() };
-        let modified = real_meta
-            .modified()
-            .ok()
-            .map(|t| DateTime::<Local>::from(t));
+        let modified = real_meta.modified().ok().map(DateTime::<Local>::from);
         let mode = metadata.permissions().mode();
         let cloud_only = crate::cloud_status::is_cloud_only(path, &metadata);
 
@@ -311,7 +308,7 @@ impl Panel {
         }
     }
 
-    fn sort_entries(&self, entries: &mut Vec<Entry>) {
+    fn sort_entries(&self, entries: &mut [Entry]) {
         match self.sort {
             SortMode::Name => {
                 entries.sort_by(|a, b| {
@@ -391,10 +388,10 @@ impl Panel {
     // -----------------------------------------------------------------------
 
     pub fn toggle_selected(&mut self) {
-        if let Some(e) = self.entries.get_mut(self.cursor) {
-            if e.name != ".." {
-                e.selected = !e.selected;
-            }
+        if let Some(e) = self.entries.get_mut(self.cursor)
+            && e.name != ".."
+        {
+            e.selected = !e.selected;
         }
     }
 
@@ -439,10 +436,10 @@ impl Panel {
     pub fn effective_selection(&self) -> Vec<&Entry> {
         let selected: Vec<&Entry> = self.entries.iter().filter(|e| e.selected).collect();
         if selected.is_empty() {
-            if let Some(e) = self.entries.get(self.cursor) {
-                if e.name != ".." {
-                    return vec![e];
-                }
+            if let Some(e) = self.entries.get(self.cursor)
+                && e.name != ".."
+            {
+                return vec![e];
             }
             vec![]
         } else {
@@ -577,11 +574,7 @@ impl Panel {
             if rel.as_os_str().is_empty() {
                 mount.archive_path.to_string_lossy().into_owned()
             } else {
-                format!(
-                    "{}{}",
-                    mount.archive_path.display(),
-                    format!("/{}", rel.display())
-                )
+                format!("{}/{}", mount.archive_path.display(), rel.display())
             }
         } else if let Some(remote) = &self.remote {
             remote_display_path(&remote.profile, &remote.cwd)
@@ -693,39 +686,22 @@ impl Panel {
         }
         let first = &tokens[0];
         let rest = &tokens[1..];
+        let mut starts = Vec::new();
+        let mut contains = Vec::new();
 
-        let matches_all = |name: &str| -> bool {
-            let low = name.to_lowercase();
-            rest.iter().all(|t| low.contains(t.as_str()))
-        };
+        for (idx, entry) in self.entries.iter().enumerate() {
+            let lowered = entry.name.to_lowercase();
+            if !rest.iter().all(|token| lowered.contains(token.as_str())) {
+                continue;
+            }
+            if lowered.starts_with(first.as_str()) {
+                starts.push(idx);
+            } else if lowered.contains(first.as_str()) {
+                contains.push(idx);
+            }
+        }
 
-        // Priority 1: first token is a prefix of the name
-        let mut starts: Vec<usize> = self
-            .entries
-            .iter()
-            .enumerate()
-            .filter(|(_, e)| {
-                let low = e.name.to_lowercase();
-                low.starts_with(first.as_str()) && matches_all(&e.name)
-            })
-            .map(|(i, _)| i)
-            .collect();
-
-        // Priority 2: first token appears anywhere else
-        let mut contains: Vec<usize> = self
-            .entries
-            .iter()
-            .enumerate()
-            .filter(|(_, e)| {
-                let low = e.name.to_lowercase();
-                low.contains(first.as_str())
-                    && !low.starts_with(first.as_str())
-                    && matches_all(&e.name)
-            })
-            .map(|(i, _)| i)
-            .collect();
-
-        starts.append(&mut contains);
+        starts.extend(contains);
         starts
     }
 

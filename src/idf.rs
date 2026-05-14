@@ -1453,15 +1453,6 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
             None,
             mz_lines(&data),
         ))
-    } else if data.starts_with(b"SQLite format 3\x00") {
-        Some(info(
-            "application/vnd.sqlite3",
-            path,
-            IdfKind::Other,
-            None,
-            None,
-            vec![],
-        ))
     } else if data.starts_with(b"\x7FELF") {
         Some(info(
             "application/x-elf",

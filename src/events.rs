@@ -627,16 +627,13 @@ fn handle_mouse_command_palette(app: &mut App, mouse: MouseEvent) -> Result<bool
             {
                 let row = (mouse.row - list_area.y) as usize;
                 let list_h = list_area.height as usize;
-                let scroll = if s.match_pos >= list_h {
-                    s.match_pos - list_h + 1
-                } else {
-                    0
-                };
-                let clicked = scroll + row;
                 let indices = s.filtered_indices();
+                let scroll = s.visible_start(list_h, indices.len());
+                let clicked = scroll + row;
                 if clicked < indices.len() && indices[clicked] != crate::app::PALETTE_SEP {
                     let same = s.match_pos == clicked;
                     s.match_pos = clicked;
+                    s.scroll_match_into_view(list_h);
                     if same {
                         return handle_command_palette(app, KeyEvent::from(KeyCode::Enter));
                     }
@@ -754,7 +751,7 @@ fn handle_mouse_search_panel(app: &mut App, mouse: MouseEvent) -> Result<bool> {
                 return handle_search(app, KeyEvent::from(key));
             }
 
-            if mouse.row >= inner.y + 1
+            if mouse.row > inner.y
                 && mouse.row <= inner.y + 3
                 && let AppMode::SearchPanel(ref mut s) = app.mode
             {
@@ -1105,7 +1102,7 @@ fn handle_mouse_input(app: &mut App, mouse: MouseEvent) -> Result<bool> {
     if point_in_rect(mouse.column, mouse.row, input_area)
         && let AppMode::Input(ref mut dlg) = app.mode
     {
-        let offset = mouse.column.saturating_sub(input_area.x) as u16;
+        let offset = mouse.column.saturating_sub(input_area.x);
         dlg.textarea
             .move_cursor(tui_textarea::CursorMove::Jump(0, offset));
     }
@@ -1168,9 +1165,9 @@ fn handle_mouse_assoc_input(app: &mut App, mouse: MouseEvent) -> Result<bool> {
     if point_in_rect(mouse.column, mouse.row, input_area)
         && let AppMode::AssocInput(ref mut dlg) = app.mode
     {
-        let col = mouse.column.saturating_sub(input_area.x) as u16;
+        let col = mouse.column.saturating_sub(input_area.x);
         if is_openers {
-            let row = mouse.row.saturating_sub(input_area.y) as u16;
+            let row = mouse.row.saturating_sub(input_area.y);
             dlg.textarea.move_cursor(tui_textarea::CursorMove::Jump(row, col));
         } else {
             dlg.textarea.move_cursor(tui_textarea::CursorMove::Jump(0, col));
@@ -1364,18 +1361,14 @@ fn main_mouse_layout(app: &App, area: Rect) -> MainMouseLayout {
 
 fn fkey_action_for_number(app: &App, n: u8) -> Option<MenuAction> {
     let shortcut = format!("F{}", n);
-    let action = crate::app::PALETTE_DATA
+    crate::app::PALETTE_DATA
         .iter()
         .find(|entry| {
             app.effective_shortcut_for(entry.fn_name, entry.shortcut)
                 .as_deref()
                 == Some(shortcut.as_str())
         })
-        .map(|entry| entry.action);
-
-    action.or_else(|| {
-        None
-    })
+        .map(|entry| entry.action)
 }
 
 fn inset_rect(area: Rect, dx: u16, dy: u16) -> Rect {
@@ -1575,7 +1568,7 @@ fn confirm_button_rects(dlg: &ConfirmDialog, area: Rect) -> (Rect, Option<Rect>)
     match &dlg.action {
         ConfirmAction::Message | ConfirmAction::MessageThen(_) => {
             let width = 72u16.min(area.width.saturating_sub(4)).max(40);
-            let height = 8u16.min(area.height.saturating_sub(2).max(8));
+            let height = 8;
             let popup = Rect {
                 x: area.x + area.width.saturating_sub(width) / 2,
                 y: area.y + area.height.saturating_sub(height) / 2,
@@ -1722,7 +1715,7 @@ fn remote_edit_share_picker_rect(
 ) -> Option<(Rect, Rect, usize)> {
     let dd_x = inner.x + 9;
     let dd_y = inner.y + path_row + 1;
-    let dd_w = inner.width.saturating_sub(9).min(40).max(16);
+    let dd_w = inner.width.saturating_sub(9).clamp(16, 40);
     let max_visible: usize = 8;
     let visible = shares_len.min(max_visible);
     let dd_h = (visible as u16 + 2).min(area.height.saturating_sub(dd_y));
@@ -1843,8 +1836,8 @@ fn search_panel_rect(area: Rect) -> (Rect, Rect, Rect, Rect) {
 }
 
 fn command_palette_rect(area: Rect, item_count: usize) -> (Rect, Rect, Rect, Rect) {
-    let w = area.width.saturating_sub(4).min(72).max(54);
-    let visible = (item_count as u16).min(18).max(3);
+    let w = area.width.saturating_sub(4).clamp(54, 72);
+    let visible = (item_count as u16).clamp(3, 18);
     let h = (visible + 5).min(area.height.saturating_sub(3)).max(8);
     let popup = clamp_rect_local(
         area,

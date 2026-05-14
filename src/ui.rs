@@ -525,8 +525,8 @@ fn render_menu(f: &mut Frame, app: &App, state: &MenuState, area: Rect) {
     // Compute dropdown x: 1 (leading) + sum of (" header  ") widths preceding
     let dd_x: u16 = {
         let mut x = 1u16;
-        for i in 0..state.bar_pos {
-            x += MENU_HEADERS[i].len() as u16 + 4; // " header  "
+        for header in MENU_HEADERS.iter().take(state.bar_pos) {
+            x += header.len() as u16 + 4; // " header  "
         }
         x
     };
@@ -588,7 +588,7 @@ fn render_menu(f: &mut Frame, app: &App, state: &MenuState, area: Rect) {
         };
 
         if *action == MenuAction::Separator {
-            let sep: String = std::iter::repeat('─').take(avail).collect();
+            let sep = "─".repeat(avail);
             f.render_widget(
                 Paragraph::new(sep).style(Style::default().fg(CLR_MENU_DD_SEP).bg(CLR_MENU_DD_BG)),
                 row,
@@ -713,13 +713,11 @@ fn status_line_left_text(app: &App) -> String {
         String::new()
     };
 
-    let status_text = if app.status.text.is_empty() {
+    if app.status.text.is_empty() {
         entry_info
     } else {
         app.status.text.clone()
-    };
-
-    status_text
+    }
 }
 
 pub(crate) fn status_line_for_copy(app: &App) -> String {
@@ -826,7 +824,7 @@ pub(crate) fn render_shortcut_bar(
     let mut spans = Vec::new();
     for (idx, item) in items.iter().enumerate() {
         spans.push(Span::styled(
-            format!("{}", item.key),
+                item.key.to_string(),
             Style::default().fg(style.key_fg).bg(style.key_bg),
         ));
         spans.push(Span::styled(
@@ -872,7 +870,7 @@ pub(crate) fn footer_shortcut_key_at_column(
 ) -> Option<KeyCode> {
     let items = footer_shortcut_items(shortcuts);
     let idx = shortcut_bar_item_index_at_column(&items, area_x, column)?;
-    shortcuts.get(idx).map(|shortcut| shortcut.key.clone())
+    shortcuts.get(idx).map(|shortcut| shortcut.key)
 }
 
 // ---------------------------------------------------------------------------

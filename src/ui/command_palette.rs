@@ -65,8 +65,8 @@ pub(super) fn render_command_palette(
     let total = indices.iter().filter(|&&i| i != PALETTE_SEP).count();
 
     // ── Popup geometry ────────────────────────────────────────────────────
-    let w = area.width.saturating_sub(4).min(72).max(54);
-    let visible = (indices.len() as u16).min(18).max(3);
+    let w = area.width.saturating_sub(4).clamp(54, 72);
+    let visible = (indices.len() as u16).clamp(3, 18);
     // 1 input + 1 sep + visible items + 1 hint + 2 border
     let h = (visible + 5).min(area.height.saturating_sub(3)).max(8);
 
@@ -146,7 +146,7 @@ pub(super) fn render_command_palette(
     );
 
     // ── Separator ─────────────────────────────────────────────────────────
-    let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
+    let sep = "─".repeat(inner.width as usize);
     safe_render_widget(
         f,
         Paragraph::new(sep).style(Style::default().fg(CLR_QS_SEP).bg(CLR_QS_BG)),
@@ -172,12 +172,9 @@ pub(super) fn render_command_palette(
         height: list_h as u16,
     };
 
-    // Scroll offset so the cursor stays visible.
-    let start = if s.match_pos >= list_h {
-        s.match_pos - list_h + 1
-    } else {
-        0
-    };
+    // Scroll offset is kept in state so moving up from the bottom row moves
+    // the highlight before the list itself scrolls.
+    let start = s.visible_start(list_h, indices.len());
 
     // Position of the section separator in the combined indices list, if any.
     let sep_pos: Option<usize> = indices.iter().position(|&i| i == PALETTE_SEP);
@@ -188,7 +185,7 @@ pub(super) fn render_command_palette(
 
         // ── Section separator row ─────────────────────────────────────────
         if cmd_idx == PALETTE_SEP {
-            let sep_line: String = std::iter::repeat('─').take(inner_w).collect();
+            let sep_line = "─".repeat(inner_w);
             safe_render_widget(
                 f,
                 Paragraph::new(Line::from(vec![Span::styled(
@@ -207,7 +204,7 @@ pub(super) fn render_command_palette(
 
         let selected = vis_idx == s.match_pos;
         // An entry is "recent" when it appears before the separator.
-        let is_recent = sep_pos.map_or(false, |sp| vis_idx < sp);
+        let is_recent = sep_pos.is_some_and(|sp| vis_idx < sp);
 
         // ── Determine if this is a static or dynamic (Lua app) entry ─────
         let lua_base = PALETTE_DATA.len();

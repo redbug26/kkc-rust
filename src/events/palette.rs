@@ -8,6 +8,16 @@ use crate::app::{
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+fn command_palette_list_height(state: &crate::app::CommandPaletteState) -> usize {
+    let item_count = state.filtered_indices().len();
+    super::terminal_rect()
+        .map(|area| {
+            let (_, _, list_area, _) = super::command_palette_rect(area, item_count);
+            list_area.height as usize
+        })
+        .unwrap_or(0)
+}
+
 pub(super) fn handle_command_palette(app: &mut App, key: KeyEvent) -> Result<bool> {
     let mut state = match std::mem::replace(&mut app.mode, AppMode::Browse) {
         AppMode::CommandPalette(state) => state,
@@ -58,16 +68,17 @@ pub(super) fn handle_command_palette(app: &mut App, key: KeyEvent) -> Result<boo
                 state.capture = false;
             }
             _ => {
-                if let Some(shortcut) = shortcut_from_key_event(key) {
-                    if let Some(fn_name) = selected_fn_name {
-                        app.set_shortcut_for_fn(&fn_name, Some(shortcut.clone()));
-                        match app.save_config() {
-                            Ok(_) => app
-                                .set_status(format!("Shortcut saved: {} -> {}", fn_name, shortcut)),
-                            Err(e) => app.set_status(format!("Save error: {}", e)),
+                if let Some(shortcut) = shortcut_from_key_event(key)
+                    && let Some(fn_name) = selected_fn_name
+                {
+                    app.set_shortcut_for_fn(&fn_name, Some(shortcut.clone()));
+                    match app.save_config() {
+                        Ok(_) => {
+                            app.set_status(format!("Shortcut saved: {} -> {}", fn_name, shortcut))
                         }
-                        state.capture = false;
+                        Err(e) => app.set_status(format!("Save error: {}", e)),
                     }
+                    state.capture = false;
                 }
             }
         }
@@ -108,6 +119,7 @@ pub(super) fn handle_command_palette(app: &mut App, key: KeyEvent) -> Result<boo
                     guard += 1;
                 }
                 state.match_pos = pos;
+                state.scroll_match_into_view(command_palette_list_height(&state));
             }
             app.mode = AppMode::CommandPalette(state);
         }
@@ -123,18 +135,21 @@ pub(super) fn handle_command_palette(app: &mut App, key: KeyEvent) -> Result<boo
                     guard += 1;
                 }
                 state.match_pos = pos;
+                state.scroll_match_into_view(command_palette_list_height(&state));
             }
             app.mode = AppMode::CommandPalette(state);
         }
         KeyCode::Backspace => {
             state.query.pop();
             state.match_pos = 0;
+            state.scroll_offset = 0;
             state.clamp_match();
             app.mode = AppMode::CommandPalette(state);
         }
         KeyCode::Char(ch) if !ctrl && !alt => {
             state.query.push(ch);
             state.match_pos = 0;
+            state.scroll_offset = 0;
             state.clamp_match();
             app.mode = AppMode::CommandPalette(state);
         }
@@ -153,13 +168,13 @@ pub(super) fn handle_command_palette(app: &mut App, key: KeyEvent) -> Result<boo
             });
 
             // Record in recents: deduplicate then prepend, cap at 5.
-            if let Some(idx) = data_idx {
-                if idx < PALETTE_DATA.len() {
-                    let fn_name = PALETTE_DATA[idx].fn_name.to_string();
-                    app.palette_recent.retain(|x| x != &fn_name);
-                    app.palette_recent.insert(0, fn_name);
-                    app.palette_recent.truncate(5);
-                }
+            if let Some(idx) = data_idx
+                && idx < PALETTE_DATA.len()
+            {
+                let fn_name = PALETTE_DATA[idx].fn_name.to_string();
+                app.palette_recent.retain(|x| x != &fn_name);
+                app.palette_recent.insert(0, fn_name);
+                app.palette_recent.truncate(5);
             }
 
             app.mode = AppMode::Browse;

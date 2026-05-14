@@ -323,9 +323,7 @@ fn render_panel_entries(
                     .fg(fg)
                     .bg(CLR_CURSOR_BG)
                     .add_modifier(Modifier::BOLD)
-            } else if entry.selected {
-                Style::default().fg(fg).add_modifier(Modifier::BOLD)
-            } else if entry.is_dir {
+            } else if entry.selected || entry.is_dir {
                 Style::default().fg(fg).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(fg)
@@ -340,9 +338,7 @@ fn render_panel_entries(
             };
             let suffix_icon = if show_cloud_icons && entry.cloud_only {
                 Some("\u{f0c2}")
-            } else if entry.is_dir {
-                None
-            } else if !show_file_icons {
+            } else if entry.is_dir || !show_file_icons {
                 None
             } else {
                 entry.file_icon
@@ -644,7 +640,7 @@ fn render_file_id_panel(f: &mut Frame, app: &App, area: Rect) {
 
     // IDF text lines
     let text = app.build_file_id_preview();
-    let mut lines: Vec<Line<'static>> = text.lines().map(|l| colorize_idf_line(l)).collect();
+    let mut lines: Vec<Line<'static>> = text.lines().map(colorize_idf_line).collect();
 
     // Hex dump section — only for regular local files
     // Layout: N*2 hex + (N-1) spaces + 2 separator + N ascii = 4N+1 chars per row
@@ -664,15 +660,15 @@ fn render_file_id_panel(f: &mut Frame, app: &App, area: Rect) {
             Some(buf)
         });
 
-    if let Some(data) = hex_data {
-        if !data.is_empty() {
-            lines.push(Line::from(Span::styled(
-                "─".repeat(cw),
-                Style::default().fg(CLR_PANEL_BORDER_DIM),
-            )));
-            for chunk in data.chunks(bytes_per_row) {
-                lines.push(hex_dump_line(chunk, bytes_per_row));
-            }
+    if let Some(data) = hex_data
+        && !data.is_empty()
+    {
+        lines.push(Line::from(Span::styled(
+            "─".repeat(cw),
+            Style::default().fg(CLR_PANEL_BORDER_DIM),
+        )));
+        for chunk in data.chunks(bytes_per_row) {
+            lines.push(hex_dump_line(chunk, bytes_per_row));
         }
     }
 

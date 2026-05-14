@@ -521,6 +521,7 @@ pub fn palette_shortname_for_action(action: MenuAction) -> &'static str {
 pub struct CommandPaletteState {
     pub query: String,
     pub match_pos: usize,
+    pub scroll_offset: usize,
     pub capture: bool,
     /// Snapshot of recently-used commands (fn_name values), most-recent first.
     /// Populated from `App::palette_recent` when the palette is opened.
@@ -536,14 +537,11 @@ pub const PALETTE_SEP: usize = usize::MAX;
 
 pub fn normalize_shortcut(value: &str) -> String {
     value
-        .replace("Ctrl+", "Ctrl+")
         .replace("CTRL+", "Ctrl+")
         .replace("Control+", "Ctrl+")
         .replace("^", "Ctrl+")
-        .replace("Shift+", "Shift+")
         .replace("SHIFT+", "Shift+")
         .replace("S-", "Shift+")
-        .replace("Alt+", "Alt+")
         .replace("ALT+", "Alt+")
         .replace("A-", "Alt+")
 }
@@ -553,14 +551,16 @@ pub fn shortcut_from_key_event(key: KeyEvent) -> Option<String> {
     let alt = key.modifiers.contains(KeyModifiers::ALT);
     let shift = key.modifiers.contains(KeyModifiers::SHIFT);
 
-    if alt && !ctrl && !shift {
-        if let KeyCode::Char(c) = key.code {
-            return match c {
-                '1'..='9' => Some(format!("F{}", (c as u8) - b'0')),
-                '0' => Some("F10".to_string()),
-                _ => None,
-            };
-        }
+    if alt
+        && !ctrl
+        && !shift
+        && let KeyCode::Char(c) = key.code
+    {
+        return match c {
+            '1'..='9' => Some(format!("F{}", (c as u8) - b'0')),
+            '0' => Some("F10".to_string()),
+            _ => None,
+        };
     }
 
     let mut parts: Vec<&str> = Vec::new();
@@ -649,10 +649,10 @@ impl CommandPaletteState {
                     let idx = self.lua_apps.iter().position(|info| info.id == id)?;
                     return Some(lua_base + idx);
                 }
-                if let Ok(i) = name.parse::<usize>() {
-                    if i < PALETTE_DATA.len() {
-                        return Some(i);
-                    }
+                if let Ok(i) = name.parse::<usize>()
+                    && i < PALETTE_DATA.len()
+                {
+                    return Some(i);
                 }
                 PALETTE_DATA.iter().position(|e| e.fn_name == name)
             })
@@ -766,6 +766,7 @@ impl CommandPaletteState {
         let len = indices.len();
         if len == 0 {
             self.match_pos = 0;
+            self.scroll_offset = 0;
             return;
         }
 
@@ -776,6 +777,39 @@ impl CommandPaletteState {
             } else {
                 self.match_pos = 0;
             }
+        }
+        self.scroll_offset = self.scroll_offset.min(len.saturating_sub(1));
+    }
+
+    pub fn visible_start(&self, list_h: usize, len: usize) -> usize {
+        if list_h == 0 || len <= list_h {
+            return 0;
+        }
+
+        let max_start = len - list_h;
+        let start = self.scroll_offset.min(max_start);
+        if self.match_pos < start {
+            self.match_pos
+        } else if self.match_pos >= start + list_h {
+            (self.match_pos - list_h + 1).min(max_start)
+        } else {
+            start
+        }
+    }
+
+    pub fn scroll_match_into_view(&mut self, list_h: usize) {
+        let len = self.filtered_indices().len();
+        if list_h == 0 || len <= list_h {
+            self.scroll_offset = 0;
+            return;
+        }
+
+        let max_start = len - list_h;
+        self.scroll_offset = self.scroll_offset.min(max_start);
+        if self.match_pos < self.scroll_offset {
+            self.scroll_offset = self.match_pos;
+        } else if self.match_pos >= self.scroll_offset + list_h {
+            self.scroll_offset = (self.match_pos - list_h + 1).min(max_start);
         }
     }
 }
@@ -908,5 +942,25 @@ impl App {
                     && item.shortcut.as_deref() == Some(shortcut.as_str())
             })
             .and_then(|item| item.fn_name.strip_prefix("lua_app_").map(str::to_string))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_palette_scroll_does_not_follow_cursor_up_from_bottom() {
+        let mut state = CommandPaletteState {
+            match_pos: 20,
+            scroll_offset: 11,
+            ..Default::default()
+        };
+
+        state.match_pos = 19;
+        state.scroll_match_into_view(10);
+
+        assert_eq!(state.scroll_offset, 11);
+        assert_eq!(state.visible_start(10, 21), 11);
     }
 }

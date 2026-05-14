@@ -15,8 +15,9 @@ pub use self::dialogs::{
     InputDialog, RemoteDeleteTarget, SearchState, TextInputState,
 };
 use self::helpers::{
-    cleanup_temp_download, draw_busy_status, panel_config_needs_profiles, same_remote_target,
-    spawn_remote_connect_task,
+    clamp_index, cleanup_temp_download, draw_busy_status, move_index_next_wrapping,
+    move_index_prev_wrapping, panel_config_needs_profiles, ranked_filtered_indices,
+    same_remote_target, spawn_remote_connect_task,
 };
 pub use self::menu::{
     AudioPlayerPaletteState, MENU_DATA, MENU_HEADERS, MenuAction, MenuEntry, MenuState,
@@ -281,49 +282,24 @@ impl PluginsState {
     }
 
     pub fn filtered_indices(&self) -> Vec<usize> {
-        if self.query.trim().is_empty() {
-            return (0..self.plugins.len()).collect();
-        }
-
-        let tokens: Vec<String> = self
-            .query
-            .split_whitespace()
-            .map(|token| token.to_lowercase())
-            .filter(|token| !token.is_empty())
-            .collect();
-        if tokens.is_empty() {
-            return (0..self.plugins.len()).collect();
-        }
-
-        let first = &tokens[0];
-        let rest = &tokens[1..];
-        let mut starts = Vec::new();
-        let mut contains = Vec::new();
-
-        for (idx, item) in self.plugins.iter().enumerate() {
-            let source = crate::plugins::plugin_source_label(&item.dir, &self.plugins_dir);
-            let searchable = format!(
-                "{} {} {} {} {} {}",
-                item.name,
-                item.kind,
-                item.version,
-                item.description,
-                item.extensions.join(" "),
-                source,
-            );
-            let lowered = searchable.to_lowercase();
-            if !rest.iter().all(|token| lowered.contains(token.as_str())) {
-                continue;
-            }
-            if item.name.to_lowercase().starts_with(first.as_str()) {
-                starts.push(idx);
-            } else if lowered.contains(first.as_str()) {
-                contains.push(idx);
-            }
-        }
-
-        starts.extend(contains);
-        starts
+        ranked_filtered_indices(
+            &self.plugins,
+            &self.query,
+            |_| true,
+            |item| {
+                let source = crate::plugins::plugin_source_label(&item.dir, &self.plugins_dir);
+                format!(
+                    "{} {} {} {} {} {}",
+                    item.name,
+                    item.kind,
+                    item.version,
+                    item.description,
+                    item.extensions.join(" "),
+                    source,
+                )
+            },
+            |item, first, _| item.name.to_lowercase().starts_with(first),
+        )
     }
 
     pub fn append_query(&mut self, ch: char) {
@@ -340,35 +316,19 @@ impl PluginsState {
 
     pub fn move_prev(&mut self) {
         let len = self.filtered_indices().len();
-        if len == 0 {
-            self.cursor = 0;
-            return;
-        }
-        self.cursor = if self.cursor == 0 {
-            len - 1
-        } else {
-            self.cursor - 1
-        };
+        move_index_prev_wrapping(&mut self.cursor, len);
         self.clamp_cursor();
     }
 
     pub fn move_next(&mut self) {
         let len = self.filtered_indices().len();
-        if len == 0 {
-            self.cursor = 0;
-            return;
-        }
-        self.cursor = (self.cursor + 1) % len;
+        move_index_next_wrapping(&mut self.cursor, len);
         self.clamp_cursor();
     }
 
     fn clamp_cursor(&mut self) {
         let len = self.filtered_indices().len();
-        if len == 0 {
-            self.cursor = 0;
-        } else {
-            self.cursor = self.cursor.min(len.saturating_sub(1));
-        }
+        clamp_index(&mut self.cursor, len);
     }
 }
 
@@ -543,40 +503,16 @@ pub struct OpenerState {
 
 impl OpenerState {
     pub fn filtered_indices(&self) -> Vec<usize> {
-        if self.query.trim().is_empty() {
-            return (0..self.items.len()).collect();
-        }
-
-        let tokens = self
-            .query
-            .split_whitespace()
-            .map(|token| token.to_ascii_lowercase())
-            .filter(|token| !token.is_empty())
-            .collect::<Vec<_>>();
-        if tokens.is_empty() {
-            return (0..self.items.len()).collect();
-        }
-
-        let first = &tokens[0];
-        let rest = &tokens[1..];
-        let mut starts = Vec::new();
-        let mut contains = Vec::new();
-        for (idx, item) in self.items.iter().enumerate() {
-            let searchable =
-                format!("{} {} {}", item.category, item.label, item.detail).to_ascii_lowercase();
-            if !rest.iter().all(|token| searchable.contains(token)) {
-                continue;
-            }
-            if item.label.to_ascii_lowercase().starts_with(first)
-                || item.category.to_ascii_lowercase().starts_with(first)
-            {
-                starts.push(idx);
-            } else if searchable.contains(first) {
-                contains.push(idx);
-            }
-        }
-        starts.extend(contains);
-        starts
+        ranked_filtered_indices(
+            &self.items,
+            &self.query,
+            |_| true,
+            |item| format!("{} {} {}", item.category, item.label, item.detail),
+            |item, first, _| {
+                item.label.to_lowercase().starts_with(first)
+                    || item.category.to_lowercase().starts_with(first)
+            },
+        )
     }
 
     pub fn append_query(&mut self, ch: char) {
@@ -593,22 +529,12 @@ impl OpenerState {
 
     pub fn move_prev(&mut self) {
         let len = self.filtered_indices().len();
-        if len == 0 {
-            self.match_pos = 0;
-        } else if self.match_pos == 0 {
-            self.match_pos = len - 1;
-        } else {
-            self.match_pos -= 1;
-        }
+        move_index_prev_wrapping(&mut self.match_pos, len);
     }
 
     pub fn move_next(&mut self) {
         let len = self.filtered_indices().len();
-        if len == 0 {
-            self.match_pos = 0;
-        } else {
-            self.match_pos = (self.match_pos + 1) % len;
-        }
+        move_index_next_wrapping(&mut self.match_pos, len);
     }
 
     pub fn selected_item(&self) -> Option<&OpenerActionItem> {
@@ -619,11 +545,7 @@ impl OpenerState {
 
     fn clamp_match(&mut self) {
         let len = self.filtered_indices().len();
-        if len == 0 {
-            self.match_pos = 0;
-        } else {
-            self.match_pos = self.match_pos.min(len.saturating_sub(1));
-        }
+        clamp_index(&mut self.match_pos, len);
     }
 }
 
@@ -661,55 +583,28 @@ impl RemoteConnectState {
     }
 
     pub fn filtered_indices(&self) -> Vec<usize> {
-        if self.query.trim().is_empty() {
-            return (0..self.items.len()).collect();
-        }
-
-        let tokens: Vec<String> = self
-            .query
-            .split_whitespace()
-            .map(|t| t.to_lowercase())
-            .filter(|t| !t.is_empty())
-            .collect();
-        if tokens.is_empty() {
-            return (0..self.items.len()).collect();
-        }
-
-        let first = &tokens[0];
-        let rest = &tokens[1..];
-
-        let mut starts = Vec::new();
-        let mut contains = Vec::new();
-
-        for (idx, item) in self.items.iter().enumerate() {
-            let protocol = item.protocol().name();
-            let source = match item.source {
-                RemoteSource::SshConfig => "ssh",
-                RemoteSource::UserToml => "toml",
-                RemoteSource::PluginAuto => "plugin",
-            };
-            let searchable = format!(
-                "{} {} {} {}",
-                item.name,
-                item.host_label(),
-                protocol,
-                source
-            );
-            let lowered = searchable.to_lowercase();
-            if !rest.iter().all(|token| lowered.contains(token.as_str())) {
-                continue;
-            }
-            if lowered.starts_with(first.as_str())
-                || item.name.to_lowercase().starts_with(first.as_str())
-            {
-                starts.push(idx);
-            } else if lowered.contains(first.as_str()) {
-                contains.push(idx);
-            }
-        }
-
-        starts.extend(contains);
-        starts
+        ranked_filtered_indices(
+            &self.items,
+            &self.query,
+            |_| true,
+            |item| {
+                let source = match item.source {
+                    RemoteSource::SshConfig => "ssh",
+                    RemoteSource::UserToml => "toml",
+                    RemoteSource::PluginAuto => "plugin",
+                };
+                format!(
+                    "{} {} {} {}",
+                    item.name,
+                    item.host_label(),
+                    item.protocol().name(),
+                    source
+                )
+            },
+            |item, first, lowered| {
+                lowered.starts_with(first) || item.name.to_lowercase().starts_with(first)
+            },
+        )
     }
 
     pub fn sync_cursor(&mut self) {
@@ -737,23 +632,13 @@ impl RemoteConnectState {
 
     pub fn move_prev(&mut self) {
         let len = self.filtered_indices().len();
-        if len == 0 {
-            return;
-        }
-        if self.match_pos == 0 {
-            self.match_pos = len - 1;
-        } else {
-            self.match_pos -= 1;
-        }
+        move_index_prev_wrapping(&mut self.match_pos, len);
         self.sync_cursor();
     }
 
     pub fn move_next(&mut self) {
         let len = self.filtered_indices().len();
-        if len == 0 {
-            return;
-        }
-        self.match_pos = (self.match_pos + 1) % len;
+        move_index_next_wrapping(&mut self.match_pos, len);
         self.sync_cursor();
     }
 }
@@ -863,12 +748,8 @@ impl AssocEditorState {
     }
 
     pub fn clamp_match(&mut self) {
-        let total = self.filtered_indices().len();
-        if total == 0 {
-            self.match_pos = 0;
-        } else {
-            self.match_pos = self.match_pos.min(total.saturating_sub(1));
-        }
+        let len = self.filtered_indices().len();
+        clamp_index(&mut self.match_pos, len);
     }
 
     pub fn selected_index(&self) -> Option<usize> {
