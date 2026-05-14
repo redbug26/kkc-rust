@@ -896,9 +896,6 @@ pub(crate) fn fkey_slots(app: &App) -> Vec<FkeySlot> {
             labels[n - 1].label = entry.shortname.to_string();
         }
     }
-    if labels[1].label.is_empty() {
-        labels[1].label = "Menu".to_string();
-    }
 
     labels
 }

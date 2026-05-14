@@ -51,6 +51,8 @@ pub enum MenuAction {
     SelectPattern,
     DeselectPattern,
     InvertSelection,
+    SaveSelectionSession,
+    LoadSelectionSession,
     SearchFiles,
     TreeView,
     InstallPluginFromStore,
@@ -809,6 +811,9 @@ pub static MENU_DATA: &[&[MenuEntry]] = &[
         MenuAction::SelectPattern,
         MenuAction::DeselectPattern,
         MenuAction::InvertSelection,
+        MenuAction::Separator,
+        MenuAction::SaveSelectionSession,
+        MenuAction::LoadSelectionSession,
     ],
     &[
         MenuAction::SearchFiles,

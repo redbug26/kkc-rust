@@ -47,7 +47,7 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
         category: "Interface",
         label: "Menu",
         shortname: "Menu",
-        shortcut: Some("F2"),
+        shortcut: Some("F9"),
         fn_name: "open_menu",
         action: MenuAction::OpenMenu,
     },
@@ -241,6 +241,22 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
         shortcut: Some("*"),
         fn_name: "invert_selection",
         action: MenuAction::InvertSelection,
+    },
+    PaletteEntry {
+        category: "Select",
+        label: "Save selection session",
+        shortname: "SaveSel",
+        shortcut: None,
+        fn_name: "save_selection_session",
+        action: MenuAction::SaveSelectionSession,
+    },
+    PaletteEntry {
+        category: "Select",
+        label: "Load selection session",
+        shortname: "LoadSel",
+        shortcut: None,
+        fn_name: "load_selection_session",
+        action: MenuAction::LoadSelectionSession,
     },
     // ── Tools ────────────────────────────────────────────────────────────
     PaletteEntry {

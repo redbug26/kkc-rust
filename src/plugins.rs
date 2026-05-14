@@ -1,4 +1,9 @@
 use anyhow::{Context, Result, anyhow, bail};
+use crossterm::{
+    event::{DisableMouseCapture, EnableMouseCapture},
+    execute,
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+};
 use base64::Engine as _;
 use mlua::{Function, Lua, Table, Value};
 use serde::Deserialize;
@@ -6,7 +11,7 @@ use serde::Serialize;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
-use std::io::{self, Cursor, Read, Seek};
+use std::io::{self, Cursor, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::rc::Rc;
@@ -3104,6 +3109,125 @@ where
     )?;
     globals.set("sj", sj)?;
 
+    let preload: Table = package.get("preload")?;
+    let dialog_mod = lua.create_function(move |lua, ()| {
+        let t = lua.create_table()?;
+
+        t.set(
+            "message",
+            lua.create_function(move |_, text: String| {
+                lua_dialog_run_interactive(|| {
+                    let mut stdout = io::stdout();
+                    writeln!(stdout, "\n{text}")?;
+                    write!(stdout, "Press Enter to continue...")?;
+                    stdout.flush()?;
+                    let mut input = String::new();
+                    io::stdin().read_line(&mut input)?;
+                    Ok(())
+                })
+            })?,
+        )?;
+
+        t.set(
+            "input",
+            lua.create_function(move |_, (prompt, default): (String, Option<String>)| {
+                lua_dialog_run_interactive(|| {
+                    let mut stdout = io::stdout();
+                    write!(
+                        stdout,
+                        "\n{}{} ",
+                        prompt,
+                        default
+                            .as_ref()
+                            .map(|d| format!(" [{d}]"))
+                            .unwrap_or_default()
+                    )?;
+                    stdout.flush()?;
+                    let mut input = String::new();
+                    io::stdin().read_line(&mut input)?;
+                    let value = input.trim_end_matches(['\n', '\r']);
+                    if value.is_empty() {
+                        Ok(default.unwrap_or_default())
+                    } else {
+                        Ok(value.to_string())
+                    }
+                })
+            })?,
+        )?;
+
+        t.set(
+            "confirm",
+            lua.create_function(move |_, (prompt, default_yes): (String, Option<bool>)| {
+                let default_yes = default_yes.unwrap_or(true);
+                lua_dialog_run_interactive(|| {
+                    let mut stdout = io::stdout();
+                    loop {
+                        write!(
+                            stdout,
+                            "\n{} [{}] ",
+                            prompt,
+                            if default_yes { "Y/n" } else { "y/N" }
+                        )?;
+                        stdout.flush()?;
+                        let mut input = String::new();
+                        io::stdin().read_line(&mut input)?;
+                        let value = input.trim().to_ascii_lowercase();
+                        if value.is_empty() {
+                            return Ok(default_yes);
+                        }
+                        if matches!(value.as_str(), "y" | "yes" | "o" | "oui") {
+                            return Ok(true);
+                        }
+                        if matches!(value.as_str(), "n" | "no" | "non") {
+                            return Ok(false);
+                        }
+                    }
+                })
+            })?,
+        )?;
+
+        t.set(
+            "select",
+            lua.create_function(
+                move |_, (prompt, options, default_idx): (String, Table, Option<usize>)| {
+                    let mut choices = Vec::new();
+                    for value in options.sequence_values::<String>() {
+                        choices.push(value?);
+                    }
+                    if choices.is_empty() {
+                        return Ok(None::<usize>);
+                    }
+                    let default_idx = default_idx.unwrap_or(1).clamp(1, choices.len());
+                    lua_dialog_run_interactive(|| {
+                        let mut stdout = io::stdout();
+                        writeln!(stdout, "\n{prompt}")?;
+                        for (idx, choice) in choices.iter().enumerate() {
+                            writeln!(stdout, "  {:>2}. {}", idx + 1, choice)?;
+                        }
+                        loop {
+                            write!(stdout, "Choice [default={}]: ", default_idx)?;
+                            stdout.flush()?;
+                            let mut input = String::new();
+                            io::stdin().read_line(&mut input)?;
+                            let value = input.trim();
+                            if value.is_empty() {
+                                return Ok(Some(default_idx));
+                            }
+                            if let Ok(parsed) = value.parse::<usize>()
+                                && (1..=choices.len()).contains(&parsed)
+                            {
+                                return Ok(Some(parsed));
+                            }
+                        }
+                    })
+                },
+            )?,
+        )?;
+
+        Ok(t)
+    })?;
+    preload.set("kkc-dialog", dialog_mod)?;
+
     let kkc = lua.create_table()?;
     kkc.set(
         "register_archive_plugin",
@@ -3224,6 +3348,29 @@ where
     preload.set("kkc", lua.create_function(move |_, ()| Ok(kkc.clone()))?)?;
 
     Ok(())
+}
+
+fn lua_dialog_run_interactive<T, F>(f: F) -> mlua::Result<T>
+where
+    F: FnOnce() -> Result<T>,
+{
+    disable_raw_mode().map_err(mlua::Error::external)?;
+    execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture)
+        .map_err(mlua::Error::external)?;
+
+    let result = f();
+
+    let restore_screen = execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture);
+    let restore_raw = enable_raw_mode();
+
+    if let Err(err) = restore_screen {
+        return Err(mlua::Error::external(err));
+    }
+    if let Err(err) = restore_raw {
+        return Err(mlua::Error::external(err));
+    }
+
+    result.map_err(mlua::Error::external)
 }
 
 fn table_string_list(table: &Table, key: &str) -> mlua::Result<Vec<String>> {

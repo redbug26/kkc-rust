@@ -69,6 +69,8 @@ pub enum InputAction {
         id: String,
         cwd: PathBuf,
     },
+    SaveSelectionSession,
+    LoadSelectionSession,
 }
 
 #[derive(Debug, Clone)]

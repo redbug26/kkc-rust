@@ -1373,11 +1373,7 @@ fn fkey_action_for_number(app: &App, n: u8) -> Option<MenuAction> {
         .map(|entry| entry.action);
 
     action.or_else(|| {
-        if n == 2 {
-            Some(MenuAction::OpenMenu)
-        } else {
-            None
-        }
+        None
     })
 }
 
@@ -2470,9 +2466,6 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
         Some(1) if !ctrl && !shift => {
             return menu::execute_menu_action(app, MenuAction::Help);
         }
-        Some(2) if !ctrl && !shift => {
-            return menu::execute_menu_action(app, MenuAction::OpenMenu);
-        }
         Some(3) if !ctrl && !shift => {
             return menu::execute_menu_action(app, MenuAction::ViewFile);
         }
@@ -2490,6 +2483,9 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
         }
         Some(8) if !ctrl && !shift => {
             return menu::execute_menu_action(app, MenuAction::DeleteFile);
+        }
+        Some(9) if !ctrl && !shift => {
+            return menu::execute_menu_action(app, MenuAction::OpenMenu);
         }
         Some(10) if !ctrl && !shift => {
             return menu::execute_menu_action(app, MenuAction::Quit);
@@ -3362,6 +3358,12 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                     if app.config.auto_reload {
                         app.reload_panels();
                     }
+                }
+                InputAction::SaveSelectionSession => {
+                    app.cmd_save_selection_session(&value);
+                }
+                InputAction::LoadSelectionSession => {
+                    app.cmd_load_selection_session(&value);
                 }
             }
         }

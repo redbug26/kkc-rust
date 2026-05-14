@@ -326,6 +326,28 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
         MenuAction::InvertSelection => {
             app.active_panel_mut().invert_selection();
         }
+        MenuAction::SaveSelectionSession => {
+            let default_name = app.default_selection_session_name();
+            let cursor = default_name.len();
+            app.mode = AppMode::Input(InputDialog {
+                title: "Save selection session".into(),
+                prompt: "Session name:".into(),
+                value: default_name,
+                cursor,
+                action: InputAction::SaveSelectionSession,
+            });
+        }
+        MenuAction::LoadSelectionSession => {
+            let default_name = app.default_selection_session_name();
+            let cursor = default_name.len();
+            app.mode = AppMode::Input(InputDialog {
+                title: "Load selection session".into(),
+                prompt: "Session name:".into(),
+                value: default_name,
+                cursor,
+                action: InputAction::LoadSelectionSession,
+            });
+        }
         MenuAction::SearchFiles => {
             app.open_search();
         }

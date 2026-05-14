@@ -1274,6 +1274,124 @@ fn install_lua_app_modules(
         })?;
     preload.set("kkc-shell", shell_mod)?;
 
+    let dialog_mod = lua.create_function(move |lua, ()| {
+        let t = lua.create_table()?;
+
+        t.set(
+            "message",
+            lua.create_function(move |_, text: String| {
+                lua_dialog_run_interactive(|| {
+                    let mut stdout = io::stdout();
+                    writeln!(stdout, "\n{text}")?;
+                    write!(stdout, "Press Enter to continue...")?;
+                    stdout.flush()?;
+                    let mut input = String::new();
+                    io::stdin().read_line(&mut input)?;
+                    Ok(())
+                })
+            })?,
+        )?;
+
+        t.set(
+            "input",
+            lua.create_function(move |_, (prompt, default): (String, Option<String>)| {
+                lua_dialog_run_interactive(|| {
+                    let mut stdout = io::stdout();
+                    write!(
+                        stdout,
+                        "\n{}{} ",
+                        prompt,
+                        default
+                            .as_ref()
+                            .map(|d| format!(" [{d}]"))
+                            .unwrap_or_default()
+                    )?;
+                    stdout.flush()?;
+                    let mut input = String::new();
+                    io::stdin().read_line(&mut input)?;
+                    let value = input.trim_end_matches(['\n', '\r']);
+                    if value.is_empty() {
+                        Ok(default.unwrap_or_default())
+                    } else {
+                        Ok(value.to_string())
+                    }
+                })
+            })?,
+        )?;
+
+        t.set(
+            "confirm",
+            lua.create_function(move |_, (prompt, default_yes): (String, Option<bool>)| {
+                let default_yes = default_yes.unwrap_or(true);
+                lua_dialog_run_interactive(|| {
+                    let mut stdout = io::stdout();
+                    loop {
+                        write!(
+                            stdout,
+                            "\n{} [{}] ",
+                            prompt,
+                            if default_yes { "Y/n" } else { "y/N" }
+                        )?;
+                        stdout.flush()?;
+                        let mut input = String::new();
+                        io::stdin().read_line(&mut input)?;
+                        let value = input.trim().to_ascii_lowercase();
+                        if value.is_empty() {
+                            return Ok(default_yes);
+                        }
+                        if matches!(value.as_str(), "y" | "yes" | "o" | "oui") {
+                            return Ok(true);
+                        }
+                        if matches!(value.as_str(), "n" | "no" | "non") {
+                            return Ok(false);
+                        }
+                    }
+                })
+            })?,
+        )?;
+
+        t.set(
+            "select",
+            lua.create_function(
+                move |_, (prompt, options, default_idx): (String, Table, Option<usize>)| {
+                    let mut choices = Vec::new();
+                    for value in options.sequence_values::<String>() {
+                        choices.push(value?);
+                    }
+                    if choices.is_empty() {
+                        return Ok(None::<usize>);
+                    }
+                    let default_idx = default_idx.unwrap_or(1).clamp(1, choices.len());
+                    lua_dialog_run_interactive(|| {
+                        let mut stdout = io::stdout();
+                        writeln!(stdout, "\n{prompt}")?;
+                        for (idx, choice) in choices.iter().enumerate() {
+                            writeln!(stdout, "  {:>2}. {}", idx + 1, choice)?;
+                        }
+                        loop {
+                            write!(stdout, "Choice [default={}]: ", default_idx)?;
+                            stdout.flush()?;
+                            let mut input = String::new();
+                            io::stdin().read_line(&mut input)?;
+                            let value = input.trim();
+                            if value.is_empty() {
+                                return Ok(Some(default_idx));
+                            }
+                            if let Ok(parsed) = value.parse::<usize>()
+                                && (1..=choices.len()).contains(&parsed)
+                            {
+                                return Ok(Some(parsed));
+                            }
+                        }
+                    })
+                },
+            )?,
+        )?;
+
+        Ok(t)
+    })?;
+    preload.set("kkc-dialog", dialog_mod)?;
+
     // Audio facade for terminal apps.
     let audio_mod = lua.create_function(move |lua, ()| {
         let t = lua.create_table()?;
@@ -1315,6 +1433,37 @@ fn install_lua_app_modules(
     preload.set("kkc-audio", audio_mod)?;
 
     Ok(())
+}
+
+fn lua_dialog_run_interactive<T, F>(f: F) -> mlua::Result<T>
+where
+    F: FnOnce() -> Result<T>,
+{
+    terminal::disable_raw_mode().map_err(mlua::Error::external)?;
+    execute!(
+        io::stdout(),
+        crossterm::terminal::LeaveAlternateScreen,
+        crossterm::event::DisableMouseCapture
+    )
+    .map_err(mlua::Error::external)?;
+
+    let result = f();
+
+    let restore_screen = execute!(
+        io::stdout(),
+        crossterm::terminal::EnterAlternateScreen,
+        crossterm::event::EnableMouseCapture
+    );
+    let restore_raw = terminal::enable_raw_mode();
+
+    if let Err(err) = restore_screen {
+        return Err(mlua::Error::external(err));
+    }
+    if let Err(err) = restore_raw {
+        return Err(mlua::Error::external(err));
+    }
+
+    result.map_err(mlua::Error::external)
 }
 
 fn call_table_function_if_exists<A>(table: &Table, name: &str, args: A) -> Result<()>

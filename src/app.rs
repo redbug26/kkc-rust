@@ -2825,6 +2825,99 @@ impl App {
         }
     }
 
+    pub fn default_selection_session_name(&self) -> String {
+        let fallback = "selection".to_string();
+        self.active_panel()
+            .path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(normalize_selection_session_name)
+            .unwrap_or(fallback)
+    }
+
+    pub fn cmd_save_selection_session(&mut self, raw_name: &str) {
+        if self.active_panel().is_remote_view() || self.active_panel().is_archive_view() {
+            self.notify("Selection sessions are available on local directories only");
+            return;
+        }
+
+        let Some(name) = normalize_selection_session_name(raw_name) else {
+            self.notify("Invalid session name");
+            return;
+        };
+
+        let selected_names = self
+            .active_panel()
+            .entries
+            .iter()
+            .filter(|entry| entry.selected && entry.name != ".." && entry.name != "[disconnect]")
+            .map(|entry| entry.name.clone())
+            .collect::<Vec<_>>();
+
+        let Ok(path) = selection_session_path(&name) else {
+            self.notify("Cannot resolve selection session path");
+            return;
+        };
+
+        let mut content = String::new();
+        content.push_str("# kkc selection session v1\n");
+        content.push_str(&format!("# panel_path={}\n", self.active_panel().path.display()));
+        for item in &selected_names {
+            content.push_str(item);
+            content.push('\n');
+        }
+
+        match fs::write(&path, content) {
+            Ok(()) => self.notify(format!(
+                "Saved selection session '{}' ({} entr{})",
+                name,
+                selected_names.len(),
+                if selected_names.len() > 1 { "ies" } else { "y" }
+            )),
+            Err(err) => self.notify(format!("Cannot save selection session: {}", err)),
+        }
+    }
+
+    pub fn cmd_load_selection_session(&mut self, raw_name: &str) {
+        if self.active_panel().is_remote_view() || self.active_panel().is_archive_view() {
+            self.notify("Selection sessions are available on local directories only");
+            return;
+        }
+
+        let Some(name) = normalize_selection_session_name(raw_name) else {
+            self.notify("Invalid session name");
+            return;
+        };
+
+        let Ok(path) = selection_session_path(&name) else {
+            self.notify("Cannot resolve selection session path");
+            return;
+        };
+
+        let text = match fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(err) => {
+                self.notify(format!("Cannot load selection session: {}", err));
+                return;
+            }
+        };
+
+        let names = text
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+
+        self.active_panel_mut().restore_selection_by_names(&names);
+        let selected = self.active_panel().selected_count();
+        let missing = names.len().saturating_sub(selected);
+        self.notify(format!(
+            "Loaded selection session '{}' ({} selected, {} missing)",
+            name, selected, missing
+        ));
+    }
+
     /// Initiate a delete — show confirmation if enabled, else delete immediately.
     pub fn cmd_delete(&mut self) {
         let entries = self
@@ -3528,6 +3621,36 @@ fn store_application_opener(item: &crate::plugins::StorePluginInfo) -> Option<St
     } else {
         Some(format!("{bin} {args}"))
     }
+}
+
+fn selection_sessions_dir() -> Result<PathBuf> {
+    let dirs = crate::config::project_dirs()?;
+    let dir = dirs.cache_dir().join("selection-sessions");
+    fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
+fn selection_session_path(name: &str) -> Result<PathBuf> {
+    Ok(selection_sessions_dir()?.join(format!("{}.lst", name)))
+}
+
+fn normalize_selection_session_name(name: &str) -> Option<String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let mut out = String::with_capacity(trimmed.len());
+    for ch in trimmed.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+            out.push(ch);
+        } else if ch.is_whitespace() {
+            out.push('_');
+        }
+    }
+
+    let out = out.trim_matches('_').trim_matches('.').to_string();
+    if out.is_empty() { None } else { Some(out) }
 }
 
 fn viewer_navigable_entry(entry: &crate::panel::Entry) -> bool {
