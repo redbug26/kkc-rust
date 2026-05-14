@@ -2828,7 +2828,7 @@ fn confirm_quit(app: &mut App) -> Result<bool> {
             title: "Quit KKC".into(),
             message: "The text editor has unsaved changes. Save before quitting?".into(),
             action: ConfirmAction::SaveEditorBeforeQuit,
-            macro_name: None,
+            macro_name: Some("confirm_save_editor_before_quit"),
             active_button: crate::app::ConfirmButton::Primary,
         });
         return Ok(false);

@@ -40,6 +40,8 @@ const CONFIRM_QUIT_MACRO: &str = include_str!("../assets/macros/confirm_quit.lua
 const CONFIRM_DELETE_MACRO: &str = include_str!("../assets/macros/confirm_delete.lua");
 const CONFIRM_TEXT_EDITOR_UNSAVED_MACRO: &str =
     include_str!("../assets/macros/confirm_text_editor_unsaved.lua");
+const CONFIRM_SAVE_EDITOR_BEFORE_QUIT_MACRO: &str =
+    include_str!("../assets/macros/confirm_save_editor_before_quit.lua");
 
 #[derive(Debug, Clone)]
 pub struct ConfirmDialogSpec {
@@ -82,12 +84,12 @@ impl Default for ConfirmDialogSpec {
     fn default() -> Self {
         Self {
             width: 38,
-            height: 9,
-            shadow_dx: 2,
-            shadow_dy: 1,
+            height: 0,
+            shadow_dx: 0,
+            shadow_dy: 0,
             title: " KK Commander ".into(),
             palette: ConfirmDialogPalette::Normal,
-            separators: vec![4],
+            separators: vec![],
             header: None,
             message: ConfirmDialogText {
                 message_text: "Do you really want to quit?".into(),
@@ -209,7 +211,7 @@ pub fn confirm_dialog_popup_rect(spec: &ConfirmDialogSpec, area: Rect) -> Rect {
     let gap_total = spec
         .button_gap
         .saturating_mul(spec.buttons.len().saturating_sub(1) as u16);
-    let buttons_group_w = buttons_total.saturating_add(gap_total).saturating_add(1);
+    let buttons_group_w = buttons_total.saturating_add(gap_total).saturating_add(1)+1;
 
     let header_w = spec
         .header
@@ -222,14 +224,18 @@ pub fn confirm_dialog_popup_rect(spec: &ConfirmDialogSpec, area: Rect) -> Rect {
     let inner_w = title_w.max(header_w).max(message_w).max(buttons_group_w);
     let desired_w = inner_w.saturating_add(2).clamp(20, 120);
 
-    let max_w = area.width.saturating_sub(2).max(3);
-    let max_h = area.height.saturating_sub(2).max(6);
+    let max_w = area.width.saturating_sub(2 + spec.shadow_dx).max(3);
+    let max_h = area.height.saturating_sub(2 + spec.shadow_dy).max(6);
     let width = desired_w.min(max_w);
-    let height = spec.height.clamp(8, 40).min(max_h);
+    let height = spec.height.clamp(6, 40).min(max_h);
 
+    // Centre the popup accounting for the shadow offset so that the dialog
+    // plus its shadow appear visually centred on screen.
+    let avail_w = area.width.saturating_sub(width + spec.shadow_dx);
+    let avail_h = area.height.saturating_sub(height + spec.shadow_dy);
     Rect {
-        x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + area.height.saturating_sub(height) / 2,
+        x: area.x + avail_w / 2,
+        y: area.y + avail_h / 2,
         width,
         height,
     }
@@ -292,6 +298,7 @@ fn confirm_macro_source(name: &str) -> Option<Cow<'static, str>> {
         "confirm_quit" => Some(Cow::Borrowed(CONFIRM_QUIT_MACRO)),
         "confirm_delete" => Some(Cow::Borrowed(CONFIRM_DELETE_MACRO)),
         "confirm_text_editor_unsaved" => Some(Cow::Borrowed(CONFIRM_TEXT_EDITOR_UNSAVED_MACRO)),
+        "confirm_save_editor_before_quit" => Some(Cow::Borrowed(CONFIRM_SAVE_EDITOR_BEFORE_QUIT_MACRO)),
         _ => None,
     }
 }
@@ -318,10 +325,93 @@ fn parse_confirm_dialog_spec(
     let message_table = spec.get::<Option<Table>>("message")?;
     let header_table = spec.get::<Option<Table>>("header")?;
     let buttons_table = spec.get::<Option<Table>>("buttons")?;
+
+    // Parse text content first — needed to auto-compute layout.
+    let message_text = message_table
+        .as_ref()
+        .map(|t| table_string(t, "text", &default.message.message_text))
+        .transpose()?
+        .unwrap_or_else(|| default.message.message_text.clone());
+    let message_prefix_blank = message_table
+        .as_ref()
+        .and_then(|t| t.get::<Option<bool>>("prefix_blank").ok().flatten())
+        .unwrap_or(default.message.message_prefix_blank);
+    let header_text: Option<String> = header_table
+        .as_ref()
+        .map(|t| {
+            table_string(
+                t,
+                "text",
+                default
+                    .header
+                    .as_ref()
+                    .map(|h| h.message_text.as_str())
+                    .unwrap_or(""),
+            )
+        })
+        .transpose()?;
+
+    // Auto-layout: derive y/height/buttons_y/height from content when not
+    // explicitly set in the Lua script.
+    let header_line_count = header_text
+        .as_deref()
+        .map(|t| t.lines().count().max(1) as u16);
+    let message_line_count = message_text.lines().count().max(1) as u16;
+    let extra_blank = if message_prefix_blank { 1u16 } else { 0 };
+
+    let header_y_auto = 0u16;
+    let header_height_auto = header_line_count.unwrap_or(1);
+    let message_y_auto = if header_text.is_some() {
+        header_y_auto + header_height_auto + 1
+    } else {
+        1
+    };
+    let message_height_auto = (message_line_count + extra_blank).max(1);
+    let buttons_y_auto = message_y_auto + message_height_auto + 1;
+    let height_auto = buttons_y_auto + 4; // button row + shadow row + 2 borders
+
+    // Parse layout fields, falling back to auto values when absent.
+    let message_y = message_table
+        .as_ref()
+        .and_then(|t| t.get::<Option<u16>>("y").ok().flatten())
+        .unwrap_or(message_y_auto);
+    let message_height = message_table
+        .as_ref()
+        .and_then(|t| t.get::<Option<u16>>("height").ok().flatten())
+        .unwrap_or(message_height_auto)
+        .clamp(1, 10);
+    let header = header_table
+        .as_ref()
+        .zip(header_text)
+        .map(|(t, text)| {
+            let h_y = t
+                .get::<Option<u16>>("y")
+                .ok()
+                .flatten()
+                .unwrap_or(header_y_auto);
+            let h_height = t
+                .get::<Option<u16>>("height")
+                .ok()
+                .flatten()
+                .unwrap_or(header_height_auto)
+                .clamp(1, 10);
+            let prefix_blank = t
+                .get::<Option<bool>>("prefix_blank")
+                .ok()
+                .flatten()
+                .unwrap_or(false);
+            Ok::<_, anyhow::Error>(ConfirmDialogText {
+                message_text: text,
+                message_y: h_y,
+                message_height: h_height,
+                message_prefix_blank: prefix_blank,
+            })
+        })
+        .transpose()?;
     let buttons_y = buttons_table
         .as_ref()
-        .map(|buttons| table_u16(buttons, "y", default.buttons_y))
-        .unwrap_or(default.buttons_y);
+        .and_then(|bt| bt.get::<Option<u16>>("y").ok().flatten())
+        .unwrap_or(buttons_y_auto);
     let button_gap = buttons_table
         .as_ref()
         .map(|buttons| table_u16(buttons, "gap", default.button_gap))
@@ -333,59 +423,31 @@ fn parse_confirm_dialog_spec(
         .transpose()?
         .filter(|buttons| buttons.len() >= 2)
         .unwrap_or(default.buttons);
+    let height = spec
+        .get::<Option<u16>>("height")
+        .ok()
+        .flatten()
+        .unwrap_or(height_auto)
+        .clamp(6, 40);
+
     Ok(ConfirmDialogSpec {
-        width: table_u16(&spec, "width", default.width).clamp(20, 120),
-        height: table_u16(&spec, "height", default.height).clamp(8, 40),
+        width: table_u16(&spec, "width", default.width).clamp(24, 120),
+        height,
         shadow_dx: table_u16(&spec, "shadow_dx", default.shadow_dx).clamp(0, 8),
         shadow_dy: table_u16(&spec, "shadow_dy", default.shadow_dy).clamp(0, 4),
         title: table_string(&spec, "title", &default.title)?,
         palette,
         separators: table_u16_list(&spec, "separators")?.unwrap_or(default.separators),
-        header: header_table
-            .as_ref()
-            .map(|header| parse_confirm_text(header, default.header.as_ref()))
-            .transpose()?,
-        message: message_table
-            .as_ref()
-            .map(|message| parse_confirm_text(message, Some(&default.message)))
-            .transpose()?
-            .unwrap_or(default.message),
+        header,
+        message: ConfirmDialogText {
+            message_text,
+            message_y,
+            message_height,
+            message_prefix_blank,
+        },
         buttons_y,
         button_gap,
         buttons,
-    })
-}
-
-fn parse_confirm_text(
-    table: &Table,
-    default: Option<&ConfirmDialogText>,
-) -> Result<ConfirmDialogText> {
-    Ok(ConfirmDialogText {
-        message_text: table_string(
-            table,
-            "text",
-            default
-                .map(|text| text.message_text.as_str())
-                .unwrap_or_default(),
-        )?,
-        message_y: table_u16(
-            table,
-            "y",
-            default.map(|text| text.message_y).unwrap_or_default(),
-        ),
-        message_height: table_u16(
-            table,
-            "height",
-            default.map(|text| text.message_height).unwrap_or(1),
-        )
-        .clamp(1, 10),
-        message_prefix_blank: table
-            .get::<Option<bool>>("prefix_blank")?
-            .unwrap_or_else(|| {
-                default
-                    .map(|text| text.message_prefix_blank)
-                    .unwrap_or(false)
-            }),
     })
 }
 
