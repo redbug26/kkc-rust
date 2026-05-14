@@ -315,6 +315,8 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
                 value: current,
                 cursor,
                 action: InputAction::GoToPath,
+                macro_name: Some("input_goto_path"),
+                focused_button: Some(0),
             });
         }
         MenuAction::SelectPattern => {
@@ -335,6 +337,8 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
                 value: default_name,
                 cursor,
                 action: InputAction::SaveSelectionSession,
+                macro_name: Some("input_save_session"),
+                focused_button: Some(0),
             });
         }
         MenuAction::LoadSelectionSession => {

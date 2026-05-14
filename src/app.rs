@@ -1107,10 +1107,10 @@ impl App {
             file_id_scroll: 0,
             mode: if let Some(msg) = startup_status {
                 AppMode::Confirm(ConfirmDialog {
-                    title: String::new(),
-                    message: msg,
+                    title: None,
+                    message: Some(msg),
                     action: ConfirmAction::Message,
-                    macro_name: None,
+                    macro_name: Some("confirm_notify"),
                     active_button: ConfirmButton::Primary,
                 })
             } else {
@@ -1339,10 +1339,10 @@ impl App {
     /// Show a notification dialog (dismissible with Enter/Esc).
     pub fn notify(&mut self, message: impl Into<String>) {
         self.mode = AppMode::Confirm(ConfirmDialog {
-            title: String::new(),
-            message: message.into(),
+            title: None,
+            message: Some(message.into()),
             action: ConfirmAction::Message,
-            macro_name: None,
+            macro_name: Some("confirm_notify"),
             active_button: ConfirmButton::Primary,
         });
     }
@@ -1840,12 +1840,12 @@ impl App {
                         .take()
                         .unwrap_or_else(RemoteConnectState::load);
                     self.mode = AppMode::Confirm(ConfirmDialog {
-                        title: String::new(),
-                        message: format!("Remote connect failed: {}", err),
+                        title: None,
+                        message: Some(format!("Remote connect failed: {}", err)),
                         action: ConfirmAction::MessageThen(Box::new(AppMode::RemoteConnect(
                             return_state,
                         ))),
-                        macro_name: None,
+                        macro_name: Some("confirm_notify"),
                         active_button: ConfirmButton::Primary,
                     });
                 }
@@ -3032,8 +3032,8 @@ impl App {
 
         if self.config.confirm_delete {
             self.mode = AppMode::Confirm(crate::app::ConfirmDialog {
-                title: "Delete".into(),
-                message: format!("Delete {}?", label),
+                title: None,
+                message: Some(format!("Delete {}?", label)),
                 action: if self.active_panel().is_remote_view() {
                     crate::app::ConfirmAction::DeleteRemote(remote_targets)
                 } else {

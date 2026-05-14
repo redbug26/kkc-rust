@@ -2506,10 +2506,10 @@ fn handle_enter(app: &mut App) -> Result<()> {
             Ok(name) => {
                 app.reload_panels();
                 app.mode = AppMode::Confirm(crate::app::ConfirmDialog {
-                    title: "Plugin installed".into(),
-                    message: format!("Plugin installed: {}", name),
+                    title: None,
+                    message: Some(format!("Plugin installed: {}", name)),
                     action: ConfirmAction::Message,
-                    macro_name: None,
+                    macro_name: Some("confirm_notify"),
                     active_button: crate::app::ConfirmButton::Primary,
                 });
             }
@@ -2825,8 +2825,8 @@ fn confirm_quit(app: &mut App) -> Result<bool> {
     // If the text editor has unsaved changes, ask about them first.
     if app.panel_text_editor_modified() {
         app.mode = AppMode::Confirm(crate::app::ConfirmDialog {
-            title: "Quit KKC".into(),
-            message: "The text editor has unsaved changes. Save before quitting?".into(),
+            title: None,
+            message: None,
             action: ConfirmAction::SaveEditorBeforeQuit,
             macro_name: Some("confirm_save_editor_before_quit"),
             active_button: crate::app::ConfirmButton::Primary,
@@ -2835,8 +2835,8 @@ fn confirm_quit(app: &mut App) -> Result<bool> {
     }
     if app.config.confirm_exit {
         app.mode = AppMode::Confirm(crate::app::ConfirmDialog {
-            title: "Quit KKC".into(),
-            message: "Exit KKC?".into(),
+            title: None,
+            message: None,
             action: ConfirmAction::Quit,
             macro_name: Some("confirm_quit"),
             active_button: crate::app::ConfirmButton::Primary,
@@ -2971,6 +2971,8 @@ fn start_rename(app: &mut App) {
             value: name.clone(),
             cursor: name.len(),
             action,
+            macro_name: Some("input_rename"),
+            focused_button: Some(0),
         });
     }
 }
@@ -2994,6 +2996,8 @@ fn start_mkdir(app: &mut App) {
         value: String::new(),
         cursor: 0,
         action,
+        macro_name: Some("input_mkdir"),
+        focused_button: Some(0),
     });
 }
 
@@ -3008,6 +3012,8 @@ fn open_wildcard_dialog(prompt: &str, select: bool) -> AppMode {
         } else {
             InputAction::DeselectPattern
         },
+        macro_name: Some("input_wildcard"),
+        focused_button: Some(0),
     })
 }
 
@@ -3229,11 +3235,15 @@ fn handle_confirm(app: &mut App, key: KeyEvent) -> Result<bool> {
 }
 
 fn confirm_has_secondary_button(dlg: &ConfirmDialog) -> bool {
-    dlg.macro_name.is_some()
-        || matches!(
-            dlg.action,
-            ConfirmAction::Quit | ConfirmAction::Delete(_) | ConfirmAction::DeleteRemote(_)
-        )
+    if dlg.macro_name.is_some() {
+        return crate::lua_dialog::confirm_render_spec(dlg)
+            .map(|spec| spec.buttons.len() >= 2)
+            .unwrap_or(false);
+    }
+    matches!(
+        dlg.action,
+        ConfirmAction::Quit | ConfirmAction::Delete(_) | ConfirmAction::DeleteRemote(_)
+    )
 }
 
 fn confirm_button_index(button: ConfirmButton) -> usize {
@@ -3302,6 +3312,87 @@ fn confirm_secondary(app: &mut App) -> Result<bool> {
 // ---------------------------------------------------------------------------
 
 fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
+    // Read button-focus state and macro_name without holding a mutable borrow.
+    let (focused_button, macro_name) = if let AppMode::Input(ref dlg) = app.mode {
+        (dlg.focused_button, dlg.macro_name)
+    } else {
+        return Ok(false);
+    };
+
+    // --- Button-focus mode: Tab/arrows cycle buttons, Enter activates, Esc returns to input ---
+    if let Some(focused_idx) = focused_button {
+        let button_count = macro_name
+            .and_then(|_| {
+                if let AppMode::Input(ref dlg) = app.mode {
+                    crate::lua_dialog::input_render_spec(dlg)
+                } else {
+                    None
+                }
+            })
+            .map(|s| s.buttons.len())
+            .unwrap_or(0);
+
+        match key.code {
+            KeyCode::Tab | KeyCode::Right => {
+                let AppMode::Input(ref mut dlg) = app.mode else {
+                    return Ok(false);
+                };
+                dlg.focused_button = if focused_idx + 1 < button_count {
+                    Some(focused_idx + 1)
+                } else {
+                    None // wrap back to input field
+                };
+            }
+            KeyCode::BackTab | KeyCode::Left => {
+                let AppMode::Input(ref mut dlg) = app.mode else {
+                    return Ok(false);
+                };
+                dlg.focused_button = if focused_idx > 0 {
+                    Some(focused_idx - 1)
+                } else {
+                    None // wrap back to input field
+                };
+            }
+            KeyCode::Esc => {
+                // Return focus to input field
+                let AppMode::Input(ref mut dlg) = app.mode else {
+                    return Ok(false);
+                };
+                dlg.focused_button = None;
+            }
+            KeyCode::Enter => {
+                let (is_cancel, value, action) =
+                    if let AppMode::Input(ref dlg) = app.mode {
+                        let spec = dlg
+                            .macro_name
+                            .and_then(|_| crate::lua_dialog::input_render_spec(dlg));
+                        let is_cancel = spec
+                            .as_ref()
+                            .and_then(|s| s.buttons.get(focused_idx))
+                            .map(|b| b.callback == "cancel")
+                            .unwrap_or(false);
+                        (is_cancel, dlg.value.clone(), dlg.action.clone())
+                    } else {
+                        return Ok(false);
+                    };
+                app.mode = AppMode::Browse;
+                if !is_cancel {
+                    input_execute_action(app, action, &value)?;
+                }
+            }
+            _ => {
+                // Any other key: return focus to input and forward to text editor
+                let AppMode::Input(ref mut dlg) = app.mode else {
+                    return Ok(false);
+                };
+                dlg.focused_button = None;
+                handle_text_input_edit_key(dlg, key);
+            }
+        }
+        return Ok(false);
+    }
+
+    // --- Normal text-input mode ---
     let AppMode::Input(ref mut dlg) = app.mode else {
         return Ok(false);
     };
@@ -3311,104 +3402,111 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
     }
 
     match key.code {
+        KeyCode::Tab if macro_name.is_some() => {
+            dlg.focused_button = Some(0);
+        }
         KeyCode::Esc => app.mode = AppMode::Browse,
         KeyCode::Enter => {
             let value = dlg.value.clone();
             let action = dlg.action.clone();
             app.mode = AppMode::Browse;
-
-            match action {
-                InputAction::Rename(path) => match crate::file_ops::rename_entry(&path, &value) {
-                    Ok(_) => {
-                        app.notify(format!("Renamed to '{}'", value));
-                        if app.config.auto_reload {
-                            app.reload_panels();
-                        }
-                    }
-                    Err(e) => app.notify(format!("Rename error: {}", e)),
-                },
-                InputAction::Mkdir(parent) => match crate::file_ops::make_dir(&parent, &value) {
-                    Ok(path) => {
-                        app.enter_dir(path)?;
-                        app.notify(format!("Created directory '{}'", value));
-                        if app.config.auto_reload {
-                            app.reload_panels();
-                        }
-                    }
-                    Err(e) => app.notify(format!("mkdir error: {}", e)),
-                },
-                InputAction::RemoteRename { profile, path } => {
-                    let Some(parent) = std::path::Path::new(&path).parent() else {
-                        app.notify("Rename error: invalid remote path");
-                        return Ok(false);
-                    };
-                    let dst = join_remote(&parent.to_string_lossy(), &value);
-                    match app.run_with_busy("Remote: renaming...", |_| {
-                        remote_rename_path(&profile, &path, &dst)
-                    }) {
-                        Ok(_) => {
-                            app.notify(format!("Renamed to '{}'", value));
-                            if app.config.auto_reload {
-                                app.reload_panels();
-                            }
-                        }
-                        Err(e) => app.notify(format!("Rename error: {}", e)),
-                    }
-                }
-                InputAction::RemoteMkdir { profile, parent } => {
-                    let path = join_remote(&parent, &value);
-                    match app.run_with_busy("Remote: creating directory...", |_| {
-                        remote_make_dir(&profile, &path)
-                    }) {
-                        Ok(_) => {
-                            app.enter_dir(std::path::PathBuf::from(path))?;
-                            app.notify(format!("Created directory '{}'", value));
-                            if app.config.auto_reload {
-                                app.reload_panels();
-                            }
-                        }
-                        Err(e) => app.notify(format!("mkdir error: {}", e)),
-                    }
-                }
-                InputAction::SelectPattern => {
-                    app.active_panel_mut().select_pattern(&value, true);
-                }
-                InputAction::DeselectPattern => {
-                    app.active_panel_mut().select_pattern(&value, false);
-                }
-                InputAction::GoToPath => {
-                    let path = std::path::PathBuf::from(&value);
-                    if path.is_dir() {
-                        app.enter_dir(path)?;
-                    } else {
-                        app.notify(format!("Not a directory: {}", value));
-                    }
-                }
-                InputAction::PluginAction { plugin, id, cwd } => {
-                    match app.run_with_busy("Running plugin action...", |_| {
-                        crate::plugins::run_action(&plugin, &id, &cwd, Some(&value))
-                    }) {
-                        Ok(message) => app.notify(if message.trim().is_empty() {
-                            "Action complete".to_string()
-                        } else {
-                            message
-                        }),
-                        Err(e) => app.notify(format!("Action error: {}", e)),
-                    }
-                    app.needs_full_redraw = true;
-                    if app.config.auto_reload {
-                        app.reload_panels();
-                    }
-                }
-                InputAction::SaveSelectionSession => {
-                    app.cmd_save_selection_session(&value);
-                }
-            }
+            input_execute_action(app, action, &value)?;
         }
         _ if handle_text_input_edit_key(dlg, key) => {}
         _ => {}
     }
     Ok(false)
+}
+
+fn input_execute_action(app: &mut App, action: InputAction, value: &str) -> Result<()> {
+    match action {
+        InputAction::Rename(path) => match crate::file_ops::rename_entry(&path, value) {
+            Ok(_) => {
+                app.notify(format!("Renamed to '{}'", value));
+                if app.config.auto_reload {
+                    app.reload_panels();
+                }
+            }
+            Err(e) => app.notify(format!("Rename error: {}", e)),
+        },
+        InputAction::Mkdir(parent) => match crate::file_ops::make_dir(&parent, value) {
+            Ok(path) => {
+                app.enter_dir(path)?;
+                app.notify(format!("Created directory '{}'", value));
+                if app.config.auto_reload {
+                    app.reload_panels();
+                }
+            }
+            Err(e) => app.notify(format!("mkdir error: {}", e)),
+        },
+        InputAction::RemoteRename { profile, path } => {
+            let Some(parent) = std::path::Path::new(&path).parent() else {
+                app.notify("Rename error: invalid remote path");
+                return Ok(());
+            };
+            let dst = join_remote(&parent.to_string_lossy(), value);
+            match app.run_with_busy("Remote: renaming...", |_| {
+                remote_rename_path(&profile, &path, &dst)
+            }) {
+                Ok(_) => {
+                    app.notify(format!("Renamed to '{}'", value));
+                    if app.config.auto_reload {
+                        app.reload_panels();
+                    }
+                }
+                Err(e) => app.notify(format!("Rename error: {}", e)),
+            }
+        }
+        InputAction::RemoteMkdir { profile, parent } => {
+            let path = join_remote(&parent, value);
+            match app.run_with_busy("Remote: creating directory...", |_| {
+                remote_make_dir(&profile, &path)
+            }) {
+                Ok(_) => {
+                    app.enter_dir(std::path::PathBuf::from(path))?;
+                    app.notify(format!("Created directory '{}'", value));
+                    if app.config.auto_reload {
+                        app.reload_panels();
+                    }
+                }
+                Err(e) => app.notify(format!("mkdir error: {}", e)),
+            }
+        }
+        InputAction::SelectPattern => {
+            app.active_panel_mut().select_pattern(value, true);
+        }
+        InputAction::DeselectPattern => {
+            app.active_panel_mut().select_pattern(value, false);
+        }
+        InputAction::GoToPath => {
+            let path = std::path::PathBuf::from(value);
+            if path.is_dir() {
+                app.enter_dir(path)?;
+            } else {
+                app.notify(format!("Not a directory: {}", value));
+            }
+        }
+        InputAction::PluginAction { plugin, id, cwd } => {
+            match app.run_with_busy("Running plugin action...", |_| {
+                crate::plugins::run_action(&plugin, &id, &cwd, Some(value))
+            }) {
+                Ok(message) => app.notify(if message.trim().is_empty() {
+                    "Action complete".to_string()
+                } else {
+                    message
+                }),
+                Err(e) => app.notify(format!("Action error: {}", e)),
+            }
+            app.needs_full_redraw = true;
+            if app.config.auto_reload {
+                app.reload_panels();
+            }
+        }
+        InputAction::SaveSelectionSession => {
+            app.cmd_save_selection_session(value);
+        }
+    }
+    Ok(())
 }
 
 fn handle_assoc_input(app: &mut App, key: KeyEvent) -> Result<bool> {
@@ -4405,6 +4503,8 @@ fn handle_action_palette(app: &mut App, key: KeyEvent) -> Result<bool> {
                         id: action.id,
                         cwd,
                     },
+                    macro_name: Some("input_plugin_action"),
+                    focused_button: Some(0),
                 });
             } else {
                 match app.run_with_busy("Running plugin action...", |_| {

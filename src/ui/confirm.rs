@@ -11,7 +11,7 @@ struct TextDialogStyle {
 }
 
 enum TextDialogFooter<'a> {
-    Plain(&'a str),
+    Plain(std::borrow::Cow<'a, str>),
     AssocMultiline,
 }
 
@@ -107,7 +107,7 @@ fn render_confirm_message(f: &mut Frame, dlg: &ConfirmDialog, area: Rect) {
 
     // Pre-wrap so we know the exact row count (and avoid ratatui overflowing
     // long unbreakable tokens like Lua file paths).
-    let wrapped = wrap_message(&dlg.message, text_w);
+    let wrapped = wrap_message(dlg.message.as_deref().unwrap_or(""), text_w);
     let msg_rows = wrapped.lines().count().max(1) as u16;
 
     // borders(2) + top_pad(1) + text rows + bottom_pad(1) + ok_btn(1) + hint(1)
@@ -125,10 +125,10 @@ fn render_confirm_message(f: &mut Frame, dlg: &ConfirmDialog, area: Rect) {
     );
     safe_render_widget(f, Clear, popup);
 
-    let title_str = if dlg.title.is_empty() {
+    let title_str = if dlg.title.as_deref().unwrap_or("").is_empty() {
         " Notice ".to_string()
     } else {
-        format!(" {} ", dlg.title)
+        format!(" {} ", dlg.title.as_deref().unwrap_or(""))
     };
 
     let block = Block::default()
@@ -200,8 +200,8 @@ fn render_confirm_box(
         let sh = Rect {
             x: popup.x + spec.shadow_dx,
             y: popup.y + spec.shadow_dy,
-            width: spec.width,
-            height: spec.height,
+            width: popup.width,
+            height: popup.height,
         };
         if sh.x + sh.width <= area.x + area.width && sh.y + sh.height <= area.y + area.height {
             safe_render_widget(
@@ -655,24 +655,96 @@ fn render_confirm_save_editor_before_quit(f: &mut Frame, area: Rect) {
 // ---------------------------------------------------------------------------
 
 pub(super) fn render_input(f: &mut Frame, dlg: &InputDialog, area: Rect) {
-    render_text_input_dialog(
+    if let Some(spec) = crate::lua_dialog::input_render_spec(dlg) {
+        render_input_box(f, &spec, dlg, area);
+    }
+}
+
+fn render_input_box(
+    f: &mut Frame,
+    spec: &crate::lua_dialog::InputDialogSpec,
+    dlg: &InputDialog,
+    area: Rect,
+) {
+    let popup = clamp_rect(area, crate::lua_dialog::input_dialog_popup_rect(spec, area));
+
+    if spec.shadow_dx > 0 || spec.shadow_dy > 0 {
+        let sh = Rect {
+            x: popup.x + spec.shadow_dx,
+            y: popup.y + spec.shadow_dy,
+            width: popup.width,
+            height: popup.height,
+        };
+        if sh.x + sh.width <= area.x + area.width && sh.y + sh.height <= area.y + area.height {
+            safe_render_widget(
+                f,
+                Block::default().style(Style::default().bg(Color::Rgb(20, 15, 10))),
+                sh,
+            );
+        }
+    }
+    safe_render_widget(f, Clear, popup);
+
+    let palette = DialogButtonPalette::from_lua(spec.palette);
+    let block_style = confirm_box_style(palette);
+    let block = Block::default()
+        .title(spec.title.as_str())
+        .borders(Borders::ALL)
+        .border_style(block_style.border)
+        .title_style(block_style.title)
+        .style(block_style.body);
+    let inner = block.inner(popup);
+    safe_render_widget(f, block, popup);
+
+    // Row 0: blank (visual gap after title border)
+    // Row 1: prompt label
+    safe_render_widget(
         f,
-        &dlg.title,
-        &dlg.prompt,
-        &dlg.value,
-        dlg.cursor,
-        area,
-        false,
-        TextDialogStyle {
-            border_fg: Color::Yellow,
-            dialog_bg: CLR_MENU_DD_BG,
-            prompt_fg: Color::White,
-            input_bg: Color::White,
-            input_fg: Color::Black,
-            hint_fg: Color::DarkGray,
+        Paragraph::new(format!(" {} ", spec.prompt)).style(block_style.message),
+        Rect {
+            x: inner.x,
+            y: inner.y + 1,
+            width: inner.width,
+            height: 1,
         },
-        TextDialogFooter::Plain(" Enter:OK  Esc:Cancel"),
     );
+
+    // Row 2: input field
+    let input_w = inner.width.saturating_sub(2) as usize;
+    let cursor_col = dlg.value[..dlg.cursor.min(dlg.value.len())].chars().count();
+    let hscroll = cursor_col.saturating_sub(input_w.saturating_sub(1));
+    let shown: String = dlg.value.chars().skip(hscroll).take(input_w).collect();
+    let value_display = format!("{:<width$}", shown, width = input_w);
+    safe_render_widget(
+        f,
+        Paragraph::new(format!(" {} ", value_display))
+            .style(Style::default().fg(Color::Black).bg(Color::White)),
+        Rect {
+            x: inner.x,
+            y: inner.y + 2,
+            width: inner.width,
+            height: 1,
+        },
+    );
+    // Show cursor only when input field has focus
+    if dlg.focused_button.is_none() {
+        let cursor_x = inner.x
+            + 1
+            + cursor_col
+                .saturating_sub(hscroll)
+                .min(input_w.saturating_sub(1)) as u16;
+        safe_set_cursor_position(f, cursor_x, inner.y + 2);
+    }
+
+    // Row 3: buttons — active button determined by focused_button
+    let rects = crate::lua_dialog::input_dialog_button_rects(spec, area);
+    for (idx, button) in spec.buttons.iter().enumerate() {
+        let Some(rect) = rects.get(idx) else {
+            continue;
+        };
+        let is_active = dlg.focused_button.map_or(false, |fb| fb == idx);
+        render_dialog_button(f, *rect, button.label.as_str(), is_active, palette);
+    }
 }
 
 pub(super) fn render_assoc_input(f: &mut Frame, dlg: &AssocInputDialog, area: Rect) {
@@ -696,7 +768,7 @@ pub(super) fn render_assoc_input(f: &mut Frame, dlg: &AssocInputDialog, area: Re
         if is_multiline {
             TextDialogFooter::AssocMultiline
         } else {
-            TextDialogFooter::Plain(" Enter:OK  Esc:Cancel")
+            TextDialogFooter::Plain(std::borrow::Cow::Borrowed(" Enter:OK  Esc:Cancel"))
         },
     );
 }
@@ -886,7 +958,7 @@ fn render_text_input_footer(
             safe_render_widget(
                 f,
                 Paragraph::new(Line::from(Span::styled(
-                    hint,
+                    hint.as_ref(),
                     Style::default().fg(style.hint_fg).bg(style.dialog_bg),
                 ))),
                 hint_area,

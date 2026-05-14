@@ -114,8 +114,8 @@ impl App {
         }
 
         self.mode = AppMode::Confirm(ConfirmDialog {
-            title: "Unsaved changes".to_string(),
-            message: "Save changes before closing the text editor?".to_string(),
+            title: None,
+            message: None,
             action: ConfirmAction::CloseTextEditorUnsaved,
             macro_name: Some("confirm_text_editor_unsaved"),
             active_button: crate::app::ConfirmButton::Primary,

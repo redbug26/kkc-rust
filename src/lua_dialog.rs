@@ -42,6 +42,196 @@ const CONFIRM_TEXT_EDITOR_UNSAVED_MACRO: &str =
     include_str!("../assets/macros/confirm_text_editor_unsaved.lua");
 const CONFIRM_SAVE_EDITOR_BEFORE_QUIT_MACRO: &str =
     include_str!("../assets/macros/confirm_save_editor_before_quit.lua");
+const CONFIRM_NOTIFY_MACRO: &str = include_str!("../assets/macros/confirm_notify.lua");
+const INPUT_MKDIR_MACRO: &str = include_str!("../assets/macros/input_mkdir.lua");
+const INPUT_RENAME_MACRO: &str = include_str!("../assets/macros/input_rename.lua");
+const INPUT_WILDCARD_MACRO: &str = include_str!("../assets/macros/input_wildcard.lua");
+const INPUT_GOTO_PATH_MACRO: &str = include_str!("../assets/macros/input_goto_path.lua");
+const INPUT_SAVE_SESSION_MACRO: &str = include_str!("../assets/macros/input_save_session.lua");
+const INPUT_PLUGIN_ACTION_MACRO: &str = include_str!("../assets/macros/input_plugin_action.lua");
+
+// ---------------------------------------------------------------------------
+// Input dialog spec (Lua-backed)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct InputDialogSpec {
+    pub title: String,
+    pub prompt: String,
+    pub shadow_dx: u16,
+    pub shadow_dy: u16,
+    pub palette: ConfirmDialogPalette,
+    pub button_gap: u16,
+    pub buttons: Vec<ConfirmDialogButtonSpec>,
+}
+
+impl Default for InputDialogSpec {
+    fn default() -> Self {
+        Self {
+            title: " Input ".into(),
+            prompt: "Value:".into(),
+            shadow_dx: 0,
+            shadow_dy: 0,
+            palette: ConfirmDialogPalette::Normal,
+            button_gap: 4,
+            buttons: vec![
+                ConfirmDialogButtonSpec {
+                    callback: "confirm".into(),
+                    label: "▶ OK ◀".into(),
+                    width: 9,
+                },
+                ConfirmDialogButtonSpec {
+                    callback: "cancel".into(),
+                    label: "▶ Cancel ◀".into(),
+                    width: 12,
+                },
+            ],
+        }
+    }
+}
+
+pub fn input_render_spec(dlg: &crate::app::InputDialog) -> Option<InputDialogSpec> {
+    let macro_name = dlg.macro_name?;
+    let default = InputDialogSpec {
+        title: format!(" {} ", dlg.title),
+        prompt: dlg.prompt.clone(),
+        ..InputDialogSpec::default()
+    };
+    load_input_dialog_spec(macro_name, default.clone())
+        .ok()
+        .or(Some(default))
+}
+
+pub fn input_dialog_popup_rect(spec: &InputDialogSpec, area: Rect) -> Rect {
+    let buttons_total = spec
+        .buttons
+        .iter()
+        .fold(0u16, |acc, b| acc.saturating_add(b.width));
+    let gap_total = spec
+        .button_gap
+        .saturating_mul(spec.buttons.len().saturating_sub(1) as u16);
+    let buttons_group_w = buttons_total.saturating_add(gap_total).saturating_add(1);
+    let prompt_w = display_width(&spec.prompt).saturating_add(4);
+    let title_w = display_width(&spec.title);
+    let inner_w = title_w.max(prompt_w).max(buttons_group_w).max(30);
+    let desired_w = inner_w.saturating_add(2).clamp(36, 80);
+    // border + blank + prompt + input + blank + button + button_shadow + border = 8
+    let height = 8u16;
+    let max_w = area.width.saturating_sub(2 + spec.shadow_dx).max(3);
+    let max_h = area.height.saturating_sub(2 + spec.shadow_dy).max(6);
+    let width = desired_w.min(max_w);
+    let height = height.min(max_h);
+    let avail_w = area.width.saturating_sub(width + spec.shadow_dx);
+    let avail_h = area.height.saturating_sub(height + spec.shadow_dy);
+    Rect {
+        x: area.x + avail_w / 2,
+        y: area.y + avail_h / 2,
+        width,
+        height,
+    }
+}
+
+pub fn input_dialog_button_rects(spec: &InputDialogSpec, area: Rect) -> Vec<Rect> {
+    let popup = input_dialog_popup_rect(spec, area);
+    let inner = inner_rect(popup);
+    let buttons_total = spec
+        .buttons
+        .iter()
+        .fold(0u16, |acc, b| acc.saturating_add(b.width));
+    let gap_total = spec
+        .button_gap
+        .saturating_mul(spec.buttons.len().saturating_sub(1) as u16);
+    let group_w = buttons_total.saturating_add(gap_total);
+    let btn_x = inner.x + inner.width.saturating_sub(group_w) / 2;
+    // blank(0) + prompt(1) + input(2) + blank(3) = buttons at row 4
+    let btn_y = inner.y + 4;
+    let mut x = btn_x;
+    spec.buttons
+        .iter()
+        .map(|button| {
+            let rect = Rect {
+                x,
+                y: btn_y,
+                width: button.width,
+                height: 1,
+            };
+            x = x
+                .saturating_add(button.width)
+                .saturating_add(spec.button_gap);
+            rect
+        })
+        .collect()
+}
+
+fn load_input_dialog_spec(name: &str, default: InputDialogSpec) -> Result<InputDialogSpec> {
+    let Some(source) = input_macro_source(name) else {
+        anyhow::bail!("unknown input macro: {}", name);
+    };
+    let lua = Lua::new();
+    let package: Table = lua.globals().get("package")?;
+    let preload: Table = package.get("preload")?;
+    install_lua_dialog_module(&lua, &preload)?;
+    let ctx_table = lua.create_table()?;
+    ctx_table.set("title", default.title.clone())?;
+    ctx_table.set("prompt", default.prompt.clone())?;
+    lua.globals().set("ctx", ctx_table)?;
+    let spec: Table = lua.load(source.as_ref()).set_name(name).eval()?;
+    parse_input_dialog_spec(&spec, default)
+}
+
+fn input_macro_source(name: &str) -> Option<Cow<'static, str>> {
+    if !is_safe_macro_name(name) {
+        return None;
+    }
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("assets")
+        .join("macros")
+        .join(format!("{}.lua", name));
+    if let Ok(source) = std::fs::read_to_string(path) {
+        return Some(Cow::Owned(source));
+    }
+    match name {
+        "input_mkdir" => Some(Cow::Borrowed(INPUT_MKDIR_MACRO)),
+        "input_rename" => Some(Cow::Borrowed(INPUT_RENAME_MACRO)),
+        "input_wildcard" => Some(Cow::Borrowed(INPUT_WILDCARD_MACRO)),
+        "input_goto_path" => Some(Cow::Borrowed(INPUT_GOTO_PATH_MACRO)),
+        "input_save_session" => Some(Cow::Borrowed(INPUT_SAVE_SESSION_MACRO)),
+        "input_plugin_action" => Some(Cow::Borrowed(INPUT_PLUGIN_ACTION_MACRO)),
+        _ => None,
+    }
+}
+
+fn parse_input_dialog_spec(spec: &Table, default: InputDialogSpec) -> Result<InputDialogSpec> {
+    let palette = match spec
+        .get::<Option<String>>("palette")?
+        .unwrap_or_else(|| "normal".into())
+        .as_str()
+    {
+        "danger" => ConfirmDialogPalette::Danger,
+        _ => ConfirmDialogPalette::Normal,
+    };
+    let buttons_table = spec.get::<Option<Table>>("buttons")?;
+    let button_gap = buttons_table
+        .as_ref()
+        .map(|bt| table_u16(bt, "gap", default.button_gap))
+        .unwrap_or(default.button_gap);
+    let buttons = buttons_table
+        .as_ref()
+        .and_then(|bt| bt.get::<Option<Table>>("items").ok().flatten())
+        .map(parse_confirm_buttons)
+        .transpose()?
+        .filter(|b| !b.is_empty())
+        .unwrap_or(default.buttons);
+    Ok(InputDialogSpec {
+        title: table_string(spec, "title", &default.title)?,
+        prompt: table_string(spec, "prompt", &default.prompt)?,
+        shadow_dx: table_u16(spec, "shadow_dx", default.shadow_dx).clamp(0, 8),
+        shadow_dy: table_u16(spec, "shadow_dy", default.shadow_dy).clamp(0, 4),
+        palette,
+        button_gap,
+        buttons,
+    })
+}
 
 #[derive(Debug, Clone)]
 pub struct ConfirmDialogSpec {
@@ -136,15 +326,14 @@ pub fn confirm_button_callback(dlg: &ConfirmDialog, button_idx: usize) -> Option
 }
 
 fn default_confirm_dialog_spec(_name: &str, dlg: &ConfirmDialog) -> ConfirmDialogSpec {
-    let title = if dlg.title.is_empty() {
-        " Confirm ".to_string()
-    } else {
-        format!(" {} ", dlg.title)
+    let title = match dlg.title.as_deref().unwrap_or("") {
+        "" => " Confirm ".to_string(),
+        t => format!(" {} ", t),
     };
     ConfirmDialogSpec {
         title,
         message: ConfirmDialogText {
-            message_text: dlg.message.clone(),
+            message_text: dlg.message.clone().unwrap_or_default(),
             message_y: 1,
             message_height: 2,
             message_prefix_blank: false,
@@ -162,7 +351,7 @@ pub struct ConfirmDialogContext {
 impl ConfirmDialogContext {
     fn from_dialog(dlg: &ConfirmDialog) -> Self {
         Self {
-            message: Some(dlg.message.clone()),
+            message: dlg.message.clone(),
             count: match &dlg.action {
                 ConfirmAction::Delete(paths) => Some(paths.len()),
                 ConfirmAction::DeleteRemote(targets) => Some(targets.len()),
@@ -299,6 +488,7 @@ fn confirm_macro_source(name: &str) -> Option<Cow<'static, str>> {
         "confirm_delete" => Some(Cow::Borrowed(CONFIRM_DELETE_MACRO)),
         "confirm_text_editor_unsaved" => Some(Cow::Borrowed(CONFIRM_TEXT_EDITOR_UNSAVED_MACRO)),
         "confirm_save_editor_before_quit" => Some(Cow::Borrowed(CONFIRM_SAVE_EDITOR_BEFORE_QUIT_MACRO)),
+        "confirm_notify" => Some(Cow::Borrowed(CONFIRM_NOTIFY_MACRO)),
         _ => None,
     }
 }
@@ -421,7 +611,7 @@ fn parse_confirm_dialog_spec(
         .and_then(|buttons| buttons.get::<Option<Table>>("items").ok().flatten())
         .map(parse_confirm_buttons)
         .transpose()?
-        .filter(|buttons| buttons.len() >= 2)
+        .filter(|buttons| !buttons.is_empty())
         .unwrap_or(default.buttons);
     let height = spec
         .get::<Option<u16>>("height")
@@ -801,6 +991,34 @@ pub fn install_lua_dialog_module(lua: &Lua, preload: &Table) -> Result<()> {
                     Ok(out)
                 },
             )?,
+        )?;
+
+        t.set(
+            "input_box",
+            lua.create_function(move |lua, spec: Table| {
+                if let Some(callback) = spec.get::<Option<mlua::Function>>("callback")?
+                    && let Some(buttons) = spec.get::<Option<Table>>("buttons")?
+                    && let Some(items) = buttons.get::<Option<Table>>("items")?
+                {
+                    for item in items.sequence_values::<Table>() {
+                        let item = item?;
+                        let result: Value = callback.call(item.clone())?;
+                        let callback_id = match result {
+                            Value::String(value) => value.to_str()?.to_string(),
+                            Value::Table(table) => table
+                                .get::<Option<String>>("id")?
+                                .or_else(|| table.get::<Option<String>>("callback").ok().flatten())
+                                .unwrap_or_default(),
+                            _ => String::new(),
+                        };
+                        if !callback_id.is_empty() {
+                            item.set("callback", callback_id)?;
+                        }
+                    }
+                }
+                spec.set("callback", lua.create_table()?)?;
+                Ok(spec)
+            })?,
         )?;
 
         Ok(t)
@@ -1589,8 +1807,8 @@ mod tests {
     #[test]
     fn confirm_quit_macro_builds_generic_spec_with_callbacks() {
         let dlg = ConfirmDialog {
-            title: "Quit KKC".into(),
-            message: "Exit KKC?".into(),
+            title: None,
+            message: None,
             action: ConfirmAction::Quit,
             macro_name: Some("confirm_quit"),
             active_button: crate::app::ConfirmButton::Primary,
@@ -1607,8 +1825,8 @@ mod tests {
     #[test]
     fn confirm_delete_macro_uses_context() {
         let dlg = ConfirmDialog {
-            title: "Delete".into(),
-            message: "Delete foo.txt?".into(),
+            title: None,
+            message: Some("Delete foo.txt?".into()),
             action: ConfirmAction::Delete(vec![std::path::PathBuf::from("foo.txt")]),
             macro_name: Some("confirm_delete"),
             active_button: crate::app::ConfirmButton::Primary,
@@ -1626,8 +1844,8 @@ mod tests {
     #[test]
     fn confirm_text_editor_unsaved_macro_uses_generic_dialog_flow() {
         let dlg = ConfirmDialog {
-            title: "Unsaved changes".into(),
-            message: "Save changes before closing the text editor?".into(),
+            title: None,
+            message: None,
             action: ConfirmAction::CloseTextEditorUnsaved,
             macro_name: Some("confirm_text_editor_unsaved"),
             active_button: crate::app::ConfirmButton::Primary,

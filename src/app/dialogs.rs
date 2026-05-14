@@ -2,8 +2,8 @@ use super::*;
 
 #[derive(Debug)]
 pub struct ConfirmDialog {
-    pub title: String,
-    pub message: String,
+    pub title: Option<String>,
+    pub message: Option<String>,
     pub action: ConfirmAction,
     pub macro_name: Option<&'static str>,
     pub active_button: ConfirmButton,
@@ -43,6 +43,9 @@ pub struct InputDialog {
     pub value: String,
     pub cursor: usize,
     pub action: InputAction,
+    pub macro_name: Option<&'static str>,
+    /// Index of the focused button, or None when input field has focus.
+    pub focused_button: Option<usize>,
 }
 
 #[derive(Debug, Clone)]

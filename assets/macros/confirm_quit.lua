@@ -3,7 +3,7 @@ local dlg = require("kkc-dialog")
 return dlg.confirm_box({
   title = " KK Commander ",
   palette = "normal",
-  shadow_dx = 1,
+  shadow_dx = 2,
   shadow_dy = 1,
   message = {
     text = "Do you really want to quit?",
