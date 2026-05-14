@@ -19,55 +19,55 @@ pub(super) fn render_copy_dialog(f: &mut Frame, dlg: &CopyDialogState, area: Rec
     let block = Block::default()
         .title(" Copy ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_MENU_BORDER))
-        .style(Style::default().bg(CLR_MENU_DD_BG));
+        .border_style(Style::default().fg(clr_menu_border()))
+        .style(Style::default().bg(clr_menu_dd_bg()));
     let inner = block.inner(popup);
     f.render_widget(block, popup);
 
     let dest_style = if dlg.field == CopyDialogState::DESTINATION {
-        Style::default().fg(CLR_MENU_SEL_FG).bg(CLR_MENU_SEL_BG)
+        Style::default().fg(clr_menu_sel_fg()).bg(clr_menu_sel_bg())
     } else {
-        Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
+        Style::default().fg(clr_menu_dd_fg()).bg(clr_menu_dd_bg())
     };
     let overwrite_style = if dlg.field == CopyDialogState::OVERWRITE {
         Style::default()
-            .fg(CLR_MENU_SEL_FG)
-            .bg(CLR_MENU_SEL_BG)
+            .fg(clr_menu_sel_fg())
+            .bg(clr_menu_sel_bg())
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
+        Style::default().fg(clr_menu_dd_fg()).bg(clr_menu_dd_bg())
     };
     let newer_style = if dlg.field == CopyDialogState::NEWER_ONLY {
         Style::default()
-            .fg(CLR_MENU_SEL_FG)
-            .bg(CLR_MENU_SEL_BG)
+            .fg(clr_menu_sel_fg())
+            .bg(clr_menu_sel_bg())
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
+        Style::default().fg(clr_menu_dd_fg()).bg(clr_menu_dd_bg())
     };
     let keep_attr_style = if dlg.field == CopyDialogState::KEEP_ATTRIBUTES {
         Style::default()
-            .fg(CLR_MENU_SEL_FG)
-            .bg(CLR_MENU_SEL_BG)
+            .fg(clr_menu_sel_fg())
+            .bg(clr_menu_sel_bg())
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
+        Style::default().fg(clr_menu_dd_fg()).bg(clr_menu_dd_bg())
     };
     let start_style = if dlg.field == CopyDialogState::START {
         Style::default()
-            .fg(CLR_MENU_SEL_FG)
-            .bg(CLR_MENU_SEL_BG)
+            .fg(clr_menu_sel_fg())
+            .bg(clr_menu_sel_bg())
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
+        Style::default().fg(clr_menu_dd_fg()).bg(clr_menu_dd_bg())
     };
     let cancel_style = if dlg.field == CopyDialogState::CANCEL {
         Style::default()
-            .fg(CLR_MENU_SEL_FG)
-            .bg(CLR_MENU_SEL_BG)
+            .fg(clr_menu_sel_fg())
+            .bg(clr_menu_sel_bg())
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
+        Style::default().fg(clr_menu_dd_fg()).bg(clr_menu_dd_bg())
     };
 
     let dest_width = inner.width.saturating_sub(6) as usize;
@@ -96,8 +96,8 @@ pub(super) fn render_copy_dialog(f: &mut Frame, dlg: &CopyDialogState, area: Rec
         Line::from(Span::styled(
             summary,
             Style::default()
-                .fg(CLR_HEADER_FG)
-                .bg(CLR_MENU_DD_BG)
+                .fg(clr_header_fg())
+                .bg(clr_menu_dd_bg())
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
@@ -108,15 +108,15 @@ pub(super) fn render_copy_dialog(f: &mut Frame, dlg: &CopyDialogState, area: Rec
             } else {
                 " "
             },
-            Style::default().fg(CLR_UNKNOWN).bg(CLR_MENU_DD_BG),
+            Style::default().fg(clr_unknown()).bg(clr_menu_dd_bg()),
         )),
         Line::from(Span::styled(
             counters,
-            Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG),
+            Style::default().fg(clr_menu_dd_fg()).bg(clr_menu_dd_bg()),
         )),
         Line::from(Span::styled(
             " Destination:",
-            Style::default().fg(CLR_HEADER_FG).bg(CLR_MENU_DD_BG),
+            Style::default().fg(clr_header_fg()).bg(clr_menu_dd_bg()),
         )),
         Line::from(Span::styled(format!(" {}", dest_value), dest_style)),
         Line::from(Span::styled(
@@ -157,12 +157,12 @@ pub(super) fn render_copy_dialog(f: &mut Frame, dlg: &CopyDialogState, area: Rec
             } else {
                 " Up/Down:Select  Space:Toggle  Enter:OK  Esc:Cancel"
             },
-            Style::default().fg(CLR_UNKNOWN).bg(CLR_MENU_DD_BG),
+            Style::default().fg(clr_unknown()).bg(clr_menu_dd_bg()),
         )),
     ];
     safe_render_widget(
         f,
-        Paragraph::new(lines).style(Style::default().bg(CLR_MENU_DD_BG)),
+        Paragraph::new(lines).style(Style::default().bg(clr_menu_dd_bg())),
         inner,
     );
 
@@ -193,8 +193,8 @@ pub(super) fn render_copy_progress(f: &mut Frame, state: &CopyProgressState, are
     let block = Block::default()
         .title(" Copy ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_MENU_BORDER))
-        .style(Style::default().bg(CLR_MENU_DD_BG));
+        .border_style(Style::default().fg(clr_menu_border()))
+        .style(Style::default().bg(clr_menu_dd_bg()));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
     if inner.height < 6 {
@@ -216,24 +216,24 @@ pub(super) fn render_copy_progress(f: &mut Frame, state: &CopyProgressState, are
         Line::from(Span::styled(
             truncate_str(&state.current_name, inner.width as usize),
             Style::default()
-                .fg(CLR_HEADER_FG)
-                .bg(CLR_MENU_DD_BG)
+                .fg(clr_header_fg())
+                .bg(clr_menu_dd_bg())
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
             format!("File  {}", progress_bar_string(bar_width, file_ratio)),
-            Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG),
+            Style::default().fg(clr_menu_dd_fg()).bg(clr_menu_dd_bg()),
         )),
         Line::from(Span::styled(
             format!("Total {}", progress_bar_string(bar_width, total_ratio)),
-            Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG),
+            Style::default().fg(clr_menu_dd_fg()).bg(clr_menu_dd_bg()),
         )),
         Line::from(Span::styled(
             format!(
                 "{}/{}  {} / {} bytes",
                 state.item_index, state.item_count, state.total_done, state.total_bytes
             ),
-            Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG),
+            Style::default().fg(clr_menu_dd_fg()).bg(clr_menu_dd_bg()),
         )),
         Line::from(Span::styled(
             format!(
@@ -243,17 +243,17 @@ pub(super) fn render_copy_progress(f: &mut Frame, state: &CopyProgressState, are
                     .map(|s| format!("{s} sec"))
                     .unwrap_or_else(|| "--".into())
             ),
-            Style::default().fg(CLR_UNKNOWN).bg(CLR_MENU_DD_BG),
+            Style::default().fg(clr_unknown()).bg(clr_menu_dd_bg()),
         )),
         Line::default(),
         Line::from(Span::styled(
             " Enter/Esc/F10:Abort",
-            Style::default().fg(CLR_UNKNOWN).bg(CLR_MENU_DD_BG),
+            Style::default().fg(clr_unknown()).bg(clr_menu_dd_bg()),
         )),
     ];
     safe_render_widget(
         f,
-        Paragraph::new(lines).style(Style::default().bg(CLR_MENU_DD_BG)),
+        Paragraph::new(lines).style(Style::default().bg(clr_menu_dd_bg())),
         inner,
     );
 }

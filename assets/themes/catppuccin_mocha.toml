@@ -1,0 +1,117 @@
+# =============================================================================
+# KKC Colour Theme - "catppuccin_mocha"
+# =============================================================================
+#
+# Inspired by Helix's Catppuccin Mocha theme.
+# Source reference: stuff/helix/runtime/themes/catppuccin_mocha.toml
+# =============================================================================
+
+[app]
+background = "#1e1e2e"
+
+[panel]
+background = "#1e1e2e"
+border = "#89b4fa"
+border_dim = "#585b70"
+title = "#cba6f7"
+tree_connector = "#6c7086"
+
+[header]
+background = "#313244"
+foreground = "#f9e2af"
+
+[cursor]
+background = "#45475a"
+foreground = "#cdd6f4"
+
+[selection]
+foreground = "#f9e2af"
+
+[files]
+directory = "#89b4fa"
+executable = "#a6e3a1"
+archive = "#fab387"
+audio = "#94e2d5"
+image = "#f5c2e7"
+video = "#f38ba8"
+document = "#b4befe"
+source = "#f9e2af"
+data = "#89dceb"
+text = "#cdd6f4"
+unknown = "#9399b2"
+
+[status]
+background = "#181825"
+foreground = "#bac2de"
+
+[fkeys]
+background = "#181825"
+number_foreground = "#1e1e2e"
+number_background = "#f5e0dc"
+label = "#cdd6f4"
+
+[buttons]
+background = "#45475a"
+foreground = "#f9e2af"
+
+[menu]
+bar_background = "#181825"
+bar_foreground = "#bac2de"
+selected_background = "#f5e0dc"
+selected_foreground = "#1e1e2e"
+dropdown_background = "#313244"
+dropdown_foreground = "#cdd6f4"
+dropdown_separator = "#585b70"
+border = "#89b4fa"
+hotkey = "#f9e2af"
+
+[palette]
+background = "#1e1e2e"
+border = "#585b70"
+input_background = "#313244"
+input_foreground = "#cdd6f4"
+separator = "#45475a"
+list_foreground = "#cdd6f4"
+selected_background = "#45475a"
+selected_foreground = "#cdd6f4"
+match_highlight = "#89b4fa"
+match_highlight_selected = "#f9e2af"
+no_match = "#6c7086"
+directory_foreground = "#89b4fa"
+title = "#cba6f7"
+footer_background = "#181825"
+footer_foreground = "#bac2de"
+
+[dialog]
+background = "#313244"
+foreground = "#cdd6f4"
+border = "#89b4fa"
+title = "#cba6f7"
+selected_background = "#45475a"
+selected_foreground = "#cdd6f4"
+hint = "#9399b2"
+
+[search]
+background = "#1e1e2e"
+label_foreground = "#89b4fa"
+active_label_foreground = "#f9e2af"
+input_foreground = "#cdd6f4"
+input_background_active = "#313244"
+input_background_idle = "#181825"
+placeholder = "#6c7086"
+header = "#9399b2"
+separator = "#45475a"
+running = "#f9e2af"
+
+[syntax]
+keyword = "#cba6f7"
+type_name = "#f9e2af"
+string = "#a6e3a1"
+comment = "#9399b2"
+number = "#fab387"
+preprocessor = "#f5c2e7"
+function = "#89b4fa"
+operator = "#89dceb"
+plain = "#cdd6f4"
+variable_language = "#f38ba8"
+ketchup = "#f9e2af"

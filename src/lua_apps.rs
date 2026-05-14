@@ -1,4 +1,5 @@
 use crate::ui::{ShortcutBarItem, ShortcutBarStyle, render_shortcut_bar};
+use crate::theme::theme;
 use anyhow::{Context, Result, anyhow, bail};
 use crossterm::{
     cursor::{Hide, Show},
@@ -693,21 +694,21 @@ fn run_lua_app(
 
             // Window border + title  (viewer style)
             let border_style = Style::default()
-                .fg(Color::Rgb(239, 225, 196))
+                .fg(theme().panel.border)
                 .add_modifier(Modifier::BOLD);
             let title_line = Line::from(vec![
                 Span::styled(
                     format!(" {} ", title_str),
                     Style::default()
-                        .fg(Color::Rgb(255, 244, 114))
-                        .bg(Color::Rgb(54, 42, 30))
+                        .fg(theme().header.foreground)
+                        .bg(theme().menu.bar_background)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     "  F5 zoom  Esc quit ",
                     Style::default()
-                        .fg(Color::Rgb(160, 140, 110))
-                        .bg(Color::Rgb(54, 42, 30)),
+                        .fg(theme().panel.border_dim)
+                        .bg(theme().menu.bar_background),
                 ),
             ]);
             let block = Block::default()
@@ -770,12 +771,12 @@ fn run_lua_app(
                     height: 1,
                 };
                 let style = ShortcutBarStyle {
-                    key_fg: Color::Rgb(230, 238, 255),
-                    key_bg: Color::Rgb(52, 73, 110),
-                    label_fg: Color::Rgb(198, 212, 238),
-                    label_bg: Color::Rgb(30, 36, 52),
-                    bar_bg: Color::Rgb(22, 26, 40),
-                    sep_fg: Color::Rgb(88, 104, 136),
+                    key_fg: theme().palette.input_foreground,
+                    key_bg: theme().palette.selected_background,
+                    label_fg: theme().palette.list_foreground,
+                    label_bg: theme().palette.background,
+                    bar_bg: theme().palette.background,
+                    sep_fg: theme().palette.separator,
                 };
                 render_shortcut_bar(f, footer_area, &shortcut_items, style);
             }

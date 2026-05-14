@@ -134,8 +134,8 @@ fn render_confirm_message(f: &mut Frame, dlg: &ConfirmDialog, area: Rect) {
     let block = Block::default()
         .title(title_str)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_PANEL_BORDER))
-        .style(Style::default().bg(CLR_MENU_DD_BG));
+        .border_style(Style::default().fg(clr_panel_border()))
+        .style(Style::default().bg(clr_menu_dd_bg()));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
 
@@ -144,7 +144,7 @@ fn render_confirm_message(f: &mut Frame, dlg: &ConfirmDialog, area: Rect) {
     safe_render_widget(
         f,
         Paragraph::new(wrapped.as_str())
-            .style(Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)),
+            .style(Style::default().fg(clr_menu_dd_fg()).bg(clr_menu_dd_bg())),
         Rect {
             x: inner.x + 1,
             y: inner.y + 1,
@@ -159,8 +159,8 @@ fn render_confirm_message(f: &mut Frame, dlg: &ConfirmDialog, area: Rect) {
             .alignment(Alignment::Center)
             .style(
                 Style::default()
-                    .fg(CLR_MENU_SEL_FG)
-                    .bg(CLR_MENU_SEL_BG)
+                    .fg(clr_menu_sel_fg())
+                    .bg(clr_menu_sel_bg())
                     .add_modifier(Modifier::BOLD),
             ),
         Rect {
@@ -174,7 +174,7 @@ fn render_confirm_message(f: &mut Frame, dlg: &ConfirmDialog, area: Rect) {
         f,
         Paragraph::new("Enter / Esc")
             .alignment(Alignment::Center)
-            .style(Style::default().fg(CLR_MENU_DD_SEP).bg(CLR_MENU_DD_BG)),
+            .style(Style::default().fg(clr_menu_dd_sep()).bg(clr_menu_dd_bg())),
         Rect {
             x: inner.x,
             y: inner.y + inner.height.saturating_sub(1),
@@ -206,7 +206,7 @@ fn render_confirm_box(
         if sh.x + sh.width <= area.x + area.width && sh.y + sh.height <= area.y + area.height {
             safe_render_widget(
                 f,
-                Block::default().style(Style::default().bg(Color::Rgb(20, 15, 10))),
+                Block::default().style(Style::default().bg(clr_menu_dd_bg())),
                 sh,
             );
         }
@@ -269,35 +269,35 @@ struct ConfirmBoxStyle {
 fn confirm_box_style(palette: DialogButtonPalette) -> ConfirmBoxStyle {
     match palette {
         DialogButtonPalette::Normal => ConfirmBoxStyle {
-            bg: CLR_APP_BG,
-            body: Style::default().bg(CLR_APP_BG),
-            border: Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG),
+            bg: clr_dialog_bg(),
+            body: Style::default().fg(clr_dialog_fg()).bg(clr_dialog_bg()),
+            border: Style::default().fg(clr_dialog_border()).bg(clr_dialog_bg()),
             title: Style::default()
-                .fg(CLR_BUTTON_FG)
-                .bg(CLR_APP_BG)
+                .fg(clr_dialog_title())
+                .bg(clr_dialog_bg())
                 .add_modifier(Modifier::BOLD),
-            separator_fg: CLR_PANEL_BORDER_DIM,
+            separator_fg: clr_dialog_hint(),
             header: Style::default()
-                .fg(CLR_BUTTON_FG)
-                .bg(CLR_APP_BG)
+                .fg(clr_dialog_title())
+                .bg(clr_dialog_bg())
                 .add_modifier(Modifier::BOLD),
-            message: Style::default().fg(Color::Rgb(50, 36, 22)).bg(CLR_APP_BG),
+            message: Style::default().fg(clr_dialog_fg()).bg(clr_dialog_bg()),
         },
         DialogButtonPalette::Danger => ConfirmBoxStyle {
-            bg: Color::Rgb(38, 18, 14),
-            body: Style::default().bg(Color::Rgb(38, 18, 14)),
-            border: Style::default().fg(Color::Rgb(180, 60, 40)),
+            bg: clr_menu_dd_bg(),
+            body: Style::default().bg(clr_menu_dd_bg()),
+            border: Style::default().fg(clr_video()),
             title: Style::default()
-                .fg(Color::Rgb(255, 100, 80))
+                .fg(clr_video())
                 .add_modifier(Modifier::BOLD),
-            separator_fg: Color::Rgb(180, 60, 40),
+            separator_fg: clr_video(),
             header: Style::default()
-                .fg(Color::Rgb(255, 160, 60))
-                .bg(Color::Rgb(38, 18, 14))
+                .fg(clr_archive())
+                .bg(clr_menu_dd_bg())
                 .add_modifier(Modifier::BOLD),
             message: Style::default()
-                .fg(Color::Rgb(240, 200, 180))
-                .bg(Color::Rgb(38, 18, 14)),
+                .fg(clr_menu_dd_fg())
+                .bg(clr_menu_dd_bg()),
         },
     }
 }
@@ -403,31 +403,31 @@ fn render_dialog_button(
     palette: DialogButtonPalette,
 ) {
     let active_bg = match palette {
-        DialogButtonPalette::Normal => CLR_PANEL_BORDER,
-        DialogButtonPalette::Danger => Color::Rgb(190, 58, 44),
+        DialogButtonPalette::Normal => clr_dialog_selected_bg(),
+        DialogButtonPalette::Danger => clr_video(),
     };
     let inactive_bg = match palette {
-        DialogButtonPalette::Normal => Color::Rgb(108, 92, 74),
-        DialogButtonPalette::Danger => Color::Rgb(30, 14, 12),
+        DialogButtonPalette::Normal => clr_dialog_bg(),
+        DialogButtonPalette::Danger => clr_menu_dd_bg(),
     };
     let inactive_fg = match palette {
-        DialogButtonPalette::Normal => Color::Rgb(132, 118, 98),
-        DialogButtonPalette::Danger => Color::Rgb(124, 92, 80),
+        DialogButtonPalette::Normal => clr_dialog_hint(),
+        DialogButtonPalette::Danger => clr_archive(),
     };
      let shadow_bg = match palette {
-        DialogButtonPalette::Normal => CLR_APP_BG,
-        DialogButtonPalette::Danger => Color::Rgb(38, 18, 14),
+        DialogButtonPalette::Normal => clr_dialog_bg(),
+        DialogButtonPalette::Danger => clr_menu_dd_bg(),
     };
     let shadow_fg = match palette {
-        DialogButtonPalette::Normal => Color::Rgb(118, 95, 70),
-        DialogButtonPalette::Danger => Color::Rgb(88, 36, 30),
+        DialogButtonPalette::Normal => clr_dialog_hint(),
+        DialogButtonPalette::Danger => clr_video(),
     };
     let style = if active {
         Style::default()
             .fg(if matches!(palette, DialogButtonPalette::Danger) {
                 Color::White
             } else {
-                Color::Black
+                clr_dialog_selected_fg()
             })
             .bg(active_bg)
             .add_modifier(Modifier::BOLD)
@@ -491,14 +491,14 @@ fn render_confirm_text_editor_unsaved(f: &mut Frame, area: Rect) {
     let title = Span::styled(
         " Unsaved Changes ",
         Style::default()
-            .fg(Color::Rgb(255, 210, 120))
+            .fg(clr_menu_hotkey())
             .add_modifier(Modifier::BOLD),
     );
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_PANEL_BORDER))
-        .style(Style::default().bg(CLR_APP_BG));
+        .border_style(Style::default().fg(clr_panel_border()))
+        .style(Style::default().bg(clr_app_bg()));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
 
@@ -506,7 +506,7 @@ fn render_confirm_text_editor_unsaved(f: &mut Frame, area: Rect) {
         f,
         Paragraph::new("Save changes before closing the text editor?")
             .alignment(Alignment::Center)
-            .style(Style::default().fg(CLR_MENU_DD_FG).bg(CLR_APP_BG)),
+            .style(Style::default().fg(clr_menu_dd_fg()).bg(clr_app_bg())),
         Rect {
             x: inner.x,
             y: inner.y + 1,
@@ -526,7 +526,7 @@ fn render_confirm_text_editor_unsaved(f: &mut Frame, area: Rect) {
         Paragraph::new(" [ Save ] ").style(
             Style::default()
                 .fg(Color::Black)
-                .bg(CLR_PANEL_BORDER)
+                .bg(clr_panel_border())
                 .add_modifier(Modifier::BOLD),
         ),
         Rect {
@@ -538,7 +538,7 @@ fn render_confirm_text_editor_unsaved(f: &mut Frame, area: Rect) {
     );
     safe_render_widget(
         f,
-        Paragraph::new(" [ Discard ] ").style(Style::default().fg(CLR_TEXT).bg(CLR_APP_BG)),
+        Paragraph::new(" [ Discard ] ").style(Style::default().fg(clr_text()).bg(clr_app_bg())),
         Rect {
             x: btn_x + save_w + gap,
             y: btn_y,
@@ -551,7 +551,7 @@ fn render_confirm_text_editor_unsaved(f: &mut Frame, area: Rect) {
         f,
         Paragraph::new("Enter/Y=Save  ·  N=Discard  ·  Esc=Cancel")
             .alignment(Alignment::Center)
-            .style(Style::default().fg(CLR_MENU_DD_SEP).bg(CLR_APP_BG)),
+            .style(Style::default().fg(clr_menu_dd_sep()).bg(clr_app_bg())),
         Rect {
             x: inner.x,
             y: btn_y + 2,
@@ -580,14 +580,14 @@ fn render_confirm_save_editor_before_quit(f: &mut Frame, area: Rect) {
     let title = Span::styled(
         " Unsaved Changes ",
         Style::default()
-            .fg(Color::Rgb(255, 210, 120))
+            .fg(clr_menu_hotkey())
             .add_modifier(Modifier::BOLD),
     );
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_PANEL_BORDER))
-        .style(Style::default().bg(CLR_APP_BG));
+        .border_style(Style::default().fg(clr_panel_border()))
+        .style(Style::default().bg(clr_app_bg()));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
 
@@ -595,7 +595,7 @@ fn render_confirm_save_editor_before_quit(f: &mut Frame, area: Rect) {
         f,
         Paragraph::new("Save changes before quitting?")
             .alignment(Alignment::Center)
-            .style(Style::default().fg(CLR_MENU_DD_FG).bg(CLR_APP_BG)),
+            .style(Style::default().fg(clr_menu_dd_fg()).bg(clr_app_bg())),
         Rect {
             x: inner.x,
             y: inner.y + 1,
@@ -615,7 +615,7 @@ fn render_confirm_save_editor_before_quit(f: &mut Frame, area: Rect) {
         Paragraph::new(" [ Save ] ").style(
             Style::default()
                 .fg(Color::Black)
-                .bg(CLR_PANEL_BORDER)
+                .bg(clr_panel_border())
                 .add_modifier(Modifier::BOLD),
         ),
         Rect {
@@ -627,7 +627,7 @@ fn render_confirm_save_editor_before_quit(f: &mut Frame, area: Rect) {
     );
     safe_render_widget(
         f,
-        Paragraph::new(" [ Discard ] ").style(Style::default().fg(CLR_TEXT).bg(CLR_APP_BG)),
+        Paragraph::new(" [ Discard ] ").style(Style::default().fg(clr_text()).bg(clr_app_bg())),
         Rect {
             x: btn_x + save_w + gap,
             y: btn_y,
@@ -640,7 +640,7 @@ fn render_confirm_save_editor_before_quit(f: &mut Frame, area: Rect) {
         f,
         Paragraph::new("Enter/Y=Save  ·  N=Discard  ·  Esc=Cancel")
             .alignment(Alignment::Center)
-            .style(Style::default().fg(CLR_MENU_DD_SEP).bg(CLR_APP_BG)),
+            .style(Style::default().fg(clr_menu_dd_sep()).bg(clr_app_bg())),
         Rect {
             x: inner.x,
             y: btn_y + 2,
@@ -678,7 +678,7 @@ fn render_input_box(
         if sh.x + sh.width <= area.x + area.width && sh.y + sh.height <= area.y + area.height {
             safe_render_widget(
                 f,
-                Block::default().style(Style::default().bg(Color::Rgb(20, 15, 10))),
+                Block::default().style(Style::default().bg(clr_menu_dd_bg())),
                 sh,
             );
         }
@@ -716,8 +716,8 @@ fn render_input_box(
     let hscroll = cursor_col.saturating_sub(input_w.saturating_sub(1));
     let shown: String = text.chars().skip(hscroll).take(input_w).collect();
     let value_display = format!("{:<width$}", shown, width = input_w);
-    let input_bg = Color::Rgb(214, 196, 167);
-    let input_fg = Color::Rgb(30, 20, 10);
+    let input_bg = clr_cursor_bg();
+    let input_fg = clr_cursor_fg();
     safe_render_widget(
         f,
         Paragraph::new(format!(" {} ", value_display))
@@ -763,12 +763,12 @@ pub(super) fn render_assoc_input(f: &mut Frame, dlg: &AssocInputDialog, area: Re
         area,
         is_multiline,
         TextDialogStyle {
-            border_fg: CLR_QS_BORDER,
-            dialog_bg: CLR_QS_BG,
-            prompt_fg: CLR_QS_LIST_FG,
-            input_bg: CLR_QS_INPUT_BG,
-            input_fg: CLR_QS_INPUT_FG,
-            hint_fg: CLR_QS_NO_MATCH,
+            border_fg: clr_qs_border(),
+            dialog_bg: clr_qs_bg(),
+            prompt_fg: clr_qs_list_fg(),
+            input_bg: clr_qs_input_bg(),
+            input_fg: clr_qs_input_fg(),
+            hint_fg: clr_qs_no_match(),
         },
         if is_multiline {
             TextDialogFooter::AssocMultiline

@@ -48,7 +48,7 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
     if sh.right() <= area.right() && sh.bottom() <= area.bottom() {
         safe_render_widget(
             f,
-            Block::default().style(Style::default().bg(Color::Rgb(20, 15, 10))),
+            Block::default().style(Style::default().bg(clr_menu_dd_bg())),
             sh,
         );
     }
@@ -56,15 +56,15 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG))
+        .border_style(Style::default().fg(clr_panel_border()).bg(clr_app_bg()))
         .title(Span::styled(
             " Plugins ",
             Style::default()
-                .fg(CLR_BUTTON_FG)
-                .bg(CLR_APP_BG)
+                .fg(clr_button_fg())
+                .bg(clr_app_bg())
                 .add_modifier(Modifier::BOLD),
         ))
-        .style(Style::default().bg(CLR_APP_BG));
+        .style(Style::default().bg(clr_app_bg()));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
 
@@ -73,7 +73,7 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
     safe_render_widget(
         f,
         Paragraph::new(truncate_str(&dir_line, inner.width as usize))
-            .style(Style::default().fg(Color::Rgb(72, 48, 28)).bg(CLR_APP_BG)),
+            .style(Style::default().fg(clr_menu_dd_sep()).bg(clr_app_bg())),
         Rect {
             x: inner.x,
             y: inner.y,
@@ -86,7 +86,7 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
     let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
     safe_render_widget(
         f,
-        Paragraph::new(sep.clone()).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
+        Paragraph::new(sep.clone()).style(Style::default().fg(clr_panel_border_dim()).bg(clr_app_bg())),
         Rect {
             x: inner.x,
             y: inner.y + 1,
@@ -109,19 +109,19 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
         Span::styled(
             truncate_str(&input_text, input_inner_w),
             Style::default()
-                .fg(Color::Rgb(34, 20, 12))
-                .bg(Color::Rgb(232, 220, 192)),
+                .fg(clr_cursor_fg())
+                .bg(clr_cursor_bg()),
         ),
         Span::styled(
             count_hint,
             Style::default()
-                .fg(Color::Rgb(88, 66, 45))
-                .bg(Color::Rgb(232, 220, 192)),
+                .fg(clr_panel_border_dim())
+                .bg(clr_cursor_bg()),
         ),
     ]);
     safe_render_widget(
         f,
-        Paragraph::new(input_row).style(Style::default().bg(Color::Rgb(232, 220, 192))),
+        Paragraph::new(input_row).style(Style::default().bg(clr_cursor_bg())),
         Rect {
             x: inner.x,
             y: inner.y + 2,
@@ -131,7 +131,7 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
     );
     safe_render_widget(
         f,
-        Paragraph::new(sep.clone()).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
+        Paragraph::new(sep.clone()).style(Style::default().fg(clr_panel_border_dim()).bg(clr_app_bg())),
         Rect {
             x: inner.x,
             y: inner.y + 3,
@@ -145,7 +145,7 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
     let footer_sep_y = button_y.saturating_sub(1);
     safe_render_widget(
         f,
-        Paragraph::new(sep).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
+        Paragraph::new(sep).style(Style::default().fg(clr_panel_border_dim()).bg(clr_app_bg())),
         Rect {
             x: inner.x,
             y: footer_sep_y,
@@ -208,7 +208,7 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
     for row in 0..body.height {
         safe_render_widget(
             f,
-            Paragraph::new("│").style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
+            Paragraph::new("│").style(Style::default().fg(clr_panel_border_dim()).bg(clr_app_bg())),
             Rect {
                 x: sep_col,
                 y: body.y + row,
@@ -228,8 +228,8 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
         ))
         .style(
             Style::default()
-                .fg(CLR_HEADER_FG)
-                .bg(CLR_HEADER_BG)
+                .fg(clr_header_fg())
+                .bg(clr_header_bg())
                 .add_modifier(Modifier::BOLD),
         ),
         Rect {
@@ -255,7 +255,7 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
         };
         safe_render_widget(
             f,
-            Paragraph::new(msg).style(Style::default().fg(Color::Rgb(72, 48, 28)).bg(CLR_APP_BG)),
+            Paragraph::new(msg).style(Style::default().fg(clr_menu_dd_sep()).bg(clr_app_bg())),
             Rect {
                 x: left_area.x,
                 y: left_area.y + 1,
@@ -272,18 +272,18 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
             let row_y = left_area.y + 1 + idx as u16;
             let selected = s.cursor == match_row;
             let type_fg = match plugin.kind.as_str() {
-                "Archive" => Color::Rgb(130, 68, 18),
-                "Viewer" => Color::Rgb(26, 58, 108),
-                "Action" => Color::Rgb(52, 92, 34),
-                _ => Color::Rgb(46, 28, 16),
+                "Archive" => clr_archive(),
+                "Viewer" => clr_doc(),
+                "Action" => clr_exec(),
+                _ => clr_menu_dd_bg(),
             };
             let style = if selected {
                 Style::default()
-                    .fg(Color::Rgb(16, 10, 6))
-                    .bg(Color::Rgb(235, 220, 188))
+                    .fg(clr_cursor_fg())
+                    .bg(clr_cursor_bg())
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(type_fg).bg(CLR_APP_BG)
+                Style::default().fg(type_fg).bg(clr_app_bg())
             };
             let icon = if selected { "▶ " } else { "  " };
             let source = crate::plugins::plugin_source_label(&plugin.dir, &s.plugins_dir);
@@ -322,8 +322,8 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
         ))
         .style(
             Style::default()
-                .fg(CLR_HEADER_FG)
-                .bg(CLR_HEADER_BG)
+                .fg(clr_header_fg())
+                .bg(clr_header_bg())
                 .add_modifier(Modifier::BOLD),
         ),
         Rect {
@@ -342,11 +342,11 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
     };
 
     let lbl_style = Style::default()
-        .fg(Color::Rgb(48, 64, 96))
-        .bg(CLR_APP_BG)
+        .fg(clr_qs_dir_fg())
+        .bg(clr_app_bg())
         .add_modifier(Modifier::BOLD);
-    let val_style = Style::default().fg(Color::Rgb(34, 20, 12)).bg(CLR_APP_BG);
-    let dim_style = Style::default().fg(Color::Rgb(88, 66, 45)).bg(CLR_APP_BG);
+    let val_style = Style::default().fg(clr_menu_dd_bg()).bg(clr_app_bg());
+    let dim_style = Style::default().fg(clr_panel_border_dim()).bg(clr_app_bg());
     let rw = right_area.width as usize;
 
     let mut lines: Vec<(Rect, Paragraph)> = Vec::new();
@@ -372,7 +372,7 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
                 width: right_area.width,
                 height: 1,
             },
-            Paragraph::new(text).style(Style::default().bg(CLR_APP_BG)),
+            Paragraph::new(text).style(Style::default().bg(clr_app_bg())),
         ));
         *row += 1;
     };
@@ -418,7 +418,7 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
                     width: right_area.width,
                     height: 1,
                 },
-                Paragraph::new(text).style(Style::default().bg(CLR_APP_BG)),
+                Paragraph::new(text).style(Style::default().bg(clr_app_bg())),
             ));
             row += 1;
         }
@@ -437,7 +437,7 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
                     width: right_area.width,
                     height: 1,
                 },
-                Paragraph::new(text).style(Style::default().bg(CLR_APP_BG)),
+                Paragraph::new(text).style(Style::default().bg(clr_app_bg())),
             ));
             row += 1;
         }
@@ -458,7 +458,7 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
                 width: right_area.width,
                 height: 1,
             },
-            Paragraph::new(text).style(Style::default().bg(CLR_APP_BG)),
+            Paragraph::new(text).style(Style::default().bg(clr_app_bg())),
         ));
         row += 1;
 
@@ -496,7 +496,7 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
                 width: right_area.width,
                 height: 1,
             },
-            Paragraph::new("").style(Style::default().bg(CLR_APP_BG)),
+            Paragraph::new("").style(Style::default().bg(clr_app_bg())),
         ));
         row += 1;
     }

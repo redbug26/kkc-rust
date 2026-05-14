@@ -92,12 +92,12 @@ pub(super) fn render_help_with_title(
         .title_bottom(
             Line::from(Span::styled(
                 format!(" {} ", state.hlp_path),
-                Style::default().fg(Color::DarkGray).bg(CLR_APP_BG),
+                Style::default().fg(Color::DarkGray).bg(clr_app_bg()),
             ))
             .right_aligned(),
         )
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG))
+        .border_style(Style::default().fg(clr_panel_border()).bg(clr_app_bg()))
         .style(Style::default().bg(Color::Black));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
@@ -136,7 +136,7 @@ pub(super) fn render_help_with_title(
                     let style = if idx == cursor {
                         Style::default()
                             .fg(Color::Black)
-                            .bg(CLR_SELECTED)
+                            .bg(clr_selected())
                             .add_modifier(Modifier::BOLD)
                     } else {
                         Style::default().fg(Color::White)
@@ -160,7 +160,7 @@ pub(super) fn render_help_with_title(
                     let style = if idx == cursor {
                         Style::default()
                             .fg(Color::Black)
-                            .bg(CLR_SELECTED)
+                            .bg(clr_selected())
                             .add_modifier(Modifier::BOLD)
                     } else {
                         Style::default().fg(Color::White)

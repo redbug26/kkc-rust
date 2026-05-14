@@ -25,6 +25,7 @@ mod screen_transition;
 mod search;
 mod system_info;
 mod terminal;
+mod theme;
 mod tracker_audio;
 mod tree_mode;
 mod ui;
@@ -175,6 +176,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
     let startup_start = Instant::now();
     let config_load_start = Instant::now();
     let config = Config::load().unwrap_or_default();
+    theme::init(&config.theme);
     let config_load_elapsed = config_load_start.elapsed();
     // Initialise the viewer debug logger before any Viewer is created.
     {

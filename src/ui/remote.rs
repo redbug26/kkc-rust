@@ -2,6 +2,22 @@ use super::bookmarks::highlight_tokens;
 use super::*;
 use crate::remote::RemoteKind;
 
+fn remote_protocol_color(protocol: crate::remote::RemoteProtocol) -> Color {
+    match protocol {
+        crate::remote::RemoteProtocol::Sftp => clr_qs_dir_fg(),
+        crate::remote::RemoteProtocol::Smb => clr_archive(),
+        crate::remote::RemoteProtocol::RemotePlugin => clr_exec(),
+    }
+}
+
+fn remote_edit_kind_color(kind: &RemoteEditKind) -> Color {
+    match kind {
+        RemoteEditKind::Sftp => clr_qs_dir_fg(),
+        RemoteEditKind::Smb => clr_archive(),
+        RemoteEditKind::RemotePlugin { .. } => clr_exec(),
+    }
+}
+
 pub(crate) fn remote_connect_shortcuts() -> Vec<FooterShortcut> {
     vec![
         FooterShortcut {
@@ -137,13 +153,13 @@ pub(super) fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, a
         .title(Span::styled(
             " Remote Connections ",
             Style::default()
-                .fg(CLR_MENU_BAR_FG)
-                .bg(CLR_MENU_DD_BG)
+                .fg(clr_menu_bar_fg())
+                .bg(clr_menu_dd_bg())
                 .add_modifier(Modifier::BOLD),
         ))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_MENU_BORDER).bg(CLR_MENU_DD_BG))
-        .style(Style::default().bg(CLR_MENU_DD_BG));
+        .border_style(Style::default().fg(clr_menu_border()).bg(clr_menu_dd_bg()))
+        .style(Style::default().bg(clr_menu_dd_bg()));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
     if inner.height < 4 {
@@ -193,23 +209,23 @@ pub(super) fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, a
     let input_row = Line::from(vec![
         Span::styled(
             truncate_str(&input_text, input_inner_w),
-            Style::default().fg(CLR_QS_INPUT_FG).bg(CLR_QS_INPUT_BG),
+            Style::default().fg(clr_qs_input_fg()).bg(clr_qs_input_bg()),
         ),
         Span::styled(
             count_hint,
-            Style::default().fg(CLR_QS_NO_MATCH).bg(CLR_QS_INPUT_BG),
+            Style::default().fg(clr_qs_no_match()).bg(clr_qs_input_bg()),
         ),
     ]);
     safe_render_widget(
         f,
-        Paragraph::new(input_row).style(Style::default().bg(CLR_QS_INPUT_BG)),
+        Paragraph::new(input_row).style(Style::default().bg(clr_qs_input_bg())),
         input_area,
     );
 
     let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
     safe_render_widget(
         f,
-        Paragraph::new(sep).style(Style::default().fg(CLR_QS_SEP).bg(CLR_MENU_DD_BG)),
+        Paragraph::new(sep).style(Style::default().fg(clr_qs_sep()).bg(clr_menu_dd_bg())),
         sep_area,
     );
 
@@ -228,12 +244,12 @@ pub(super) fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, a
     let items = if state.items.is_empty() {
         vec![ListItem::new(Line::from(Span::styled(
             " No server entry found in ~/.ssh/config or connections.toml ",
-            Style::default().fg(CLR_UNKNOWN),
+            Style::default().fg(clr_unknown()),
         )))]
     } else if matches.is_empty() {
         vec![ListItem::new(Line::from(Span::styled(
             " No matching connection ",
-            Style::default().fg(CLR_QS_NO_MATCH).bg(CLR_MENU_DD_BG),
+            Style::default().fg(clr_qs_no_match()).bg(clr_menu_dd_bg()),
         )))]
     } else {
         matches
@@ -244,81 +260,80 @@ pub(super) fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, a
             .map(|(match_idx, item_idx)| {
                 let item = &state.items[*item_idx];
                 let protocol = item.protocol();
-                let (r, g, b) = protocol.color_rgb();
                 let proto = match &item.kind {
                     RemoteKind::RemotePlugin(plugin) => plugin.scheme.as_str(),
                     _ => protocol.name(),
                 };
-                let proto_style = Style::default().fg(Color::Rgb(r, g, b)).bg(CLR_MENU_DD_BG);
+                let proto_style = Style::default()
+                    .fg(remote_protocol_color(protocol))
+                    .bg(clr_menu_dd_bg());
                 let (source, badge_style) = match item.source {
                     RemoteSource::SshConfig => (
                         "ssh",
                         Style::default()
-                            .fg(Color::Rgb(255, 208, 124))
-                            .bg(CLR_MENU_DD_BG),
+                            .fg(clr_menu_hotkey())
+                            .bg(clr_menu_dd_bg()),
                     ),
                     RemoteSource::UserToml => (
                         "toml",
                         Style::default()
-                            .fg(Color::Rgb(246, 237, 212))
-                            .bg(CLR_MENU_DD_BG),
+                            .fg(clr_menu_dd_fg())
+                            .bg(clr_menu_dd_bg()),
                     ),
                     RemoteSource::PluginAuto => (
                         "plugin",
                         Style::default()
-                            .fg(Color::Rgb(168, 232, 174))
-                            .bg(CLR_MENU_DD_BG),
+                            .fg(clr_exec())
+                            .bg(clr_menu_dd_bg()),
                     ),
                 };
                 let host = item.host_label();
                 let selected = match_idx == state.match_pos;
                 let row_style = if selected {
                     Style::default()
-                        .fg(CLR_MENU_SEL_FG)
-                        .bg(CLR_MENU_SEL_BG)
+                        .fg(clr_menu_sel_fg())
+                        .bg(clr_menu_sel_bg())
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
+                    Style::default().fg(clr_menu_dd_fg()).bg(clr_menu_dd_bg())
                 };
                 let badge_style = if selected {
-                    badge_style.bg(CLR_MENU_SEL_BG).add_modifier(Modifier::BOLD)
+                    badge_style.bg(clr_menu_sel_bg()).add_modifier(Modifier::BOLD)
                 } else {
                     badge_style
                 };
                 let proto_style = if selected {
-                    proto_style.bg(CLR_MENU_SEL_BG).add_modifier(Modifier::BOLD)
+                    proto_style.bg(clr_menu_sel_bg()).add_modifier(Modifier::BOLD)
                 } else {
                     proto_style
                 };
                 let alias_style = row_style.add_modifier(Modifier::BOLD);
                 let host_style = if selected {
                     Style::default()
-                        .fg(CLR_MENU_SEL_FG)
-                        .bg(CLR_MENU_SEL_BG)
+                        .fg(clr_menu_sel_fg())
+                        .bg(clr_menu_sel_bg())
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default()
-                        .fg(Color::Rgb(198, 184, 156))
-                        .bg(CLR_MENU_DD_BG)
+                    Style::default().fg(clr_text()).bg(clr_menu_dd_bg())
                 };
                 let alias_line = highlight_tokens(
                     &format!("{:<16}", truncate_str(&item.name, 16)),
                     &tokens,
-                    alias_style.fg.unwrap_or(CLR_MENU_DD_FG),
-                    alias_style.bg.unwrap_or(CLR_MENU_DD_BG),
-                    CLR_QS_MATCH_HI_SEL,
+                    alias_style.fg.unwrap_or(clr_menu_dd_fg()),
+                    alias_style.bg.unwrap_or(clr_menu_dd_bg()),
+                    clr_qs_match_hi_sel(),
                 );
                 let proto_text = truncate_str(proto, 8);
                 let host_text = truncate_str(&host, inner.width.saturating_sub(35) as usize);
                 let host_line = highlight_tokens(
                     &host_text,
                     &tokens,
-                    host_style.fg.unwrap_or(CLR_MENU_DD_FG),
-                    host_style.bg.unwrap_or(CLR_MENU_DD_BG),
+                    host_style.fg.unwrap_or(clr_menu_dd_fg()),
+                    host_style.bg.unwrap_or(clr_menu_dd_bg()),
                     if selected {
-                        CLR_QS_MATCH_HI_SEL
+                        clr_qs_match_hi_sel()
                     } else {
-                        CLR_QS_MATCH_HI
+                        clr_qs_match_hi()
                     },
                 );
                 let mut spans = vec![Span::styled(" ", row_style)];
@@ -369,18 +384,17 @@ pub(super) fn render_remote_add_menu(
         .title(Span::styled(
             " Add Connection ",
             Style::default()
-                .fg(CLR_MENU_BAR_FG)
-                .bg(CLR_MENU_DD_BG)
+                .fg(clr_menu_bar_fg())
+                .bg(clr_menu_dd_bg())
                 .add_modifier(Modifier::BOLD),
         ))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_MENU_BORDER).bg(CLR_MENU_DD_BG))
-        .style(Style::default().bg(CLR_MENU_DD_BG));
+        .border_style(Style::default().fg(clr_menu_border()).bg(clr_menu_dd_bg()))
+        .style(Style::default().bg(clr_menu_dd_bg()));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
 
     for (i, kind) in choices.iter().enumerate() {
-        let (r, g, b) = kind.color_rgb();
         let label = kind.name();
         let row = Rect {
             x: inner.x,
@@ -397,10 +411,12 @@ pub(super) fn render_remote_add_menu(
         let style = if selected {
             Style::default()
                 .fg(Color::Black)
-                .bg(Color::Rgb(r, g, b))
+                .bg(remote_edit_kind_color(kind))
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(Color::Rgb(r, g, b)).bg(CLR_MENU_DD_BG)
+            Style::default()
+                .fg(remote_edit_kind_color(kind))
+                .bg(clr_menu_dd_bg())
         };
         safe_render_widget(f, Paragraph::new(text).style(style), row);
     }
@@ -435,13 +451,13 @@ pub(super) fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: R
         .title(Span::styled(
             state.kind.title(),
             Style::default()
-                .fg(CLR_MENU_BAR_FG)
-                .bg(CLR_MENU_DD_BG)
+                .fg(clr_menu_bar_fg())
+                .bg(clr_menu_dd_bg())
                 .add_modifier(Modifier::BOLD),
         ))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_MENU_BORDER).bg(CLR_MENU_DD_BG))
-        .style(Style::default().bg(CLR_MENU_DD_BG));
+        .border_style(Style::default().fg(clr_menu_border()).bg(clr_menu_dd_bg()))
+        .style(Style::default().bg(clr_menu_dd_bg()));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
     let value_w = (inner.width as usize).saturating_sub(9);
@@ -450,8 +466,8 @@ pub(super) fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: R
         let selected = state.cursor == idx;
         // Label: always dark background; arrow prefix on selected row
         let label_style = Style::default()
-            .fg(CLR_HEADER_FG)
-            .bg(CLR_MENU_DD_BG)
+            .fg(clr_header_fg())
+            .bg(clr_menu_dd_bg())
             .add_modifier(if selected {
                 Modifier::BOLD
             } else {
@@ -462,7 +478,7 @@ pub(super) fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: R
         let value_style = if selected {
             Style::default().fg(Color::Black).bg(Color::White)
         } else {
-            Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
+            Style::default().fg(clr_menu_dd_fg()).bg(clr_menu_dd_bg())
         };
         lines.push(Line::from(vec![
             Span::styled(format!("{}{:<8}", prefix, format!("{label}:")), label_style),
@@ -475,19 +491,19 @@ pub(super) fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: R
     lines.push(Line::default());
     let save_style = if state.cursor == state.save_index() {
         Style::default()
-            .fg(CLR_MENU_SEL_FG)
-            .bg(CLR_MENU_SEL_BG)
+            .fg(clr_menu_sel_fg())
+            .bg(clr_menu_sel_bg())
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
+        Style::default().fg(clr_menu_dd_fg()).bg(clr_menu_dd_bg())
     };
     let cancel_style = if state.cursor == state.cancel_index() {
         Style::default()
-            .fg(CLR_MENU_SEL_FG)
-            .bg(CLR_MENU_SEL_BG)
+            .fg(clr_menu_sel_fg())
+            .bg(clr_menu_sel_bg())
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
+        Style::default().fg(clr_menu_dd_fg()).bg(clr_menu_dd_bg())
     };
     lines.push(Line::from(vec![
         Span::styled(" [ Save ] ", save_style),
@@ -498,7 +514,7 @@ pub(super) fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: R
     lines.push(Line::default());
     safe_render_widget(
         f,
-        Paragraph::new(lines).style(Style::default().bg(CLR_MENU_DD_BG)),
+        Paragraph::new(lines).style(Style::default().bg(clr_menu_dd_bg())),
         inner,
     );
     let hint_row = Rect {
@@ -540,11 +556,11 @@ pub(super) fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: R
         let dd_block = Block::default()
             .title(Span::styled(
                 " Shares ",
-                Style::default().fg(CLR_MENU_BAR_FG).bg(CLR_MENU_DD_BG),
+                Style::default().fg(clr_menu_bar_fg()).bg(clr_menu_dd_bg()),
             ))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(CLR_QS_BORDER).bg(CLR_MENU_DD_BG))
-            .style(Style::default().bg(CLR_MENU_DD_BG));
+            .border_style(Style::default().fg(clr_qs_border()).bg(clr_menu_dd_bg()))
+            .style(Style::default().bg(clr_menu_dd_bg()));
         let dd_inner = dd_block.inner(dd_area);
         safe_render_widget(f, dd_block, dd_area);
 
@@ -559,9 +575,9 @@ pub(super) fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: R
         {
             let selected = idx == picker_cur;
             let (fg, bg) = if selected {
-                (CLR_MENU_SEL_FG, CLR_MENU_SEL_BG)
+                (clr_menu_sel_fg(), clr_menu_sel_bg())
             } else {
-                (CLR_MENU_DD_FG, CLR_MENU_DD_BG)
+                (clr_menu_dd_fg(), clr_menu_dd_bg())
             };
             let marker = if selected { "▶ " } else { "  " };
             let name = truncate_str(&shares[idx], dd_inner.width.saturating_sub(2) as usize);
@@ -602,41 +618,41 @@ pub(super) fn render_remote_connecting(f: &mut Frame, state: &RemoteConnectingSt
         .title(Span::styled(
             " Connecting ",
             Style::default()
-                .fg(CLR_MENU_BAR_FG)
-                .bg(CLR_MENU_DD_BG)
+                .fg(clr_menu_bar_fg())
+                .bg(clr_menu_dd_bg())
                 .add_modifier(Modifier::BOLD),
         ))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_MENU_BORDER).bg(CLR_MENU_DD_BG))
-        .style(Style::default().bg(CLR_MENU_DD_BG));
+        .border_style(Style::default().fg(clr_menu_border()).bg(clr_menu_dd_bg()))
+        .style(Style::default().bg(clr_menu_dd_bg()));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
     let lines = vec![
         Line::from(Span::styled(
             format!(" {} connection in progress", state.protocol_label),
-            Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG),
+            Style::default().fg(clr_menu_dd_fg()).bg(clr_menu_dd_bg()),
         )),
         Line::from(Span::styled(
             format!(" {}", state.profile_name),
             Style::default()
-                .fg(CLR_HEADER_FG)
-                .bg(CLR_MENU_DD_BG)
+                .fg(clr_header_fg())
+                .bg(clr_menu_dd_bg())
                 .add_modifier(Modifier::BOLD),
         )),
         Line::default(),
         Line::from(Span::styled(
             " Please wait... ",
-            Style::default().fg(CLR_TEXT).bg(CLR_MENU_DD_BG),
+            Style::default().fg(clr_text()).bg(clr_menu_dd_bg()),
         )),
         Line::from(Span::styled(
             format!(" {}", state.phase),
-            Style::default().fg(CLR_HEADER_FG).bg(CLR_MENU_DD_BG),
+            Style::default().fg(clr_header_fg()).bg(clr_menu_dd_bg()),
         )),
         Line::default(),
         Line::default(),
     ];
     f.render_widget(
-        Paragraph::new(lines).style(Style::default().bg(CLR_MENU_DD_BG)),
+        Paragraph::new(lines).style(Style::default().bg(clr_menu_dd_bg())),
         inner,
     );
     let hint_row = Rect {

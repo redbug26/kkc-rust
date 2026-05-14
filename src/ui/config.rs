@@ -25,7 +25,7 @@ pub(super) fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
     if sh.right() <= area.right() && sh.bottom() <= area.bottom() {
         safe_render_widget(
             f,
-            Block::default().style(Style::default().bg(Color::Rgb(20, 15, 10))),
+            Block::default().style(Style::default().bg(clr_menu_dd_bg())),
             sh,
         );
     }
@@ -35,15 +35,15 @@ pub(super) fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
     // Outer box
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG))
+        .border_style(Style::default().fg(clr_panel_border()).bg(clr_app_bg()))
         .title(Span::styled(
             " Setup ",
             Style::default()
-                .fg(CLR_BUTTON_FG)
-                .bg(CLR_APP_BG)
+                .fg(clr_button_fg())
+                .bg(clr_app_bg())
                 .add_modifier(Modifier::BOLD),
         ))
-        .style(Style::default().bg(CLR_APP_BG));
+        .style(Style::default().bg(clr_app_bg()));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
 
@@ -60,16 +60,16 @@ pub(super) fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
 
     let tabs = Tabs::new(vec!["Behaviour", "Display", "Viewer", "External"])
         .select(cs.tab)
-        .style(Style::default().fg(Color::Rgb(80, 60, 40)).bg(CLR_APP_BG))
+        .style(Style::default().fg(clr_menu_dd_sep()).bg(clr_app_bg()))
         .highlight_style(
             Style::default()
-                .fg(CLR_BUTTON_FG)
-                .bg(CLR_APP_BG)
+                .fg(clr_button_fg())
+                .bg(clr_app_bg())
                 .add_modifier(Modifier::BOLD),
         )
         .divider(Span::styled(
             "  ",
-            Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG),
+            Style::default().fg(clr_panel_border_dim()).bg(clr_app_bg()),
         ));
     safe_render_widget(f, tabs, chunks[0]);
 
@@ -78,7 +78,7 @@ pub(super) fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
         .collect();
     safe_render_widget(
         f,
-        Paragraph::new(top_sep).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
+        Paragraph::new(top_sep).style(Style::default().fg(clr_panel_border_dim()).bg(clr_app_bg())),
         chunks[1],
     );
 
@@ -206,7 +206,7 @@ pub(super) fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
         .collect();
     safe_render_widget(
         f,
-        Paragraph::new(sep).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
+        Paragraph::new(sep).style(Style::default().fg(clr_panel_border_dim()).bg(clr_app_bg())),
         chunks[3],
     );
 
@@ -221,18 +221,18 @@ pub(super) fn render_config(f: &mut Frame, cs: &ConfigState, area: Rect) {
     let ok_style = if cs.cursor == ok_idx {
         Style::default()
             .fg(Color::Black)
-            .bg(CLR_PANEL_BORDER)
+            .bg(clr_panel_border())
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::Rgb(80, 60, 40)).bg(CLR_APP_BG)
+        Style::default().fg(clr_menu_dd_sep()).bg(clr_app_bg())
     };
     let cancel_style = if cs.cursor == cancel_idx {
         Style::default()
             .fg(Color::Black)
-            .bg(CLR_PANEL_BORDER)
+            .bg(clr_panel_border())
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::Rgb(80, 60, 40)).bg(CLR_APP_BG)
+        Style::default().fg(clr_menu_dd_sep()).bg(clr_app_bg())
     };
 
     safe_render_widget(
@@ -274,10 +274,10 @@ pub(super) fn render_config_checkbox(
     let style = if selected {
         Style::default()
             .fg(Color::Black)
-            .bg(CLR_CURSOR_BG)
+            .bg(clr_cursor_bg())
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::Rgb(50, 36, 22)).bg(CLR_APP_BG)
+        Style::default().fg(clr_menu_dd_bg()).bg(clr_app_bg())
     };
     let text = format!("  [{}] {}", tick, label);
     let padded = format!("{:<width$}", text, width = area.width as usize);
@@ -306,8 +306,8 @@ pub(super) fn render_config_field(
         return;
     }
     let label_style = Style::default()
-        .fg(Color::Rgb(80, 60, 40))
-        .bg(CLR_APP_BG)
+        .fg(clr_menu_dd_sep())
+        .bg(clr_app_bg())
         .add_modifier(Modifier::BOLD);
     safe_render_widget(
         f,
@@ -326,14 +326,14 @@ pub(super) fn render_config_field(
     let selected = cursor == cursor_idx;
     let field_w = area.width.saturating_sub(4);
     let input_bg = if selected {
-        CLR_CURSOR_BG
+        clr_cursor_bg()
     } else {
-        Color::Rgb(160, 140, 115)
+        clr_button_bg()
     };
     let input_fg = if selected {
         Color::Black
     } else {
-        Color::Rgb(40, 28, 18)
+        clr_menu_dd_bg()
     };
     safe_render_widget(
         f,

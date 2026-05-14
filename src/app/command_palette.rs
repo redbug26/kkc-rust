@@ -61,6 +61,14 @@ pub static PALETTE_DATA: &[PaletteEntry] = &[
     },
     PaletteEntry {
         category: "Interface",
+        label: "Switch theme",
+        shortname: "Theme",
+        shortcut: None,
+        fn_name: "switch_theme",
+        action: MenuAction::SwitchTheme,
+    },
+    PaletteEntry {
+        category: "Interface",
         label: "Plugin actions",
         shortname: "Actions",
         shortcut: Some("Ctrl+A"),

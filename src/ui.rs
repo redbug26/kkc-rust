@@ -85,63 +85,72 @@ use ratatui::{
 use unicode_width::UnicodeWidthStr;
 
 // ---------------------------------------------------------------------------
-// Colour palette (closer to original KKC brown/beige theme)
+// Colour accessors — delegate to the runtime theme (set via crate::theme)
 // ---------------------------------------------------------------------------
+use crate::theme::theme;
 
-const CLR_APP_BG: Color = Color::Rgb(182, 160, 132);
-const CLR_PANEL_BG: Color = Color::Black;
-const CLR_PANEL_BORDER: Color = Color::Rgb(239, 225, 196);
-const CLR_PANEL_BORDER_DIM: Color = Color::Rgb(118, 95, 70);
-const CLR_PANEL_TITLE: Color = Color::Rgb(246, 237, 212);
-const CLR_HEADER_BG: Color = Color::Rgb(125, 107, 92);
-const CLR_HEADER_FG: Color = Color::Rgb(255, 244, 114);
-const CLR_CURSOR_BG: Color = Color::Rgb(214, 196, 167);
-const CLR_CURSOR_FG: Color = Color::Black;
-const CLR_SELECTED: Color = Color::Rgb(255, 244, 114);
-const CLR_DIR: Color = Color::Rgb(228, 210, 181);
-const CLR_TREE: Color = Color::Rgb(132, 146, 166);
-const CLR_EXEC: Color = Color::Rgb(184, 234, 120);
-const CLR_ARCHIVE: Color = Color::Rgb(234, 166, 116);
-const CLR_AUDIO: Color = Color::Rgb(161, 238, 188);
-const CLR_IMAGE: Color = Color::Rgb(255, 188, 166);
-const CLR_VIDEO: Color = Color::Rgb(255, 144, 116);
-const CLR_DOC: Color = Color::Rgb(163, 208, 255);
-const CLR_SOURCE: Color = Color::Rgb(255, 238, 143);
-const CLR_DATA: Color = Color::Rgb(164, 230, 225);
-const CLR_TEXT: Color = Color::Rgb(224, 214, 192);
-const CLR_UNKNOWN: Color = Color::Rgb(172, 160, 142);
-const CLR_STATUS_BG: Color = Color::Rgb(125, 107, 92);
-const CLR_STATUS_FG: Color = Color::Rgb(244, 235, 208);
-const CLR_FKEY_BG: Color = Color::Rgb(92, 78, 64);
-const CLR_FKEY_NUM: Color = Color::Black;
-const CLR_FKEY_LABEL: Color = Color::Rgb(245, 235, 206);
-const CLR_FKEY_NUM_BG: Color = Color::Rgb(241, 228, 193);
-const CLR_BUTTON_BG: Color = Color::Rgb(181, 160, 132);
-const CLR_BUTTON_FG: Color = Color::Rgb(255, 244, 114);
+#[inline] fn clr_app_bg() -> Color { theme().app.background }
+#[inline] fn clr_panel_bg() -> Color { theme().panel.background }
+#[inline] fn clr_panel_border() -> Color { theme().panel.border }
+#[inline] fn clr_panel_border_dim() -> Color { theme().panel.border_dim }
+#[inline] fn clr_panel_title() -> Color { theme().panel.title }
+#[inline] fn clr_header_bg() -> Color { theme().header.background }
+#[inline] fn clr_header_fg() -> Color { theme().header.foreground }
+#[inline] fn clr_cursor_bg() -> Color { theme().cursor.background }
+#[inline] fn clr_cursor_fg() -> Color { theme().cursor.foreground }
+#[inline] fn clr_selected() -> Color { theme().selection.foreground }
+#[inline] fn clr_dir() -> Color { theme().files.directory }
+#[inline] fn clr_tree() -> Color { theme().panel.tree_connector }
+#[inline] fn clr_exec() -> Color { theme().files.executable }
+#[inline] fn clr_archive() -> Color { theme().files.archive }
+#[inline] fn clr_audio() -> Color { theme().files.audio }
+#[inline] fn clr_image() -> Color { theme().files.image }
+#[inline] fn clr_video() -> Color { theme().files.video }
+#[inline] fn clr_doc() -> Color { theme().files.document }
+#[inline] fn clr_source() -> Color { theme().files.source }
+#[inline] fn clr_data() -> Color { theme().files.data }
+#[inline] fn clr_text() -> Color { theme().files.text }
+#[inline] fn clr_unknown() -> Color { theme().files.unknown }
+#[inline] fn clr_status_bg() -> Color { theme().status.background }
+#[inline] fn clr_status_fg() -> Color { theme().status.foreground }
+#[inline] fn clr_fkey_bg() -> Color { theme().fkeys.background }
+#[inline] fn clr_fkey_num() -> Color { theme().fkeys.number_foreground }
+#[inline] fn clr_fkey_label() -> Color { theme().fkeys.label }
+#[inline] fn clr_fkey_num_bg() -> Color { theme().fkeys.number_background }
+#[inline] fn clr_button_bg() -> Color { theme().buttons.background }
+#[inline] fn clr_button_fg() -> Color { theme().buttons.foreground }
 
-const CLR_MENU_BAR_BG: Color = Color::Rgb(54, 42, 30);
-const CLR_MENU_BAR_FG: Color = Color::Rgb(241, 228, 193);
-const CLR_MENU_SEL_BG: Color = Color::Rgb(241, 228, 193);
-const CLR_MENU_SEL_FG: Color = Color::Black;
-const CLR_MENU_DD_BG: Color = Color::Rgb(44, 34, 24);
-const CLR_MENU_DD_FG: Color = Color::Rgb(241, 228, 193);
-const CLR_MENU_DD_SEP: Color = Color::Rgb(118, 95, 70);
-const CLR_MENU_BORDER: Color = Color::Rgb(180, 148, 108);
-const CLR_MENU_HOTKEY: Color = Color::Rgb(255, 200, 80);
+#[inline] fn clr_menu_bar_bg() -> Color { theme().menu.bar_background }
+#[inline] fn clr_menu_bar_fg() -> Color { theme().menu.bar_foreground }
+#[inline] fn clr_menu_sel_bg() -> Color { theme().menu.selected_background }
+#[inline] fn clr_menu_sel_fg() -> Color { theme().menu.selected_foreground }
+#[inline] fn clr_menu_dd_bg() -> Color { theme().menu.dropdown_background }
+#[inline] fn clr_menu_dd_fg() -> Color { theme().menu.dropdown_foreground }
+#[inline] fn clr_menu_dd_sep() -> Color { theme().menu.dropdown_separator }
+#[inline] fn clr_menu_border() -> Color { theme().menu.border }
+#[inline] fn clr_menu_hotkey() -> Color { theme().menu.hotkey }
 
 // Quick-palette (VSCode-style)
-const CLR_QS_BG: Color = Color::Rgb(30, 30, 30);
-const CLR_QS_BORDER: Color = Color::Rgb(80, 80, 80);
-const CLR_QS_INPUT_BG: Color = Color::Rgb(58, 58, 58);
-const CLR_QS_INPUT_FG: Color = Color::White;
-const CLR_QS_SEP: Color = Color::Rgb(70, 70, 70);
-const CLR_QS_LIST_FG: Color = Color::Rgb(200, 200, 200);
-const CLR_QS_SEL_BG: Color = Color::Rgb(40, 79, 135);
-const CLR_QS_SEL_FG: Color = Color::White;
-const CLR_QS_MATCH_HI: Color = Color::Rgb(255, 197, 61);
-const CLR_QS_MATCH_HI_SEL: Color = Color::Rgb(255, 230, 120);
-const CLR_QS_NO_MATCH: Color = Color::Rgb(130, 130, 130);
-const CLR_QS_DIR_FG: Color = Color::Rgb(86, 156, 214);
+#[inline] fn clr_qs_bg() -> Color { theme().palette.background }
+#[inline] fn clr_qs_border() -> Color { theme().palette.border }
+#[inline] fn clr_qs_input_bg() -> Color { theme().palette.input_background }
+#[inline] fn clr_qs_input_fg() -> Color { theme().palette.input_foreground }
+#[inline] fn clr_qs_sep() -> Color { theme().palette.separator }
+#[inline] fn clr_qs_list_fg() -> Color { theme().palette.list_foreground }
+#[inline] fn clr_qs_sel_bg() -> Color { theme().palette.selected_background }
+#[inline] fn clr_qs_sel_fg() -> Color { theme().palette.selected_foreground }
+#[inline] fn clr_qs_match_hi() -> Color { theme().palette.match_highlight }
+#[inline] fn clr_qs_match_hi_sel() -> Color { theme().palette.match_highlight_selected }
+#[inline] fn clr_qs_no_match() -> Color { theme().palette.no_match }
+#[inline] fn clr_qs_dir_fg() -> Color { theme().palette.directory_foreground }
+
+#[inline] fn clr_dialog_bg() -> Color { theme().dialog.background }
+#[inline] fn clr_dialog_fg() -> Color { theme().dialog.foreground }
+#[inline] fn clr_dialog_border() -> Color { theme().dialog.border }
+#[inline] fn clr_dialog_title() -> Color { theme().dialog.title }
+#[inline] fn clr_dialog_selected_bg() -> Color { theme().dialog.selected_background }
+#[inline] fn clr_dialog_selected_fg() -> Color { theme().dialog.selected_foreground }
+#[inline] fn clr_dialog_hint() -> Color { theme().dialog.hint }
 
 // ---------------------------------------------------------------------------
 // Entry style by category
@@ -149,23 +158,23 @@ const CLR_QS_DIR_FG: Color = Color::Rgb(86, 156, 214);
 
 fn entry_fg(entry: &Entry, color_by_type: bool) -> Color {
     if !color_by_type {
-        return CLR_TEXT;
+        return clr_text();
     }
     if entry.selected {
-        return CLR_SELECTED;
+        return clr_selected();
     }
     match entry.category {
-        FileCategory::Directory => CLR_DIR,
-        FileCategory::Executable => CLR_EXEC,
-        FileCategory::Archive => CLR_ARCHIVE,
-        FileCategory::Audio => CLR_AUDIO,
-        FileCategory::Image => CLR_IMAGE,
-        FileCategory::Video => CLR_VIDEO,
-        FileCategory::Document => CLR_DOC,
-        FileCategory::Source => CLR_SOURCE,
-        FileCategory::Data => CLR_DATA,
-        FileCategory::Text => CLR_TEXT,
-        FileCategory::Unknown => CLR_UNKNOWN,
+        FileCategory::Directory => clr_dir(),
+        FileCategory::Executable => clr_exec(),
+        FileCategory::Archive => clr_archive(),
+        FileCategory::Audio => clr_audio(),
+        FileCategory::Image => clr_image(),
+        FileCategory::Video => clr_video(),
+        FileCategory::Document => clr_doc(),
+        FileCategory::Source => clr_source(),
+        FileCategory::Data => clr_data(),
+        FileCategory::Text => clr_text(),
+        FileCategory::Unknown => clr_unknown(),
     }
 }
 
@@ -175,7 +184,7 @@ fn entry_fg(entry: &Entry, color_by_type: bool) -> Color {
 
 pub fn render(f: &mut Frame, app: &App) {
     f.render_widget(
-        Block::default().style(Style::default().bg(CLR_APP_BG)),
+        Block::default().style(Style::default().bg(clr_app_bg())),
         f.area(),
     );
 
@@ -481,23 +490,23 @@ fn render_menu(f: &mut Frame, app: &App, state: &MenuState, area: Rect) {
         height: 1,
     };
 
-    let mut spans = vec![Span::styled(" ", Style::default().bg(CLR_MENU_BAR_BG))];
+    let mut spans = vec![Span::styled(" ", Style::default().bg(clr_menu_bar_bg()))];
     for (i, header) in MENU_HEADERS.iter().enumerate() {
         let selected = i == state.bar_pos;
         let base_style = if selected {
             Style::default()
-                .bg(CLR_MENU_SEL_BG)
-                .fg(CLR_MENU_SEL_FG)
+                .bg(clr_menu_sel_bg())
+                .fg(clr_menu_sel_fg())
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().bg(CLR_MENU_BAR_BG).fg(CLR_MENU_BAR_FG)
+            Style::default().bg(clr_menu_bar_bg()).fg(clr_menu_bar_fg())
         };
         let hotkey_style = if selected {
             base_style
         } else {
             Style::default()
-                .bg(CLR_MENU_BAR_BG)
-                .fg(CLR_MENU_HOTKEY)
+                .bg(clr_menu_bar_bg())
+                .fg(clr_menu_hotkey())
                 .add_modifier(Modifier::BOLD)
         };
         spans.push(Span::styled(" ", base_style));
@@ -508,10 +517,10 @@ fn render_menu(f: &mut Frame, app: &App, state: &MenuState, area: Rect) {
         } else {
             spans.push(Span::styled(format!("{} ", header), base_style));
         }
-        spans.push(Span::styled("  ", Style::default().bg(CLR_MENU_BAR_BG)));
+        spans.push(Span::styled("  ", Style::default().bg(clr_menu_bar_bg())));
     }
     f.render_widget(
-        Paragraph::new(Line::from(spans)).style(Style::default().bg(CLR_MENU_BAR_BG)),
+        Paragraph::new(Line::from(spans)).style(Style::default().bg(clr_menu_bar_bg())),
         bar_area,
     );
 
@@ -559,8 +568,8 @@ fn render_menu(f: &mut Frame, app: &App, state: &MenuState, area: Rect) {
     f.render_widget(Clear, dd_area);
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_MENU_BORDER))
-        .style(Style::default().bg(CLR_MENU_DD_BG));
+        .border_style(Style::default().fg(clr_menu_border()))
+        .style(Style::default().bg(clr_menu_dd_bg()));
     let inner = block.inner(dd_area);
     f.render_widget(block, dd_area);
 
@@ -590,17 +599,17 @@ fn render_menu(f: &mut Frame, app: &App, state: &MenuState, area: Rect) {
         if *action == MenuAction::Separator {
             let sep = "─".repeat(avail);
             f.render_widget(
-                Paragraph::new(sep).style(Style::default().fg(CLR_MENU_DD_SEP).bg(CLR_MENU_DD_BG)),
+                Paragraph::new(sep).style(Style::default().fg(clr_menu_dd_sep()).bg(clr_menu_dd_bg())),
                 row,
             );
         } else {
             let style = if idx == state.item_pos {
                 Style::default()
-                    .bg(CLR_MENU_SEL_BG)
-                    .fg(CLR_MENU_SEL_FG)
+                    .bg(clr_menu_sel_bg())
+                    .fg(clr_menu_sel_fg())
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().bg(CLR_MENU_DD_BG).fg(CLR_MENU_DD_FG)
+                Style::default().bg(clr_menu_dd_bg()).fg(clr_menu_dd_fg())
             };
             let label = menu_action_label(*action);
             let key_text = menu_action_shortcut(app, *action).unwrap_or_default();
@@ -666,11 +675,11 @@ fn render_status(f: &mut Frame, app: &App, area: Rect) {
                 status_text,
                 width = left_w.saturating_sub(1) as usize
             ),
-            Style::default().fg(CLR_STATUS_FG).bg(CLR_STATUS_BG),
+            Style::default().fg(clr_status_fg()).bg(clr_status_bg()),
         ),
         Span::styled(
             right_info,
-            Style::default().fg(CLR_BUTTON_FG).bg(CLR_STATUS_BG),
+            Style::default().fg(clr_button_fg()).bg(clr_status_bg()),
         ),
     ]);
     f.render_widget(Paragraph::new(line), area);
@@ -768,23 +777,23 @@ pub(crate) struct ShortcutBarStyle {
 
 fn default_shortcut_bar_style() -> ShortcutBarStyle {
     ShortcutBarStyle {
-        key_fg: CLR_FKEY_NUM,
-        key_bg: CLR_FKEY_NUM_BG,
-        label_fg: CLR_FKEY_LABEL,
-        label_bg: CLR_FKEY_BG,
-        bar_bg: CLR_FKEY_BG,
-        sep_fg: Color::Rgb(152, 130, 102),
+        key_fg: clr_fkey_num(),
+        key_bg: clr_fkey_num_bg(),
+        label_fg: clr_fkey_label(),
+        label_bg: clr_fkey_bg(),
+        bar_bg: clr_fkey_bg(),
+        sep_fg: clr_panel_border_dim(),
     }
 }
 
 fn secondary_shortcut_bar_style() -> ShortcutBarStyle {
     ShortcutBarStyle {
-        key_fg: Color::Rgb(230, 238, 255),
-        key_bg: Color::Rgb(52, 73, 110),
-        label_fg: Color::Rgb(198, 212, 238),
-        label_bg: Color::Rgb(30, 36, 52),
-        bar_bg: Color::Rgb(22, 26, 40),
-        sep_fg: Color::Rgb(88, 104, 136),
+        key_fg: clr_qs_input_fg(),
+        key_bg: clr_qs_sel_bg(),
+        label_fg: clr_qs_list_fg(),
+        label_bg: clr_qs_bg(),
+        bar_bg: clr_qs_bg(),
+        sep_fg: clr_qs_sep(),
     }
 }
 

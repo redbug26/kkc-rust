@@ -14,27 +14,29 @@ use std::borrow::Cow;
 use std::io;
 use unicode_width::UnicodeWidthStr;
 
-const CLR_DIALOG_BG: Color = Color::Rgb(125, 107, 92);
-const CLR_DIALOG_FG: Color = Color::Rgb(244, 235, 208);
-const CLR_DIALOG_BORDER: Color = Color::Rgb(239, 225, 196);
-const CLR_DIALOG_TITLE: Color = Color::Rgb(255, 244, 114);
-const CLR_DIALOG_SELECTED_BG: Color = Color::Rgb(214, 196, 167);
-const CLR_DIALOG_SELECTED_FG: Color = Color::Black;
-const CLR_DIALOG_HINT: Color = Color::Rgb(172, 160, 142);
+use crate::theme::theme;
+
+#[inline] fn clr_dialog_bg() -> Color { theme().dialog.background }
+#[inline] fn clr_dialog_fg() -> Color { theme().dialog.foreground }
+#[inline] fn clr_dialog_border() -> Color { theme().dialog.border }
+#[inline] fn clr_dialog_title() -> Color { theme().dialog.title }
+#[inline] fn clr_dialog_selected_bg() -> Color { theme().dialog.selected_background }
+#[inline] fn clr_dialog_selected_fg() -> Color { theme().dialog.selected_foreground }
+#[inline] fn clr_dialog_hint() -> Color { theme().dialog.hint }
 
 // Match the native command palette visual language.
-const CLR_PAL_BG: Color = Color::Rgb(30, 30, 30);
-const CLR_PAL_BORDER: Color = Color::Rgb(80, 80, 80);
-const CLR_PAL_INPUT_BG: Color = Color::Rgb(58, 58, 58);
-const CLR_PAL_INPUT_FG: Color = Color::White;
-const CLR_PAL_SEP: Color = Color::Rgb(70, 70, 70);
-const CLR_PAL_LIST_FG: Color = Color::Rgb(200, 200, 200);
-const CLR_PAL_SEL_BG: Color = Color::Rgb(40, 79, 135);
-const CLR_PAL_SEL_FG: Color = Color::White;
-const CLR_PAL_HINT: Color = Color::Rgb(130, 130, 130);
-const CLR_PAL_TITLE: Color = Color::Rgb(190, 190, 190);
-const CLR_PAL_FOOTER_BG: Color = Color::Rgb(52, 52, 52);
-const CLR_PAL_FOOTER_FG: Color = Color::Rgb(230, 230, 230);
+#[inline] fn clr_pal_bg() -> Color { theme().palette.background }
+#[inline] fn clr_pal_border() -> Color { theme().palette.border }
+#[inline] fn clr_pal_input_bg() -> Color { theme().palette.input_background }
+#[inline] fn clr_pal_input_fg() -> Color { theme().palette.input_foreground }
+#[inline] fn clr_pal_sep() -> Color { theme().palette.separator }
+#[inline] fn clr_pal_list_fg() -> Color { theme().palette.list_foreground }
+#[inline] fn clr_pal_sel_bg() -> Color { theme().palette.selected_background }
+#[inline] fn clr_pal_sel_fg() -> Color { theme().palette.selected_foreground }
+#[inline] fn clr_pal_hint() -> Color { theme().palette.no_match }
+#[inline] fn clr_pal_title() -> Color { theme().palette.title }
+#[inline] fn clr_pal_footer_bg() -> Color { theme().palette.footer_background }
+#[inline] fn clr_pal_footer_fg() -> Color { theme().palette.footer_foreground }
 
 const CONFIRM_QUIT_MACRO: &str = include_str!("../assets/macros/confirm_quit.lua");
 const CONFIRM_DELETE_MACRO: &str = include_str!("../assets/macros/confirm_delete.lua");
@@ -733,17 +735,17 @@ pub fn install_lua_dialog_module(lua: &Lua, preload: &Table) -> Result<()> {
                                     .title("Lua Message")
                                     .title_style(
                                         Style::default()
-                                            .fg(CLR_DIALOG_TITLE)
+                                            .fg(clr_dialog_title())
                                             .add_modifier(Modifier::BOLD),
                                     )
-                                    .style(Style::default().bg(CLR_DIALOG_BG))
-                                    .border_style(Style::default().fg(CLR_DIALOG_BORDER))
+                                    .style(Style::default().bg(clr_dialog_bg()))
+                                    .border_style(Style::default().fg(clr_dialog_border()))
                                     .borders(Borders::ALL),
                                 area,
                             );
                             f.render_widget(
                                 Paragraph::new(text.as_str())
-                                    .style(Style::default().fg(CLR_DIALOG_FG).bg(CLR_DIALOG_BG)),
+                                    .style(Style::default().fg(clr_dialog_fg()).bg(clr_dialog_bg())),
                                 inner,
                             );
                         })?;
@@ -792,24 +794,24 @@ pub fn install_lua_dialog_module(lua: &Lua, preload: &Table) -> Result<()> {
                                     .title("Lua Input")
                                     .title_style(
                                         Style::default()
-                                            .fg(CLR_DIALOG_TITLE)
+                                            .fg(clr_dialog_title())
                                             .add_modifier(Modifier::BOLD),
                                     )
-                                    .style(Style::default().bg(CLR_DIALOG_BG))
-                                    .border_style(Style::default().fg(CLR_DIALOG_BORDER))
+                                    .style(Style::default().bg(clr_dialog_bg()))
+                                    .border_style(Style::default().fg(clr_dialog_border()))
                                     .borders(Borders::ALL),
                                 area,
                             );
                             f.render_widget(
                                 Paragraph::new(prompt.as_str())
-                                    .style(Style::default().fg(CLR_DIALOG_FG).bg(CLR_DIALOG_BG)),
+                                    .style(Style::default().fg(clr_dialog_fg()).bg(clr_dialog_bg())),
                                 chunks[0],
                             );
                             f.render_widget(
                                 Paragraph::new(format!("Value: {}", value)).style(
                                     Style::default()
-                                        .fg(CLR_DIALOG_SELECTED_FG)
-                                        .bg(CLR_DIALOG_SELECTED_BG),
+                                        .fg(clr_dialog_selected_fg())
+                                        .bg(clr_dialog_selected_bg()),
                                 ),
                                 chunks[1],
                             );
@@ -862,17 +864,17 @@ pub fn install_lua_dialog_module(lua: &Lua, preload: &Table) -> Result<()> {
                                     .title("Lua Confirm")
                                     .title_style(
                                         Style::default()
-                                            .fg(CLR_DIALOG_TITLE)
+                                            .fg(clr_dialog_title())
                                             .add_modifier(Modifier::BOLD),
                                     )
-                                    .style(Style::default().bg(CLR_DIALOG_BG))
-                                    .border_style(Style::default().fg(CLR_DIALOG_BORDER))
+                                    .style(Style::default().bg(clr_dialog_bg()))
+                                    .border_style(Style::default().fg(clr_dialog_border()))
                                     .borders(Borders::ALL),
                                 area,
                             );
                             f.render_widget(
                                 Paragraph::new(prompt.as_str())
-                                    .style(Style::default().fg(CLR_DIALOG_FG).bg(CLR_DIALOG_BG)),
+                                    .style(Style::default().fg(clr_dialog_fg()).bg(clr_dialog_bg())),
                                 inner,
                             );
                         })?;
@@ -1142,34 +1144,34 @@ struct PaletteColors {
 fn palette_colors(theme: PaletteTheme) -> PaletteColors {
     match theme {
         PaletteTheme::CommandPalette => PaletteColors {
-            bg: CLR_PAL_BG,
-            border: CLR_PAL_BORDER,
-            input_bg: CLR_PAL_INPUT_BG,
-            input_fg: CLR_PAL_INPUT_FG,
-            sep: CLR_PAL_SEP,
-            list_fg: CLR_PAL_LIST_FG,
-            sel_bg: CLR_PAL_SEL_BG,
-            sel_fg: CLR_PAL_SEL_FG,
-            hint: CLR_PAL_HINT,
-            title: CLR_PAL_TITLE,
-            footer_bg: CLR_PAL_FOOTER_BG,
-            footer_fg: CLR_PAL_FOOTER_FG,
-            footer_shadow: Color::Rgb(34, 34, 34),
+            bg: clr_pal_bg(),
+            border: clr_pal_border(),
+            input_bg: clr_pal_input_bg(),
+            input_fg: clr_pal_input_fg(),
+            sep: clr_pal_sep(),
+            list_fg: clr_pal_list_fg(),
+            sel_bg: clr_pal_sel_bg(),
+            sel_fg: clr_pal_sel_fg(),
+            hint: clr_pal_hint(),
+            title: clr_pal_title(),
+            footer_bg: clr_pal_footer_bg(),
+            footer_fg: clr_pal_footer_fg(),
+            footer_shadow: clr_pal_bg(),
         },
         PaletteTheme::RemoteConnections => PaletteColors {
-            bg: CLR_DIALOG_BG,
-            border: CLR_DIALOG_BORDER,
-            input_bg: CLR_DIALOG_SELECTED_BG,
-            input_fg: CLR_DIALOG_SELECTED_FG,
-            sep: CLR_DIALOG_HINT,
-            list_fg: CLR_DIALOG_FG,
-            sel_bg: CLR_DIALOG_SELECTED_BG,
-            sel_fg: CLR_DIALOG_SELECTED_FG,
-            hint: CLR_DIALOG_HINT,
-            title: CLR_DIALOG_TITLE,
-            footer_bg: CLR_DIALOG_BORDER,
-            footer_fg: CLR_DIALOG_SELECTED_FG,
-            footer_shadow: Color::Rgb(140, 122, 102),
+            bg: clr_dialog_bg(),
+            border: clr_dialog_border(),
+            input_bg: clr_dialog_selected_bg(),
+            input_fg: clr_dialog_selected_fg(),
+            sep: clr_dialog_hint(),
+            list_fg: clr_dialog_fg(),
+            sel_bg: clr_dialog_selected_bg(),
+            sel_fg: clr_dialog_selected_fg(),
+            hint: clr_dialog_hint(),
+            title: clr_dialog_title(),
+            footer_bg: clr_dialog_border(),
+            footer_fg: clr_dialog_selected_fg(),
+            footer_shadow: clr_dialog_hint(),
         },
     }
 }

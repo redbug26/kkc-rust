@@ -63,6 +63,7 @@ pub enum MenuAction {
     FileIdPreview,
     PanelTextEditor,
     DirBookmarks,
+    SwitchTheme,
     ToggleFBar,
     SaveConfig,
     Setup,
@@ -695,6 +696,7 @@ pub static MENU_DATA: &[&[MenuEntry]] = &[
         MenuAction::FileIdPreview,
         MenuAction::PanelTextEditor,
         MenuAction::DirBookmarks,
+        MenuAction::SwitchTheme,
     ],
     &[
         MenuAction::Setup,

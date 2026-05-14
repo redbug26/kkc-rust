@@ -428,6 +428,10 @@ pub struct Config {
     #[serde(default)]
     pub panel_view_type: PanelViewType,
 
+    /// Active colour theme name.
+    #[serde(default = "default_theme")]
+    pub theme: String,
+
     /// Active panel when the app was closed.
     #[serde(default)]
     pub active_panel: ActivePanelSide,
@@ -477,6 +481,7 @@ impl Default for Config {
             shortcut_overrides: Vec::new(),
             debug_log: false,
             panel_view_type: PanelViewType::Normal,
+            theme: default_theme(),
             active_panel: ActivePanelSide::Left,
             panel_text_editor_path: None,
             panel_text_editor_side: ActivePanelSide::Left,
@@ -617,6 +622,10 @@ impl Config {
         out.push_str(&format!("color_by_type = {}\n", self.color_by_type));
         out.push_str(&format!("show_cloud_icons = {}\n", self.show_cloud_icons));
         out.push_str(&format!("show_file_icons = {}\n", self.show_file_icons));
+        out.push_str(&format!(
+            "theme = {}\n",
+            toml::Value::String(self.theme.clone())
+        ));
         out.push('\n');
 
         // ─── Viewer ───────────────────────────────────────────────────────
@@ -980,6 +989,10 @@ fn default_editor() -> String {
 
 fn default_pager() -> String {
     std::env::var("PAGER").unwrap_or_else(|_| "less".into())
+}
+
+fn default_theme() -> String {
+    "default".to_string()
 }
 
 pub fn default_store_index_path() -> String {

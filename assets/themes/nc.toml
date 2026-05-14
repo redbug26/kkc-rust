@@ -1,0 +1,120 @@
+# =============================================================================
+# KKC Colour Theme - "nc" (Norton Commander-inspired blue palette)
+# =============================================================================
+#
+# Copy this file to your KKC config theme path as default.toml to use it:
+#   ~/.config/kkc/themes/default.toml
+#
+# The palette keeps the classic NC feel: blue panels, cyan borders, yellow
+# headers, white file text, and high-contrast cyan/black selection.
+# =============================================================================
+
+[app]
+background = "#0000AA"
+
+[panel]
+background = "#0000AA"
+border = "#55FFFF"
+border_dim = "#0088CC"
+title = "#FFFF55"
+tree_connector = "#55FFFF"
+
+[header]
+background = "#00AAAA"
+foreground = "#FFFF55"
+
+[cursor]
+background = "#00AAAA"
+foreground = "black"
+
+[selection]
+foreground = "#FFFF55"
+
+[files]
+directory = "#FFFFFF"
+executable = "#55FF55"
+archive = "#FFAA00"
+audio = "#55FFFF"
+image = "#FF55FF"
+video = "#FF5555"
+document = "#FFFFFF"
+source = "#FFFF55"
+data = "#55FFFF"
+text = "#FFFFFF"
+unknown = "#AAAAAA"
+
+[status]
+background = "#00AAAA"
+foreground = "#FFFF55"
+
+[fkeys]
+background = "#000000"
+number_foreground = "black"
+number_background = "#00AAAA"
+label = "#FFFFFF"
+
+[buttons]
+background = "#00AAAA"
+foreground = "#FFFF55"
+
+[menu]
+bar_background = "#00AAAA"
+bar_foreground = "#000000"
+selected_background = "#FFFF55"
+selected_foreground = "black"
+dropdown_background = "#0000AA"
+dropdown_foreground = "#FFFFFF"
+dropdown_separator = "#55FFFF"
+border = "#55FFFF"
+hotkey = "#FFFF55"
+
+[palette]
+background = "#0000AA"
+border = "#55FFFF"
+input_background = "#00AAAA"
+input_foreground = "#000000"
+separator = "#55FFFF"
+list_foreground = "#FFFFFF"
+selected_background = "#00AAAA"
+selected_foreground = "#000000"
+match_highlight = "#FFFF55"
+match_highlight_selected = "#FFFF55"
+no_match = "#AAAAAA"
+directory_foreground = "#55FFFF"
+title = "#FFFF55"
+footer_background = "#000000"
+footer_foreground = "#FFFFFF"
+
+[dialog]
+background = "#00AAAA"
+foreground = "#000000"
+border = "#FFFF55"
+title = "#FFFF55"
+selected_background = "#0000AA"
+selected_foreground = "#FFFFFF"
+hint = "#000000"
+
+[search]
+background = "#0000AA"
+label_foreground = "#55FFFF"
+active_label_foreground = "#FFFF55"
+input_foreground = "#000000"
+input_background_active = "#00AAAA"
+input_background_idle = "#000088"
+placeholder = "#AAAAAA"
+header = "#FFFF55"
+separator = "#55FFFF"
+running = "#FFFF55"
+
+[syntax]
+keyword = "#FFFF55"
+type_name = "#55FFFF"
+string = "#55FF55"
+comment = "#AAAAAA"
+number = "#FF55FF"
+preprocessor = "#FFAA00"
+function = "#FFFFFF"
+operator = "#FFFF55"
+plain = "#FFFFFF"
+variable_language = "#55FFFF"
+ketchup = "#FFFF55"

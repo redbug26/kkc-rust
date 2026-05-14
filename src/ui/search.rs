@@ -106,13 +106,13 @@ pub(super) fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
         .title(Span::styled(
             title,
             Style::default()
-                .fg(CLR_HEADER_FG)
+                .fg(clr_header_fg())
                 .add_modifier(Modifier::BOLD),
         ))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(CLR_PANEL_BORDER))
-        .style(Style::default().bg(Color::Rgb(18, 18, 24)));
+        .border_style(Style::default().fg(clr_panel_border()))
+        .style(Style::default().bg(crate::theme::theme().search.background));
     let inner = block.inner(popup);
     f.render_widget(block, popup);
 
@@ -138,12 +138,13 @@ pub(super) fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
     let label_w = 12usize;
     let iw = inner.width.saturating_sub(label_w as u16 + 4) as usize;
 
-    let clr_label = Color::Rgb(120, 140, 180);
-    let clr_active_label = CLR_HEADER_FG;
-    let clr_input_bg_active = Color::Rgb(30, 40, 60);
-    let clr_input_bg_idle = Color::Rgb(22, 22, 30);
-    let clr_input_fg = Color::Rgb(230, 225, 210);
-    let clr_placeholder = Color::Rgb(80, 90, 110);
+    let srch = &crate::theme::theme().search;
+    let clr_label = srch.label_foreground;
+    let clr_active_label = srch.active_label_foreground;
+    let clr_input_bg_active = srch.input_background_active;
+    let clr_input_bg_idle = srch.input_background_idle;
+    let clr_input_fg = srch.input_foreground;
+    let clr_placeholder = srch.placeholder;
 
     let (lbl0, bg0) = if state.input_field == 0 {
         (clr_active_label, clr_input_bg_active)
@@ -221,7 +222,7 @@ pub(super) fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
 
     safe_render_widget(
         f,
-        Paragraph::new(input_lines).style(Style::default().bg(Color::Rgb(18, 18, 24))),
+        Paragraph::new(input_lines).style(Style::default().bg(crate::theme::theme().search.background)),
         Rect {
             x: inner.x,
             y: inner.y,
@@ -252,13 +253,13 @@ pub(super) fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
         .title(Span::styled(
             sep_title,
             Style::default().fg(if state.running {
-                Color::Rgb(220, 180, 80)
+                crate::theme::theme().search.running
             } else {
-                Color::Rgb(160, 170, 200)
+                crate::theme::theme().search.separator
             }),
         ))
         .borders(Borders::TOP)
-        .border_style(Style::default().fg(Color::Rgb(60, 70, 100)));
+        .border_style(Style::default().fg(crate::theme::theme().search.separator));
     let results_body = sep_block.inner(results_area);
     safe_render_widget(f, sep_block, results_area);
 
@@ -284,7 +285,7 @@ pub(super) fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
         width: results_body.width,
         height: results_body.height.saturating_sub(1),
     };
-    let clr_hdr = Color::Rgb(100, 110, 140);
+    let clr_hdr = crate::theme::theme().search.header;
     safe_render_widget(
         f,
         Paragraph::new(Line::from(vec![
@@ -306,7 +307,7 @@ pub(super) fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
                 Style::default().fg(clr_hdr).add_modifier(Modifier::BOLD),
             ),
         ]))
-        .style(Style::default().bg(Color::Rgb(24, 26, 36))),
+        .style(Style::default().bg(crate::theme::theme().search.background)),
         header_area,
     );
 
@@ -333,13 +334,23 @@ pub(super) fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
         .map(|(i, r)| {
             let is_cursor = i == state.cursor && is_results_focused;
             // Zebra: alternating row backgrounds
+            let srch_bg = crate::theme::theme().search.background;
             let zebra_bg = if (i % 2) == 0 {
-                Color::Rgb(18, 18, 24)
+                srch_bg
             } else {
-                Color::Rgb(22, 22, 32)
+                // Slightly lighter row for zebra striping.
+                // Blend the search background with white by 10 %.
+                match srch_bg {
+                    ratatui::style::Color::Rgb(r, g, b) => ratatui::style::Color::Rgb(
+                        r.saturating_add(4),
+                        g.saturating_add(4),
+                        b.saturating_add(8),
+                    ),
+                    other => other,
+                }
             };
 
-            let row_bg = if is_cursor { CLR_CURSOR_BG } else { zebra_bg };
+            let row_bg = if is_cursor { clr_cursor_bg() } else { zebra_bg };
 
             let file_name = r
                 .path
@@ -363,30 +374,30 @@ pub(super) fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
                 Color::Black
             } else {
                 match ext.as_str() {
-                    "rs" | "c" | "h" | "cpp" | "py" | "js" | "ts" => CLR_SOURCE,
+                    "rs" | "c" | "h" | "cpp" | "py" | "js" | "ts" => clr_source(),
                     "zip" | "tar" | "gz" | "bz2" | "xz" | "7z" | "rar" | "lha" | "lzh" => {
-                        CLR_ARCHIVE
+                        clr_archive()
                     }
-                    "mp3" | "flac" | "ogg" | "wav" | "mod" | "xm" | "s3m" | "ayt" => CLR_AUDIO,
-                    "png" | "jpg" | "jpeg" | "gif" | "bmp" | "svg" | "webp" => CLR_IMAGE,
-                    "mp4" | "mkv" | "avi" | "mov" => CLR_VIDEO,
-                    "pdf" | "doc" | "docx" | "odt" => CLR_DOC,
-                    "json" | "toml" | "yaml" | "xml" | "csv" => CLR_DATA,
-                    "txt" | "md" | "rst" => CLR_TEXT,
-                    _ => Color::Rgb(190, 185, 175),
+                    "mp3" | "flac" | "ogg" | "wav" | "mod" | "xm" | "s3m" | "ayt" => clr_audio(),
+                    "png" | "jpg" | "jpeg" | "gif" | "bmp" | "svg" | "webp" => clr_image(),
+                    "mp4" | "mkv" | "avi" | "mov" => clr_video(),
+                    "pdf" | "doc" | "docx" | "odt" => clr_doc(),
+                    "json" | "toml" | "yaml" | "xml" | "csv" => clr_data(),
+                    "txt" | "md" | "rst" => clr_text(),
+                    _ => clr_unknown(),
                 }
             };
 
             let dir_clr = if is_cursor {
                 Color::Black
             } else {
-                Color::Rgb(100, 110, 130)
+                clr_qs_no_match()
             };
-            let size_clr = if is_cursor { Color::Black } else { CLR_DATA };
+            let size_clr = if is_cursor { Color::Black } else { clr_data() };
             let date_clr = if is_cursor {
                 Color::Black
             } else {
-                Color::Rgb(130, 140, 160)
+                crate::theme::theme().search.header
             };
 
             let name_str = truncate_search_file_name(&file_name, name_w);
@@ -422,7 +433,7 @@ pub(super) fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
 
     safe_render_widget(
         f,
-        List::new(items).style(Style::default().bg(Color::Rgb(18, 18, 24))),
+        List::new(items).style(Style::default().bg(crate::theme::theme().search.background)),
         result_inner,
     );
 
@@ -431,7 +442,7 @@ pub(super) fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
         let mut sb_state = ScrollbarState::new(result_count).position(state.cursor);
         f.render_stateful_widget(
             Scrollbar::new(ScrollbarOrientation::VerticalRight)
-                .style(Style::default().fg(Color::Rgb(60, 70, 100))),
+                .style(Style::default().fg(crate::theme::theme().search.separator)),
             result_inner,
             &mut sb_state,
         );

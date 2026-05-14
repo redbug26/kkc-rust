@@ -13,59 +13,61 @@ use ratatui::text::{Line, Span};
 use std::path::Path;
 
 // ── Token colour palette  (VS Code Dark+ inspired) ────────────────────────────
-const CLR_KEYWORD: Color = Color::Rgb(86, 156, 214); // blue       — keyword / literal
-const CLR_TYPE: Color = Color::Rgb(78, 201, 176); // teal       — type / title.class
-const CLR_STRING: Color = Color::Rgb(206, 145, 120); // salmon     — string
-const CLR_COMMENT: Color = Color::Rgb(106, 153, 85); // green      — comment
-const CLR_NUMBER: Color = Color::Rgb(181, 206, 168); // pale green — number
-const CLR_PREPROC: Color = Color::Rgb(197, 134, 192); // violet     — meta / preprocessor
-const CLR_FUNC: Color = Color::Rgb(220, 220, 170); // pale yel.  — title.function / built_in
-const CLR_OPERATOR: Color = Color::Rgb(180, 200, 240); // lt blue-gr — operator
-const CLR_PLAIN: Color = Color::Rgb(212, 212, 212); // light gray — plain text
-const CLR_VAR_LANG: Color = Color::Rgb(156, 220, 254); // light cyan — variable.language
-const CLR_KETCHUP: Color = Color::Yellow;
+use crate::theme::theme;
+
+#[inline] fn clr_keyword() -> Color { theme().syntax.keyword }
+#[inline] fn clr_type() -> Color { theme().syntax.type_name }
+#[inline] fn clr_string() -> Color { theme().syntax.string }
+#[inline] fn clr_comment() -> Color { theme().syntax.comment }
+#[inline] fn clr_number() -> Color { theme().syntax.number }
+#[inline] fn clr_preproc() -> Color { theme().syntax.preprocessor }
+#[inline] fn clr_func() -> Color { theme().syntax.function }
+#[inline] fn clr_operator() -> Color { theme().syntax.operator }
+#[inline] fn clr_plain() -> Color { theme().syntax.plain }
+#[inline] fn clr_var_lang() -> Color { theme().syntax.variable_language }
+#[inline] fn clr_ketchup() -> Color { theme().syntax.ketchup }
 
 #[inline]
 fn kw() -> Style {
     Style::default()
-        .fg(CLR_KEYWORD)
+        .fg(clr_keyword())
         .add_modifier(Modifier::BOLD)
 }
 #[inline]
 fn ty() -> Style {
-    Style::default().fg(CLR_TYPE)
+    Style::default().fg(clr_type())
 }
 #[inline]
 fn str_s() -> Style {
-    Style::default().fg(CLR_STRING)
+    Style::default().fg(clr_string())
 }
 #[inline]
 fn cmt() -> Style {
-    Style::default().fg(CLR_COMMENT).add_modifier(Modifier::DIM)
+    Style::default().fg(clr_comment()).add_modifier(Modifier::DIM)
 }
 #[inline]
 fn num() -> Style {
-    Style::default().fg(CLR_NUMBER)
+    Style::default().fg(clr_number())
 }
 #[inline]
 fn pre() -> Style {
-    Style::default().fg(CLR_PREPROC)
+    Style::default().fg(clr_preproc())
 }
 #[inline]
 fn func() -> Style {
-    Style::default().fg(CLR_FUNC)
+    Style::default().fg(clr_func())
 }
 #[inline]
 fn op() -> Style {
-    Style::default().fg(CLR_OPERATOR)
+    Style::default().fg(clr_operator())
 }
 #[inline]
 fn pl() -> Style {
-    Style::default().fg(CLR_PLAIN)
+    Style::default().fg(clr_plain())
 }
 #[inline]
 fn var_lang() -> Style {
-    Style::default().fg(CLR_VAR_LANG)
+    Style::default().fg(clr_var_lang())
 }
 
 // ── Language detection ────────────────────────────────────────────────────
@@ -1763,7 +1765,7 @@ fn tokenize_ketchup(line: &str) -> Vec<Span<'static>> {
             let token: String = chars[start..i].iter().collect();
             let style = if KETCHUP_KW.iter().any(|kw| kw.eq_ignore_ascii_case(&token)) {
                 Style::default()
-                    .fg(CLR_KETCHUP)
+                    .fg(clr_ketchup())
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::White)

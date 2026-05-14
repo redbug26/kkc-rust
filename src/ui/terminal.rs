@@ -1,10 +1,24 @@
 use super::*;
 
-const CLR_TERM_BG: Color = Color::Rgb(10, 10, 10);
-const CLR_TERM_FG: Color = Color::Rgb(200, 200, 200);
-const CLR_TERM_BORDER: Color = Color::Rgb(80, 180, 80);
-const CLR_TERM_PROMPT: Color = Color::Rgb(100, 220, 100);
-const CLR_TERM_INPUT: Color = Color::White;
+fn clr_term_bg() -> Color {
+    clr_menu_dd_bg()
+}
+
+fn clr_term_fg() -> Color {
+    clr_menu_dd_fg()
+}
+
+fn clr_term_border() -> Color {
+    clr_exec()
+}
+
+fn clr_term_prompt() -> Color {
+    clr_exec()
+}
+
+fn clr_term_input() -> Color {
+    clr_qs_input_fg()
+}
 
 pub(super) fn render_terminal(f: &mut Frame, app: &App, area: Rect) {
     let ts = &app.terminal;
@@ -20,12 +34,12 @@ pub(super) fn render_terminal(f: &mut Frame, app: &App, area: Rect) {
         Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(if running {
-                Color::Rgb(220, 160, 60)
+                clr_archive()
             } else {
-                CLR_TERM_BORDER
+                clr_term_border()
             }))
-            .style(Style::default().bg(CLR_TERM_BG))
-            .title(Span::styled(title, Style::default().fg(CLR_TERM_PROMPT))),
+            .style(Style::default().bg(clr_term_bg()))
+            .title(Span::styled(title, Style::default().fg(clr_term_prompt()))),
         area,
     );
 
@@ -54,14 +68,14 @@ pub(super) fn render_terminal(f: &mut Frame, app: &App, area: Rect) {
                 return Line::from(Span::styled(
                     prompt_line.to_string(),
                     Style::default()
-                        .fg(CLR_TERM_PROMPT)
+                        .fg(clr_term_prompt())
                         .add_modifier(Modifier::BOLD),
                 ));
             }
             if l.starts_with('[') {
                 return Line::from(Span::styled(
                     l.clone(),
-                    Style::default().fg(Color::Rgb(160, 160, 160)),
+                    Style::default().fg(clr_qs_no_match()),
                 ));
             }
             // For all other lines parse embedded ANSI escape codes
@@ -69,7 +83,7 @@ pub(super) fn render_terminal(f: &mut Frame, app: &App, area: Rect) {
             // If the line has no spans with any explicit fg colour we fall back
             // to the default terminal foreground so plain text matches the theme.
             if line.spans.iter().all(|s| s.style.fg.is_none()) {
-                line = line.style(Style::default().fg(CLR_TERM_FG));
+                line = line.style(Style::default().fg(clr_term_fg()));
             }
             line
         })
@@ -77,7 +91,7 @@ pub(super) fn render_terminal(f: &mut Frame, app: &App, area: Rect) {
 
     safe_render_widget(
         f,
-        Paragraph::new(lines).style(Style::default().bg(CLR_TERM_BG)),
+        Paragraph::new(lines).style(Style::default().bg(clr_term_bg())),
         log_area,
     );
 
@@ -93,15 +107,15 @@ pub(super) fn render_terminal(f: &mut Frame, app: &App, area: Rect) {
                 prompt,
                 Style::default()
                     .fg(if running {
-                        Color::Rgb(220, 160, 60)
+                        clr_archive()
                     } else {
-                        CLR_TERM_PROMPT
+                        clr_term_prompt()
                     })
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(ts.input.clone(), Style::default().fg(CLR_TERM_INPUT)),
+            Span::styled(ts.input.clone(), Style::default().fg(clr_term_input())),
         ]))
-        .style(Style::default().bg(CLR_TERM_BG)),
+        .style(Style::default().bg(clr_term_bg())),
         Rect {
             x: inner.x,
             y: prompt_y,

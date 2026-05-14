@@ -562,6 +562,43 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
         MenuAction::DirBookmarks => {
             app.open_dir_bookmarks();
         }
+        MenuAction::SwitchTheme => {
+            let themes = crate::theme::available_theme_names();
+            let default_idx = themes
+                .iter()
+                .position(|name| name == &app.config.theme)
+                .unwrap_or(0);
+            match crate::plugins::dialog_select_with_checks(
+                "Switch theme",
+                &themes,
+                default_idx,
+                &[],
+                crate::plugins::DialogSelectTheme::CommandPalette,
+            ) {
+                Ok((Some(choice), _)) => {
+                    app.needs_full_redraw = true;
+                    if let Some(theme_name) = themes.get(choice) {
+                        match crate::theme::set(theme_name) {
+                            Ok(()) => {
+                                app.config.theme = theme_name.clone();
+                                match app.save_config() {
+                                    Ok(()) => app.set_status(format!("Theme switched: {theme_name}")),
+                                    Err(err) => app.set_status(format!("Theme save error: {err}")),
+                                }
+                            }
+                            Err(err) => app.set_status(format!("Theme load error: {err}")),
+                        }
+                    }
+                }
+                Ok((None, _)) => {
+                    app.needs_full_redraw = true;
+                }
+                Err(err) => {
+                    app.needs_full_redraw = true;
+                    app.set_status(format!("Theme selector error: {err}"));
+                }
+            }
+        }
         MenuAction::ToggleFBar => {
             app.config.show_fkey_bar = !app.config.show_fkey_bar;
             if let Err(e) = app.save_config() {

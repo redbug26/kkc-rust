@@ -37,15 +37,6 @@ impl RemoteEditKind {
         }
     }
 
-    /// UI accent colour (R, G, B).
-    pub fn color_rgb(&self) -> (u8, u8, u8) {
-        match self {
-            Self::Sftp => (121, 214, 255),
-            Self::Smb => (255, 165, 80),
-            Self::RemotePlugin { .. } => (141, 222, 150),
-        }
-    }
-
     pub fn title(&self) -> String {
         match self {
             Self::Sftp => " Add SFTP Server ".to_string(),

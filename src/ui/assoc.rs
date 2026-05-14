@@ -102,15 +102,15 @@ pub(super) fn render_opener(f: &mut Frame, s: &OpenerState, area: Rect, preferre
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_QS_BORDER).bg(CLR_QS_BG))
+        .border_style(Style::default().fg(clr_qs_border()).bg(clr_qs_bg()))
         .title(Span::styled(
             title,
             Style::default()
-                .fg(CLR_QS_INPUT_FG)
-                .bg(CLR_QS_BG)
+                .fg(clr_qs_input_fg())
+                .bg(clr_qs_bg())
                 .add_modifier(Modifier::BOLD),
         ))
-        .style(Style::default().bg(CLR_QS_BG));
+        .style(Style::default().bg(clr_qs_bg()));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
 
@@ -127,16 +127,16 @@ pub(super) fn render_opener(f: &mut Frame, s: &OpenerState, area: Rect, preferre
     let input_row = Line::from(vec![
         Span::styled(
             truncate_str(&input_text, input_w),
-            Style::default().fg(CLR_QS_INPUT_FG).bg(CLR_QS_INPUT_BG),
+            Style::default().fg(clr_qs_input_fg()).bg(clr_qs_input_bg()),
         ),
         Span::styled(
             count_hint,
-            Style::default().fg(CLR_QS_MATCH_HI).bg(CLR_QS_INPUT_BG),
+            Style::default().fg(clr_qs_match_hi()).bg(clr_qs_input_bg()),
         ),
     ]);
     safe_render_widget(
         f,
-        Paragraph::new(input_row).style(Style::default().bg(CLR_QS_INPUT_BG)),
+        Paragraph::new(input_row).style(Style::default().bg(clr_qs_input_bg())),
         Rect {
             x: inner.x,
             y: inner.y,
@@ -147,7 +147,7 @@ pub(super) fn render_opener(f: &mut Frame, s: &OpenerState, area: Rect, preferre
 
     safe_render_widget(
         f,
-        Paragraph::new(hint).style(Style::default().fg(CLR_QS_LIST_FG).bg(CLR_QS_BG)),
+        Paragraph::new(hint).style(Style::default().fg(clr_qs_list_fg()).bg(clr_qs_bg())),
         Rect {
             x: inner.x,
             y: inner.y + 1,
@@ -158,7 +158,7 @@ pub(super) fn render_opener(f: &mut Frame, s: &OpenerState, area: Rect, preferre
     let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
     safe_render_widget(
         f,
-        Paragraph::new(sep).style(Style::default().fg(CLR_QS_SEP).bg(CLR_QS_BG)),
+        Paragraph::new(sep).style(Style::default().fg(clr_qs_sep()).bg(clr_qs_bg())),
         Rect {
             x: inner.x,
             y: inner.y + 2,
@@ -174,7 +174,7 @@ pub(super) fn render_opener(f: &mut Frame, s: &OpenerState, area: Rect, preferre
         safe_render_widget(
             f,
             Paragraph::new("  (no match)")
-                .style(Style::default().fg(CLR_QS_NO_MATCH).bg(CLR_QS_BG)),
+                .style(Style::default().fg(clr_qs_no_match()).bg(clr_qs_bg())),
             Rect {
                 x: inner.x,
                 y: list_y,
@@ -208,8 +208,8 @@ pub(super) fn render_opener(f: &mut Frame, s: &OpenerState, area: Rect, preferre
                     f,
                     Paragraph::new(format!("  {}", category)).style(
                         Style::default()
-                            .fg(CLR_QS_DIR_FG)
-                            .bg(CLR_QS_BG)
+                            .fg(clr_qs_dir_fg())
+                            .bg(clr_qs_bg())
                             .add_modifier(Modifier::BOLD),
                     ),
                     Rect {
@@ -228,11 +228,11 @@ pub(super) fn render_opener(f: &mut Frame, s: &OpenerState, area: Rect, preferre
                 let selected = s.match_pos == *match_row;
                 let style = if selected {
                     Style::default()
-                        .fg(CLR_QS_SEL_FG)
-                        .bg(CLR_QS_SEL_BG)
+                        .fg(clr_qs_sel_fg())
+                        .bg(clr_qs_sel_bg())
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(CLR_QS_LIST_FG).bg(CLR_QS_BG)
+                    Style::default().fg(clr_qs_list_fg()).bg(clr_qs_bg())
                 };
                 let icon = if selected { " > " } else { "   " };
                 let available = inner.width as usize;
@@ -284,8 +284,8 @@ pub(super) fn render_action_palette(f: &mut Frame, s: &ActionPaletteState, area:
     let block = Block::default()
         .title(" Actions ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_QS_BORDER))
-        .style(Style::default().bg(CLR_QS_BG));
+        .border_style(Style::default().fg(clr_qs_border()))
+        .style(Style::default().bg(clr_qs_bg()));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
 
@@ -293,7 +293,7 @@ pub(super) fn render_action_palette(f: &mut Frame, s: &ActionPaletteState, area:
     safe_render_widget(
         f,
         Paragraph::new(truncate_str(&dir, inner.width as usize))
-            .style(Style::default().fg(Color::DarkGray).bg(CLR_QS_BG)),
+            .style(Style::default().fg(Color::DarkGray).bg(clr_qs_bg())),
         Rect {
             x: inner.x,
             y: inner.y,
@@ -305,7 +305,7 @@ pub(super) fn render_action_palette(f: &mut Frame, s: &ActionPaletteState, area:
     let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
     safe_render_widget(
         f,
-        Paragraph::new(sep.clone()).style(Style::default().fg(CLR_QS_SEP).bg(CLR_QS_BG)),
+        Paragraph::new(sep.clone()).style(Style::default().fg(clr_qs_sep()).bg(clr_qs_bg())),
         Rect {
             x: inner.x,
             y: inner.y + 1,
@@ -331,9 +331,9 @@ pub(super) fn render_action_palette(f: &mut Frame, s: &ActionPaletteState, area:
         let action = &s.actions[action_idx];
         let selected = action_idx == s.cursor;
         let (fg, bg) = if selected {
-            (CLR_QS_SEL_FG, CLR_QS_SEL_BG)
+            (clr_qs_sel_fg(), clr_qs_sel_bg())
         } else {
-            (CLR_QS_LIST_FG, CLR_QS_BG)
+            (clr_qs_list_fg(), clr_qs_bg())
         };
         let marker = if selected { ">" } else { " " };
         let mut text = format!(" {} {}  {}", marker, action.title, action.description);
@@ -362,7 +362,7 @@ pub(super) fn render_action_palette(f: &mut Frame, s: &ActionPaletteState, area:
     safe_render_widget(
         f,
         Paragraph::new("  Enter Run   Esc Close ")
-            .style(Style::default().fg(CLR_BUTTON_FG).bg(CLR_BUTTON_BG)),
+            .style(Style::default().fg(clr_button_fg()).bg(clr_button_bg())),
         Rect {
             x: inner.x,
             y: hint_y,
@@ -405,15 +405,15 @@ pub(super) fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rec
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_QS_BORDER).bg(CLR_QS_BG))
+        .border_style(Style::default().fg(clr_qs_border()).bg(clr_qs_bg()))
         .title(Span::styled(
             " Associations ",
             Style::default()
-                .fg(CLR_QS_INPUT_FG)
-                .bg(CLR_QS_BG)
+                .fg(clr_qs_input_fg())
+                .bg(clr_qs_bg())
                 .add_modifier(Modifier::BOLD),
         ))
-        .style(Style::default().bg(CLR_QS_BG));
+        .style(Style::default().bg(clr_qs_bg()));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
 
@@ -429,16 +429,16 @@ pub(super) fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rec
     let input_row = Line::from(vec![
         Span::styled(
             truncate_str(&input_text, input_w),
-            Style::default().fg(CLR_QS_INPUT_FG).bg(CLR_QS_INPUT_BG),
+            Style::default().fg(clr_qs_input_fg()).bg(clr_qs_input_bg()),
         ),
         Span::styled(
             count_hint,
-            Style::default().fg(CLR_QS_MATCH_HI).bg(CLR_QS_INPUT_BG),
+            Style::default().fg(clr_qs_match_hi()).bg(clr_qs_input_bg()),
         ),
     ]);
     safe_render_widget(
         f,
-        Paragraph::new(input_row).style(Style::default().bg(CLR_QS_INPUT_BG)),
+        Paragraph::new(input_row).style(Style::default().bg(clr_qs_input_bg())),
         Rect {
             x: inner.x,
             y: inner.y,
@@ -450,7 +450,7 @@ pub(super) fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rec
     let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
     safe_render_widget(
         f,
-        Paragraph::new(sep.clone()).style(Style::default().fg(CLR_QS_SEP).bg(CLR_QS_BG)),
+        Paragraph::new(sep.clone()).style(Style::default().fg(clr_qs_sep()).bg(clr_qs_bg())),
         Rect {
             x: inner.x,
             y: inner.y + 1,
@@ -465,8 +465,8 @@ pub(super) fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rec
         f,
         Paragraph::new(header).style(
             Style::default()
-                .fg(CLR_QS_DIR_FG)
-                .bg(CLR_QS_BG)
+                .fg(clr_qs_dir_fg())
+                .bg(clr_qs_bg())
                 .add_modifier(Modifier::BOLD),
         ),
         Rect {
@@ -478,7 +478,7 @@ pub(super) fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rec
     );
     safe_render_widget(
         f,
-        Paragraph::new(sep.clone()).style(Style::default().fg(CLR_QS_SEP).bg(CLR_QS_BG)),
+        Paragraph::new(sep.clone()).style(Style::default().fg(clr_qs_sep()).bg(clr_qs_bg())),
         Rect {
             x: inner.x,
             y: inner.y + 3,
@@ -499,7 +499,7 @@ pub(super) fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rec
         safe_render_widget(
             f,
             Paragraph::new("  (no match)")
-                .style(Style::default().fg(CLR_QS_NO_MATCH).bg(CLR_QS_BG)),
+                .style(Style::default().fg(clr_qs_no_match()).bg(clr_qs_bg())),
             Rect {
                 x: inner.x,
                 y: inner.y + 4,
@@ -521,11 +521,11 @@ pub(super) fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rec
             let selected = s.match_pos == filtered_row;
             let style = if selected {
                 Style::default()
-                    .fg(CLR_QS_SEL_FG)
-                    .bg(CLR_QS_SEL_BG)
+                    .fg(clr_qs_sel_fg())
+                    .bg(clr_qs_sel_bg())
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(CLR_QS_LIST_FG).bg(CLR_QS_BG)
+                Style::default().fg(clr_qs_list_fg()).bg(clr_qs_bg())
             };
             let icon = if selected { ">" } else { " " };
             let openers_str = openers.join(" | ");
@@ -554,7 +554,7 @@ pub(super) fn render_assoc_editor(f: &mut Frame, s: &AssocEditorState, area: Rec
     let hint_sep_y = inner.y + inner.height.saturating_sub(2);
     safe_render_widget(
         f,
-        Paragraph::new(sep).style(Style::default().fg(CLR_QS_SEP).bg(CLR_QS_BG)),
+        Paragraph::new(sep).style(Style::default().fg(clr_qs_sep()).bg(clr_qs_bg())),
         Rect {
             x: inner.x,
             y: hint_sep_y,

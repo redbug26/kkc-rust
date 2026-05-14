@@ -30,20 +30,20 @@ pub(super) fn render_panel_text_editor(
     };
     let border_style = if active {
         Style::default()
-            .fg(CLR_HEADER_FG)
-            .bg(CLR_APP_BG)
+            .fg(clr_header_fg())
+            .bg(clr_app_bg())
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG)
+        Style::default().fg(clr_panel_border()).bg(clr_app_bg())
     };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Thick)
         .border_style(border_style)
-        .style(Style::default().bg(CLR_PANEL_BG))
+        .style(Style::default().bg(clr_panel_bg()))
         .title(Span::styled(
             title,
-            Style::default().fg(CLR_PANEL_TITLE).bg(CLR_APP_BG),
+            Style::default().fg(clr_panel_title()).bg(clr_app_bg()),
         ));
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -179,7 +179,7 @@ fn render_wrapped_editor(
                 Span::styled(number, number_style),
                 Span::styled(
                     wrapped.text.clone(),
-                    Style::default().fg(CLR_TEXT).bg(CLR_PANEL_BG),
+                    Style::default().fg(clr_text()).bg(clr_panel_bg()),
                 ),
             ])
         })
@@ -225,7 +225,7 @@ fn editor_line(
         Span::styled(number, line_number_style(idx, cursor_row, active)),
         Span::styled(
             slice_chars(line, hscroll, text_width),
-            Style::default().fg(CLR_TEXT).bg(CLR_PANEL_BG),
+            Style::default().fg(clr_text()).bg(clr_panel_bg()),
         ),
     ])
 }
@@ -233,11 +233,11 @@ fn editor_line(
 fn line_number_style(idx: usize, cursor_row: usize, active: bool) -> Style {
     if idx == cursor_row && active {
         Style::default()
-            .fg(CLR_PANEL_TITLE)
-            .bg(CLR_PANEL_BG)
+            .fg(clr_panel_title())
+            .bg(clr_panel_bg())
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(CLR_MENU_DD_SEP).bg(CLR_PANEL_BG)
+        Style::default().fg(clr_menu_dd_sep()).bg(clr_panel_bg())
     }
 }
 

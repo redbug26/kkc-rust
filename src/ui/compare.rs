@@ -2,10 +2,10 @@ use super::*;
 
 fn compare_marker(kind: crate::app::CompareRowKind) -> (&'static str, Color) {
     match kind {
-        crate::app::CompareRowKind::Equal => ("=", Color::Rgb(110, 110, 125)),
-        crate::app::CompareRowKind::Added => ("+", Color::Rgb(80, 180, 120)),
-        crate::app::CompareRowKind::Removed => ("-", Color::Rgb(220, 100, 100)),
-        crate::app::CompareRowKind::Changed => ("~", Color::Rgb(220, 180, 80)),
+        crate::app::CompareRowKind::Equal => ("=", clr_qs_no_match()),
+        crate::app::CompareRowKind::Added => ("+", clr_exec()),
+        crate::app::CompareRowKind::Removed => ("-", clr_video()),
+        crate::app::CompareRowKind::Changed => ("~", clr_archive()),
     }
 }
 
@@ -27,13 +27,13 @@ pub(super) fn render_compare_panel(f: &mut Frame, state: &ComparePanelState, are
         .title(Span::styled(
             " Compare Files ",
             Style::default()
-                .fg(CLR_HEADER_FG)
+                .fg(clr_header_fg())
                 .add_modifier(Modifier::BOLD),
         ))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(CLR_PANEL_BORDER))
-        .style(Style::default().bg(Color::Rgb(18, 18, 24)));
+        .border_style(Style::default().fg(clr_panel_border()))
+        .style(Style::default().bg(clr_qs_bg()));
     let inner = block.inner(popup);
     f.render_widget(block, popup);
     if inner.height < 5 {
@@ -52,28 +52,28 @@ pub(super) fn render_compare_panel(f: &mut Frame, state: &ComparePanelState, are
 
     let header = vec![
         Line::from(vec![
-            Span::styled(" Left : ", Style::default().fg(Color::Rgb(120, 170, 230))),
+            Span::styled(" Left : ", Style::default().fg(clr_qs_dir_fg())),
             Span::styled(
                 truncate_path(
                     &state.left_label,
                     chunks[0].width.saturating_sub(10) as usize,
                 ),
-                Style::default().fg(Color::Rgb(220, 225, 235)),
+                Style::default().fg(clr_qs_input_fg()),
             ),
         ]),
         Line::from(vec![
-            Span::styled(" Right: ", Style::default().fg(Color::Rgb(120, 170, 230))),
+            Span::styled(" Right: ", Style::default().fg(clr_qs_dir_fg())),
             Span::styled(
                 truncate_path(
                     &state.right_label,
                     chunks[0].width.saturating_sub(10) as usize,
                 ),
-                Style::default().fg(Color::Rgb(220, 225, 235)),
+                Style::default().fg(clr_qs_input_fg()),
             ),
             Span::raw("  "),
             Span::styled(
                 state.summary.clone(),
-                Style::default().fg(Color::Rgb(150, 160, 180)),
+                Style::default().fg(clr_qs_no_match()),
             ),
         ]),
         Line::from(vec![Span::styled(
@@ -93,39 +93,39 @@ pub(super) fn render_compare_panel(f: &mut Frame, state: &ComparePanelState, are
                 },
                 if state.search_active { "_" } else { "" }
             ),
-            Style::default().fg(Color::Rgb(160, 170, 200)),
+            Style::default().fg(clr_qs_list_fg()),
         )]),
     ];
     safe_render_widget(
         f,
-        Paragraph::new(header).style(Style::default().bg(Color::Rgb(18, 18, 24))),
+        Paragraph::new(header).style(Style::default().bg(clr_qs_bg())),
         chunks[0],
     );
 
     let title_line = Line::from(vec![
         Span::styled(
             format!(" {:>4} ", "L#"),
-            Style::default().fg(Color::Rgb(130, 140, 160)),
+            Style::default().fg(clr_qs_no_match()),
         ),
         Span::styled(
             truncate_str("Left", (chunks[1].width as usize).saturating_sub(24) / 2),
-            Style::default().fg(Color::Rgb(130, 140, 160)),
+            Style::default().fg(clr_qs_no_match()),
         ),
         Span::raw("  "),
-        Span::styled(" M ", Style::default().fg(Color::Rgb(130, 140, 160))),
+        Span::styled(" M ", Style::default().fg(clr_qs_no_match())),
         Span::raw("  "),
         Span::styled(
             format!(" {:>4} ", "R#"),
-            Style::default().fg(Color::Rgb(130, 140, 160)),
+            Style::default().fg(clr_qs_no_match()),
         ),
         Span::styled(
             truncate_str("Right", (chunks[1].width as usize).saturating_sub(24) / 2),
-            Style::default().fg(Color::Rgb(130, 140, 160)),
+            Style::default().fg(clr_qs_no_match()),
         ),
     ]);
     safe_render_widget(
         f,
-        Paragraph::new(title_line).style(Style::default().bg(Color::Rgb(24, 24, 32))),
+        Paragraph::new(title_line).style(Style::default().bg(clr_qs_input_bg())),
         chunks[1],
     );
 
@@ -145,7 +145,7 @@ pub(super) fn render_compare_panel(f: &mut Frame, state: &ComparePanelState, are
     let items = if state.rows.is_empty() {
         vec![ListItem::new(Line::from(vec![Span::styled(
             state.message.as_deref().unwrap_or("No differences"),
-            Style::default().fg(Color::Rgb(150, 200, 150)),
+            Style::default().fg(clr_exec()),
         )]))]
     } else {
         state
@@ -157,17 +157,17 @@ pub(super) fn render_compare_panel(f: &mut Frame, state: &ComparePanelState, are
             .map(|(idx, row)| {
                 let selected = idx == state.cursor;
                 let zebra = if idx % 2 == 0 {
-                    Color::Rgb(18, 18, 24)
+                    clr_qs_bg()
                 } else {
-                    Color::Rgb(22, 22, 32)
+                    clr_menu_dd_bg()
                 };
-                let bg = if selected { CLR_CURSOR_BG } else { zebra };
+                let bg = if selected { clr_cursor_bg() } else { zebra };
                 let fg = if selected {
-                    CLR_CURSOR_FG
+                    clr_cursor_fg()
                 } else if row.kind == crate::app::CompareRowKind::Equal {
-                    Color::Rgb(120, 125, 140)
+                    clr_qs_no_match()
                 } else {
-                    Color::Rgb(220, 225, 235)
+                    clr_qs_input_fg()
                 };
                 let (marker, marker_color) = compare_marker(row.kind);
                 let left_no = row
@@ -201,7 +201,7 @@ pub(super) fn render_compare_panel(f: &mut Frame, state: &ComparePanelState, are
 
     safe_render_widget(
         f,
-        List::new(items).style(Style::default().bg(Color::Rgb(18, 18, 24))),
+        List::new(items).style(Style::default().bg(clr_qs_bg())),
         list_area,
     );
 
@@ -228,8 +228,8 @@ pub(super) fn render_compare_panel(f: &mut Frame, state: &ComparePanelState, are
         f,
         Paragraph::new(footer).style(
             Style::default()
-                .fg(Color::Rgb(150, 160, 180))
-                .bg(Color::Rgb(18, 18, 24)),
+                .fg(clr_qs_no_match())
+                .bg(clr_qs_bg()),
         ),
         chunks[3],
     );

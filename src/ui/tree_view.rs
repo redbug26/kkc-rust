@@ -18,13 +18,13 @@ pub(super) fn render_tree_view(f: &mut Frame, state: &TreeViewState, area: Rect)
         .title(Span::styled(
             " Tree View ",
             Style::default()
-                .fg(CLR_HEADER_FG)
+                .fg(clr_header_fg())
                 .add_modifier(Modifier::BOLD),
         ))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(CLR_PANEL_BORDER))
-        .style(Style::default().bg(Color::Rgb(18, 18, 24)));
+        .border_style(Style::default().fg(clr_panel_border()))
+        .style(Style::default().bg(clr_qs_bg()));
     let inner = block.inner(popup);
     f.render_widget(block, popup);
 
@@ -62,19 +62,19 @@ pub(super) fn render_tree_view(f: &mut Frame, state: &TreeViewState, area: Rect)
         inner.width.saturating_sub(32) as usize,
     );
     let top = Line::from(vec![
-        Span::styled("  ", Style::default().bg(Color::Rgb(30, 40, 60))),
+        Span::styled("  ", Style::default().bg(clr_qs_input_bg())),
         Span::styled(
             format!(" {}_ ", query_label),
             Style::default()
-                .fg(Color::Rgb(230, 225, 210))
-                .bg(Color::Rgb(30, 40, 60)),
+                .fg(clr_qs_input_fg())
+                .bg(clr_qs_input_bg()),
         ),
         Span::raw("  "),
-        Span::styled(root, Style::default().fg(Color::Rgb(120, 130, 150))),
+        Span::styled(root, Style::default().fg(clr_qs_no_match())),
     ]);
     safe_render_widget(
         f,
-        Paragraph::new(top).style(Style::default().bg(Color::Rgb(18, 18, 24))),
+        Paragraph::new(top).style(Style::default().bg(clr_qs_bg())),
         chunks[0],
     );
 
@@ -119,8 +119,8 @@ pub(super) fn render_tree_view(f: &mut Frame, state: &TreeViewState, area: Rect)
                 Gauge::default()
                     .gauge_style(
                         Style::default()
-                            .fg(CLR_HEADER_FG)
-                            .bg(Color::Rgb(35, 35, 45)),
+                            .fg(clr_header_fg())
+                            .bg(clr_qs_input_bg()),
                     )
                     .label(label)
                     .ratio(level.ratio.clamp(0.0, 1.0)),
@@ -142,8 +142,8 @@ pub(super) fn render_tree_view(f: &mut Frame, state: &TreeViewState, area: Rect)
             Gauge::default()
                 .gauge_style(
                     Style::default()
-                        .fg(CLR_HEADER_FG)
-                        .bg(Color::Rgb(35, 35, 45)),
+                        .fg(clr_header_fg())
+                        .bg(clr_qs_input_bg()),
                 )
                 .label(gauge_label)
                 .ratio(1.0),
@@ -165,8 +165,8 @@ pub(super) fn render_tree_view(f: &mut Frame, state: &TreeViewState, area: Rect)
         f,
         Paragraph::new(count_line).style(
             Style::default()
-                .fg(Color::Rgb(150, 160, 180))
-                .bg(Color::Rgb(18, 18, 24)),
+                .fg(clr_qs_no_match())
+                .bg(clr_qs_bg()),
         ),
         chunks[2],
     );
@@ -196,17 +196,17 @@ pub(super) fn render_tree_view(f: &mut Frame, state: &TreeViewState, area: Rect)
             let entry = state.entries.get(entry_idx)?;
             let selected = !is_context && disp_idx == selected_disp;
             let zebra = if disp_idx % 2 == 0 {
-                Color::Rgb(18, 18, 24)
+                clr_qs_bg()
             } else {
-                Color::Rgb(22, 22, 32)
+                clr_menu_dd_bg()
             };
-            let bg = if selected { CLR_CURSOR_BG } else { zebra };
+            let bg = if selected { clr_cursor_bg() } else { zebra };
             let fg = if selected {
-                CLR_CURSOR_FG
+                clr_cursor_fg()
             } else if is_context {
-                Color::Rgb(70, 80, 100)
+                clr_qs_sep()
             } else {
-                CLR_DIR
+                clr_dir()
             };
             let connector = tree_connector(
                 entry.depth,
@@ -227,7 +227,7 @@ pub(super) fn render_tree_view(f: &mut Frame, state: &TreeViewState, area: Rect)
             };
             Some(ListItem::new(Line::from(vec![
                 Span::styled(" ", Style::default().fg(fg).bg(bg)),
-                Span::styled(connector_part, Style::default().fg(CLR_TREE).bg(bg)),
+                Span::styled(connector_part, Style::default().fg(clr_tree()).bg(bg)),
                 Span::styled(content_part, Style::default().fg(fg).bg(bg)),
             ])))
         })
@@ -235,7 +235,7 @@ pub(super) fn render_tree_view(f: &mut Frame, state: &TreeViewState, area: Rect)
 
     safe_render_widget(
         f,
-        List::new(items).style(Style::default().bg(Color::Rgb(18, 18, 24))),
+        List::new(items).style(Style::default().bg(clr_qs_bg())),
         list_area,
     );
 
@@ -243,7 +243,7 @@ pub(super) fn render_tree_view(f: &mut Frame, state: &TreeViewState, area: Rect)
         let mut sb_state = ScrollbarState::new(display.len()).position(selected_disp);
         f.render_stateful_widget(
             Scrollbar::new(ScrollbarOrientation::VerticalRight)
-                .style(Style::default().fg(Color::Rgb(80, 90, 120))),
+                .style(Style::default().fg(clr_qs_border())),
             list_area,
             &mut sb_state,
         );
@@ -253,7 +253,7 @@ pub(super) fn render_tree_view(f: &mut Frame, state: &TreeViewState, area: Rect)
         f,
         Paragraph::new(" [Refresh] Ctrl+R / F5 ")
             .alignment(Alignment::Right)
-            .style(Style::default().fg(Color::Black).bg(CLR_BUTTON_BG)),
+            .style(Style::default().fg(Color::Black).bg(clr_button_bg())),
         chunks[4],
     );
 }

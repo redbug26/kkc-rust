@@ -177,8 +177,8 @@ pub(super) fn render_dir_bookmarks(f: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
         .title(" Bookmarks ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_MENU_BORDER))
-        .style(Style::default().bg(CLR_MENU_DD_BG));
+        .border_style(Style::default().fg(clr_menu_border()))
+        .style(Style::default().bg(clr_menu_dd_bg()));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
 
@@ -222,23 +222,23 @@ pub(super) fn render_dir_bookmarks(f: &mut Frame, app: &App, area: Rect) {
     let input_row = Line::from(vec![
         Span::styled(
             truncate_str(&input_text, input_inner_w),
-            Style::default().fg(CLR_QS_INPUT_FG).bg(CLR_QS_INPUT_BG),
+            Style::default().fg(clr_qs_input_fg()).bg(clr_qs_input_bg()),
         ),
         Span::styled(
             count_hint,
-            Style::default().fg(CLR_QS_NO_MATCH).bg(CLR_QS_INPUT_BG),
+            Style::default().fg(clr_qs_no_match()).bg(clr_qs_input_bg()),
         ),
     ]);
     safe_render_widget(
         f,
-        Paragraph::new(input_row).style(Style::default().bg(CLR_QS_INPUT_BG)),
+        Paragraph::new(input_row).style(Style::default().bg(clr_qs_input_bg())),
         input_area,
     );
 
     let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
     safe_render_widget(
         f,
-        Paragraph::new(sep).style(Style::default().fg(CLR_QS_SEP).bg(CLR_MENU_DD_BG)),
+        Paragraph::new(sep).style(Style::default().fg(clr_qs_sep()).bg(clr_menu_dd_bg())),
         sep_area,
     );
 
@@ -258,12 +258,12 @@ pub(super) fn render_dir_bookmarks(f: &mut Frame, app: &App, area: Rect) {
     let items: Vec<ListItem> = if app.bookmarks.is_empty() && matches.is_empty() {
         vec![ListItem::new(Line::from(Span::styled(
             "(no bookmarks)",
-            Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG),
+            Style::default().fg(clr_menu_dd_fg()).bg(clr_menu_dd_bg()),
         )))]
     } else if matches.is_empty() {
         vec![ListItem::new(Line::from(Span::styled(
             " No matching bookmark ",
-            Style::default().fg(CLR_QS_NO_MATCH).bg(CLR_MENU_DD_BG),
+            Style::default().fg(clr_qs_no_match()).bg(clr_menu_dd_bg()),
         )))]
     } else {
         matches
@@ -279,13 +279,13 @@ pub(super) fn render_dir_bookmarks(f: &mut Frame, app: &App, area: Rect) {
                         let label = format!(" <add current dir> {}", path);
                         let style = if selected {
                             Style::default()
-                                .fg(CLR_MENU_SEL_FG)
-                                .bg(CLR_MENU_SEL_BG)
+                                .fg(clr_menu_sel_fg())
+                                .bg(clr_menu_sel_bg())
                                 .add_modifier(Modifier::BOLD)
                         } else {
                             Style::default()
-                                .fg(CLR_HEADER_FG)
-                                .bg(CLR_MENU_DD_BG)
+                                .fg(clr_header_fg())
+                                .bg(clr_menu_dd_bg())
                                 .add_modifier(Modifier::BOLD)
                         };
                         (label, style)
@@ -305,30 +305,30 @@ pub(super) fn render_dir_bookmarks(f: &mut Frame, app: &App, area: Rect) {
                         };
                         let style = if selected {
                             Style::default()
-                                .fg(CLR_MENU_SEL_FG)
-                                .bg(CLR_MENU_SEL_BG)
+                                .fg(clr_menu_sel_fg())
+                                .bg(clr_menu_sel_bg())
                                 .add_modifier(Modifier::BOLD)
                         } else if !is_remote && !p.is_dir() {
                             Style::default()
-                                .fg(CLR_MENU_DD_FG)
-                                .bg(CLR_MENU_DD_BG)
+                                .fg(clr_menu_dd_fg())
+                                .bg(clr_menu_dd_bg())
                                 .add_modifier(Modifier::DIM)
                         } else {
-                            Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
+                            Style::default().fg(clr_menu_dd_fg()).bg(clr_menu_dd_bg())
                         };
                         (label, style)
                     }
                 };
                 let hi = if selected {
-                    CLR_QS_MATCH_HI_SEL
+                    clr_qs_match_hi_sel()
                 } else {
-                    CLR_QS_MATCH_HI
+                    clr_qs_match_hi()
                 };
                 ListItem::new(highlight_tokens(
                     &label,
                     &tokens,
-                    style.fg.unwrap_or(CLR_MENU_DD_FG),
-                    style.bg.unwrap_or(CLR_MENU_DD_BG),
+                    style.fg.unwrap_or(clr_menu_dd_fg()),
+                    style.bg.unwrap_or(clr_menu_dd_bg()),
                     hi,
                 ))
             })
@@ -336,7 +336,7 @@ pub(super) fn render_dir_bookmarks(f: &mut Frame, app: &App, area: Rect) {
     };
     safe_render_widget(
         f,
-        List::new(items).style(Style::default().bg(CLR_MENU_DD_BG)),
+        List::new(items).style(Style::default().bg(clr_menu_dd_bg())),
         list_area,
     );
 
@@ -441,8 +441,8 @@ pub(super) fn render_quicksearch_palette(f: &mut Frame, app: &App, area: Rect) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_QS_BORDER))
-        .style(Style::default().bg(CLR_QS_BG));
+        .border_style(Style::default().fg(clr_qs_border()))
+        .style(Style::default().bg(clr_qs_bg()));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
 
@@ -484,23 +484,23 @@ pub(super) fn render_quicksearch_palette(f: &mut Frame, app: &App, area: Rect) {
     let input_row = Line::from(vec![
         Span::styled(
             truncate_str(&input_text, input_inner_w),
-            Style::default().fg(CLR_QS_INPUT_FG).bg(CLR_QS_INPUT_BG),
+            Style::default().fg(clr_qs_input_fg()).bg(clr_qs_input_bg()),
         ),
         Span::styled(
             count_hint,
-            Style::default().fg(CLR_QS_NO_MATCH).bg(CLR_QS_INPUT_BG),
+            Style::default().fg(clr_qs_no_match()).bg(clr_qs_input_bg()),
         ),
     ]);
     safe_render_widget(
         f,
-        Paragraph::new(input_row).style(Style::default().bg(CLR_QS_INPUT_BG)),
+        Paragraph::new(input_row).style(Style::default().bg(clr_qs_input_bg())),
         input_area,
     );
 
     let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
     safe_render_widget(
         f,
-        Paragraph::new(sep).style(Style::default().fg(CLR_QS_SEP).bg(CLR_QS_BG)),
+        Paragraph::new(sep).style(Style::default().fg(clr_qs_sep()).bg(clr_qs_bg())),
         sep_area,
     );
 
@@ -508,7 +508,7 @@ pub(super) fn render_quicksearch_palette(f: &mut Frame, app: &App, area: Rect) {
     if total == 0 && !query.is_empty() {
         safe_render_widget(
             f,
-            Paragraph::new(" No match").style(Style::default().fg(CLR_QS_NO_MATCH).bg(CLR_QS_BG)),
+            Paragraph::new(" No match").style(Style::default().fg(clr_qs_no_match()).bg(clr_qs_bg())),
             list_area,
         );
         return;
@@ -533,11 +533,11 @@ pub(super) fn render_quicksearch_palette(f: &mut Frame, app: &App, area: Rect) {
             let entry = &panel.entries[entry_idx];
             let is_sel = match_idx == qs_pos;
             let (bg, fg, hi) = if is_sel {
-                (CLR_QS_SEL_BG, CLR_QS_SEL_FG, CLR_QS_MATCH_HI_SEL)
+                (clr_qs_sel_bg(), clr_qs_sel_fg(), clr_qs_match_hi_sel())
             } else if entry.is_dir {
-                (CLR_QS_BG, CLR_QS_DIR_FG, CLR_QS_MATCH_HI)
+                (clr_qs_bg(), clr_qs_dir_fg(), clr_qs_match_hi())
             } else {
-                (CLR_QS_BG, CLR_QS_LIST_FG, CLR_QS_MATCH_HI)
+                (clr_qs_bg(), clr_qs_list_fg(), clr_qs_match_hi())
             };
 
             let icon = if entry.is_dir { " \u{25b6} " } else { "   " };
@@ -571,7 +571,7 @@ pub(super) fn render_quicksearch_palette(f: &mut Frame, app: &App, area: Rect) {
 
     safe_render_widget(
         f,
-        List::new(items).style(Style::default().bg(CLR_QS_BG)),
+        List::new(items).style(Style::default().bg(clr_qs_bg())),
         render_area,
     );
 
@@ -580,8 +580,8 @@ pub(super) fn render_quicksearch_palette(f: &mut Frame, app: &App, area: Rect) {
         safe_render_stateful_widget(
             f,
             Scrollbar::new(ScrollbarOrientation::VerticalRight)
-                .thumb_style(Style::default().fg(CLR_QS_BORDER))
-                .track_style(Style::default().bg(CLR_QS_BG))
+                .thumb_style(Style::default().fg(clr_qs_border()))
+                .track_style(Style::default().bg(clr_qs_bg()))
                 .begin_symbol(None)
                 .end_symbol(None),
             sb,
@@ -622,8 +622,8 @@ pub(super) fn render_viewer_plugin_palette(
     let block = Block::default()
         .title(" Viewer Plugins ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_QS_BORDER))
-        .style(Style::default().bg(CLR_QS_BG));
+        .border_style(Style::default().fg(clr_qs_border()))
+        .style(Style::default().bg(clr_qs_bg()));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
 
@@ -663,23 +663,23 @@ pub(super) fn render_viewer_plugin_palette(
     let input_row = Line::from(vec![
         Span::styled(
             truncate_str(&input_text, input_inner_w),
-            Style::default().fg(CLR_QS_INPUT_FG).bg(CLR_QS_INPUT_BG),
+            Style::default().fg(clr_qs_input_fg()).bg(clr_qs_input_bg()),
         ),
         Span::styled(
             count_hint,
-            Style::default().fg(CLR_QS_NO_MATCH).bg(CLR_QS_INPUT_BG),
+            Style::default().fg(clr_qs_no_match()).bg(clr_qs_input_bg()),
         ),
     ]);
     safe_render_widget(
         f,
-        Paragraph::new(input_row).style(Style::default().bg(CLR_QS_INPUT_BG)),
+        Paragraph::new(input_row).style(Style::default().bg(clr_qs_input_bg())),
         input_area,
     );
 
     let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
     safe_render_widget(
         f,
-        Paragraph::new(sep).style(Style::default().fg(CLR_QS_SEP).bg(CLR_QS_BG)),
+        Paragraph::new(sep).style(Style::default().fg(clr_qs_sep()).bg(clr_qs_bg())),
         sep_area,
     );
 
@@ -691,7 +691,7 @@ pub(super) fn render_viewer_plugin_palette(
         };
         safe_render_widget(
             f,
-            Paragraph::new(message).style(Style::default().fg(CLR_QS_NO_MATCH).bg(CLR_QS_BG)),
+            Paragraph::new(message).style(Style::default().fg(clr_qs_no_match()).bg(clr_qs_bg())),
             list_area,
         );
         return;
@@ -731,44 +731,44 @@ pub(super) fn render_viewer_plugin_palette(
     let desc_w = content_w.saturating_sub(name_w + if ext_w > 0 { ext_w + 2 } else { 0 });
 
     let mut header_spans = vec![
-        Span::styled("  ", Style::default().fg(CLR_HEADER_FG).bg(CLR_HEADER_BG)),
+        Span::styled("  ", Style::default().fg(clr_header_fg()).bg(clr_header_bg())),
         Span::styled(
             truncate_str("Plugin", name_w),
             Style::default()
-                .fg(CLR_HEADER_FG)
-                .bg(CLR_HEADER_BG)
+                .fg(clr_header_fg())
+                .bg(clr_header_bg())
                 .add_modifier(Modifier::BOLD),
         ),
     ];
     if ext_w > 0 {
         header_spans.push(Span::styled(
             "  ",
-            Style::default().fg(CLR_HEADER_FG).bg(CLR_HEADER_BG),
+            Style::default().fg(clr_header_fg()).bg(clr_header_bg()),
         ));
         header_spans.push(Span::styled(
             truncate_str("Extensions", ext_w),
             Style::default()
-                .fg(CLR_HEADER_FG)
-                .bg(CLR_HEADER_BG)
+                .fg(clr_header_fg())
+                .bg(clr_header_bg())
                 .add_modifier(Modifier::BOLD),
         ));
     }
     if desc_w > 0 {
         header_spans.push(Span::styled(
             "  ",
-            Style::default().fg(CLR_HEADER_FG).bg(CLR_HEADER_BG),
+            Style::default().fg(clr_header_fg()).bg(clr_header_bg()),
         ));
         header_spans.push(Span::styled(
             truncate_str("Description", desc_w),
             Style::default()
-                .fg(CLR_HEADER_FG)
-                .bg(CLR_HEADER_BG)
+                .fg(clr_header_fg())
+                .bg(clr_header_bg())
                 .add_modifier(Modifier::BOLD),
         ));
     }
     safe_render_widget(
         f,
-        Paragraph::new(Line::from(header_spans)).style(Style::default().bg(CLR_HEADER_BG)),
+        Paragraph::new(Line::from(header_spans)).style(Style::default().bg(clr_header_bg())),
         header_area,
     );
 
@@ -788,9 +788,9 @@ pub(super) fn render_viewer_plugin_palette(
             let plugin = &state.items[plugin_idx];
             let is_sel = match_idx == qs_pos;
             let (bg, fg, hi) = if is_sel {
-                (CLR_QS_SEL_BG, CLR_QS_SEL_FG, CLR_QS_MATCH_HI_SEL)
+                (clr_qs_sel_bg(), clr_qs_sel_fg(), clr_qs_match_hi_sel())
             } else {
-                (CLR_QS_BG, CLR_QS_LIST_FG, CLR_QS_MATCH_HI)
+                (clr_qs_bg(), clr_qs_list_fg(), clr_qs_match_hi())
             };
 
             let marker = if is_sel { "\u{25b6} " } else { "  " };
@@ -809,7 +809,7 @@ pub(super) fn render_viewer_plugin_palette(
                 spans.push(Span::styled(
                     truncate_str(&extensions, ext_w),
                     Style::default()
-                        .fg(if is_sel { fg } else { CLR_DATA })
+                        .fg(if is_sel { fg } else { clr_data() })
                         .bg(bg),
                 ));
             }
@@ -847,7 +847,7 @@ pub(super) fn render_viewer_plugin_palette(
 
     safe_render_widget(
         f,
-        List::new(items).style(Style::default().bg(CLR_QS_BG)),
+        List::new(items).style(Style::default().bg(clr_qs_bg())),
         render_area,
     );
 
@@ -856,8 +856,8 @@ pub(super) fn render_viewer_plugin_palette(
         safe_render_stateful_widget(
             f,
             Scrollbar::new(ScrollbarOrientation::VerticalRight)
-                .thumb_style(Style::default().fg(CLR_QS_BORDER))
-                .track_style(Style::default().bg(CLR_QS_BG))
+                .thumb_style(Style::default().fg(clr_qs_border()))
+                .track_style(Style::default().bg(clr_qs_bg()))
                 .begin_symbol(None)
                 .end_symbol(None),
             sb,
@@ -898,8 +898,8 @@ pub(super) fn render_audio_player_palette(
     let block = Block::default()
         .title(" Audio Player ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_QS_BORDER))
-        .style(Style::default().bg(CLR_QS_BG));
+        .border_style(Style::default().fg(clr_qs_border()))
+        .style(Style::default().bg(clr_qs_bg()));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
 
@@ -941,8 +941,8 @@ pub(super) fn render_audio_player_palette(
         f,
         Paragraph::new(truncate_str(&q, left_w as usize)).style(
             Style::default()
-                .fg(CLR_QS_INPUT_FG)
-                .bg(CLR_QS_INPUT_BG)
+                .fg(clr_qs_input_fg())
+                .bg(clr_qs_input_bg())
                 .add_modifier(Modifier::BOLD),
         ),
         Rect {
@@ -954,7 +954,7 @@ pub(super) fn render_audio_player_palette(
     );
     safe_render_widget(
         f,
-        Paragraph::new(count_hint).style(Style::default().fg(CLR_QS_NO_MATCH).bg(CLR_QS_INPUT_BG)),
+        Paragraph::new(count_hint).style(Style::default().fg(clr_qs_no_match()).bg(clr_qs_input_bg())),
         Rect {
             x: input_area.x + left_w,
             y: input_area.y,
@@ -966,7 +966,7 @@ pub(super) fn render_audio_player_palette(
     safe_render_widget(
         f,
         Paragraph::new("─".repeat(sep_area.width as usize))
-            .style(Style::default().fg(CLR_QS_BORDER).bg(CLR_QS_BG)),
+            .style(Style::default().fg(clr_qs_border()).bg(clr_qs_bg())),
         sep_area,
     );
 
@@ -987,9 +987,9 @@ pub(super) fn render_audio_player_palette(
             let plugin = &state.items[idx];
             let is_sel = match_idx == qs_pos;
             let (bg, fg, hi) = if is_sel {
-                (CLR_QS_SEL_BG, CLR_QS_SEL_FG, CLR_QS_MATCH_HI_SEL)
+                (clr_qs_sel_bg(), clr_qs_sel_fg(), clr_qs_match_hi_sel())
             } else {
-                (CLR_QS_BG, CLR_QS_LIST_FG, CLR_QS_MATCH_HI)
+                (clr_qs_bg(), clr_qs_list_fg(), clr_qs_match_hi())
             };
 
             let name_label = if plugin.name == plugin.id {
@@ -1016,9 +1016,9 @@ pub(super) fn render_audio_player_palette(
                 format!("  {}", desc),
                 Style::default()
                     .fg(if is_sel {
-                        Color::Rgb(220, 230, 255)
+                        clr_qs_sel_fg()
                     } else {
-                        CLR_QS_NO_MATCH
+                        clr_qs_no_match()
                     })
                     .bg(bg),
             ));
@@ -1046,7 +1046,7 @@ pub(super) fn render_audio_player_palette(
 
     safe_render_widget(
         f,
-        List::new(items).style(Style::default().bg(CLR_QS_BG)),
+        List::new(items).style(Style::default().bg(clr_qs_bg())),
         render_area,
     );
 
@@ -1055,8 +1055,8 @@ pub(super) fn render_audio_player_palette(
         safe_render_stateful_widget(
             f,
             Scrollbar::new(ScrollbarOrientation::VerticalRight)
-                .thumb_style(Style::default().fg(CLR_QS_BORDER))
-                .track_style(Style::default().bg(CLR_QS_BG))
+                .thumb_style(Style::default().fg(clr_qs_border()))
+                .track_style(Style::default().bg(clr_qs_bg()))
                 .begin_symbol(None)
                 .end_symbol(None),
             sb,
@@ -1092,8 +1092,8 @@ pub(super) fn render_store_install_palette(
     let block = Block::default()
         .title(" Store ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG))
-        .style(Style::default().bg(CLR_APP_BG));
+        .border_style(Style::default().fg(clr_panel_border()).bg(clr_app_bg()))
+        .style(Style::default().bg(clr_app_bg()));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
 
@@ -1132,19 +1132,19 @@ pub(super) fn render_store_install_palette(
         Span::styled(
             truncate_str(&input_text, input_inner_w),
             Style::default()
-                .fg(Color::Rgb(34, 20, 12))
-                .bg(Color::Rgb(232, 220, 192)),
+                .fg(clr_cursor_fg())
+                .bg(clr_cursor_bg()),
         ),
         Span::styled(
             count_hint,
             Style::default()
-                .fg(Color::Rgb(88, 66, 45))
-                .bg(Color::Rgb(232, 220, 192)),
+                .fg(clr_panel_border_dim())
+                .bg(clr_cursor_bg()),
         ),
     ]);
     safe_render_widget(
         f,
-        Paragraph::new(input_row).style(Style::default().bg(Color::Rgb(232, 220, 192))),
+        Paragraph::new(input_row).style(Style::default().bg(clr_cursor_bg())),
         Rect {
             x: inner.x,
             y: inner.y,
@@ -1160,7 +1160,7 @@ pub(super) fn render_store_install_palette(
             &format!("  {}", state.index_version_label()),
             inner.width as usize,
         ))
-        .style(Style::default().fg(Color::Rgb(88, 66, 45)).bg(CLR_APP_BG)),
+        .style(Style::default().fg(clr_panel_border_dim()).bg(clr_app_bg())),
         Rect {
             x: inner.x,
             y: inner.y + 1,
@@ -1170,7 +1170,7 @@ pub(super) fn render_store_install_palette(
     );
     safe_render_widget(
         f,
-        Paragraph::new(sep.clone()).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
+        Paragraph::new(sep.clone()).style(Style::default().fg(clr_panel_border_dim()).bg(clr_app_bg())),
         Rect {
             x: inner.x,
             y: inner.y + 2,
@@ -1183,7 +1183,7 @@ pub(super) fn render_store_install_palette(
     let footer_sep_y = button_y.saturating_sub(1);
     safe_render_widget(
         f,
-        Paragraph::new(sep).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
+        Paragraph::new(sep).style(Style::default().fg(clr_panel_border_dim()).bg(clr_app_bg())),
         Rect {
             x: inner.x,
             y: footer_sep_y,
@@ -1250,7 +1250,7 @@ pub(super) fn render_store_install_palette(
     for row in 0..body.height {
         safe_render_widget(
             f,
-            Paragraph::new("│").style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
+            Paragraph::new("│").style(Style::default().fg(clr_panel_border_dim()).bg(clr_app_bg())),
             Rect {
                 x: sep_col,
                 y: body.y + row,
@@ -1269,8 +1269,8 @@ pub(super) fn render_store_install_palette(
         ))
         .style(
             Style::default()
-                .fg(CLR_HEADER_FG)
-                .bg(CLR_HEADER_BG)
+                .fg(clr_header_fg())
+                .bg(clr_header_bg())
                 .add_modifier(Modifier::BOLD),
         ),
         Rect {
@@ -1291,7 +1291,7 @@ pub(super) fn render_store_install_palette(
         };
         safe_render_widget(
             f,
-            Paragraph::new(msg).style(Style::default().fg(Color::Rgb(72, 48, 28)).bg(CLR_APP_BG)),
+            Paragraph::new(msg).style(Style::default().fg(clr_menu_dd_sep()).bg(clr_app_bg())),
             Rect {
                 x: left_area.x,
                 y: left_area.y + 1,
@@ -1374,8 +1374,8 @@ pub(super) fn render_store_install_palette(
                     f,
                     Paragraph::new(label.clone()).style(
                         Style::default()
-                            .fg(Color::Rgb(92, 74, 36))
-                            .bg(Color::Rgb(223, 210, 178))
+                            .fg(clr_menu_dd_sep())
+                            .bg(clr_button_bg())
                             .add_modifier(Modifier::BOLD),
                     ),
                     Rect {
@@ -1399,17 +1399,17 @@ pub(super) fn render_store_install_palette(
 
         let style = if selected {
             Style::default()
-                .fg(Color::Rgb(16, 10, 6))
-                .bg(Color::Rgb(235, 220, 188))
+                .fg(clr_cursor_fg())
+                .bg(clr_cursor_bg())
                 .add_modifier(Modifier::BOLD)
         } else if has_update {
-            Style::default().fg(Color::Rgb(150, 74, 10)).bg(CLR_APP_BG)
+            Style::default().fg(clr_archive()).bg(clr_app_bg())
         } else if !has_compatible_method {
-            Style::default().fg(Color::Rgb(118, 104, 88)).bg(CLR_APP_BG)
+            Style::default().fg(clr_panel_border_dim()).bg(clr_app_bg())
         } else if installed {
-            Style::default().fg(Color::Rgb(26, 104, 46)).bg(CLR_APP_BG)
+            Style::default().fg(clr_exec()).bg(clr_app_bg())
         } else {
-            Style::default().fg(Color::Rgb(46, 28, 16)).bg(CLR_APP_BG)
+            Style::default().fg(clr_menu_dd_bg()).bg(clr_app_bg())
         };
 
         let status = if has_update {
@@ -1454,8 +1454,8 @@ pub(super) fn render_store_install_palette(
         ))
         .style(
             Style::default()
-                .fg(CLR_HEADER_FG)
-                .bg(CLR_HEADER_BG)
+                .fg(clr_header_fg())
+                .bg(clr_header_bg())
                 .add_modifier(Modifier::BOLD),
         ),
         Rect {
@@ -1476,11 +1476,11 @@ pub(super) fn render_store_install_palette(
     };
 
     let lbl_style = Style::default()
-        .fg(Color::Rgb(48, 64, 96))
-        .bg(CLR_APP_BG)
+        .fg(clr_qs_dir_fg())
+        .bg(clr_app_bg())
         .add_modifier(Modifier::BOLD);
-    let val_style = Style::default().fg(Color::Rgb(34, 20, 12)).bg(CLR_APP_BG);
-    let dim_style = Style::default().fg(Color::Rgb(88, 66, 45)).bg(CLR_APP_BG);
+    let val_style = Style::default().fg(clr_menu_dd_bg()).bg(clr_app_bg());
+    let dim_style = Style::default().fg(clr_panel_border_dim()).bg(clr_app_bg());
     let rw = right_area.width as usize;
 
     if let Some(progress) = state.progress.as_ref() {
@@ -1499,7 +1499,7 @@ pub(super) fn render_store_install_palette(
         ]);
         safe_render_widget(
             f,
-            Paragraph::new(text).style(Style::default().bg(CLR_APP_BG)),
+            Paragraph::new(text).style(Style::default().bg(clr_app_bg())),
             Rect {
                 x: right_area.x,
                 y: detail_y + *row,
@@ -1552,7 +1552,7 @@ pub(super) fn render_store_install_palette(
             safe_render_widget(
                 f,
                 Paragraph::new(Line::from(vec![Span::styled("  Available :", lbl_style)]))
-                    .style(Style::default().bg(CLR_APP_BG)),
+                    .style(Style::default().bg(clr_app_bg())),
                 Rect {
                     x: right_area.x,
                     y: detail_y + row,
@@ -1591,7 +1591,7 @@ pub(super) fn render_store_install_palette(
         safe_render_widget(
             f,
             Paragraph::new(Line::from(vec![Span::styled("  Description :", lbl_style)]))
-                .style(Style::default().bg(CLR_APP_BG)),
+                .style(Style::default().bg(clr_app_bg())),
             Rect {
                 x: right_area.x,
                 y: detail_y + row,
@@ -1647,12 +1647,12 @@ fn render_store_install_progress(
         .borders(Borders::ALL)
         .border_style(
             Style::default()
-                .fg(Color::Rgb(160, 160, 160))
+                .fg(clr_panel_border_dim())
                 .bg(Color::Black),
         )
         .style(
             Style::default()
-                .fg(Color::Rgb(230, 230, 230))
+                .fg(clr_qs_input_fg())
                 .bg(Color::Black),
         );
     let inner = block.inner(box_area);
@@ -1683,7 +1683,7 @@ fn render_store_install_progress(
             f,
             Paragraph::new(truncate_str(line, width)).style(
                 Style::default()
-                    .fg(Color::Rgb(230, 230, 230))
+                    .fg(clr_qs_input_fg())
                     .bg(Color::Black),
             ),
             Rect {
@@ -1713,8 +1713,8 @@ fn render_store_install_methods_dialog(
     let block = Block::default()
         .title(" Install Methods ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG))
-        .style(Style::default().bg(CLR_APP_BG));
+        .border_style(Style::default().fg(clr_panel_border()).bg(clr_app_bg()))
+        .style(Style::default().bg(clr_app_bg()));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
 
@@ -1731,7 +1731,7 @@ fn render_store_install_methods_dialog(
     safe_render_widget(
         f,
         Paragraph::new(truncate_str(&summary, inner.width as usize))
-            .style(Style::default().fg(Color::Rgb(46, 28, 16)).bg(CLR_APP_BG)),
+            .style(Style::default().fg(clr_menu_dd_bg()).bg(clr_app_bg())),
         Rect {
             x: inner.x,
             y: inner.y,
@@ -1745,8 +1745,8 @@ fn render_store_install_methods_dialog(
         f,
         Paragraph::new("  Method       Command        Status      Store apps").style(
             Style::default()
-                .fg(CLR_HEADER_FG)
-                .bg(CLR_HEADER_BG)
+                .fg(clr_header_fg())
+                .bg(clr_header_bg())
                 .add_modifier(Modifier::BOLD),
         ),
         Rect {
@@ -1763,7 +1763,7 @@ fn render_store_install_methods_dialog(
         safe_render_widget(
             f,
             Paragraph::new("  No application install method matches this OS.")
-                .style(Style::default().fg(Color::Rgb(118, 104, 88)).bg(CLR_APP_BG)),
+                .style(Style::default().fg(clr_panel_border_dim()).bg(clr_app_bg())),
             Rect {
                 x: inner.x,
                 y: list_y,
@@ -1788,9 +1788,9 @@ fn render_store_install_methods_dialog(
                 apps
             );
             let style = if method.available {
-                Style::default().fg(Color::Rgb(26, 104, 46)).bg(CLR_APP_BG)
+                Style::default().fg(clr_exec()).bg(clr_app_bg())
             } else {
-                Style::default().fg(Color::Rgb(150, 74, 10)).bg(CLR_APP_BG)
+                Style::default().fg(clr_archive()).bg(clr_app_bg())
             };
             safe_render_widget(
                 f,
@@ -1828,8 +1828,8 @@ fn render_store_detect_dialog(f: &mut Frame, detect: &crate::app::StoreDetectSta
     let block = Block::default()
         .title(" Detect Installed Applications ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG))
-        .style(Style::default().bg(CLR_APP_BG));
+        .border_style(Style::default().fg(clr_panel_border()).bg(clr_app_bg()))
+        .style(Style::default().bg(clr_app_bg()));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
 
@@ -1841,7 +1841,7 @@ fn render_store_detect_dialog(f: &mut Frame, detect: &crate::app::StoreDetectSta
     safe_render_widget(
         f,
         Paragraph::new(truncate_str(&summary, inner.width as usize))
-            .style(Style::default().fg(Color::Rgb(46, 28, 16)).bg(CLR_APP_BG)),
+            .style(Style::default().fg(clr_menu_dd_bg()).bg(clr_app_bg())),
         Rect {
             x: inner.x,
             y: inner.y,
@@ -1852,7 +1852,7 @@ fn render_store_detect_dialog(f: &mut Frame, detect: &crate::app::StoreDetectSta
     safe_render_widget(
         f,
         Paragraph::new("  Space/Left/Right changes action. Enter applies.")
-            .style(Style::default().fg(Color::Rgb(88, 66, 45)).bg(CLR_APP_BG)),
+            .style(Style::default().fg(clr_panel_border_dim()).bg(clr_app_bg())),
         Rect {
             x: inner.x,
             y: inner.y + 1,
@@ -1867,7 +1867,7 @@ fn render_store_detect_dialog(f: &mut Frame, detect: &crate::app::StoreDetectSta
         safe_render_widget(
             f,
             Paragraph::new("  No missing remembered applications.")
-                .style(Style::default().fg(Color::Rgb(26, 104, 46)).bg(CLR_APP_BG)),
+                .style(Style::default().fg(clr_exec()).bg(clr_app_bg())),
             Rect {
                 x: inner.x,
                 y: list_y,
@@ -1900,10 +1900,10 @@ fn render_store_detect_dialog(f: &mut Frame, detect: &crate::app::StoreDetectSta
             let style = if selected {
                 Style::default()
                     .fg(Color::Black)
-                    .bg(CLR_CURSOR_BG)
+                    .bg(clr_cursor_bg())
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::Rgb(46, 28, 16)).bg(CLR_APP_BG)
+                Style::default().fg(clr_menu_dd_bg()).bg(clr_app_bg())
             };
             safe_render_widget(
                 f,

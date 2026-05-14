@@ -80,7 +80,7 @@ fn render_quick_preview(
 
 pub(super) fn render_center_buttons(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(
-        Block::default().style(Style::default().bg(CLR_APP_BG)),
+        Block::default().style(Style::default().bg(clr_app_bg())),
         area,
     );
 
@@ -152,11 +152,11 @@ fn render_panel(
 ) {
     let border_style = if active {
         Style::default()
-            .fg(CLR_PANEL_BORDER)
-            .bg(CLR_APP_BG)
+            .fg(clr_panel_border())
+            .bg(clr_app_bg())
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)
+        Style::default().fg(clr_panel_border_dim()).bg(clr_app_bg())
     };
     let border_type = if active {
         BorderType::Thick
@@ -179,10 +179,10 @@ fn render_panel(
         .borders(Borders::ALL)
         .border_type(border_type)
         .border_style(border_style)
-        .style(Style::default().bg(CLR_PANEL_BG))
+        .style(Style::default().bg(clr_panel_bg()))
         .title(Span::styled(
             title,
-            Style::default().fg(CLR_PANEL_TITLE).bg(CLR_APP_BG),
+            Style::default().fg(clr_panel_title()).bg(clr_app_bg()),
         ));
 
     let inner = block.inner(area);
@@ -252,37 +252,37 @@ fn render_panel_header(
         Span::styled(
             format!("{:^width$}", "Name", width = name_w),
             Style::default()
-                .fg(CLR_HEADER_FG)
-                .bg(CLR_HEADER_BG)
+                .fg(clr_header_fg())
+                .bg(clr_header_bg())
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("│", Style::default().fg(CLR_PANEL_BORDER).bg(CLR_PANEL_BG)),
+        Span::styled("│", Style::default().fg(clr_panel_border()).bg(clr_panel_bg())),
         Span::styled(
             format!("{:^width$}", "Size", width = size_w),
             Style::default()
-                .fg(CLR_HEADER_FG)
-                .bg(CLR_HEADER_BG)
+                .fg(clr_header_fg())
+                .bg(clr_header_bg())
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("│", Style::default().fg(CLR_PANEL_BORDER).bg(CLR_PANEL_BG)),
+        Span::styled("│", Style::default().fg(clr_panel_border()).bg(clr_panel_bg())),
         Span::styled(
             format!("{:^width$}", "Date", width = date_w),
             Style::default()
-                .fg(CLR_HEADER_FG)
-                .bg(CLR_HEADER_BG)
+                .fg(clr_header_fg())
+                .bg(clr_header_bg())
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("│", Style::default().fg(CLR_PANEL_BORDER).bg(CLR_PANEL_BG)),
+        Span::styled("│", Style::default().fg(clr_panel_border()).bg(clr_panel_bg())),
         Span::styled(
             format!("{:^width$}", "Time", width = time_w),
             Style::default()
-                .fg(CLR_HEADER_FG)
-                .bg(CLR_HEADER_BG)
+                .fg(clr_header_fg())
+                .bg(clr_header_bg())
                 .add_modifier(Modifier::BOLD),
         ),
     ]);
     f.render_widget(
-        Paragraph::new(header_line).style(Style::default().bg(CLR_PANEL_BG)),
+        Paragraph::new(header_line).style(Style::default().bg(clr_panel_bg())),
         header_area,
     );
 }
@@ -311,9 +311,9 @@ fn render_panel_entries(
             let is_disconnect_entry = entry.name == "[disconnect]";
             let is_cursor = active && idx == panel.cursor;
             let fg = if is_cursor {
-                CLR_CURSOR_FG
+                clr_cursor_fg()
             } else if entry.selected {
-                CLR_SELECTED
+                clr_selected()
             } else {
                 entry_fg(entry, color_by_type)
             };
@@ -321,7 +321,7 @@ fn render_panel_entries(
             let base_style = if is_cursor {
                 Style::default()
                     .fg(fg)
-                    .bg(CLR_CURSOR_BG)
+                    .bg(clr_cursor_bg())
                     .add_modifier(Modifier::BOLD)
             } else if entry.selected || entry.is_dir {
                 Style::default().fg(fg).add_modifier(Modifier::BOLD)
@@ -382,7 +382,7 @@ fn render_panel_entries(
         })
         .collect();
 
-    let list = List::new(items).style(Style::default().bg(CLR_PANEL_BG));
+    let list = List::new(items).style(Style::default().bg(clr_panel_bg()));
     f.render_widget(list, list_area);
 }
 
@@ -406,8 +406,8 @@ fn column_separator(base_style: Style) -> Span<'static> {
     Span::styled(
         "│",
         Style::default()
-            .fg(CLR_PANEL_BORDER_DIM)
-            .bg(base_style.bg.unwrap_or(CLR_PANEL_BG)),
+            .fg(clr_panel_border_dim())
+            .bg(base_style.bg.unwrap_or(clr_panel_bg())),
     )
 }
 
@@ -431,8 +431,8 @@ fn render_panel_scrollbar(
     };
     f.render_stateful_widget(
         Scrollbar::new(ScrollbarOrientation::VerticalRight)
-            .thumb_style(Style::default().fg(CLR_PANEL_BORDER))
-            .track_style(Style::default().bg(CLR_PANEL_BG))
+            .thumb_style(Style::default().fg(clr_panel_border()))
+            .track_style(Style::default().bg(clr_panel_bg()))
             .begin_symbol(Some("^"))
             .end_symbol(Some("v")),
         sb_area,
@@ -484,7 +484,7 @@ fn render_panel_footer(f: &mut Frame, panel: &crate::panel::Panel, footer_area: 
 
     f.render_widget(
         Paragraph::new(truncate_str(&footer, footer_area.width as usize))
-            .style(Style::default().fg(CLR_BUTTON_FG).bg(CLR_STATUS_BG)),
+            .style(Style::default().fg(clr_button_fg()).bg(clr_status_bg())),
         footer_area,
     );
 }
@@ -495,7 +495,7 @@ fn colorize_idf_line(line: &str) -> Line<'static> {
         return Line::from(Span::styled(
             line.to_string(),
             Style::default()
-                .fg(CLR_HEADER_FG)
+                .fg(clr_header_fg())
                 .add_modifier(Modifier::BOLD),
         ));
     }
@@ -508,16 +508,16 @@ fn colorize_idf_line(line: &str) -> Line<'static> {
         if line.starts_with(prefix.as_str()) {
             let value = &line[prefix.len()..];
             let label_color = match *label {
-                "Type" => CLR_HEADER_FG,
-                "Title" | "Composer" => CLR_PANEL_TITLE,
-                _ => CLR_PANEL_BORDER_DIM,
+                "Type" => clr_header_fg(),
+                "Title" | "Composer" => clr_panel_title(),
+                _ => clr_panel_border_dim(),
             };
             let value_color = match *label {
-                "Type" => CLR_PANEL_TITLE,
-                "Mime" => CLR_DATA,
-                "Attr" => CLR_EXEC,
-                "Viewers" => CLR_AUDIO,
-                _ => CLR_TEXT,
+                "Type" => clr_panel_title(),
+                "Mime" => clr_data(),
+                "Attr" => clr_exec(),
+                "Viewers" => clr_audio(),
+                _ => clr_text(),
             };
             return Line::from(vec![
                 Span::styled(prefix, Style::default().fg(label_color)),
@@ -529,7 +529,7 @@ fn colorize_idf_line(line: &str) -> Line<'static> {
     if line.starts_with(' ') {
         return Line::from(Span::styled(
             line.to_string(),
-            Style::default().fg(CLR_DATA),
+            Style::default().fg(clr_data()),
         ));
     }
     // Empty line
@@ -540,7 +540,7 @@ fn colorize_idf_line(line: &str) -> Line<'static> {
     Line::from(Span::styled(
         line.to_string(),
         Style::default()
-            .fg(CLR_PANEL_TITLE)
+            .fg(clr_panel_title())
             .add_modifier(Modifier::BOLD),
     ))
 }
@@ -553,7 +553,7 @@ fn hex_dump_line(chunk: &[u8], bytes_per_row: usize) -> Line<'static> {
         }
         spans.push(Span::styled(
             format!("{:02X}", b),
-            Style::default().fg(CLR_DATA),
+            Style::default().fg(clr_data()),
         ));
     }
     // Pad if this is a short last row
@@ -573,7 +573,7 @@ fn hex_dump_line(chunk: &[u8], bytes_per_row: usize) -> Line<'static> {
             }
         })
         .collect();
-    spans.push(Span::styled(ascii, Style::default().fg(CLR_UNKNOWN)));
+    spans.push(Span::styled(ascii, Style::default().fg(clr_unknown())));
     Line::from(spans)
 }
 
@@ -581,17 +581,17 @@ fn render_file_id_panel(f: &mut Frame, app: &App, area: Rect) {
     let focused = app.file_id_active;
     let (border_style, title_style, title_text) = if focused {
         (
-            Style::default().fg(CLR_HEADER_FG).bg(CLR_APP_BG),
+            Style::default().fg(clr_header_fg()).bg(clr_app_bg()),
             Style::default()
-                .fg(CLR_HEADER_FG)
-                .bg(CLR_APP_BG)
+                .fg(clr_header_fg())
+                .bg(clr_app_bg())
                 .add_modifier(Modifier::BOLD),
             " FileID ↑↓  Tab=exit ",
         )
     } else {
         (
-            Style::default().fg(CLR_PANEL_BORDER).bg(CLR_APP_BG),
-            Style::default().fg(CLR_PANEL_TITLE).bg(CLR_APP_BG),
+            Style::default().fg(clr_panel_border()).bg(clr_app_bg()),
+            Style::default().fg(clr_panel_title()).bg(clr_app_bg()),
             " FileID ",
         )
     };
@@ -599,7 +599,7 @@ fn render_file_id_panel(f: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .border_type(BorderType::Thick)
         .border_style(border_style)
-        .style(Style::default().bg(CLR_PANEL_BG))
+        .style(Style::default().bg(clr_panel_bg()))
         .title(Span::styled(title_text, title_style));
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -622,7 +622,7 @@ fn render_file_id_panel(f: &mut Frame, app: &App, area: Rect) {
     let right_col = cols[2];
 
     // Render decorative inner gutter bars (pipe + padding space)
-    let gutter_style = Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_PANEL_BG);
+    let gutter_style = Style::default().fg(clr_panel_border_dim()).bg(clr_panel_bg());
     let left_gutter_lines: Vec<Line<'static>> = (0..inner.height as usize)
         .map(|_| Line::from(Span::styled("│ ", gutter_style)))
         .collect();
@@ -630,11 +630,11 @@ fn render_file_id_panel(f: &mut Frame, app: &App, area: Rect) {
         .map(|_| Line::from(Span::styled(" │", gutter_style)))
         .collect();
     f.render_widget(
-        Paragraph::new(left_gutter_lines).style(Style::default().bg(CLR_PANEL_BG)),
+        Paragraph::new(left_gutter_lines).style(Style::default().bg(clr_panel_bg())),
         left_col,
     );
     f.render_widget(
-        Paragraph::new(right_gutter_lines).style(Style::default().bg(CLR_PANEL_BG)),
+        Paragraph::new(right_gutter_lines).style(Style::default().bg(clr_panel_bg())),
         right_col,
     );
 
@@ -665,7 +665,7 @@ fn render_file_id_panel(f: &mut Frame, app: &App, area: Rect) {
     {
         lines.push(Line::from(Span::styled(
             "─".repeat(cw),
-            Style::default().fg(CLR_PANEL_BORDER_DIM),
+            Style::default().fg(clr_panel_border_dim()),
         )));
         for chunk in data.chunks(bytes_per_row) {
             lines.push(hex_dump_line(chunk, bytes_per_row));
@@ -675,7 +675,7 @@ fn render_file_id_panel(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(
         Paragraph::new(lines)
             .scroll((app.file_id_scroll, 0))
-            .style(Style::default().bg(CLR_PANEL_BG)),
+            .style(Style::default().bg(clr_panel_bg())),
         content_area,
     );
 }
@@ -703,15 +703,15 @@ fn render_menu_button(f: &mut Frame, area: Rect, label: &str) {
         };
         safe_render_widget(
             f,
-            Block::default().style(Style::default().bg(CLR_BUTTON_BG)),
+            Block::default().style(Style::default().bg(clr_button_bg())),
             area,
         );
         safe_render_widget(
             f,
             Paragraph::new(text).alignment(Alignment::Center).style(
                 Style::default()
-                    .fg(CLR_BUTTON_FG)
-                    .bg(CLR_BUTTON_BG)
+                    .fg(clr_button_fg())
+                    .bg(clr_button_bg())
                     .add_modifier(Modifier::BOLD),
             ),
             text_area,
@@ -721,9 +721,9 @@ fn render_menu_button(f: &mut Frame, area: Rect, label: &str) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_PANEL_BORDER))
+        .border_style(Style::default().fg(clr_panel_border()))
         .border_type(BorderType::Rounded)
-        .style(Style::default().bg(CLR_BUTTON_BG));
+        .style(Style::default().bg(clr_button_bg()));
     let inner = block.inner(area);
     safe_render_widget(f, block, area);
     let top_pad = inner.height.saturating_sub(1) / 2;
@@ -737,8 +737,8 @@ fn render_menu_button(f: &mut Frame, area: Rect, label: &str) {
         f,
         Paragraph::new(text).alignment(Alignment::Center).style(
             Style::default()
-                .fg(CLR_BUTTON_FG)
-                .bg(CLR_BUTTON_BG)
+                .fg(clr_button_fg())
+                .bg(clr_button_bg())
                 .add_modifier(Modifier::BOLD),
         ),
         text_area,

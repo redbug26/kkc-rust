@@ -273,6 +273,42 @@ hint = "#ACA08E"
 
 
 # =============================================================================
+# [search]  —  File-search panel overlay
+# =============================================================================
+[search]
+
+# Search panel background.
+background = "#121218"
+
+# Label colour for inactive input field (Name / Content / Dir labels).
+label_foreground = "#788CB4"
+
+# Label colour for the active / focused input field.
+active_label_foreground = "#FFF472"
+
+# Input text colour.
+input_foreground = "#E6E1D2"
+
+# Input background when the field is active / focused.
+input_background_active = "#1E2840"
+
+# Input background when the field is idle / unfocused.
+input_background_idle = "#16161E"
+
+# Placeholder text colour (shown when the field is empty and unfocused).
+placeholder = "#505A6E"
+
+# Result column header text colour.
+header = "#646E8C"
+
+# Separator / border between input area and results list.
+separator = "#3C4664"
+
+# "Searching in progress" indicator colour.
+running = "#DCB450"
+
+
+# =============================================================================
 # [syntax]  —  Syntax-highlighted viewer colours
 # =============================================================================
 [syntax]

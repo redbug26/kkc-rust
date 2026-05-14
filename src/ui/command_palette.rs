@@ -6,13 +6,30 @@ use unicode_width::UnicodeWidthStr;
 
 const LUA_APP_CATEGORY: &str = "Apps";
 
-// Accent colour for shortcuts and dim colour for fn_name.
-const CLR_SHORTCUT: Color = Color::Rgb(100, 195, 220);
-const CLR_SHORTCUT_CHANGED: Color = Color::Rgb(255, 196, 92);
-const CLR_CATEGORY: Color = Color::Rgb(140, 140, 140);
-const CLR_FN_NAME: Color = Color::Rgb(90, 90, 90);
-const CLR_MARKER: Color = Color::Rgb(255, 220, 80);
-const CLR_RECENT_STAR: Color = Color::Rgb(255, 190, 60);
+#[inline]
+fn clr_shortcut() -> Color {
+    clr_qs_dir_fg()
+}
+#[inline]
+fn clr_shortcut_changed() -> Color {
+    clr_menu_hotkey()
+}
+#[inline]
+fn clr_category() -> Color {
+    clr_qs_no_match()
+}
+#[inline]
+fn clr_fn_name() -> Color {
+    clr_qs_sep()
+}
+#[inline]
+fn clr_marker() -> Color {
+    clr_qs_match_hi()
+}
+#[inline]
+fn clr_recent_star() -> Color {
+    clr_qs_match_hi()
+}
 // Width reserved for right-aligned shortcut column (e.g. "Ctrl+F1" = 7 + padding)
 const SHORT_W: usize = 11;
 
@@ -88,8 +105,8 @@ pub(super) fn render_command_palette(
             "  Command Palette  "
         })
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_QS_BORDER))
-        .style(Style::default().bg(CLR_QS_BG));
+        .border_style(Style::default().fg(clr_qs_border()))
+        .style(Style::default().bg(clr_qs_bg()));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
 
@@ -121,7 +138,7 @@ pub(super) fn render_command_palette(
     let input_row = Line::from(vec![
         Span::styled(
             truncate_str(&input_text, input_inner_w),
-            Style::default().fg(CLR_QS_INPUT_FG).bg(CLR_QS_INPUT_BG),
+            Style::default().fg(clr_qs_input_fg()).bg(clr_qs_input_bg()),
         ),
         Span::styled(
             count_hint,
@@ -129,14 +146,14 @@ pub(super) fn render_command_palette(
                 .fg(if total == 0 {
                     Color::Red
                 } else {
-                    CLR_QS_NO_MATCH
+                    clr_qs_no_match()
                 })
-                .bg(CLR_QS_INPUT_BG),
+                .bg(clr_qs_input_bg()),
         ),
     ]);
     safe_render_widget(
         f,
-        Paragraph::new(input_row).style(Style::default().bg(CLR_QS_INPUT_BG)),
+        Paragraph::new(input_row).style(Style::default().bg(clr_qs_input_bg())),
         Rect {
             x: inner.x,
             y: inner.y,
@@ -149,7 +166,7 @@ pub(super) fn render_command_palette(
     let sep = "─".repeat(inner.width as usize);
     safe_render_widget(
         f,
-        Paragraph::new(sep).style(Style::default().fg(CLR_QS_SEP).bg(CLR_QS_BG)),
+        Paragraph::new(sep).style(Style::default().fg(clr_qs_sep()).bg(clr_qs_bg())),
         Rect {
             x: inner.x,
             y: inner.y + 1,
@@ -190,7 +207,7 @@ pub(super) fn render_command_palette(
                 f,
                 Paragraph::new(Line::from(vec![Span::styled(
                     sep_line,
-                    Style::default().fg(CLR_QS_SEP).bg(CLR_QS_BG),
+                    Style::default().fg(clr_qs_sep()).bg(clr_qs_bg()),
                 )])),
                 Rect {
                     x: list_area.x,
@@ -246,20 +263,20 @@ pub(super) fn render_command_palette(
 
         let (row_bg, label_fg, cat_fg, fn_fg, short_fg, marker_fg) = if selected {
             (
-                CLR_QS_SEL_BG,
-                CLR_QS_SEL_FG,
-                Color::Rgb(200, 215, 240),
-                Color::Rgb(130, 155, 185),
-                Color::Rgb(150, 230, 255),
-                CLR_MARKER,
+                clr_qs_sel_bg(),
+                clr_qs_sel_fg(),
+                clr_qs_sel_fg(),
+                clr_qs_match_hi_sel(),
+                clr_qs_dir_fg(),
+                clr_marker(),
             )
         } else {
             (
-                CLR_QS_BG,
-                CLR_QS_LIST_FG,
-                CLR_CATEGORY,
-                CLR_FN_NAME,
-                CLR_SHORTCUT,
+                clr_qs_bg(),
+                clr_qs_list_fg(),
+                clr_category(),
+                clr_fn_name(),
+                clr_shortcut(),
                 Color::DarkGray,
             )
         };
@@ -268,7 +285,7 @@ pub(super) fn render_command_palette(
         let (marker_str, marker_color) = if selected {
             ("> ", marker_fg)
         } else if is_recent {
-            ("\u{2605} ", CLR_RECENT_STAR) // ★
+            ("\u{2605} ", clr_recent_star()) // ★
         } else {
             ("  ", marker_fg)
         };
@@ -297,7 +314,7 @@ pub(super) fn render_command_palette(
                 .unwrap_or_default();
             let changed = shortcut != default_shortcut;
             if changed {
-                (CLR_SHORTCUT_CHANGED, CLR_SHORTCUT_CHANGED)
+                (clr_shortcut_changed(), clr_shortcut_changed())
             } else {
                 (fn_fg, short_fg)
             }

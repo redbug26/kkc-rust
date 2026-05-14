@@ -138,9 +138,9 @@ fn render_viewer_backdrop(f: &mut Frame, host: Rect, panel: Rect) {
         return;
     }
 
-    let bg = Color::Rgb(24, 31, 38);
-    let pattern_dim = Style::default().fg(Color::Rgb(43, 60, 68)).bg(bg);
-    let pattern_hi = Style::default().fg(Color::Rgb(76, 96, 92)).bg(bg);
+    let bg = clr_menu_dd_bg();
+    let pattern_dim = Style::default().fg(clr_panel_border_dim()).bg(bg);
+    let pattern_hi = Style::default().fg(clr_panel_border()).bg(bg);
     let mut lines = Vec::with_capacity(host.height as usize);
     for y in 0..host.height as usize {
         let mut spans = Vec::new();
@@ -173,7 +173,7 @@ fn render_viewer_backdrop(f: &mut Frame, host: Rect, panel: Rect) {
     };
     if halo.width > 0 && halo.height > 0 {
         f.render_widget(
-            Block::default().style(Style::default().bg(Color::Rgb(43, 58, 56))),
+            Block::default().style(Style::default().bg(clr_panel_border_dim())),
             halo,
         );
     }
@@ -188,7 +188,7 @@ fn render_viewer_backdrop(f: &mut Frame, host: Rect, panel: Rect) {
     };
     if shadow.width > 0 && shadow.height > 0 {
         f.render_widget(
-            Block::default().style(Style::default().bg(Color::Rgb(14, 18, 22))),
+            Block::default().style(Style::default().bg(clr_menu_dd_bg())),
             shadow,
         );
     }
@@ -200,13 +200,13 @@ fn render_viewer_full_width_header(f: &mut Frame, host: Rect, title: Line<'stati
     }
     let style = if active {
         Style::default()
-            .fg(CLR_HEADER_FG)
-            .bg(CLR_MENU_BAR_BG)
+            .fg(clr_header_fg())
+            .bg(clr_menu_bar_bg())
             .add_modifier(Modifier::BOLD)
     } else {
         Style::default()
-            .fg(CLR_PANEL_BORDER_DIM)
-            .bg(CLR_MENU_BAR_BG)
+            .fg(clr_panel_border_dim())
+            .bg(clr_menu_bar_bg())
     };
     let header = Rect {
         x: host.x,
@@ -506,30 +506,30 @@ pub(super) fn render_viewer(
         if active {
             (
                 Style::default()
-                    .fg(CLR_HEADER_FG)
+                    .fg(clr_header_fg())
                     .add_modifier(Modifier::BOLD),
                 BorderType::Thick,
                 Line::from(Span::styled(
                     format!(" {} ", label),
                     Style::default()
-                        .fg(CLR_HEADER_FG)
+                        .fg(clr_header_fg())
                         .add_modifier(Modifier::BOLD),
                 )),
             )
         } else {
             (
-                Style::default().fg(CLR_PANEL_BORDER_DIM),
+                Style::default().fg(clr_panel_border_dim()),
                 BorderType::Rounded,
                 Line::from(Span::styled(
                     format!(" {} ", label),
-                    Style::default().fg(CLR_PANEL_BORDER_DIM),
+                    Style::default().fg(clr_panel_border_dim()),
                 )),
             )
         }
     } else if full_width_header {
         (
             Style::default()
-                .fg(CLR_PANEL_BORDER)
+                .fg(clr_panel_border())
                 .add_modifier(Modifier::BOLD),
             BorderType::Thick,
             Line::from(Span::raw(String::new())),
@@ -537,14 +537,14 @@ pub(super) fn render_viewer(
     } else if active {
         (
             Style::default()
-                .fg(CLR_PANEL_BORDER)
+                .fg(clr_panel_border())
                 .add_modifier(Modifier::BOLD),
             BorderType::Thick,
             title_line.clone(),
         )
     } else {
         (
-            Style::default().fg(CLR_PANEL_BORDER_DIM),
+            Style::default().fg(clr_panel_border_dim()),
             BorderType::Rounded,
             title_line.clone(),
         )
@@ -667,7 +667,7 @@ pub(super) fn render_viewer(
                 let num_str = format!("{:>width$}\u{2502} ", abs_idx + 1, width = ln_digits);
                 let mut spans = vec![Span::styled(
                     num_str,
-                    Style::default().fg(Color::Rgb(90, 110, 150)),
+                    Style::default().fg(clr_panel_border_dim()),
                 )];
                 spans.extend(content_line.spans);
                 Line::from(spans)
@@ -766,13 +766,13 @@ pub(super) fn render_viewer_goto(f: &mut Frame, state: &ViewerGotoState, area: R
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_PANEL_BORDER))
-        .style(Style::default().bg(CLR_MENU_DD_BG));
+        .border_style(Style::default().fg(clr_panel_border()))
+        .style(Style::default().bg(clr_menu_dd_bg()));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
     safe_render_widget(
         f,
-        Block::default().style(Style::default().bg(CLR_MENU_DD_BG)),
+        Block::default().style(Style::default().bg(clr_menu_dd_bg())),
         inner,
     );
 
@@ -782,11 +782,11 @@ pub(super) fn render_viewer_goto(f: &mut Frame, state: &ViewerGotoState, area: R
         .map(|(idx, (shortcut, label))| {
             let style = if idx == state.cursor {
                 Style::default()
-                    .fg(CLR_MENU_SEL_FG)
-                    .bg(CLR_MENU_SEL_BG)
+                    .fg(clr_menu_sel_fg())
+                    .bg(clr_menu_sel_bg())
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
+                Style::default().fg(clr_menu_dd_fg()).bg(clr_menu_dd_bg())
             };
             let mut spans = vec![
                 Span::styled(" ", style),
@@ -805,7 +805,7 @@ pub(super) fn render_viewer_goto(f: &mut Frame, state: &ViewerGotoState, area: R
     };
     safe_render_widget(
         f,
-        List::new(list_items).style(Style::default().bg(CLR_MENU_DD_BG)),
+        List::new(list_items).style(Style::default().bg(clr_menu_dd_bg())),
         list_area,
     );
 
@@ -818,7 +818,7 @@ pub(super) fn render_viewer_goto(f: &mut Frame, state: &ViewerGotoState, area: R
     safe_render_widget(
         f,
         Paragraph::new(" digits set <n>  Enter:run  Esc:close ")
-            .style(Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)),
+            .style(Style::default().fg(clr_menu_dd_fg()).bg(clr_menu_dd_bg())),
         hint_area,
     );
 }
@@ -927,13 +927,13 @@ pub(super) fn render_viewer_menu(
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_PANEL_BORDER))
-        .style(Style::default().bg(CLR_MENU_DD_BG));
+        .border_style(Style::default().fg(clr_panel_border()))
+        .style(Style::default().bg(clr_menu_dd_bg()));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
     safe_render_widget(
         f,
-        Block::default().style(Style::default().bg(CLR_MENU_DD_BG)),
+        Block::default().style(Style::default().bg(clr_menu_dd_bg())),
         inner,
     );
 
@@ -945,14 +945,14 @@ pub(super) fn render_viewer_menu(
                 && viewer.preproc_len() > 0
                 && idx == viewer.preproc_len();
             let style = if is_separator {
-                Style::default().fg(CLR_MENU_DD_SEP).bg(CLR_MENU_DD_BG)
+                Style::default().fg(clr_menu_dd_sep()).bg(clr_menu_dd_bg())
             } else if idx == menu.cursor {
                 Style::default()
-                    .fg(CLR_MENU_SEL_FG)
-                    .bg(CLR_MENU_SEL_BG)
+                    .fg(clr_menu_sel_fg())
+                    .bg(clr_menu_sel_bg())
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)
+                Style::default().fg(clr_menu_dd_fg()).bg(clr_menu_dd_bg())
             };
             let line = if menu.kind == ViewerMenuKind::Mode {
                 viewer_mode_menu_line(idx, item, style)
@@ -982,7 +982,7 @@ pub(super) fn render_viewer_menu(
         .collect::<Vec<_>>();
     safe_render_widget(
         f,
-        List::new(visible_items).style(Style::default().bg(CLR_MENU_DD_BG)),
+        List::new(visible_items).style(Style::default().bg(clr_menu_dd_bg())),
         list_area,
     );
 
@@ -999,7 +999,7 @@ pub(super) fn render_viewer_menu(
         );
         safe_render_widget(
             f,
-            Paragraph::new(info).style(Style::default().fg(CLR_MENU_DD_FG).bg(CLR_MENU_DD_BG)),
+            Paragraph::new(info).style(Style::default().fg(clr_menu_dd_fg()).bg(clr_menu_dd_bg())),
             info_area,
         );
     }

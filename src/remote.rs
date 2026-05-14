@@ -87,14 +87,6 @@ impl RemoteProtocol {
         }
     }
 
-    /// UI accent colour (R, G, B).
-    pub fn color_rgb(self) -> (u8, u8, u8) {
-        match self {
-            RemoteProtocol::Sftp => (121, 214, 255),
-            RemoteProtocol::Smb => (255, 165, 80),
-            RemoteProtocol::RemotePlugin => (141, 222, 150),
-        }
-    }
 }
 
 impl RemoteProfile {
