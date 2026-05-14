@@ -1,0 +1,311 @@
+# =============================================================================
+# KKC Colour Theme — "default" (brown / beige retro palette)
+# =============================================================================
+#
+# Copy this file to  ~/.config/kkc/themes/default.toml  (Linux / macOS) to
+# customise colours without touching the source code or recompiling.
+# KKC loads that path at startup; if it is absent the built-in copy is used.
+#
+# Colour format
+# -------------
+#   "#RRGGBB"   24-bit hex  (e.g. "#B6A084")
+#   "black"     ANSI named  (black | red | green | yellow | blue |
+#               "white"      magenta | cyan | gray | darkgray |
+#                            lightred | lightgreen | lightyellow |
+#                            lightblue | lightmagenta | lightcyan | white)
+#
+# =============================================================================
+
+
+# =============================================================================
+# [app]  —  Application background (visible in empty areas around panels)
+# =============================================================================
+[app]
+
+# The outer frame colour shown where no panel or widget is drawn.
+background = "#B6A084"
+
+
+# =============================================================================
+# [panel]  —  File-panel chrome
+# =============================================================================
+[panel]
+
+# Panel content background (usually black to maximise contrast with entries).
+background = "black"
+
+# Border colour when the panel is focused / active.
+border = "#EFE1C4"
+
+# Border colour when the panel is inactive / dimmed.
+border_dim = "#765F46"
+
+# Panel title text (path shown in the top border).
+title = "#F6EDD4"
+
+# Tree-view connector lines (│ ├ └ characters in tree mode).
+tree_connector = "#849292"
+
+
+# =============================================================================
+# [header]  —  Column-header row inside the file panel
+# =============================================================================
+[header]
+
+# Header row background.
+background = "#7D6B5C"
+
+# Header row foreground (column labels: Name, Size, Date …).
+foreground = "#FFF472"
+
+
+# =============================================================================
+# [cursor]  —  Highlighted / cursor row in a panel
+# =============================================================================
+[cursor]
+
+# Cursor row background.
+background = "#D6C4A7"
+
+# Cursor row foreground (overrides file-type colour on the cursor row).
+foreground = "black"
+
+
+# =============================================================================
+# [selection]  —  Multi-selected files (Space-bar selection)
+# =============================================================================
+[selection]
+
+# Colour of the file name when the entry is in the selection set.
+foreground = "#FFF472"
+
+
+# =============================================================================
+# [files]  —  File-type colours (used when colour-by-type is enabled)
+# =============================================================================
+[files]
+
+# Directories.
+directory = "#E4D2B5"
+
+# Executable files (chmod +x, ELF, Mach-O …).
+executable = "#B8EA78"
+
+# Archives / compressed files (zip, tar, gz, 7z …).
+archive = "#EAA674"
+
+# Audio files (mp3, flac, ogg, wav, mod …).
+audio = "#A1EEBC"
+
+# Image files (png, jpg, gif, bmp, svg …).
+image = "#FFBCA6"
+
+# Video files (mp4, mkv, avi, mov …).
+video = "#FF9074"
+
+# Documents (pdf, doc, odt …).
+document = "#A3D0FF"
+
+# Source code (rs, c, h, cpp, py, js, ts …).
+source = "#FFEE8F"
+
+# Structured data (json, toml, yaml, xml, csv …).
+data = "#A4E6E1"
+
+# Plain text files (txt, md, rst …).
+text = "#E0D6C0"
+
+# Everything else.
+unknown = "#ACA08E"
+
+
+# =============================================================================
+# [status]  —  Status bar (bottom of screen)
+# =============================================================================
+[status]
+
+# Status bar background.
+background = "#7D6B5C"
+
+# Status bar foreground (path, free-space, entry count …).
+foreground = "#F4EBD0"
+
+
+# =============================================================================
+# [fkeys]  —  Function-key bar (F1–F10 strip at the very bottom)
+# =============================================================================
+[fkeys]
+
+# Background of the whole F-key strip.
+background = "#5C4E40"
+
+# Colour of the F-number digit (e.g. "1" in "1Help").
+number_foreground = "black"
+
+# Background pill behind the F-number digit.
+number_background = "#F1E4C1"
+
+# Label text colour (e.g. "Help" in "1Help").
+label = "#F5EBCE"
+
+
+# =============================================================================
+# [buttons]  —  Centre-panel action buttons (mk dir, delete …)
+# =============================================================================
+[buttons]
+
+# Button background.
+background = "#B5A084"
+
+# Button text / foreground.
+foreground = "#FFF472"
+
+
+# =============================================================================
+# [menu]  —  Menu bar and drop-down menus
+# =============================================================================
+[menu]
+
+# Menu bar background (the top row: Left  Files  Commands …).
+bar_background = "#362A1E"
+
+# Menu bar foreground (the menu header labels).
+bar_foreground = "#F1E4C1"
+
+# Background of the currently highlighted menu header.
+selected_background = "#F1E4C1"
+
+# Foreground of the currently highlighted menu header.
+selected_foreground = "black"
+
+# Drop-down panel background.
+dropdown_background = "#2C2218"
+
+# Drop-down item text colour.
+dropdown_foreground = "#F1E4C1"
+
+# Separator line colour inside drop-down panels.
+dropdown_separator = "#765F46"
+
+# Drop-down panel border colour.
+border = "#B4946C"
+
+# Hotkey / mnemonic character highlight colour.
+hotkey = "#FFC850"
+
+
+# =============================================================================
+# [palette]  —  Quick-open / command palette  (dark VS-Code-style overlay)
+# =============================================================================
+[palette]
+
+# Palette overlay background.
+background = "#1E1E1E"
+
+# Palette border.
+border = "#505050"
+
+# Text-input field background.
+input_background = "#3A3A3A"
+
+# Text-input field foreground.
+input_foreground = "white"
+
+# Thin separator line between the input field and the result list.
+separator = "#464646"
+
+# Default item text colour in the result list.
+list_foreground = "#C8C8C8"
+
+# Background of the selected / highlighted result row.
+selected_background = "#284F87"
+
+# Foreground of the selected / highlighted result row.
+selected_foreground = "white"
+
+# Fuzzy-match highlight colour (matched characters).
+match_highlight = "#FFC53D"
+
+# Fuzzy-match highlight colour when the row is also selected.
+match_highlight_selected = "#FFE678"
+
+# Text colour for "no matches" hint.
+no_match = "#828282"
+
+# Directory path prefix in file-open results.
+directory_foreground = "#569CD6"
+
+# Title / caption of the palette widget.
+title = "#BEBEBE"
+
+# Footer bar background (shortcut hints at the bottom of the palette).
+footer_background = "#343434"
+
+# Footer bar foreground.
+footer_foreground = "#E6E6E6"
+
+
+# =============================================================================
+# [dialog]  —  Lua-scripted dialogs (confirm, input, list chooser …)
+# =============================================================================
+[dialog]
+
+# Dialog box background.
+background = "#7D6B5C"
+
+# Dialog text foreground.
+foreground = "#F4EBD0"
+
+# Dialog border colour.
+border = "#EFE1C4"
+
+# Dialog title text colour.
+title = "#FFF472"
+
+# Background of the highlighted / selected item inside a dialog list.
+selected_background = "#D6C4A7"
+
+# Foreground of the selected item.
+selected_foreground = "black"
+
+# Hint / subtitle text colour (greyed-out secondary text).
+hint = "#ACA08E"
+
+
+# =============================================================================
+# [syntax]  —  Syntax-highlighted viewer colours
+# =============================================================================
+[syntax]
+
+# Keywords and boolean literals  (if, else, true, false …).
+keyword = "#569CD6"
+
+# Type names and class titles  (struct, enum, class …).
+type_name = "#4EC9B0"
+
+# String literals  ("hello", 'world' …).
+string = "#CE9178"
+
+# Comments  (// …, /* … */, # …).
+comment = "#6A9955"
+
+# Numeric literals  (42, 3.14, 0xFF …).
+number = "#B5CEA8"
+
+# Preprocessor directives and meta annotations  (#define, @decorator …).
+preprocessor = "#C586C0"
+
+# Function and method names / built-in identifiers.
+function = "#DCDCAA"
+
+# Operators  (+, -, =>, ?, …).
+operator = "#B4C8F0"
+
+# Plain / unstyled text.
+plain = "#D4D4D4"
+
+# Language-supplied variables  (self, this, super …).
+variable_language = "#9CDCFE"
+
+# Special accent colour used for the "ketchup" easter-egg highlight.
+ketchup = "yellow"

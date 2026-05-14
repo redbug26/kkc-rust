@@ -262,6 +262,14 @@ local function rotate_y(y, d)
     return y
 end
 
+local function random_byte()
+    return math.floor(rand.float() * 256) & 0xFF
+end
+
+local function random_direction()
+    return math.floor(rand.float() * 4)
+end
+
 local function next_random(seed1, seed2)
     local temp1 = (seed1 & 0x0001) * 0x0080
     local temp2 = (seed2 >> 1) & 0x007F
@@ -741,8 +749,8 @@ local function update_amoeba(x, y)
         amoeba_enclosed = false
 
         local chance_mask = amoeba_slow ~= 0 and 31 or 3
-        if (rand.int(0, 255) & chance_mask) == 0 then
-            local d = rand.int(0, 3)
+        if (random_byte() & chance_mask) == 0 then
+            local d = random_direction()
             local xx = rotate_x(x, d)
             local yy = rotate_y(y, d)
             local t = cell(xx, yy)
