@@ -13,7 +13,7 @@ return dlg.confirm_box({
     gap = 3,
     items = {
       { id = "confirm", label = "▶  Yes  ◀" },
-      { id = "cancel", label = "▶   No  ◀" },
+      { id = "cancel", label = "▶   No   ◀" },
     },
   },
   callback = function(button)

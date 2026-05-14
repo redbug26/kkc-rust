@@ -129,6 +129,8 @@ use crate::theme::theme;
 #[inline] fn clr_menu_dd_sep() -> Color { theme().menu.dropdown_separator }
 #[inline] fn clr_menu_border() -> Color { theme().menu.border }
 #[inline] fn clr_menu_hotkey() -> Color { theme().menu.hotkey }
+#[inline] fn clr_menu_danger_button_inactive_bg() -> Color { theme().menu.danger_button_inactive_background }
+#[inline] fn clr_menu_danger_button_inactive_fg() -> Color { theme().menu.danger_button_inactive_foreground }
 
 // Quick-palette (VSCode-style)
 #[inline] fn clr_qs_bg() -> Color { theme().palette.background }
@@ -151,6 +153,8 @@ use crate::theme::theme;
 #[inline] fn clr_dialog_selected_bg() -> Color { theme().dialog.selected_background }
 #[inline] fn clr_dialog_selected_fg() -> Color { theme().dialog.selected_foreground }
 #[inline] fn clr_dialog_hint() -> Color { theme().dialog.hint }
+#[inline] fn clr_dialog_inactive_button_bg() -> Color { theme().dialog.inactive_button_background }
+#[inline] fn clr_dialog_inactive_button_fg() -> Color { theme().dialog.inactive_button_foreground }
 
 // ---------------------------------------------------------------------------
 // Entry style by category

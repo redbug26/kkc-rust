@@ -299,7 +299,7 @@ impl Default for ConfirmDialogSpec {
                 },
                 ConfirmDialogButtonSpec {
                     callback: "cancel".into(),
-                    label: "▶   No  ◀".into(),
+                    label: "▶   No   ◀".into(),
                     width: 11,
                 },
             ],

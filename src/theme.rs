@@ -190,6 +190,8 @@ pub struct MenuColors {
     pub dropdown_separator: Color,
     pub border: Color,
     pub hotkey: Color,
+    pub danger_button_inactive_background: Color,
+    pub danger_button_inactive_foreground: Color,
 }
 
 #[derive(Debug)]
@@ -220,6 +222,8 @@ pub struct DialogColors {
     pub selected_background: Color,
     pub selected_foreground: Color,
     pub hint: Color,
+    pub inactive_button_background: Color,
+    pub inactive_button_foreground: Color,
 }
 
 #[derive(Debug)]
@@ -416,6 +420,10 @@ struct RawMenu {
     dropdown_separator: String,
     border: String,
     hotkey: String,
+    #[serde(default)]
+    danger_button_inactive_background: String,
+    #[serde(default)]
+    danger_button_inactive_foreground: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -446,6 +454,10 @@ struct RawDialog {
     selected_background: String,
     selected_foreground: String,
     hint: String,
+    #[serde(default)]
+    inactive_button_background: String,
+    #[serde(default)]
+    inactive_button_foreground: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -542,6 +554,16 @@ impl From<RawTheme> for Theme {
                 dropdown_separator: parse_color(&r.menu.dropdown_separator),
                 border: parse_color(&r.menu.border),
                 hotkey: parse_color(&r.menu.hotkey),
+                danger_button_inactive_background: if r.menu.danger_button_inactive_background.is_empty() {
+                    parse_color(&r.menu.dropdown_background)
+                } else {
+                    parse_color(&r.menu.danger_button_inactive_background)
+                },
+                danger_button_inactive_foreground: if r.menu.danger_button_inactive_foreground.is_empty() {
+                    parse_color(&r.menu.dropdown_foreground)
+                } else {
+                    parse_color(&r.menu.danger_button_inactive_foreground)
+                },
             },
             palette: PaletteColors {
                 background: parse_color(&r.palette.background),
@@ -568,6 +590,16 @@ impl From<RawTheme> for Theme {
                 selected_background: parse_color(&r.dialog.selected_background),
                 selected_foreground: parse_color(&r.dialog.selected_foreground),
                 hint: parse_color(&r.dialog.hint),
+                inactive_button_background: if r.dialog.inactive_button_background.is_empty() {
+                    parse_color(&r.dialog.foreground)
+                } else {
+                    parse_color(&r.dialog.inactive_button_background)
+                },
+                inactive_button_foreground: if r.dialog.inactive_button_foreground.is_empty() {
+                    parse_color(&r.dialog.hint)
+                } else {
+                    parse_color(&r.dialog.inactive_button_foreground)
+                },
             },
             search: SearchColors {
                 background: parse_color(&r.search.background),

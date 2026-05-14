@@ -407,12 +407,12 @@ fn render_dialog_button(
         DialogButtonPalette::Danger => clr_video(),
     };
     let inactive_bg = match palette {
-        DialogButtonPalette::Normal => clr_dialog_bg(),
-        DialogButtonPalette::Danger => clr_menu_dd_bg(),
+        DialogButtonPalette::Normal => clr_dialog_inactive_button_bg(),
+        DialogButtonPalette::Danger => clr_menu_danger_button_inactive_bg(),
     };
     let inactive_fg = match palette {
-        DialogButtonPalette::Normal => clr_dialog_hint(),
-        DialogButtonPalette::Danger => clr_archive(),
+        DialogButtonPalette::Normal => clr_dialog_inactive_button_fg(),
+        DialogButtonPalette::Danger => clr_menu_danger_button_inactive_fg(),
     };
      let shadow_bg = match palette {
         DialogButtonPalette::Normal => clr_dialog_bg(),

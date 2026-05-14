@@ -193,6 +193,12 @@ border = "#B4946C"
 # Hotkey / mnemonic character highlight colour.
 hotkey = "#FFC850"
 
+# Background of inactive danger buttons (e.g., in delete confirmations).
+danger_button_inactive_background = "#8B5A3C"
+
+# Foreground of inactive danger buttons.
+danger_button_inactive_foreground = "#D6C4A7"
+
 
 # =============================================================================
 # [palette]  —  Quick-open / command palette  (dark VS-Code-style overlay)
@@ -270,6 +276,12 @@ selected_foreground = "black"
 
 # Hint / subtitle text colour (greyed-out secondary text).
 hint = "#ACA08E"
+
+# Background of inactive dialog buttons.
+inactive_button_background = "#8B7F70"
+
+# Foreground of inactive dialog buttons.
+inactive_button_foreground = "#C4B9A8"
 
 
 # =============================================================================

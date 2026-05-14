@@ -64,6 +64,8 @@ dropdown_foreground = "#cdd6f4"
 dropdown_separator = "#585b70"
 border = "#89b4fa"
 hotkey = "#f9e2af"
+danger_button_inactive_background = "#45475a"
+danger_button_inactive_foreground = "#a6adc8"
 
 [palette]
 background = "#1e1e2e"
@@ -90,6 +92,8 @@ title = "#cba6f7"
 selected_background = "#45475a"
 selected_foreground = "#cdd6f4"
 hint = "#9399b2"
+inactive_button_background = "#3d3f52"
+inactive_button_foreground = "#a6adc8"
 
 [search]
 background = "#1e1e2e"
