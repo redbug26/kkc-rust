@@ -1,4 +1,5 @@
 use super::*;
+use tui_textarea::{CursorMove, TextArea};
 
 #[derive(Debug)]
 pub struct ConfirmDialog {
@@ -36,16 +37,42 @@ pub struct RemoteDeleteTarget {
     pub is_dir: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct InputDialog {
     pub title: String,
     pub prompt: String,
-    pub value: String,
-    pub cursor: usize,
+    pub textarea: TextArea<'static>,
     pub action: InputAction,
     pub macro_name: Option<&'static str>,
     /// Index of the focused button, or None when input field has focus.
     pub focused_button: Option<usize>,
+}
+
+impl std::fmt::Debug for InputDialog {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InputDialog")
+            .field("title", &self.title)
+            .field("prompt", &self.prompt)
+            .field("text", &self.text())
+            .field("action", &self.action)
+            .field("macro_name", &self.macro_name)
+            .field("focused_button", &self.focused_button)
+            .finish()
+    }
+}
+
+impl InputDialog {
+    /// Create a textarea pre-filled with `initial` text, cursor at end.
+    pub fn make_textarea(initial: impl Into<String>) -> TextArea<'static> {
+        let mut ta = TextArea::new(vec![initial.into()]);
+        ta.move_cursor(CursorMove::End);
+        ta
+    }
+
+    /// Return the current single-line text value.
+    pub fn text(&self) -> &str {
+        self.textarea.lines().first().map(|s| s.as_str()).unwrap_or("")
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -154,24 +181,6 @@ pub trait TextInputState {
 
     fn end(&mut self) {
         *self.cursor_mut() = self.value().len();
-    }
-}
-
-impl TextInputState for InputDialog {
-    fn value(&self) -> &String {
-        &self.value
-    }
-
-    fn value_mut(&mut self) -> &mut String {
-        &mut self.value
-    }
-
-    fn cursor(&self) -> usize {
-        self.cursor
-    }
-
-    fn cursor_mut(&mut self) -> &mut usize {
-        &mut self.cursor
     }
 }
 

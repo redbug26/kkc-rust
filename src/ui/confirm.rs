@@ -709,11 +709,12 @@ fn render_input_box(
         },
     );
 
-    // Row 2: input field
+    // Row 2: input field (backed by tui-textarea state)
     let input_w = inner.width.saturating_sub(2) as usize;
-    let cursor_col = dlg.value[..dlg.cursor.min(dlg.value.len())].chars().count();
+    let text = dlg.textarea.lines().first().map(|s| s.as_str()).unwrap_or("");
+    let (_, cursor_col) = dlg.textarea.cursor(); // (row, char-column)
     let hscroll = cursor_col.saturating_sub(input_w.saturating_sub(1));
-    let shown: String = dlg.value.chars().skip(hscroll).take(input_w).collect();
+    let shown: String = text.chars().skip(hscroll).take(input_w).collect();
     let value_display = format!("{:<width$}", shown, width = input_w);
     safe_render_widget(
         f,

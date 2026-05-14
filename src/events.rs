@@ -1105,8 +1105,9 @@ fn handle_mouse_input(app: &mut App, mouse: MouseEvent) -> Result<bool> {
     if point_in_rect(mouse.column, mouse.row, input_area)
         && let AppMode::Input(ref mut dlg) = app.mode
     {
-        let offset = mouse.column.saturating_sub(input_area.x) as usize;
-        dlg.cursor = byte_index_for_display_column(&dlg.value, offset);
+        let offset = mouse.column.saturating_sub(input_area.x) as u16;
+        dlg.textarea
+            .move_cursor(tui_textarea::CursorMove::Jump(0, offset));
     }
     Ok(false)
 }
@@ -2968,8 +2969,7 @@ fn start_rename(app: &mut App) {
         app.mode = AppMode::Input(InputDialog {
             title: "Rename".into(),
             prompt: "New name:".into(),
-            value: name.clone(),
-            cursor: name.len(),
+            textarea: InputDialog::make_textarea(name.clone()),
             action,
             macro_name: Some("input_rename"),
             focused_button: Some(0),
@@ -2993,8 +2993,7 @@ fn start_mkdir(app: &mut App) {
     app.mode = AppMode::Input(InputDialog {
         title: "Create Directory".into(),
         prompt: "Directory name:".into(),
-        value: String::new(),
-        cursor: 0,
+        textarea: InputDialog::make_textarea(""),
         action,
         macro_name: Some("input_mkdir"),
         focused_button: Some(0),
@@ -3005,8 +3004,7 @@ fn open_wildcard_dialog(prompt: &str, select: bool) -> AppMode {
     AppMode::Input(InputDialog {
         title: "Wildcard".into(),
         prompt: prompt.into(),
-        value: "*".into(),
-        cursor: 1,
+        textarea: InputDialog::make_textarea("*"),
         action: if select {
             InputAction::SelectPattern
         } else {
@@ -3371,7 +3369,7 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                             .and_then(|s| s.buttons.get(focused_idx))
                             .map(|b| b.callback == "cancel")
                             .unwrap_or(false);
-                        (is_cancel, dlg.value.clone(), dlg.action.clone())
+                        (is_cancel, dlg.text().to_string(), dlg.action.clone())
                     } else {
                         return Ok(false);
                     };
@@ -3381,12 +3379,14 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                 }
             }
             _ => {
-                // Any other key: return focus to input and forward to text editor
+                // Any other key: return focus to input and forward to textarea
                 let AppMode::Input(ref mut dlg) = app.mode else {
                     return Ok(false);
                 };
                 dlg.focused_button = None;
-                handle_text_input_edit_key(dlg, key);
+                if let Some(input) = textarea_input_from_key_event(key) {
+                    dlg.textarea.input(input);
+                }
             }
         }
         return Ok(false);
@@ -3397,7 +3397,20 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(false);
     };
 
-    if handle_text_input_paste(dlg, key) {
+    // Ctrl+V: paste from system clipboard (single-line — strip newlines)
+    if key.modifiers.contains(KeyModifiers::CONTROL)
+        && matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V'))
+    {
+        if let Some(text) = paste_text_from_clipboard() {
+            for ch in text.chars().filter(|&c| c != '\n' && c != '\r') {
+                dlg.textarea.input(tui_textarea::Input {
+                    key: tui_textarea::Key::Char(ch),
+                    ctrl: false,
+                    alt: false,
+                    shift: false,
+                });
+            }
+        }
         return Ok(false);
     }
 
@@ -3407,13 +3420,16 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         }
         KeyCode::Esc => app.mode = AppMode::Browse,
         KeyCode::Enter => {
-            let value = dlg.value.clone();
+            let value = dlg.text().to_string();
             let action = dlg.action.clone();
             app.mode = AppMode::Browse;
             input_execute_action(app, action, &value)?;
         }
-        _ if handle_text_input_edit_key(dlg, key) => {}
-        _ => {}
+        _ => {
+            if let Some(input) = textarea_input_from_key_event(key) {
+                dlg.textarea.input(input);
+            }
+        }
     }
     Ok(false)
 }
@@ -4496,8 +4512,7 @@ fn handle_action_palette(app: &mut App, key: KeyEvent) -> Result<bool> {
                 app.mode = AppMode::Input(InputDialog {
                     title: action.title,
                     prompt,
-                    value: String::new(),
-                    cursor: 0,
+                    textarea: InputDialog::make_textarea(""),
                     action: InputAction::PluginAction {
                         plugin: action.plugin,
                         id: action.id,

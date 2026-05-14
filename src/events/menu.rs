@@ -308,12 +308,10 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
         }
         MenuAction::GoToPath => {
             let current = app.active_panel().display_path();
-            let cursor = current.len();
             app.mode = AppMode::Input(InputDialog {
                 title: "Go to Path".into(),
                 prompt: "Path:".into(),
-                value: current,
-                cursor,
+                textarea: InputDialog::make_textarea(current),
                 action: InputAction::GoToPath,
                 macro_name: Some("input_goto_path"),
                 focused_button: Some(0),
@@ -330,12 +328,10 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
         }
         MenuAction::SaveSelectionSession => {
             let default_name = app.default_selection_session_name();
-            let cursor = default_name.len();
             app.mode = AppMode::Input(InputDialog {
                 title: "Save selection session".into(),
                 prompt: "Session name:".into(),
-                value: default_name,
-                cursor,
+                textarea: InputDialog::make_textarea(default_name),
                 action: InputAction::SaveSelectionSession,
                 macro_name: Some("input_save_session"),
                 focused_button: Some(0),
