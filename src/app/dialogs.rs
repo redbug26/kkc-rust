@@ -75,13 +75,48 @@ impl InputDialog {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AssocInputDialog {
     pub title: String,
     pub prompt: String,
-    pub value: String,
-    pub cursor: usize,
+    pub textarea: TextArea<'static>,
     pub action: AssocInputAction,
+}
+
+impl std::fmt::Debug for AssocInputDialog {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AssocInputDialog")
+            .field("title", &self.title)
+            .field("prompt", &self.prompt)
+            .field("text", &self.text())
+            .field("action", &self.action)
+            .finish()
+    }
+}
+
+impl AssocInputDialog {
+    /// Create a textarea pre-filled with `initial` text (may be multiline), cursor at end.
+    pub fn make_textarea(initial: impl AsRef<str>) -> TextArea<'static> {
+        let text = initial.as_ref();
+        let lines: Vec<String> = if text.is_empty() {
+            vec![String::new()]
+        } else {
+            text.split('\n').map(|s| s.to_string()).collect()
+        };
+        let mut ta = TextArea::from(lines);
+        ta.move_cursor(CursorMove::End);
+        ta
+    }
+
+    /// Return all lines joined with `\n`.
+    pub fn text(&self) -> String {
+        self.textarea.lines().join("\n")
+    }
+
+    /// Return only the first line (used for MimeType step).
+    pub fn first_line(&self) -> &str {
+        self.textarea.lines().first().map(|s| s.as_str()).unwrap_or("")
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -181,24 +216,6 @@ pub trait TextInputState {
 
     fn end(&mut self) {
         *self.cursor_mut() = self.value().len();
-    }
-}
-
-impl TextInputState for AssocInputDialog {
-    fn value(&self) -> &String {
-        &self.value
-    }
-
-    fn value_mut(&mut self) -> &mut String {
-        &mut self.value
-    }
-
-    fn cursor(&self) -> usize {
-        self.cursor
-    }
-
-    fn cursor_mut(&mut self) -> &mut usize {
-        &mut self.cursor
     }
 }
 

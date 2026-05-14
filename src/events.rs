@@ -1168,12 +1168,12 @@ fn handle_mouse_assoc_input(app: &mut App, mouse: MouseEvent) -> Result<bool> {
     if point_in_rect(mouse.column, mouse.row, input_area)
         && let AppMode::AssocInput(ref mut dlg) = app.mode
     {
-        let offset = mouse.column.saturating_sub(input_area.x) as usize;
+        let col = mouse.column.saturating_sub(input_area.x) as u16;
         if is_openers {
-            let row = mouse.row.saturating_sub(input_area.y) as usize;
-            assoc_input_set_cursor_from_point(dlg, row, offset);
+            let row = mouse.row.saturating_sub(input_area.y) as u16;
+            dlg.textarea.move_cursor(tui_textarea::CursorMove::Jump(row, col));
         } else {
-            dlg.cursor = byte_index_for_display_column(&dlg.value, offset);
+            dlg.textarea.move_cursor(tui_textarea::CursorMove::Jump(0, col));
         }
     }
     Ok(false)
@@ -3536,15 +3536,45 @@ fn handle_assoc_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             || (key.modifiers.contains(KeyModifiers::CONTROL)
                 && matches!(key.code, KeyCode::Char('s') | KeyCode::Char('S'))));
 
-    if handle_text_input_paste(dlg, key) {
+    // Ctrl+V: paste — allow newlines only in openers mode
+    if key.modifiers.contains(KeyModifiers::CONTROL)
+        && matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V'))
+    {
+        if let Some(text) = paste_text_from_clipboard() {
+            for ch in text.chars() {
+                if ch == '\n' || ch == '\r' {
+                    if is_openers {
+                        dlg.textarea.input(tui_textarea::Input {
+                            key: tui_textarea::Key::Enter,
+                            ctrl: false,
+                            alt: false,
+                            shift: false,
+                        });
+                    }
+                } else {
+                    dlg.textarea.input(tui_textarea::Input {
+                        key: tui_textarea::Key::Char(ch),
+                        ctrl: false,
+                        alt: false,
+                        shift: false,
+                    });
+                }
+            }
+        }
         return Ok(false);
     }
 
+    // Ctrl+J: insert newline in openers mode
     if is_openers
         && key.modifiers.contains(KeyModifiers::CONTROL)
         && matches!(key.code, KeyCode::Char('j') | KeyCode::Char('J'))
     {
-        dlg.insert_char('\n');
+        dlg.textarea.input(tui_textarea::Input {
+            key: tui_textarea::Key::Enter,
+            ctrl: false,
+            alt: false,
+            shift: false,
+        });
         return Ok(false);
     }
 
@@ -3553,7 +3583,7 @@ fn handle_assoc_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             app.mode = AppMode::AssocEditor(AssocEditorState::from_config(&app.config));
         }
         _ if save_openers => {
-            let value = dlg.value.clone();
+            let value = dlg.textarea.lines().join("\n");
             let ext = match &dlg.action {
                 AssocInputAction::Openers { ext, .. } => ext.clone(),
                 AssocInputAction::MimeType => String::new(),
@@ -3567,11 +3597,16 @@ fn handle_assoc_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                 let AppMode::AssocInput(ref mut dlg) = app.mode else {
                     return Ok(false);
                 };
-                dlg.insert_char('\n');
+                dlg.textarea.input(tui_textarea::Input {
+                    key: tui_textarea::Key::Enter,
+                    ctrl: false,
+                    alt: false,
+                    shift: false,
+                });
                 return Ok(false);
             }
 
-            let value = dlg.value.clone();
+            let value = dlg.first_line().to_string();
             let action = dlg.action.clone();
             app.mode = AppMode::Browse;
 
@@ -3582,12 +3617,10 @@ fn handle_assoc_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                         app.mode = AppMode::AssocEditor(AssocEditorState::from_config(&app.config));
                     } else {
                         let existing = app.config.openers_for_mime(&mime_type).join("\n");
-                        let cursor = existing.len();
                         app.mode = AppMode::AssocInput(AssocInputDialog {
                             title: "Association".into(),
                             prompt: format!("Openers for {} (one command per line):", mime_type),
-                            value: existing,
-                            cursor,
+                            textarea: AssocInputDialog::make_textarea(&existing),
                             action: AssocInputAction::Openers {
                                 ext: mime_type,
                                 edit_index: None,
@@ -3602,20 +3635,14 @@ fn handle_assoc_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                 }
             }
         }
-        _ if handle_text_input_edit_key(dlg, key) => {}
-        KeyCode::Up if is_openers => {
-            let AppMode::AssocInput(ref mut dlg) = app.mode else {
-                return Ok(false);
-            };
-            move_assoc_input_cursor_vertical(dlg, -1);
+        _ => {
+            if let Some(input) = crate::events::panel_text_editor::textarea_input_from_key_event(key) {
+                let AppMode::AssocInput(ref mut dlg) = app.mode else {
+                    return Ok(false);
+                };
+                dlg.textarea.input(input);
+            }
         }
-        KeyCode::Down if is_openers => {
-            let AppMode::AssocInput(ref mut dlg) = app.mode else {
-                return Ok(false);
-            };
-            move_assoc_input_cursor_vertical(dlg, 1);
-        }
-        _ => {}
     }
     Ok(false)
 }
@@ -3676,73 +3703,6 @@ fn handle_text_input_edit_key<T: TextInputState>(dlg: &mut T, key: KeyEvent) -> 
     }
 
     true
-}
-
-fn move_assoc_input_cursor_vertical(dlg: &mut AssocInputDialog, delta: isize) {
-    let cursor = dlg.cursor.min(dlg.value.len());
-    let before = &dlg.value[..cursor];
-    let current_col = before.chars().rev().take_while(|&ch| ch != '\n').count();
-    let lines: Vec<&str> = dlg.value.split('\n').collect();
-    if lines.is_empty() {
-        return;
-    }
-
-    let current_line = before.chars().filter(|&ch| ch == '\n').count() as isize;
-    let target_line =
-        (current_line + delta).clamp(0, lines.len().saturating_sub(1) as isize) as usize;
-    let target_col = current_col.min(lines[target_line].chars().count());
-
-    let target_char_index = lines
-        .iter()
-        .take(target_line)
-        .map(|line| line.chars().count() + 1)
-        .sum::<usize>()
-        + target_col;
-
-    let total_chars = dlg.value.chars().count();
-    if target_char_index >= total_chars {
-        dlg.cursor = dlg.value.len();
-        return;
-    }
-
-    for (count, (idx, _)) in dlg.value.char_indices().enumerate() {
-        if count == target_char_index {
-            dlg.cursor = idx;
-            return;
-        }
-    }
-    dlg.cursor = dlg.value.len();
-}
-
-fn assoc_input_set_cursor_from_point(dlg: &mut AssocInputDialog, row: usize, column: usize) {
-    let lines: Vec<&str> = dlg.value.split('\n').collect();
-    if lines.is_empty() {
-        dlg.cursor = 0;
-        return;
-    }
-
-    let line_idx = row.min(lines.len().saturating_sub(1));
-    let target_col = column.min(lines[line_idx].chars().count());
-    let target_char_index = lines
-        .iter()
-        .take(line_idx)
-        .map(|line| line.chars().count() + 1)
-        .sum::<usize>()
-        + target_col;
-
-    let total_chars = dlg.value.chars().count();
-    if target_char_index >= total_chars {
-        dlg.cursor = dlg.value.len();
-        return;
-    }
-
-    for (count, (idx, _)) in dlg.value.char_indices().enumerate() {
-        if count == target_char_index {
-            dlg.cursor = idx;
-            return;
-        }
-    }
-    dlg.cursor = dlg.value.len();
 }
 
 fn handle_copy_dialog(app: &mut App, key: KeyEvent) -> Result<bool> {
@@ -4853,8 +4813,7 @@ fn handle_assoc_editor(app: &mut App, key: KeyEvent) -> Result<bool> {
             app.mode = AppMode::AssocInput(AssocInputDialog {
                 title: "Edit association".into(),
                 prompt: format!("Openers for {} (one command per line):", mime_type),
-                value: openers_str.clone(),
-                cursor: openers_str.len(),
+                textarea: AssocInputDialog::make_textarea(&openers_str),
                 action: AssocInputAction::Openers {
                     ext: mime_type,
                     edit_index: Some(idx),
@@ -4889,12 +4848,10 @@ fn handle_assoc_editor(app: &mut App, key: KeyEvent) -> Result<bool> {
 
 fn assoc_mime_input_dialog(app: &App) -> AppMode {
     let value = default_assoc_mime_type(app).unwrap_or_default();
-    let cursor = value.len();
     AppMode::AssocInput(AssocInputDialog {
         title: "New association".into(),
         prompt: "MIME type:".into(),
-        value,
-        cursor,
+        textarea: AssocInputDialog::make_textarea(&value),
         action: AssocInputAction::MimeType,
     })
 }

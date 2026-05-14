@@ -716,10 +716,12 @@ fn render_input_box(
     let hscroll = cursor_col.saturating_sub(input_w.saturating_sub(1));
     let shown: String = text.chars().skip(hscroll).take(input_w).collect();
     let value_display = format!("{:<width$}", shown, width = input_w);
+    let input_bg = Color::Rgb(214, 196, 167);
+    let input_fg = Color::Rgb(30, 20, 10);
     safe_render_widget(
         f,
         Paragraph::new(format!(" {} ", value_display))
-            .style(Style::default().fg(Color::Black).bg(Color::White)),
+            .style(Style::default().fg(input_fg).bg(input_bg)),
         Rect {
             x: inner.x,
             y: inner.y + 2,
@@ -750,12 +752,13 @@ fn render_input_box(
 
 pub(super) fn render_assoc_input(f: &mut Frame, dlg: &AssocInputDialog, area: Rect) {
     let is_multiline = matches!(dlg.action, AssocInputAction::Openers { .. });
+    let (cursor_row, cursor_col) = dlg.textarea.cursor();
     render_text_input_dialog(
         f,
         &dlg.title,
         &dlg.prompt,
-        &dlg.value,
-        dlg.cursor,
+        dlg.textarea.lines(),
+        (cursor_row, cursor_col),
         area,
         is_multiline,
         TextDialogStyle {
@@ -778,8 +781,8 @@ fn render_text_input_dialog(
     f: &mut Frame,
     title: &str,
     prompt: &str,
-    value: &str,
-    cursor: usize,
+    lines: &[String],
+    cursor: (usize, usize),
     area: Rect,
     is_multiline: bool,
     style: TextDialogStyle,
@@ -798,10 +801,11 @@ fn render_text_input_dialog(
 
     render_text_input_prompt(f, inner, prompt, &style);
 
+    let first_line = lines.first().map(|s| s.as_str()).unwrap_or("");
     if is_multiline {
-        render_multiline_text_input(f, inner, value, cursor, &style);
+        render_multiline_text_input(f, inner, lines, cursor.0, cursor.1, &style);
     } else {
-        render_singleline_text_input(f, inner, value, cursor, &style);
+        render_singleline_text_input(f, inner, first_line, cursor.1, &style);
     }
 
     render_text_input_footer(f, inner, footer, &style);
@@ -851,11 +855,10 @@ fn render_singleline_text_input(
     f: &mut Frame,
     inner: Rect,
     value: &str,
-    cursor: usize,
+    cursor_col: usize,
     style: &TextDialogStyle,
 ) {
     let input_w = inner.width.saturating_sub(2) as usize;
-    let cursor_col = value[..cursor.min(value.len())].chars().count();
     let hscroll = cursor_col.saturating_sub(input_w.saturating_sub(1));
     let shown = slice_chars(value, hscroll, input_w);
     let value_display = format!("{:<width$}", shown, width = input_w);
@@ -888,18 +891,14 @@ fn render_singleline_text_input(
 fn render_multiline_text_input(
     f: &mut Frame,
     inner: Rect,
-    value: &str,
-    cursor: usize,
+    lines: &[String],
+    cursor_line: usize,
+    cursor_col: usize,
     style: &TextDialogStyle,
 ) {
     let line_w = inner.width.saturating_sub(2) as usize;
     let input_top = inner.y + 1;
     let input_h = inner.height.saturating_sub(3) as usize;
-    let (cursor_line, cursor_col) = cursor_line_col(value, cursor);
-    let mut lines = value.split('\n').collect::<Vec<_>>();
-    if lines.is_empty() {
-        lines.push("");
-    }
 
     let vscroll = if cursor_line < input_h {
         0
@@ -910,7 +909,7 @@ fn render_multiline_text_input(
 
     for draw_row in 0..input_h {
         let line_idx = vscroll + draw_row;
-        let line = lines.get(line_idx).copied().unwrap_or("");
+        let line: &str = lines.get(line_idx).map(|s| s.as_str()).unwrap_or("");
         let hscroll = if line_idx == cursor_line {
             active_hscroll
         } else {
@@ -970,25 +969,6 @@ fn render_text_input_footer(
             render_shortcut_bar(f, hint_area, &hint_items, secondary_shortcut_bar_style());
         }
     }
-}
-
-fn cursor_line_col(value: &str, cursor: usize) -> (usize, usize) {
-    let mut line = 0usize;
-    let mut col = 0usize;
-    let cursor = cursor.min(value.len());
-
-    for (idx, ch) in value.char_indices() {
-        if idx >= cursor {
-            break;
-        }
-        if ch == '\n' {
-            line += 1;
-            col = 0;
-        } else {
-            col += 1;
-        }
-    }
-    (line, col)
 }
 
 fn slice_chars(value: &str, start: usize, width: usize) -> String {
