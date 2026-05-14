@@ -5,6 +5,14 @@ pub struct ConfirmDialog {
     pub title: String,
     pub message: String,
     pub action: ConfirmAction,
+    pub macro_name: Option<&'static str>,
+    pub active_button: ConfirmButton,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfirmButton {
+    Primary,
+    Secondary,
 }
 
 #[derive(Debug)]

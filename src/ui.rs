@@ -54,10 +54,11 @@ pub(crate) use self::plugins::plugins_shortcuts;
 use self::plugins::render_plugins;
 use crate::app::{
     ActionPaletteState, ActivePanel, App, AppMode, AssocEditorState, AudioPlayerPaletteState,
-    BookmarkListItem, ComparePanelState, ConfigState, ConfirmAction, ConfirmDialog, InputDialog,
-    MENU_DATA, MENU_HEADERS, MenuAction, MenuState, OpenerState, PluginsState, RemoteConnectState,
-    RemoteConnectingState, RemoteEditKind, RemoteEditState, SearchState, StoreInstallPaletteState,
-    ViewerGotoState, ViewerMenuKind, ViewerMenuState, ViewerPluginPaletteState,
+    BookmarkListItem, ComparePanelState, ConfigState, ConfirmAction, ConfirmButton, ConfirmDialog,
+    InputDialog, MENU_DATA, MENU_HEADERS, MenuAction, MenuState, OpenerState, PluginsState,
+    RemoteConnectState, RemoteConnectingState, RemoteEditKind, RemoteEditState, SearchState,
+    StoreInstallPaletteState, ViewerGotoState, ViewerMenuKind, ViewerMenuState,
+    ViewerPluginPaletteState,
 };
 use crate::config::SortMode;
 use crate::copy::{CopyDialogState, CopyProgressState};

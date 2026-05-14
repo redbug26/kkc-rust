@@ -1,3 +1,4 @@
+use crate::app::{ConfirmAction, ConfirmDialog};
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, MouseEventKind};
 use mlua::{Lua, Table, Value};
@@ -9,6 +10,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
 };
+use std::borrow::Cow;
 use std::io;
 use unicode_width::UnicodeWidthStr;
 
@@ -34,9 +36,435 @@ const CLR_PAL_TITLE: Color = Color::Rgb(190, 190, 190);
 const CLR_PAL_FOOTER_BG: Color = Color::Rgb(52, 52, 52);
 const CLR_PAL_FOOTER_FG: Color = Color::Rgb(230, 230, 230);
 
+const CONFIRM_QUIT_MACRO: &str = include_str!("../assets/macros/confirm_quit.lua");
+const CONFIRM_DELETE_MACRO: &str = include_str!("../assets/macros/confirm_delete.lua");
+
+#[derive(Debug, Clone)]
+pub struct ConfirmDialogSpec {
+    pub width: u16,
+    pub height: u16,
+    pub shadow_dx: u16,
+    pub shadow_dy: u16,
+    pub title: String,
+    pub palette: ConfirmDialogPalette,
+    pub separators: Vec<u16>,
+    pub header: Option<ConfirmDialogText>,
+    pub message: ConfirmDialogText,
+    pub buttons_y: u16,
+    pub button_gap: u16,
+    pub buttons: Vec<ConfirmDialogButtonSpec>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfirmDialogPalette {
+    Normal,
+    Danger,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConfirmDialogText {
+    pub message_text: String,
+    pub message_y: u16,
+    pub message_height: u16,
+    pub message_prefix_blank: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConfirmDialogButtonSpec {
+    pub callback: String,
+    pub label: String,
+    pub width: u16,
+}
+
+impl Default for ConfirmDialogSpec {
+    fn default() -> Self {
+        Self {
+            width: 38,
+            height: 9,
+            shadow_dx: 2,
+            shadow_dy: 1,
+            title: " KK Commander ".into(),
+            palette: ConfirmDialogPalette::Normal,
+            separators: vec![4],
+            header: None,
+            message: ConfirmDialogText {
+                message_text: "Do you really want to quit?".into(),
+                message_y: 1,
+                message_height: 3,
+                message_prefix_blank: true,
+            },
+            buttons_y: 5,
+            button_gap: 3,
+            buttons: vec![
+                ConfirmDialogButtonSpec {
+                    callback: "confirm".into(),
+                    label: "▶  Yes  ◀".into(),
+                    width: 11,
+                },
+                ConfirmDialogButtonSpec {
+                    callback: "cancel".into(),
+                    label: "▶   No  ◀".into(),
+                    width: 11,
+                },
+            ],
+        }
+    }
+}
+
+pub fn confirm_render_spec(dlg: &ConfirmDialog) -> Option<ConfirmDialogSpec> {
+    let macro_name = dlg.macro_name?;
+    let fallback = default_confirm_dialog_spec(macro_name, dlg);
+    load_confirm_dialog_spec(
+        macro_name,
+        ConfirmDialogContext::from_dialog(dlg),
+        fallback.clone(),
+    )
+    .ok()
+    .or(Some(fallback))
+}
+
+pub fn confirm_button_callback(dlg: &ConfirmDialog, button_idx: usize) -> Option<String> {
+    confirm_render_spec(dlg).and_then(|spec| {
+        spec.buttons
+            .get(button_idx)
+            .map(|button| button.callback.clone())
+    })
+}
+
+fn default_confirm_dialog_spec(name: &str, dlg: &ConfirmDialog) -> ConfirmDialogSpec {
+    if name == "confirm_delete" {
+        let count = confirm_delete_count(&dlg.action);
+        return ConfirmDialogSpec {
+            width: 44,
+            height: 9,
+            shadow_dx: 0,
+            shadow_dy: 0,
+            title: " Delete ".into(),
+            palette: ConfirmDialogPalette::Danger,
+            separators: Vec::new(),
+            header: Some(ConfirmDialogText {
+                message_text: if count == 1 {
+                    "⚠  Delete this item?".into()
+                } else {
+                    "⚠  Delete these items?".into()
+                },
+                message_y: 0,
+                message_height: 1,
+                message_prefix_blank: false,
+            }),
+            message: ConfirmDialogText {
+                message_text: dlg.message.clone(),
+                message_y: 2,
+                message_height: 2,
+                message_prefix_blank: false,
+            },
+            buttons_y: 5,
+            button_gap: 4,
+            buttons: vec![
+                ConfirmDialogButtonSpec {
+                    callback: "confirm".into(),
+                    label: "▶ Delete ◀".into(),
+                    width: 13,
+                },
+                ConfirmDialogButtonSpec {
+                    callback: "cancel".into(),
+                    label: "▶ Cancel ◀".into(),
+                    width: 13,
+                },
+            ],
+        };
+    }
+    ConfirmDialogSpec::default()
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct ConfirmDialogContext {
+    pub message: Option<String>,
+    pub count: Option<usize>,
+}
+
+impl ConfirmDialogContext {
+    fn from_dialog(dlg: &ConfirmDialog) -> Self {
+        Self {
+            message: Some(dlg.message.clone()),
+            count: match &dlg.action {
+                ConfirmAction::Delete(paths) => Some(paths.len()),
+                ConfirmAction::DeleteRemote(targets) => Some(targets.len()),
+                _ => None,
+            },
+        }
+    }
+}
+
+fn confirm_delete_count(action: &ConfirmAction) -> usize {
+    match action {
+        ConfirmAction::Delete(paths) => paths.len(),
+        ConfirmAction::DeleteRemote(targets) => targets.len(),
+        _ => 0,
+    }
+}
+
+pub fn confirm_dialog_button_rects(spec: &ConfirmDialogSpec, area: Rect) -> Vec<Rect> {
+    let popup = Rect {
+        x: area.x + area.width.saturating_sub(spec.width) / 2,
+        y: area.y + area.height.saturating_sub(spec.height) / 2,
+        width: spec.width,
+        height: spec.height,
+    };
+    let inner = inner_rect(popup);
+    let buttons_total = spec
+        .buttons
+        .iter()
+        .fold(0u16, |acc, button| acc.saturating_add(button.width));
+    let gap_total = spec
+        .button_gap
+        .saturating_mul(spec.buttons.len().saturating_sub(1) as u16);
+    let group_w = buttons_total.saturating_add(gap_total);
+    let btn_x = inner.x + inner.width.saturating_sub(group_w) / 2;
+    let btn_y = inner.y + spec.buttons_y;
+    let mut x = btn_x;
+    spec.buttons
+        .iter()
+        .map(|button| {
+            let rect = Rect {
+                x,
+                y: btn_y,
+                width: button.width,
+                height: 1,
+            };
+            x = x
+                .saturating_add(button.width)
+                .saturating_add(spec.button_gap);
+            rect
+        })
+        .collect()
+}
+
+pub fn confirm_dialog_button_rect_pair(spec: &ConfirmDialogSpec, area: Rect) -> (Rect, Rect) {
+    let rects = confirm_dialog_button_rects(spec, area);
+    (
+        rects.first().copied().unwrap_or(Rect {
+            x: area.x,
+            y: area.y,
+            width: 0,
+            height: 0,
+        }),
+        rects.get(1).copied().unwrap_or(Rect {
+            x: area.x,
+            y: area.y,
+            width: 0,
+            height: 0,
+        }),
+    )
+}
+
+fn load_confirm_dialog_spec(
+    name: &str,
+    ctx: ConfirmDialogContext,
+    default: ConfirmDialogSpec,
+) -> Result<ConfirmDialogSpec> {
+    let source = confirm_macro_source(name).unwrap_or(Cow::Borrowed(CONFIRM_QUIT_MACRO));
+    let lua = Lua::new();
+    let package: Table = lua.globals().get("package")?;
+    let preload: Table = package.get("preload")?;
+    install_lua_dialog_module(&lua, &preload)?;
+    let ctx_table = lua.create_table()?;
+    if let Some(message) = ctx.message {
+        ctx_table.set("message", message)?;
+    }
+    if let Some(count) = ctx.count {
+        ctx_table.set("count", count)?;
+    }
+    lua.globals().set("ctx", ctx_table)?;
+    let spec: Table = lua.load(source.as_ref()).set_name(name).eval()?;
+    parse_confirm_dialog_spec(&spec, default)
+}
+
+fn confirm_macro_source(name: &str) -> Option<Cow<'static, str>> {
+    if !is_safe_macro_name(name) {
+        return None;
+    }
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("assets")
+        .join("macros")
+        .join(format!("{}.lua", name));
+    if let Ok(source) = std::fs::read_to_string(path) {
+        return Some(Cow::Owned(source));
+    }
+    match name {
+        "confirm_quit" => Some(Cow::Borrowed(CONFIRM_QUIT_MACRO)),
+        "confirm_delete" => Some(Cow::Borrowed(CONFIRM_DELETE_MACRO)),
+        _ => None,
+    }
+}
+
+fn is_safe_macro_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
+fn parse_confirm_dialog_spec(
+    spec: &Table,
+    default: ConfirmDialogSpec,
+) -> Result<ConfirmDialogSpec> {
+    let palette = match spec
+        .get::<Option<String>>("palette")?
+        .unwrap_or_else(|| "normal".into())
+        .as_str()
+    {
+        "danger" => ConfirmDialogPalette::Danger,
+        _ => ConfirmDialogPalette::Normal,
+    };
+    let message_table = spec.get::<Option<Table>>("message")?;
+    let header_table = spec.get::<Option<Table>>("header")?;
+    let buttons_table = spec.get::<Option<Table>>("buttons")?;
+    let buttons_y = buttons_table
+        .as_ref()
+        .map(|buttons| table_u16(buttons, "y", default.buttons_y))
+        .unwrap_or(default.buttons_y);
+    let button_gap = buttons_table
+        .as_ref()
+        .map(|buttons| table_u16(buttons, "gap", default.button_gap))
+        .unwrap_or(default.button_gap);
+    let buttons = buttons_table
+        .as_ref()
+        .and_then(|buttons| buttons.get::<Option<Table>>("items").ok().flatten())
+        .map(parse_confirm_buttons)
+        .transpose()?
+        .filter(|buttons| buttons.len() >= 2)
+        .unwrap_or(default.buttons);
+    Ok(ConfirmDialogSpec {
+        width: table_u16(&spec, "width", default.width).clamp(20, 120),
+        height: table_u16(&spec, "height", default.height).clamp(8, 40),
+        shadow_dx: table_u16(&spec, "shadow_dx", default.shadow_dx).clamp(0, 8),
+        shadow_dy: table_u16(&spec, "shadow_dy", default.shadow_dy).clamp(0, 4),
+        title: table_string(&spec, "title", &default.title)?,
+        palette,
+        separators: table_u16_list(&spec, "separators")?.unwrap_or(default.separators),
+        header: header_table
+            .as_ref()
+            .map(|header| parse_confirm_text(header, default.header.as_ref()))
+            .transpose()?,
+        message: message_table
+            .as_ref()
+            .map(|message| parse_confirm_text(message, Some(&default.message)))
+            .transpose()?
+            .unwrap_or(default.message),
+        buttons_y,
+        button_gap,
+        buttons,
+    })
+}
+
+fn parse_confirm_text(
+    table: &Table,
+    default: Option<&ConfirmDialogText>,
+) -> Result<ConfirmDialogText> {
+    Ok(ConfirmDialogText {
+        message_text: table_string(
+            table,
+            "text",
+            default
+                .map(|text| text.message_text.as_str())
+                .unwrap_or_default(),
+        )?,
+        message_y: table_u16(
+            table,
+            "y",
+            default.map(|text| text.message_y).unwrap_or_default(),
+        ),
+        message_height: table_u16(
+            table,
+            "height",
+            default.map(|text| text.message_height).unwrap_or(1),
+        )
+        .clamp(1, 10),
+        message_prefix_blank: table
+            .get::<Option<bool>>("prefix_blank")?
+            .unwrap_or_else(|| {
+                default
+                    .map(|text| text.message_prefix_blank)
+                    .unwrap_or(false)
+            }),
+    })
+}
+
+fn parse_confirm_buttons(items: Table) -> Result<Vec<ConfirmDialogButtonSpec>> {
+    let mut buttons = Vec::new();
+    for item in items.sequence_values::<Table>() {
+        let item = item?;
+        let id = table_string(&item, "id", "confirm")?;
+        let callback = table_string(&item, "callback", id.as_str())?;
+        let label = table_string(&item, "label", id.as_str())?;
+        let width = table_u16(&item, "width", label.chars().count() as u16).clamp(4, 30);
+        buttons.push(ConfirmDialogButtonSpec {
+            callback,
+            label,
+            width,
+        });
+    }
+    Ok(buttons)
+}
+
+fn table_string(table: &Table, key: &str, default: &str) -> Result<String> {
+    Ok(table
+        .get::<Option<String>>(key)?
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| default.to_string()))
+}
+
+fn table_u16(table: &Table, key: &str, default: u16) -> u16 {
+    table
+        .get::<Option<u16>>(key)
+        .ok()
+        .flatten()
+        .unwrap_or(default)
+}
+
+fn table_u16_list(table: &Table, key: &str) -> Result<Option<Vec<u16>>> {
+    let Some(values) = table.get::<Option<Table>>(key)? else {
+        return Ok(None);
+    };
+    let mut out = Vec::new();
+    for value in values.sequence_values::<u16>() {
+        out.push(value?);
+    }
+    Ok(Some(out))
+}
+
 pub fn install_lua_dialog_module(lua: &Lua, preload: &Table) -> Result<()> {
     let dialog_mod = lua.create_function(move |lua, ()| {
         let t = lua.create_table()?;
+
+        t.set(
+            "confirm_box",
+            lua.create_function(move |lua, spec: Table| {
+                if let Some(callback) = spec.get::<Option<mlua::Function>>("callback")?
+                    && let Some(buttons) = spec.get::<Option<Table>>("buttons")?
+                    && let Some(items) = buttons.get::<Option<Table>>("items")?
+                {
+                    for item in items.sequence_values::<Table>() {
+                        let item = item?;
+                        let result: Value = callback.call(item.clone())?;
+                        let callback_id = match result {
+                            Value::String(value) => value.to_str()?.to_string(),
+                            Value::Table(table) => table
+                                .get::<Option<String>>("id")?
+                                .or_else(|| table.get::<Option<String>>("callback").ok().flatten())
+                                .unwrap_or_default(),
+                            _ => String::new(),
+                        };
+                        if !callback_id.is_empty() {
+                            item.set("callback", callback_id)?;
+                        }
+                    }
+                }
+                spec.set("callback", lua.create_table()?)?;
+                Ok(spec)
+            })?,
+        )?;
 
         t.set(
             "message",
@@ -49,15 +477,7 @@ pub fn install_lua_dialog_module(lua: &Lua, preload: &Table) -> Result<()> {
                                 .max(display_width(hint))
                                 .max(display_width("Lua Message"));
                             let content_h = line_count(&text).max(1).saturating_add(1);
-                            let area = popup_rect(
-                                f.area(),
-                                content_w,
-                                content_h,
-                                38,
-                                96,
-                                7,
-                                28,
-                            );
+                            let area = popup_rect(f.area(), content_w, content_h, 38, 96, 7, 28);
                             let chunks = Layout::default()
                                 .direction(Direction::Vertical)
                                 .constraints([Constraint::Min(1), Constraint::Length(1)])
@@ -118,20 +538,13 @@ pub fn install_lua_dialog_module(lua: &Lua, preload: &Table) -> Result<()> {
                             };
                             let content_w = max_line_width(&prompt)
                                 .max(display_width(hint))
-                                .max(display_width(value_line).saturating_add(max_line_width(&value)))
+                                .max(
+                                    display_width(value_line)
+                                        .saturating_add(max_line_width(&value)),
+                                )
                                 .max(display_width("Lua Input"));
-                            let content_h = line_count(&prompt)
-                                .max(1)
-                                .saturating_add(2);
-                            let area = popup_rect(
-                                f.area(),
-                                content_w,
-                                content_h,
-                                42,
-                                104,
-                                8,
-                                30,
-                            );
+                            let content_h = line_count(&prompt).max(1).saturating_add(2);
+                            let area = popup_rect(f.area(), content_w, content_h, 42, 104, 8, 30);
                             let chunks = Layout::default()
                                 .direction(Direction::Vertical)
                                 .constraints([
@@ -161,12 +574,11 @@ pub fn install_lua_dialog_module(lua: &Lua, preload: &Table) -> Result<()> {
                                 chunks[0],
                             );
                             f.render_widget(
-                                Paragraph::new(format!("Value: {}", value))
-                                    .style(
-                                        Style::default()
-                                            .fg(CLR_DIALOG_SELECTED_FG)
-                                            .bg(CLR_DIALOG_SELECTED_BG),
-                                    ),
+                                Paragraph::new(format!("Value: {}", value)).style(
+                                    Style::default()
+                                        .fg(CLR_DIALOG_SELECTED_FG)
+                                        .bg(CLR_DIALOG_SELECTED_BG),
+                                ),
                                 chunks[1],
                             );
                             f.render_widget(
@@ -307,16 +719,6 @@ pub fn install_lua_dialog_module(lua: &Lua, preload: &Table) -> Result<()> {
                     Option<Table>,
                     Option<String>,
                 )| {
-                    let mut choices = Vec::new();
-                    for value in options.sequence_values::<String>() {
-                        choices.push(value?);
-                    }
-                    if choices.is_empty() {
-                        let out = lua.create_table()?;
-                        out.set("checks", lua.create_table()?)?;
-                        return Ok(out);
-                    }
-
                     let mut checks = Vec::new();
                     if let Some(checkboxes) = checkboxes {
                         for entry in checkboxes.sequence_values::<Value>() {
@@ -335,7 +737,9 @@ pub fn install_lua_dialog_module(lua: &Lua, preload: &Table) -> Result<()> {
                                     if !label.is_empty() {
                                         checks.push(DialogCheckbox {
                                             label,
-                                            checked: t.get::<Option<bool>>("checked")?.unwrap_or(false),
+                                            checked: t
+                                                .get::<Option<bool>>("checked")?
+                                                .unwrap_or(false),
                                         });
                                     }
                                 }
@@ -344,16 +748,25 @@ pub fn install_lua_dialog_module(lua: &Lua, preload: &Table) -> Result<()> {
                         }
                     }
 
+                    let mut choices = Vec::new();
+                    for value in options.sequence_values::<String>() {
+                        choices.push(value?);
+                    }
+                    if choices.is_empty() {
+                        let out = lua.create_table()?;
+                        let lua_checks = lua.create_table()?;
+                        for (i, item) in checks.into_iter().enumerate() {
+                            lua_checks.set(i + 1, item.checked)?;
+                        }
+                        out.set("checks", lua_checks)?;
+                        return Ok(out);
+                    }
+
                     let default_zero_based = default_idx.unwrap_or(1).clamp(1, choices.len()) - 1;
                     let theme = PaletteTheme::from_name(theme_name.as_deref());
-                    let (selected, check_states) = run_palette_dialog(
-                        prompt,
-                        choices,
-                        default_zero_based,
-                        checks,
-                        theme,
-                    )
-                    .map_err(mlua::Error::external)?;
+                    let (selected, check_states) =
+                        run_palette_dialog(prompt, choices, default_zero_based, checks, theme)
+                            .map_err(mlua::Error::external)?;
 
                     let out = lua.create_table()?;
                     if let Some(idx) = selected {
@@ -463,13 +876,8 @@ enum PaletteTheme {
 
 impl PaletteTheme {
     fn from_name(name: Option<&str>) -> Self {
-        match name
-            .map(|s| s.trim().to_ascii_lowercase())
-            .as_deref()
-        {
-            Some("remote") | Some("remote_connections") | Some("ctrlf") => {
-                Self::RemoteConnections
-            }
+        match name.map(|s| s.trim().to_ascii_lowercase()).as_deref() {
+            Some("remote") | Some("remote_connections") | Some("ctrlf") => Self::RemoteConnections,
             _ => Self::CommandPalette,
         }
     }
@@ -581,13 +989,20 @@ fn run_palette_dialog(
                 .max(display_width(" \u{2315} ").saturating_add(display_width(&filter)))
                 .max(display_width(" ▶  OK  ◀   ▶ Cancel ◀ "))
                 .max(display_width("Command Palette"));
-            let visible_list = filtered.len().clamp(1, 12) as u16;
+            // Exact rule:
+            // - <= 8 items: show full list (no scrolling)
+            // - > 8 items: list becomes scrollable with 8 visible rows
+            let visible_list = filtered.len().clamp(1, 8) as u16;
             let options_rows = if checkboxes.is_empty() {
                 0
             } else {
                 checkboxes.len() as u16 + 1
             };
-            let content_h = visible_list.saturating_add(options_rows).saturating_add(3);
+            let spacer_rows = if !checkboxes.is_empty() { 1 } else { 0 };
+            let content_h = visible_list
+                .saturating_add(options_rows)
+                .saturating_add(4)
+                .saturating_add(spacer_rows);
             let term_size = terminal.size()?;
             let term_area = Rect {
                 x: 0,
@@ -595,14 +1010,40 @@ fn run_palette_dialog(
                 width: term_size.width,
                 height: term_size.height,
             };
-            let area = popup_rect(term_area, content_w, content_h, 52, 112, 9, 40);
+            let area = popup_rect(term_area, content_w, content_h, 52, 112, 9, 120);
             let inner = inner_rect(area);
 
-            let list_area = Rect {
+            let body_area = Rect {
                 x: inner.x,
                 y: inner.y + 2,
                 width: inner.width,
-                height: inner.height.saturating_sub(4),
+                // input(1) + sep(1) + body + optional spacer + buttons(1) + shadow(1)
+                height: inner.height.saturating_sub(4 + spacer_rows),
+            };
+            let checks_reserved = if checkboxes.is_empty() {
+                0
+            } else {
+                (checkboxes.len() as u16).saturating_add(1)
+            };
+            let body_h = body_area.height;
+            let desired_choices_h = visible_list.min(body_h).max(1);
+            let checks_h = if checkboxes.is_empty() {
+                0
+            } else {
+                checks_reserved.min(body_h.saturating_sub(desired_choices_h))
+            };
+            let choices_h = body_h.saturating_sub(checks_h);
+            let choices_area = Rect {
+                x: body_area.x,
+                y: body_area.y,
+                width: body_area.width,
+                height: choices_h,
+            };
+            let checks_area = Rect {
+                x: body_area.x,
+                y: body_area.y + choices_h,
+                width: body_area.width,
+                height: checks_h,
             };
             let ok_label = "▶  OK  ◀";
             let cancel_label = "▶ Cancel ◀";
@@ -622,31 +1063,23 @@ fn run_palette_dialog(
                 .saturating_add(buttons_gap);
             let footer_y = inner.y + inner.height.saturating_sub(2);
             let footer_shadow_y = inner.y + inner.height.saturating_sub(1);
-            let mut rows = Vec::new();
-            if filtered.is_empty() {
-                rows.push(Row::NoMatch);
-            } else {
-                for idx in &filtered {
-                    rows.push(Row::Choice(*idx));
-                }
+            let choices_h_usize = choices_area.height as usize;
+            let checks_visible_rows = checks_area.height.saturating_sub(1) as usize;
+            let checks_focusable = !checkboxes.is_empty() && checks_visible_rows > 0;
+            if focus == PaletteFocus::Checkboxes && !checks_focusable {
+                focus = PaletteFocus::List;
             }
-            if !checkboxes.is_empty() {
-                rows.push(Row::Separator);
-                for idx in 0..checkboxes.len() {
-                    rows.push(Row::Checkbox(idx));
-                }
-            }
-            let selected_row = if focus == PaletteFocus::Checkboxes && !checkboxes.is_empty() {
-                let base = if filtered.is_empty() { 1 } else { filtered.len() + 1 };
-                base + checks_cursor
-            } else if filtered.is_empty() {
+            let choice_start = if choices_h_usize == 0 {
                 0
+            } else if cursor >= choices_h_usize {
+                cursor - choices_h_usize + 1
             } else {
-                cursor
+                0
             };
-            let list_h = list_area.height as usize;
-            let start = if selected_row >= list_h {
-                selected_row - list_h + 1
+            let checks_start = if checks_visible_rows == 0 {
+                0
+            } else if checks_cursor >= checks_visible_rows {
+                checks_cursor - checks_visible_rows + 1
             } else {
                 0
             };
@@ -662,7 +1095,11 @@ fn run_palette_dialog(
                 f.render_widget(
                     Block::default()
                         .title(title)
-                        .title_style(Style::default().fg(colors.title).add_modifier(Modifier::BOLD))
+                        .title_style(
+                            Style::default()
+                                .fg(colors.title)
+                                .add_modifier(Modifier::BOLD),
+                        )
                         .style(Style::default().bg(colors.bg))
                         .border_style(Style::default().fg(colors.border))
                         .borders(Borders::ALL),
@@ -700,7 +1137,8 @@ fn run_palette_dialog(
 
                 let sep = "─".repeat(inner.width as usize);
                 f.render_widget(
-                    Paragraph::new(sep.clone()).style(Style::default().fg(colors.sep).bg(colors.bg)),
+                    Paragraph::new(sep.clone())
+                        .style(Style::default().fg(colors.sep).bg(colors.bg)),
                     Rect {
                         x: inner.x,
                         y: inner.y + 1,
@@ -709,87 +1147,100 @@ fn run_palette_dialog(
                     },
                 );
 
-                for (row_idx, row) in rows.iter().skip(start).take(list_h).enumerate() {
-                    let y = list_area.y + row_idx as u16;
-                    match row {
-                        Row::Separator => {
-                            f.render_widget(
-                                Paragraph::new(sep.clone())
-                                    .style(Style::default().fg(colors.sep).bg(colors.bg)),
-                                Rect {
-                                    x: list_area.x,
-                                    y,
-                                    width: list_area.width,
-                                    height: 1,
-                                },
-                            );
-                        }
-                        Row::NoMatch => {
-                            f.render_widget(
-                                Paragraph::new(Line::styled(
-                                    "No match",
-                                    Style::default().fg(colors.hint).bg(colors.bg),
-                                )),
-                                Rect {
-                                    x: list_area.x,
-                                    y,
-                                    width: list_area.width,
-                                    height: 1,
-                                },
-                            );
-                        }
-                        Row::Choice(choice_idx) => {
-                            let is_sel = !filtered.is_empty() && filtered[cursor] == *choice_idx;
+                if choices_area.height > 0 {
+                    if filtered.is_empty() {
+                        f.render_widget(
+                            Paragraph::new(Line::styled(
+                                "No match",
+                                Style::default().fg(colors.hint).bg(colors.bg),
+                            )),
+                            Rect {
+                                x: choices_area.x,
+                                y: choices_area.y,
+                                width: choices_area.width,
+                                height: 1,
+                            },
+                        );
+                    } else {
+                        for (row_idx, choice_idx) in filtered
+                            .iter()
+                            .skip(choice_start)
+                            .take(choices_h_usize)
+                            .enumerate()
+                        {
+                            let y = choices_area.y + row_idx as u16;
+                            let is_sel = filtered[cursor] == *choice_idx;
                             let list_is_active = focus == PaletteFocus::List;
                             let (bg, fg, marker) = if is_sel && list_is_active {
-                                // Active selection: highlighted with marker
                                 (colors.sel_bg, colors.sel_fg, "> ")
-                            } else if is_sel && !list_is_active {
-                                // Inactive selection: still visible but dimmed, no marker
+                            } else if is_sel {
                                 (colors.bg, colors.hint, "  ")
                             } else {
-                                // Not selected
                                 (colors.bg, colors.list_fg, "  ")
                             };
-                            let row_text =
-                                format!("{}{:>2}. {}", marker, choice_idx + 1, choices[*choice_idx]);
+                            let row_text = format!(
+                                "{}{:>2}. {}",
+                                marker,
+                                choice_idx + 1,
+                                choices[*choice_idx]
+                            );
                             f.render_widget(
                                 Paragraph::new(Line::styled(
-                                    truncate_to_width(&row_text, list_area.width as usize),
+                                    truncate_to_width(&row_text, choices_area.width as usize),
                                     Style::default().fg(fg).bg(bg),
                                 )),
                                 Rect {
-                                    x: list_area.x,
+                                    x: choices_area.x,
                                     y,
-                                    width: list_area.width,
+                                    width: choices_area.width,
                                     height: 1,
                                 },
                             );
                         }
-                        Row::Checkbox(check_idx) => {
-                            let item = &checkboxes[*check_idx];
-                            let is_sel =
-                                focus == PaletteFocus::Checkboxes && checks_cursor == *check_idx;
-                            let (bg, fg, marker) = if is_sel {
-                                (colors.sel_bg, colors.sel_fg, "> ")
-                            } else {
-                                (colors.bg, colors.list_fg, "  ")
-                            };
-                            let mark = if item.checked { "x" } else { " " };
-                            let row_text = format!("{}[{}] {}", marker, mark, item.label);
-                            f.render_widget(
-                                Paragraph::new(Line::styled(
-                                    truncate_to_width(&row_text, list_area.width as usize),
-                                    Style::default().fg(fg).bg(bg),
-                                )),
-                                Rect {
-                                    x: list_area.x,
-                                    y,
-                                    width: list_area.width,
-                                    height: 1,
-                                },
-                            );
-                        }
+                    }
+                }
+
+                if checks_area.height > 0 {
+                    f.render_widget(
+                        Paragraph::new(sep.clone())
+                            .style(Style::default().fg(colors.sep).bg(colors.bg)),
+                        Rect {
+                            x: checks_area.x,
+                            y: checks_area.y,
+                            width: checks_area.width,
+                            height: 1,
+                        },
+                    );
+
+                    for (row_idx, check_idx) in (checks_start..checkboxes.len())
+                        .take(checks_visible_rows)
+                        .enumerate()
+                    {
+                        let y = checks_area.y + 1 + row_idx as u16;
+                        let item = &checkboxes[check_idx];
+                        let is_current = checks_cursor == check_idx;
+                        let is_active = focus == PaletteFocus::Checkboxes;
+                        let (bg, fg, marker) = if is_current && is_active {
+                            (colors.sel_bg, colors.sel_fg, "> ")
+                        } else if is_current {
+                            (colors.bg, colors.hint, "  ")
+                        } else {
+                            (colors.bg, colors.list_fg, "  ")
+                        };
+                        let mark = if item.checked { "x" } else { " " };
+                        let row_text = format!("{}[{}] {}", marker, mark, item.label);
+                        f.render_widget(
+                            Paragraph::new(Line::styled(
+                                truncate_to_width(&row_text, checks_area.width as usize),
+                                Style::default().fg(fg).bg(bg),
+                            )),
+                            Rect {
+                                x: checks_area.x,
+                                y,
+                                width: checks_area.width,
+                                height: 1,
+                            },
+                        );
                     }
                 }
 
@@ -811,8 +1262,7 @@ fn run_palette_dialog(
                 } else {
                     Style::default().fg(colors.footer_fg).bg(colors.footer_bg)
                 };
-                let shadow_side_style =
-                    Style::default().fg(colors.footer_shadow).bg(colors.bg);
+                let shadow_side_style = Style::default().fg(colors.footer_shadow).bg(colors.bg);
                 let base_bg_style = Style::default().bg(colors.bg);
                 let ok_rest = "  OK  ◀";
                 let cancel_rest = " Cancel ◀";
@@ -846,7 +1296,7 @@ fn run_palette_dialog(
                         Style::default().bg(colors.bg),
                     ),
                     Span::styled(
-                        "▀".repeat((ok_w-1) as usize),
+                        "▀".repeat((ok_w - 1) as usize),
                         Style::default().fg(colors.footer_shadow).bg(colors.bg),
                     ),
                     Span::styled("▘", Style::default().fg(colors.footer_shadow).bg(colors.bg)),
@@ -883,6 +1333,12 @@ fn run_palette_dialog(
                         return Ok((None, states));
                     }
                     KeyCode::Enter => {
+                        if focus == PaletteFocus::Checkboxes {
+                            if let Some(item) = checkboxes.get_mut(checks_cursor) {
+                                item.checked = !item.checked;
+                            }
+                            continue;
+                        }
                         let states = checkboxes.iter().map(|c| c.checked).collect();
                         if active_button == DialogButton::Cancel {
                             return Ok((None, states));
@@ -896,10 +1352,10 @@ fn run_palette_dialog(
                     KeyCode::Tab => {
                         focus = match focus {
                             PaletteFocus::List => {
-                                if checkboxes.is_empty() {
-                                    PaletteFocus::Buttons
-                                } else {
+                                if checks_focusable {
                                     PaletteFocus::Checkboxes
+                                } else {
+                                    PaletteFocus::Buttons
                                 }
                             }
                             PaletteFocus::Checkboxes => PaletteFocus::Buttons,
@@ -917,20 +1373,20 @@ fn run_palette_dialog(
                         }
                     }
                     KeyCode::Up => {
-                        if focus == PaletteFocus::Checkboxes && !checkboxes.is_empty() {
+                        if focus == PaletteFocus::Checkboxes && checks_focusable {
                             checks_cursor = checks_cursor.saturating_sub(1);
                         } else if focus == PaletteFocus::List {
                             cursor = cursor.saturating_sub(1);
                         } else {
-                            focus = if checkboxes.is_empty() {
-                                PaletteFocus::List
-                            } else {
+                            focus = if checks_focusable {
                                 PaletteFocus::Checkboxes
+                            } else {
+                                PaletteFocus::List
                             };
                         }
                     }
                     KeyCode::Down => {
-                        if focus == PaletteFocus::Checkboxes && !checkboxes.is_empty() {
+                        if focus == PaletteFocus::Checkboxes && checks_focusable {
                             checks_cursor =
                                 (checks_cursor + 1).min(checkboxes.len().saturating_sub(1));
                         } else if focus == PaletteFocus::List {
@@ -991,44 +1447,46 @@ fn run_palette_dialog(
                             }
                         }
 
-                        if mouse.row >= list_area.y
-                            && mouse.row < list_area.y + list_area.height
-                            && mouse.column >= list_area.x
-                            && mouse.column < list_area.x + list_area.width
+                        if mouse.row >= choices_area.y
+                            && mouse.row < choices_area.y + choices_area.height
+                            && mouse.column >= choices_area.x
+                            && mouse.column < choices_area.x + choices_area.width
                         {
-                            let row_idx = start + (mouse.row - list_area.y) as usize;
-                            if let Some(row) = rows.get(row_idx).copied() {
-                                match row {
-                                    Row::Choice(choice_idx) => {
-                                        if let Some(pos) =
-                                            filtered.iter().position(|idx| *idx == choice_idx)
-                                        {
-                                            cursor = pos;
-                                            focus = PaletteFocus::List;
-                                            active_button = DialogButton::Ok;
-                                        }
-                                    }
-                                    Row::Checkbox(check_idx) => {
-                                        checks_cursor = check_idx;
-                                        focus = PaletteFocus::Checkboxes;
-                                        if let Some(item) = checkboxes.get_mut(check_idx) {
-                                            item.checked = !item.checked;
-                                        }
-                                    }
-                                    Row::Separator | Row::NoMatch => {}
+                            if !filtered.is_empty() {
+                                let row_idx = choice_start + (mouse.row - choices_area.y) as usize;
+                                if row_idx < filtered.len() {
+                                    cursor = row_idx;
+                                    focus = PaletteFocus::List;
+                                    active_button = DialogButton::Ok;
+                                }
+                            }
+                        }
+
+                        if checks_area.height > 1
+                            && mouse.row > checks_area.y
+                            && mouse.row < checks_area.y + checks_area.height
+                            && mouse.column >= checks_area.x
+                            && mouse.column < checks_area.x + checks_area.width
+                        {
+                            let check_idx = checks_start + (mouse.row - checks_area.y - 1) as usize;
+                            if check_idx < checkboxes.len() {
+                                checks_cursor = check_idx;
+                                focus = PaletteFocus::Checkboxes;
+                                if let Some(item) = checkboxes.get_mut(check_idx) {
+                                    item.checked = !item.checked;
                                 }
                             }
                         }
                     }
                     MouseEventKind::ScrollUp => {
-                        if focus == PaletteFocus::Checkboxes && !checkboxes.is_empty() {
+                        if focus == PaletteFocus::Checkboxes && checks_focusable {
                             checks_cursor = checks_cursor.saturating_sub(1);
                         } else {
                             cursor = cursor.saturating_sub(1);
                         }
                     }
                     MouseEventKind::ScrollDown => {
-                        if focus == PaletteFocus::Checkboxes && !checkboxes.is_empty() {
+                        if focus == PaletteFocus::Checkboxes && checks_focusable {
                             checks_cursor =
                                 (checks_cursor + 1).min(checkboxes.len().saturating_sub(1));
                         } else {
@@ -1082,14 +1540,6 @@ fn filtered_indices(choices: &[String], filter: &str) -> Vec<usize> {
     starts
 }
 
-#[derive(Clone, Copy)]
-enum Row {
-    Choice(usize),
-    Separator,
-    Checkbox(usize),
-    NoMatch,
-}
-
 fn truncate_to_width(text: &str, max_width: usize) -> String {
     if max_width == 0 {
         return String::new();
@@ -1109,4 +1559,46 @@ fn truncate_to_width(text: &str, max_width: usize) -> String {
     }
     out.push('…');
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn confirm_quit_macro_builds_generic_spec_with_callbacks() {
+        let dlg = ConfirmDialog {
+            title: "Quit KKC".into(),
+            message: "Exit KKC?".into(),
+            action: ConfirmAction::Quit,
+            macro_name: Some("confirm_quit"),
+            active_button: crate::app::ConfirmButton::Primary,
+        };
+        let spec = confirm_render_spec(&dlg).expect("confirm quit spec");
+
+        assert_eq!(spec.title, " KK Commander ");
+        assert_eq!(spec.palette, ConfirmDialogPalette::Normal);
+        assert_eq!(spec.buttons.len(), 2);
+        assert_eq!(spec.buttons[0].callback, "confirm");
+        assert_eq!(spec.buttons[1].callback, "cancel");
+    }
+
+    #[test]
+    fn confirm_delete_macro_uses_context() {
+        let dlg = ConfirmDialog {
+            title: "Delete".into(),
+            message: "Delete foo.txt?".into(),
+            action: ConfirmAction::Delete(vec![std::path::PathBuf::from("foo.txt")]),
+            macro_name: Some("confirm_delete"),
+            active_button: crate::app::ConfirmButton::Primary,
+        };
+        let spec = confirm_render_spec(&dlg).expect("confirm delete spec");
+
+        assert_eq!(spec.title, " Delete ");
+        assert_eq!(spec.palette, ConfirmDialogPalette::Danger);
+        assert_eq!(spec.header.unwrap().message_text, "⚠  Delete this item?");
+        assert_eq!(spec.message.message_text, "Delete foo.txt?");
+        assert_eq!(spec.buttons[0].callback, "confirm");
+        assert_eq!(spec.buttons[1].callback, "cancel");
+    }
 }

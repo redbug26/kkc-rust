@@ -11,8 +11,8 @@ pub use self::command_palette::{
     palette_shortname_for_action, shortcut_from_key_event,
 };
 pub use self::dialogs::{
-    AssocInputAction, AssocInputDialog, ConfirmAction, ConfirmDialog, InputAction, InputDialog,
-    RemoteDeleteTarget, SearchState, TextInputState,
+    AssocInputAction, AssocInputDialog, ConfirmAction, ConfirmButton, ConfirmDialog, InputAction,
+    InputDialog, RemoteDeleteTarget, SearchState, TextInputState,
 };
 use self::helpers::{
     cleanup_temp_download, draw_busy_status, panel_config_needs_profiles, same_remote_target,
@@ -1110,6 +1110,8 @@ impl App {
                     title: String::new(),
                     message: msg,
                     action: ConfirmAction::Message,
+                    macro_name: None,
+                    active_button: ConfirmButton::Primary,
                 })
             } else {
                 AppMode::Browse
@@ -1340,6 +1342,8 @@ impl App {
             title: String::new(),
             message: message.into(),
             action: ConfirmAction::Message,
+            macro_name: None,
+            active_button: ConfirmButton::Primary,
         });
     }
 
@@ -1841,6 +1845,8 @@ impl App {
                         action: ConfirmAction::MessageThen(Box::new(AppMode::RemoteConnect(
                             return_state,
                         ))),
+                        macro_name: None,
+                        active_button: ConfirmButton::Primary,
                     });
                 }
             }
@@ -3033,6 +3039,8 @@ impl App {
                 } else {
                     crate::app::ConfirmAction::Delete(paths)
                 },
+                macro_name: Some("confirm_delete"),
+                active_button: crate::app::ConfirmButton::Primary,
             });
         } else if self.active_panel().is_remote_view() {
             let _ = self.cmd_delete_remote_confirmed(remote_targets);

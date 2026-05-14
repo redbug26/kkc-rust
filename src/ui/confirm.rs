@@ -37,10 +37,11 @@ pub(super) fn render_confirm(f: &mut Frame, dlg: &ConfirmDialog, area: Rect) {
         ConfirmAction::Message | ConfirmAction::MessageThen(_) => {
             render_confirm_message(f, dlg, area)
         }
-        ConfirmAction::Quit => render_confirm_quit(f, area),
-        ConfirmAction::Delete(paths) => render_confirm_delete(f, &dlg.message, paths.len(), area),
-        ConfirmAction::DeleteRemote(targets) => {
-            render_confirm_delete(f, &dlg.message, targets.len(), area)
+        ConfirmAction::Quit | ConfirmAction::Delete(_) | ConfirmAction::DeleteRemote(_) => {
+            let Some(spec) = crate::lua_dialog::confirm_render_spec(dlg) else {
+                return;
+            };
+            render_confirm_box(f, &spec, area, dlg.active_button);
         }
         ConfirmAction::CloseTextEditorUnsaved => render_confirm_text_editor_unsaved(f, area),
         ConfirmAction::SaveEditorBeforeQuit => render_confirm_save_editor_before_quit(f, area),
@@ -181,283 +182,261 @@ fn render_confirm_message(f: &mut Frame, dlg: &ConfirmDialog, area: Rect) {
 }
 
 // ---------------------------------------------------------------------------
-// Quit dialog
+// Lua-backed confirmation boxes
 // ---------------------------------------------------------------------------
 
-fn render_confirm_quit(f: &mut Frame, area: Rect) {
-    const W: u16 = 38;
-    const H: u16 = 11;
-    let x = (area.width.saturating_sub(W)) / 2 + area.x;
-    let y = (area.height.saturating_sub(H)) / 2 + area.y;
+fn render_confirm_box(
+    f: &mut Frame,
+    spec: &crate::lua_dialog::ConfirmDialogSpec,
+    area: Rect,
+    active_button: ConfirmButton,
+) {
+    let x = (area.width.saturating_sub(spec.width)) / 2 + area.x;
+    let y = (area.height.saturating_sub(spec.height)) / 2 + area.y;
     let popup = clamp_rect(
         area,
         Rect {
             x,
             y,
-            width: W,
-            height: H,
+            width: spec.width,
+            height: spec.height,
         },
     );
 
-    // Shadow
-    let sh = Rect {
-        x: popup.x + 2,
-        y: popup.y + 1,
-        width: W,
-        height: H,
-    };
-    if sh.x + sh.width <= area.x + area.width && sh.y + sh.height <= area.y + area.height {
-        safe_render_widget(
-            f,
-            Block::default().style(Style::default().bg(Color::Rgb(20, 15, 10))),
-            sh,
-        );
+    if spec.shadow_dx > 0 || spec.shadow_dy > 0 {
+        let sh = Rect {
+            x: popup.x + spec.shadow_dx,
+            y: popup.y + spec.shadow_dy,
+            width: spec.width,
+            height: spec.height,
+        };
+        if sh.x + sh.width <= area.x + area.width && sh.y + sh.height <= area.y + area.height {
+            safe_render_widget(
+                f,
+                Block::default().style(Style::default().bg(Color::Rgb(20, 15, 10))),
+                sh,
+            );
+        }
     }
     safe_render_widget(f, Clear, popup);
 
+    let palette = DialogButtonPalette::from_lua(spec.palette);
+    let block_style = confirm_box_style(palette);
     let block = Block::default()
+        .title(spec.title.as_str())
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG))
-        .style(Style::default().bg(CLR_APP_BG));
+        .border_style(block_style.border)
+        .title_style(block_style.title)
+        .style(block_style.body);
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
 
-    // Title band
-    let logo_area = Rect {
-        x: inner.x,
-        y: inner.y,
-        width: inner.width,
-        height: 1,
+    let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
+    for sep_y in &spec.separators {
+        safe_render_widget(
+            f,
+            Paragraph::new(sep.clone()).style(
+                Style::default()
+                    .fg(block_style.separator_fg)
+                    .bg(block_style.bg),
+            ),
+            Rect {
+                x: inner.x,
+                y: inner.y + *sep_y,
+                width: inner.width,
+                height: 1,
+            },
+        );
+    }
+
+    if let Some(header) = &spec.header {
+        render_confirm_box_text(f, header, inner, block_style.header, Alignment::Center);
+    }
+    render_confirm_box_text(
+        f,
+        &spec.message,
+        inner,
+        block_style.message,
+        Alignment::Center,
+    );
+
+    render_dialog_buttons(f, spec, area, active_button, palette);
+}
+
+struct ConfirmBoxStyle {
+    bg: Color,
+    body: Style,
+    border: Style,
+    title: Style,
+    separator_fg: Color,
+    header: Style,
+    message: Style,
+}
+
+fn confirm_box_style(palette: DialogButtonPalette) -> ConfirmBoxStyle {
+    match palette {
+        DialogButtonPalette::Normal => ConfirmBoxStyle {
+            bg: CLR_APP_BG,
+            body: Style::default().bg(CLR_APP_BG),
+            border: Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG),
+            title: Style::default()
+                .fg(CLR_BUTTON_FG)
+                .bg(CLR_APP_BG)
+                .add_modifier(Modifier::BOLD),
+            separator_fg: CLR_PANEL_BORDER_DIM,
+            header: Style::default()
+                .fg(CLR_BUTTON_FG)
+                .bg(CLR_APP_BG)
+                .add_modifier(Modifier::BOLD),
+            message: Style::default().fg(Color::Rgb(50, 36, 22)).bg(CLR_APP_BG),
+        },
+        DialogButtonPalette::Danger => ConfirmBoxStyle {
+            bg: Color::Rgb(38, 18, 14),
+            body: Style::default().bg(Color::Rgb(38, 18, 14)),
+            border: Style::default().fg(Color::Rgb(180, 60, 40)),
+            title: Style::default()
+                .fg(Color::Rgb(255, 100, 80))
+                .add_modifier(Modifier::BOLD),
+            separator_fg: Color::Rgb(180, 60, 40),
+            header: Style::default()
+                .fg(Color::Rgb(255, 160, 60))
+                .bg(Color::Rgb(38, 18, 14))
+                .add_modifier(Modifier::BOLD),
+            message: Style::default()
+                .fg(Color::Rgb(240, 200, 180))
+                .bg(Color::Rgb(38, 18, 14)),
+        },
+    }
+}
+
+fn render_confirm_box_text(
+    f: &mut Frame,
+    text: &crate::lua_dialog::ConfirmDialogText,
+    inner: Rect,
+    style: Style,
+    alignment: Alignment,
+) {
+    let message = if text.message_prefix_blank {
+        format!("\n{}", text.message_text)
+    } else {
+        text.message_text.clone()
     };
     safe_render_widget(
         f,
-        Paragraph::new(" KK Commander ")
-            .alignment(Alignment::Center)
-            .style(
-                Style::default()
-                    .fg(CLR_BUTTON_FG)
-                    .bg(CLR_STATUS_BG)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        logo_area,
-    );
-
-    // Top separator
-    let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
-    safe_render_widget(
-        f,
-        Paragraph::new(sep.clone()).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
+        Paragraph::new(message).alignment(alignment).style(style),
         Rect {
             x: inner.x,
-            y: inner.y + 1,
+            y: inner.y + text.message_y,
             width: inner.width,
-            height: 1,
-        },
-    );
-
-    // Message
-    safe_render_widget(
-        f,
-        Paragraph::new("\nDo you really want to quit?")
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(Color::Rgb(50, 36, 22)).bg(CLR_APP_BG)),
-        Rect {
-            x: inner.x,
-            y: inner.y + 2,
-            width: inner.width,
-            height: 3,
-        },
-    );
-
-    // Bottom separator
-    safe_render_widget(
-        f,
-        Paragraph::new(sep).style(Style::default().fg(CLR_PANEL_BORDER_DIM).bg(CLR_APP_BG)),
-        Rect {
-            x: inner.x,
-            y: inner.y + 5,
-            width: inner.width,
-            height: 1,
-        },
-    );
-
-    // Buttons
-    let btn_y = inner.y + 7;
-    let yes_w: u16 = 11;
-    let no_w: u16 = 11;
-    let gap: u16 = 4;
-    let btn_x = inner.x + (inner.width.saturating_sub(yes_w + gap + no_w)) / 2;
-
-    safe_render_widget(
-        f,
-        Paragraph::new("  [ Yes ]  ").style(
-            Style::default()
-                .fg(Color::Black)
-                .bg(CLR_PANEL_BORDER)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Rect {
-            x: btn_x,
-            y: btn_y,
-            width: yes_w,
-            height: 1,
-        },
-    );
-    safe_render_widget(
-        f,
-        Paragraph::new("  [  No ]  ")
-            .style(Style::default().fg(Color::Rgb(80, 60, 40)).bg(CLR_APP_BG)),
-        Rect {
-            x: btn_x + yes_w + gap,
-            y: btn_y,
-            width: no_w,
-            height: 1,
-        },
-    );
-
-    // Key hints
-    safe_render_widget(
-        f,
-        Paragraph::new("Y / Enter  ·  N / Esc")
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(Color::Rgb(120, 90, 60)).bg(CLR_APP_BG)),
-        Rect {
-            x: inner.x,
-            y: inner.y + 8,
-            width: inner.width,
-            height: 1,
+            height: text.message_height,
         },
     );
 }
 
-// ---------------------------------------------------------------------------
-// Delete confirm dialog
-// ---------------------------------------------------------------------------
+fn render_dialog_buttons(
+    f: &mut Frame,
+    spec: &crate::lua_dialog::ConfirmDialogSpec,
+    area: Rect,
+    active_button: ConfirmButton,
+    palette: DialogButtonPalette,
+) {
+    let rects = crate::lua_dialog::confirm_dialog_button_rects(spec, area);
+    for (idx, button) in spec.buttons.iter().enumerate() {
+        let Some(rect) = rects.get(idx) else {
+            continue;
+        };
+        let active = match idx {
+            0 => active_button == ConfirmButton::Primary,
+            1 => active_button == ConfirmButton::Secondary,
+            _ => false,
+        };
+        render_dialog_button(f, *rect, button.label.as_str(), active, palette);
+    }
+}
 
-fn render_confirm_delete(f: &mut Frame, message: &str, count: usize, area: Rect) {
-    const W: u16 = 44;
-    const H: u16 = 9;
-    let x = (area.width.saturating_sub(W)) / 2 + area.x;
-    let y = (area.height.saturating_sub(H)) / 2 + area.y;
-    let popup = clamp_rect(
-        area,
-        Rect {
-            x,
-            y,
-            width: W,
-            height: H,
-        },
-    );
-    safe_render_widget(f, Clear, popup);
+#[derive(Clone, Copy)]
+enum DialogButtonPalette {
+    Normal,
+    Danger,
+}
 
-    let title = Span::styled(
-        " Delete ",
-        Style::default()
-            .fg(Color::Rgb(255, 100, 80))
-            .add_modifier(Modifier::BOLD),
-    );
-    let block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Rgb(180, 60, 40)))
-        .style(Style::default().bg(Color::Rgb(38, 18, 14)));
-    let inner = block.inner(popup);
-    safe_render_widget(f, block, popup);
+impl DialogButtonPalette {
+    fn from_lua(palette: crate::lua_dialog::ConfirmDialogPalette) -> Self {
+        match palette {
+            crate::lua_dialog::ConfirmDialogPalette::Normal => Self::Normal,
+            crate::lua_dialog::ConfirmDialogPalette::Danger => Self::Danger,
+        }
+    }
+}
 
-    // Warning header
-    let icon_label = if count == 1 {
-        "\u{26a0}  Delete this item?"
-    } else {
-        "\u{26a0}  Delete these items?"
+fn render_dialog_button(
+    f: &mut Frame,
+    area: Rect,
+    label: &str,
+    active: bool,
+    palette: DialogButtonPalette,
+) {
+    let active_bg = match palette {
+        DialogButtonPalette::Normal => CLR_PANEL_BORDER,
+        DialogButtonPalette::Danger => Color::Rgb(190, 58, 44),
     };
-    safe_render_widget(
-        f,
-        Paragraph::new(icon_label)
-            .alignment(Alignment::Center)
-            .style(
-                Style::default()
-                    .fg(Color::Rgb(255, 160, 60))
-                    .bg(Color::Rgb(38, 18, 14))
-                    .add_modifier(Modifier::BOLD),
-            ),
-        Rect {
-            x: inner.x,
-            y: inner.y,
-            width: inner.width,
-            height: 1,
-        },
-    );
-
-    // Message
-    let short_msg = truncate_str(message, inner.width as usize);
-    safe_render_widget(
-        f,
-        Paragraph::new(short_msg)
-            .alignment(Alignment::Center)
-            .style(
-                Style::default()
-                    .fg(Color::Rgb(240, 200, 180))
-                    .bg(Color::Rgb(38, 18, 14)),
-            ),
-        Rect {
-            x: inner.x,
-            y: inner.y + 2,
-            width: inner.width,
-            height: 2,
-        },
-    );
-
-    // Buttons
-    let btn_y = inner.y + 5;
-    let yes_w: u16 = 13;
-    let no_w: u16 = 13;
-    let gap: u16 = 4;
-    let btn_x = inner.x + (inner.width.saturating_sub(yes_w + gap + no_w)) / 2;
+    let inactive_bg = match palette {
+        DialogButtonPalette::Normal => CLR_APP_BG,
+        DialogButtonPalette::Danger => Color::Rgb(38, 18, 14),
+    };
+    let inactive_fg = match palette {
+        DialogButtonPalette::Normal => Color::Rgb(80, 60, 40),
+        DialogButtonPalette::Danger => Color::Rgb(180, 140, 120),
+    };
+    let shadow_fg = match palette {
+        DialogButtonPalette::Normal => Color::Rgb(118, 95, 70),
+        DialogButtonPalette::Danger => Color::Rgb(88, 36, 30),
+    };
+    let style = if active {
+        Style::default()
+            .fg(if matches!(palette, DialogButtonPalette::Danger) {
+                Color::White
+            } else {
+                Color::Black
+            })
+            .bg(active_bg)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(inactive_fg).bg(inactive_bg)
+    };
+    let shadow_style = Style::default().fg(shadow_fg).bg(inactive_bg);
+    let bg_style = Style::default().bg(inactive_bg);
+    let text = format!("{:^width$}", label, width = area.width as usize);
 
     safe_render_widget(
         f,
-        Paragraph::new("  [ Delete ]  ").style(
-            Style::default()
-                .fg(Color::White)
-                .bg(Color::Rgb(160, 40, 30))
-                .add_modifier(Modifier::BOLD),
-        ),
+        Paragraph::new(Line::from(vec![
+            Span::styled(text, style),
+            Span::styled("▖", shadow_style),
+        ]))
+        .style(bg_style),
         Rect {
-            x: btn_x,
-            y: btn_y,
-            width: yes_w,
+            x: area.x,
+            y: area.y,
+            width: area.width.saturating_add(1),
             height: 1,
         },
     );
     safe_render_widget(
         f,
-        Paragraph::new("  [ Cancel ]  ").style(
-            Style::default()
-                .fg(Color::Rgb(180, 140, 120))
-                .bg(Color::Rgb(38, 18, 14)),
-        ),
-        Rect {
-            x: btn_x + yes_w + gap,
-            y: btn_y,
-            width: no_w,
-            height: 1,
-        },
-    );
-
-    // Hints
-    safe_render_widget(
-        f,
-        Paragraph::new("Y / Enter  ·  N / Esc")
-            .alignment(Alignment::Center)
-            .style(
-                Style::default()
-                    .fg(Color::Rgb(130, 90, 70))
-                    .bg(Color::Rgb(38, 18, 14)),
+        Paragraph::new(Line::from(vec![
+            Span::styled(" ", bg_style),
+            Span::styled(
+                "▀".repeat(area.width.saturating_sub(1) as usize),
+                shadow_style,
             ),
+            Span::styled("▘", shadow_style),
+        ]))
+        .style(bg_style),
         Rect {
-            x: inner.x,
-            y: btn_y + 1,
-            width: inner.width,
+            x: area.x,
+            y: area.y.saturating_add(1),
+            width: area.width.saturating_add(1),
             height: 1,
         },
     );

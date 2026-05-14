@@ -13,9 +13,9 @@ use self::viewer::{
 };
 use crate::app::{
     ActivePanel, App, AppMode, AssocEditorState, AssocInputAction, AssocInputDialog,
-    BookmarkListItem, ConfigState, ConfirmAction, ConfirmDialog, InputAction, InputDialog,
-    MENU_DATA, MENU_HEADERS, MenuAction, MenuState, OpenerActionItem, OpenerActionKind,
-    OpenerState, RemoteEditKind, TextInputState,
+    BookmarkListItem, ConfigState, ConfirmAction, ConfirmButton, ConfirmDialog, InputAction,
+    InputDialog, MENU_DATA, MENU_HEADERS, MenuAction, MenuState, OpenerActionItem,
+    OpenerActionKind, OpenerState, RemoteEditKind, TextInputState,
 };
 use crate::archive::supports_archive_navigation;
 use crate::compare::{jump_to_compare_search_match, rebuild_compare_panel_state};
@@ -1576,55 +1576,20 @@ fn confirm_button_rects(dlg: &ConfirmDialog, area: Rect) -> (Rect, Option<Rect>)
                 None,
             )
         }
-        ConfirmAction::Quit => {
-            let popup = Rect {
-                x: area.x + area.width.saturating_sub(38) / 2,
-                y: area.y + area.height.saturating_sub(11) / 2,
-                width: 38,
-                height: 11,
+        ConfirmAction::Quit | ConfirmAction::Delete(_) | ConfirmAction::DeleteRemote(_) => {
+            let Some(spec) = crate::lua_dialog::confirm_render_spec(dlg) else {
+                return (
+                    Rect {
+                        x: area.x,
+                        y: area.y,
+                        width: 0,
+                        height: 0,
+                    },
+                    None,
+                );
             };
-            let inner = inset_rect(popup, 1, 1);
-            let btn_y = inner.y + 7;
-            let btn_x = inner.x + inner.width.saturating_sub(26) / 2;
-            (
-                Rect {
-                    x: btn_x,
-                    y: btn_y,
-                    width: 11,
-                    height: 1,
-                },
-                Some(Rect {
-                    x: btn_x + 15,
-                    y: btn_y,
-                    width: 11,
-                    height: 1,
-                }),
-            )
-        }
-        ConfirmAction::Delete(_) | ConfirmAction::DeleteRemote(_) => {
-            let popup = Rect {
-                x: area.x + area.width.saturating_sub(44) / 2,
-                y: area.y + area.height.saturating_sub(9) / 2,
-                width: 44,
-                height: 9,
-            };
-            let inner = inset_rect(popup, 1, 1);
-            let btn_y = inner.y + 5;
-            let btn_x = inner.x + inner.width.saturating_sub(30) / 2;
-            (
-                Rect {
-                    x: btn_x,
-                    y: btn_y,
-                    width: 13,
-                    height: 1,
-                },
-                Some(Rect {
-                    x: btn_x + 17,
-                    y: btn_y,
-                    width: 13,
-                    height: 1,
-                }),
-            )
+            let (accept, reject) = crate::lua_dialog::confirm_dialog_button_rect_pair(&spec, area);
+            (accept, Some(reject))
         }
         ConfirmAction::CloseTextEditorUnsaved | ConfirmAction::SaveEditorBeforeQuit => {
             let popup = Rect {
@@ -2534,6 +2499,8 @@ fn handle_enter(app: &mut App) -> Result<()> {
                     title: "Plugin installed".into(),
                     message: format!("Plugin installed: {}", name),
                     action: ConfirmAction::Message,
+                    macro_name: None,
+                    active_button: crate::app::ConfirmButton::Primary,
                 });
             }
             Err(e) => app.notify(format!("Cannot install plugin: {}", e)),
@@ -2851,6 +2818,8 @@ fn confirm_quit(app: &mut App) -> Result<bool> {
             title: "Quit KKC".into(),
             message: "The text editor has unsaved changes. Save before quitting?".into(),
             action: ConfirmAction::SaveEditorBeforeQuit,
+            macro_name: None,
+            active_button: crate::app::ConfirmButton::Primary,
         });
         return Ok(false);
     }
@@ -2859,6 +2828,8 @@ fn confirm_quit(app: &mut App) -> Result<bool> {
             title: "Quit KKC".into(),
             message: "Exit KKC?".into(),
             action: ConfirmAction::Quit,
+            macro_name: Some("confirm_quit"),
+            active_button: crate::app::ConfirmButton::Primary,
         });
         Ok(false)
     } else {
@@ -3189,52 +3160,42 @@ fn handle_confirm(app: &mut App, key: KeyEvent) -> Result<bool> {
     };
 
     match key.code {
-        KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-            let AppMode::Confirm(dlg) = std::mem::replace(&mut app.mode, AppMode::Browse) else {
-                return Ok(false);
-            };
-            match dlg.action {
-                ConfirmAction::Message => {}
-                ConfirmAction::MessageThen(next) => {
-                    app.mode = *next;
-                }
-                ConfirmAction::Quit => return Ok(true),
-                ConfirmAction::Delete(paths) => {
-                    app.cmd_delete_confirmed(paths)?;
-                }
-                ConfirmAction::DeleteRemote(targets) => {
-                    app.cmd_delete_remote_confirmed(targets)?;
-                }
-                ConfirmAction::CloseTextEditorUnsaved => {
-                    if let Err(e) = app.save_panel_text_editor() {
-                        app.notify(format!("Cannot save text editor file: {}", e));
-                        app.panel_text_editor_active = true;
-                    } else {
-                        app.close_panel_text_editor();
-                    }
-                }
-                ConfirmAction::SaveEditorBeforeQuit => {
-                    if let Err(e) = app.save_panel_text_editor() {
-                        app.notify(format!("Cannot save text editor file: {}", e));
-                        app.panel_text_editor_active = true;
-                    } else {
-                        app.close_panel_text_editor();
-                        return confirm_quit(app);
-                    }
-                }
+        KeyCode::Left | KeyCode::Right | KeyCode::Tab => {
+            if let AppMode::Confirm(dlg) = &mut app.mode
+                && confirm_has_secondary_button(&dlg.action)
+            {
+                dlg.active_button = match dlg.active_button {
+                    ConfirmButton::Primary => ConfirmButton::Secondary,
+                    ConfirmButton::Secondary => ConfirmButton::Primary,
+                };
             }
         }
-        KeyCode::Char('n') | KeyCode::Char('N') => {
-            let AppMode::Confirm(dlg) = std::mem::replace(&mut app.mode, AppMode::Browse) else {
-                return Ok(false);
+        KeyCode::Char('y') | KeyCode::Char('Y') => {
+            return confirm_primary(app);
+        }
+        KeyCode::Enter => {
+            if let AppMode::Confirm(dlg) = &app.mode {
+                if let Some(callback) = crate::lua_dialog::confirm_button_callback(
+                    dlg,
+                    confirm_button_index(dlg.active_button),
+                ) {
+                    return match callback.as_str() {
+                        "cancel" => confirm_secondary(app),
+                        _ => confirm_primary(app),
+                    };
+                }
             };
-            if matches!(dlg.action, ConfirmAction::CloseTextEditorUnsaved) {
-                app.close_panel_text_editor();
-            } else if matches!(dlg.action, ConfirmAction::SaveEditorBeforeQuit) {
-                // Discard changes and proceed to quit.
-                app.close_panel_text_editor();
-                return confirm_quit(app);
-            }
+            let active = match &app.mode {
+                AppMode::Confirm(dlg) => dlg.active_button,
+                _ => ConfirmButton::Primary,
+            };
+            return match active {
+                ConfirmButton::Primary => confirm_primary(app),
+                ConfirmButton::Secondary => confirm_secondary(app),
+            };
+        }
+        KeyCode::Char('n') | KeyCode::Char('N') => {
+            return confirm_secondary(app);
         }
         KeyCode::Esc => {
             let keep_editor_focused = matches!(
@@ -3251,6 +3212,74 @@ fn handle_confirm(app: &mut App, key: KeyEvent) -> Result<bool> {
             if keep_editor_focused {
                 app.panel_text_editor_active = true;
             }
+        }
+        _ => {}
+    }
+    Ok(false)
+}
+
+fn confirm_has_secondary_button(action: &ConfirmAction) -> bool {
+    matches!(
+        action,
+        ConfirmAction::Quit | ConfirmAction::Delete(_) | ConfirmAction::DeleteRemote(_)
+    )
+}
+
+fn confirm_button_index(button: ConfirmButton) -> usize {
+    match button {
+        ConfirmButton::Primary => 0,
+        ConfirmButton::Secondary => 1,
+    }
+}
+
+fn confirm_primary(app: &mut App) -> Result<bool> {
+    let AppMode::Confirm(dlg) = std::mem::replace(&mut app.mode, AppMode::Browse) else {
+        return Ok(false);
+    };
+    match dlg.action {
+        ConfirmAction::Message => {}
+        ConfirmAction::MessageThen(next) => {
+            app.mode = *next;
+        }
+        ConfirmAction::Quit => return Ok(true),
+        ConfirmAction::Delete(paths) => {
+            app.cmd_delete_confirmed(paths)?;
+        }
+        ConfirmAction::DeleteRemote(targets) => {
+            app.cmd_delete_remote_confirmed(targets)?;
+        }
+        ConfirmAction::CloseTextEditorUnsaved => {
+            if let Err(e) = app.save_panel_text_editor() {
+                app.notify(format!("Cannot save text editor file: {}", e));
+                app.panel_text_editor_active = true;
+            } else {
+                app.close_panel_text_editor();
+            }
+        }
+        ConfirmAction::SaveEditorBeforeQuit => {
+            if let Err(e) = app.save_panel_text_editor() {
+                app.notify(format!("Cannot save text editor file: {}", e));
+                app.panel_text_editor_active = true;
+            } else {
+                app.close_panel_text_editor();
+                return confirm_quit(app);
+            }
+        }
+    }
+    Ok(false)
+}
+
+fn confirm_secondary(app: &mut App) -> Result<bool> {
+    let AppMode::Confirm(dlg) = std::mem::replace(&mut app.mode, AppMode::Browse) else {
+        return Ok(false);
+    };
+    match dlg.action {
+        ConfirmAction::CloseTextEditorUnsaved => {
+            app.close_panel_text_editor();
+        }
+        ConfirmAction::SaveEditorBeforeQuit => {
+            app.close_panel_text_editor();
+            return confirm_quit(app);
         }
         _ => {}
     }
