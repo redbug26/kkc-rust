@@ -3355,15 +3355,13 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                         }),
                         Err(e) => app.notify(format!("Action error: {}", e)),
                     }
+                    app.needs_full_redraw = true;
                     if app.config.auto_reload {
                         app.reload_panels();
                     }
                 }
                 InputAction::SaveSelectionSession => {
                     app.cmd_save_selection_session(&value);
-                }
-                InputAction::LoadSelectionSession => {
-                    app.cmd_load_selection_session(&value);
                 }
             }
         }
@@ -4379,6 +4377,7 @@ fn handle_action_palette(app: &mut App, key: KeyEvent) -> Result<bool> {
                     }),
                     Err(e) => app.notify(format!("Action error: {}", e)),
                 }
+                app.needs_full_redraw = true;
                 if app.config.auto_reload {
                     app.reload_panels();
                 }

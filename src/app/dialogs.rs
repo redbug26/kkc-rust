@@ -70,7 +70,6 @@ pub enum InputAction {
         cwd: PathBuf,
     },
     SaveSelectionSession,
-    LoadSelectionSession,
 }
 
 #[derive(Debug, Clone)]

@@ -1,9 +1,4 @@
 use anyhow::{Context, Result, anyhow, bail};
-use crossterm::{
-    event::{DisableMouseCapture, EnableMouseCapture},
-    execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
-};
 use base64::Engine as _;
 use mlua::{Function, Lua, Table, Value};
 use serde::Deserialize;
@@ -11,7 +6,7 @@ use serde::Serialize;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
-use std::io::{self, Cursor, Read, Seek, Write};
+use std::io::{self, Cursor, Read, Seek};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::rc::Rc;
@@ -706,6 +701,113 @@ pub fn run_action(
         .read()
         .map_err(|_| anyhow!("Plugin registry lock poisoned"))?
         .run_action(plugin, action_id, cwd, input)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DialogSelectTheme {
+    CommandPalette,
+    RemoteConnections,
+}
+
+impl DialogSelectTheme {
+    fn as_lua_name(self) -> &'static str {
+        match self {
+            Self::CommandPalette => "command_palette",
+            Self::RemoteConnections => "remote_connections",
+        }
+    }
+}
+
+#[allow(dead_code)]
+pub fn dialog_select(prompt: &str, options: &[String], default_idx: usize) -> Result<Option<usize>> {
+    let (selected, _) = dialog_select_with_checks(
+        prompt,
+        options,
+        default_idx,
+        &[],
+        DialogSelectTheme::CommandPalette,
+    )?;
+    Ok(selected)
+}
+
+pub fn dialog_select_with_checks(
+    prompt: &str,
+    options: &[String],
+    default_idx: usize,
+    checkboxes: &[(String, bool)],
+    theme: DialogSelectTheme,
+) -> Result<(Option<usize>, Vec<bool>)> {
+    if options.is_empty() {
+        return Ok((None, checkboxes.iter().map(|(_, checked)| *checked).collect()));
+    }
+
+    let lua = plugin_lua();
+    install_bindings(&lua, Path::new("."), |_| {})?;
+
+    let lua_options = lua.create_table()?;
+    for (idx, option) in options.iter().enumerate() {
+        lua_options.set(idx + 1, option.clone())?;
+    }
+
+    let default_one_based = default_idx.saturating_add(1).clamp(1, options.len());
+    let lua_checks = lua.create_table()?;
+    for (idx, (label, checked)) in checkboxes.iter().enumerate() {
+        let item = lua.create_table()?;
+        item.set("label", label.clone())?;
+        item.set("checked", *checked)?;
+        lua_checks.set(idx + 1, item)?;
+    }
+
+    let globals = lua.globals();
+    globals.set("__kkc_dialog_prompt", prompt.to_string())?;
+    globals.set("__kkc_dialog_options", lua_options)?;
+    globals.set("__kkc_dialog_default", default_one_based)?;
+    globals.set("__kkc_dialog_checks", lua_checks)?;
+    globals.set("__kkc_dialog_theme", theme.as_lua_name())?;
+
+    // Run a Lua macro chunk so dialog rendering and selection flow live in Lua.
+    let (selected, checks): (Option<usize>, Table) = lua
+        .load(
+            r#"
+local dlg = require("kkc-dialog")
+local result = dlg.select_with_checks(
+  __kkc_dialog_prompt,
+  __kkc_dialog_options,
+  __kkc_dialog_default,
+  __kkc_dialog_checks,
+  __kkc_dialog_theme
+)
+if result == nil then
+  return nil, {}
+end
+return result.index, result.checks
+"#,
+        )
+        .set_name("kkc-dialog-select-with-checks-macro")
+        .eval()?;
+
+    let selected = selected.and_then(|idx| {
+        if (1..=options.len()).contains(&idx) {
+            Some(idx - 1)
+        } else {
+            None
+        }
+    });
+
+    let mut check_states = Vec::new();
+    for value in checks.sequence_values::<bool>() {
+        check_states.push(value?);
+    }
+    if check_states.len() < checkboxes.len() {
+        check_states.extend(
+            checkboxes[check_states.len()..]
+                .iter()
+                .map(|(_, checked)| *checked),
+        );
+    }
+    check_states.truncate(checkboxes.len());
+
+    Ok((selected, check_states))
 }
 
 pub fn is_plugin_bundle(path: &Path) -> bool {
@@ -3110,123 +3212,7 @@ where
     globals.set("sj", sj)?;
 
     let preload: Table = package.get("preload")?;
-    let dialog_mod = lua.create_function(move |lua, ()| {
-        let t = lua.create_table()?;
-
-        t.set(
-            "message",
-            lua.create_function(move |_, text: String| {
-                lua_dialog_run_interactive(|| {
-                    let mut stdout = io::stdout();
-                    writeln!(stdout, "\n{text}")?;
-                    write!(stdout, "Press Enter to continue...")?;
-                    stdout.flush()?;
-                    let mut input = String::new();
-                    io::stdin().read_line(&mut input)?;
-                    Ok(())
-                })
-            })?,
-        )?;
-
-        t.set(
-            "input",
-            lua.create_function(move |_, (prompt, default): (String, Option<String>)| {
-                lua_dialog_run_interactive(|| {
-                    let mut stdout = io::stdout();
-                    write!(
-                        stdout,
-                        "\n{}{} ",
-                        prompt,
-                        default
-                            .as_ref()
-                            .map(|d| format!(" [{d}]"))
-                            .unwrap_or_default()
-                    )?;
-                    stdout.flush()?;
-                    let mut input = String::new();
-                    io::stdin().read_line(&mut input)?;
-                    let value = input.trim_end_matches(['\n', '\r']);
-                    if value.is_empty() {
-                        Ok(default.unwrap_or_default())
-                    } else {
-                        Ok(value.to_string())
-                    }
-                })
-            })?,
-        )?;
-
-        t.set(
-            "confirm",
-            lua.create_function(move |_, (prompt, default_yes): (String, Option<bool>)| {
-                let default_yes = default_yes.unwrap_or(true);
-                lua_dialog_run_interactive(|| {
-                    let mut stdout = io::stdout();
-                    loop {
-                        write!(
-                            stdout,
-                            "\n{} [{}] ",
-                            prompt,
-                            if default_yes { "Y/n" } else { "y/N" }
-                        )?;
-                        stdout.flush()?;
-                        let mut input = String::new();
-                        io::stdin().read_line(&mut input)?;
-                        let value = input.trim().to_ascii_lowercase();
-                        if value.is_empty() {
-                            return Ok(default_yes);
-                        }
-                        if matches!(value.as_str(), "y" | "yes" | "o" | "oui") {
-                            return Ok(true);
-                        }
-                        if matches!(value.as_str(), "n" | "no" | "non") {
-                            return Ok(false);
-                        }
-                    }
-                })
-            })?,
-        )?;
-
-        t.set(
-            "select",
-            lua.create_function(
-                move |_, (prompt, options, default_idx): (String, Table, Option<usize>)| {
-                    let mut choices = Vec::new();
-                    for value in options.sequence_values::<String>() {
-                        choices.push(value?);
-                    }
-                    if choices.is_empty() {
-                        return Ok(None::<usize>);
-                    }
-                    let default_idx = default_idx.unwrap_or(1).clamp(1, choices.len());
-                    lua_dialog_run_interactive(|| {
-                        let mut stdout = io::stdout();
-                        writeln!(stdout, "\n{prompt}")?;
-                        for (idx, choice) in choices.iter().enumerate() {
-                            writeln!(stdout, "  {:>2}. {}", idx + 1, choice)?;
-                        }
-                        loop {
-                            write!(stdout, "Choice [default={}]: ", default_idx)?;
-                            stdout.flush()?;
-                            let mut input = String::new();
-                            io::stdin().read_line(&mut input)?;
-                            let value = input.trim();
-                            if value.is_empty() {
-                                return Ok(Some(default_idx));
-                            }
-                            if let Ok(parsed) = value.parse::<usize>()
-                                && (1..=choices.len()).contains(&parsed)
-                            {
-                                return Ok(Some(parsed));
-                            }
-                        }
-                    })
-                },
-            )?,
-        )?;
-
-        Ok(t)
-    })?;
-    preload.set("kkc-dialog", dialog_mod)?;
+    crate::lua_dialog::install_lua_dialog_module(lua, &preload)?;
 
     let kkc = lua.create_table()?;
     kkc.set(
@@ -3348,29 +3334,6 @@ where
     preload.set("kkc", lua.create_function(move |_, ()| Ok(kkc.clone()))?)?;
 
     Ok(())
-}
-
-fn lua_dialog_run_interactive<T, F>(f: F) -> mlua::Result<T>
-where
-    F: FnOnce() -> Result<T>,
-{
-    disable_raw_mode().map_err(mlua::Error::external)?;
-    execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture)
-        .map_err(mlua::Error::external)?;
-
-    let result = f();
-
-    let restore_screen = execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture);
-    let restore_raw = enable_raw_mode();
-
-    if let Err(err) = restore_screen {
-        return Err(mlua::Error::external(err));
-    }
-    if let Err(err) = restore_raw {
-        return Err(mlua::Error::external(err));
-    }
-
-    result.map_err(mlua::Error::external)
 }
 
 fn table_string_list(table: &Table, key: &str) -> mlua::Result<Vec<String>> {

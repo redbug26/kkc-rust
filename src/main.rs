@@ -14,6 +14,7 @@ mod file_types;
 mod gif_recorder;
 mod help;
 mod idf;
+mod lua_dialog;
 mod lua_apps;
 mod matrix_screensaver;
 mod panel;

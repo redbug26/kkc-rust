@@ -2878,7 +2878,12 @@ impl App {
         }
     }
 
+    #[allow(dead_code)]
     pub fn cmd_load_selection_session(&mut self, raw_name: &str) {
+        self.cmd_load_selection_session_with_options(raw_name, false);
+    }
+
+    pub fn cmd_load_selection_session_with_options(&mut self, raw_name: &str, force_panel_path: bool) {
         if self.active_panel().is_remote_view() || self.active_panel().is_archive_view() {
             self.notify("Selection sessions are available on local directories only");
             return;
@@ -2902,6 +2907,34 @@ impl App {
             }
         };
 
+        let saved_panel_path = text
+            .lines()
+            .find_map(|line| line.strip_prefix("# panel_path="))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(std::path::PathBuf::from);
+
+        if force_panel_path
+            && let Some(saved_path) = saved_panel_path
+        {
+            if saved_path.is_dir() {
+                if let Err(err) = self.active_panel_mut().enter_dir(saved_path.clone()) {
+                    self.notify(format!(
+                        "Cannot enter saved panel path '{}': {}",
+                        saved_path.display(),
+                        err
+                    ));
+                    return;
+                }
+            } else {
+                self.notify(format!(
+                    "Saved panel path not found: {}",
+                    saved_path.display()
+                ));
+                return;
+            }
+        }
+
         let names = text
             .lines()
             .map(str::trim)
@@ -2913,9 +2946,47 @@ impl App {
         let selected = self.active_panel().selected_count();
         let missing = names.len().saturating_sub(selected);
         self.notify(format!(
-            "Loaded selection session '{}' ({} selected, {} missing)",
-            name, selected, missing
+            "Loaded selection session '{}' ({} selected, {} missing{})",
+            name,
+            selected,
+            missing,
+            if force_panel_path {
+                ", forced saved path"
+            } else {
+                ""
+            }
         ));
+    }
+
+    pub fn selection_session_names(&self) -> Vec<String> {
+        let Ok(dir) = selection_sessions_dir() else {
+            return Vec::new();
+        };
+        let Ok(entries) = fs::read_dir(dir) else {
+            return Vec::new();
+        };
+
+        let mut out = entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.is_file()
+                    && path
+                        .extension()
+                        .and_then(|ext| ext.to_str())
+                        .map(|ext| ext.eq_ignore_ascii_case("lst"))
+                        .unwrap_or(false)
+            })
+            .filter_map(|path| {
+                path.file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .map(str::to_string)
+            })
+            .collect::<Vec<_>>();
+
+        out.sort();
+        out.dedup();
+        out
     }
 
     /// Initiate a delete — show confirmation if enabled, else delete immediately.

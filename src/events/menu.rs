@@ -338,15 +338,41 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
             });
         }
         MenuAction::LoadSelectionSession => {
+            let sessions = app.selection_session_names();
+            if sessions.is_empty() {
+                app.notify("No saved selection session");
+                return Ok(false);
+            }
+
             let default_name = app.default_selection_session_name();
-            let cursor = default_name.len();
-            app.mode = AppMode::Input(InputDialog {
-                title: "Load selection session".into(),
-                prompt: "Session name:".into(),
-                value: default_name,
-                cursor,
-                action: InputAction::LoadSelectionSession,
-            });
+            let default_idx = sessions
+                .iter()
+                .position(|name| name == &default_name)
+                .unwrap_or(0);
+            let checkboxes = vec![("Force load saved panel path".to_string(), false)];
+
+            match crate::plugins::dialog_select_with_checks(
+                "Load selection session",
+                &sessions,
+                default_idx,
+                &checkboxes,
+                crate::plugins::DialogSelectTheme::RemoteConnections,
+            ) {
+                Ok((Some(choice), checks)) => {
+                    app.needs_full_redraw = true;
+                    if let Some(name) = sessions.get(choice) {
+                        let force_path = checks.first().copied().unwrap_or(false);
+                        app.cmd_load_selection_session_with_options(name, force_path);
+                    }
+                }
+                Ok((None, _)) => {
+                    app.needs_full_redraw = true;
+                }
+                Err(err) => {
+                    app.needs_full_redraw = true;
+                    app.notify(format!("Cannot open session chooser: {}", err));
+                }
+            }
         }
         MenuAction::SearchFiles => {
             app.open_search();
