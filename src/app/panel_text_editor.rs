@@ -117,7 +117,7 @@ impl App {
             title: "Unsaved changes".to_string(),
             message: "Save changes before closing the text editor?".to_string(),
             action: ConfirmAction::CloseTextEditorUnsaved,
-            macro_name: None,
+            macro_name: Some("confirm_text_editor_unsaved"),
             active_button: crate::app::ConfirmButton::Primary,
         });
         false

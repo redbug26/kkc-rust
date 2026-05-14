@@ -33,16 +33,19 @@ pub(crate) fn assoc_input_shortcuts() -> Vec<FooterShortcut> {
 }
 
 pub(super) fn render_confirm(f: &mut Frame, dlg: &ConfirmDialog, area: Rect) {
+    if dlg.macro_name.is_some() {
+        let Some(spec) = crate::lua_dialog::confirm_render_spec(dlg) else {
+            return;
+        };
+        render_confirm_box(f, &spec, area, dlg.active_button);
+        return;
+    }
+
     match &dlg.action {
         ConfirmAction::Message | ConfirmAction::MessageThen(_) => {
             render_confirm_message(f, dlg, area)
         }
-        ConfirmAction::Quit | ConfirmAction::Delete(_) | ConfirmAction::DeleteRemote(_) => {
-            let Some(spec) = crate::lua_dialog::confirm_render_spec(dlg) else {
-                return;
-            };
-            render_confirm_box(f, &spec, area, dlg.active_button);
-        }
+        ConfirmAction::Quit | ConfirmAction::Delete(_) | ConfirmAction::DeleteRemote(_) => {}
         ConfirmAction::CloseTextEditorUnsaved => render_confirm_text_editor_unsaved(f, area),
         ConfirmAction::SaveEditorBeforeQuit => render_confirm_save_editor_before_quit(f, area),
     }
@@ -191,17 +194,7 @@ fn render_confirm_box(
     area: Rect,
     active_button: ConfirmButton,
 ) {
-    let x = (area.width.saturating_sub(spec.width)) / 2 + area.x;
-    let y = (area.height.saturating_sub(spec.height)) / 2 + area.y;
-    let popup = clamp_rect(
-        area,
-        Rect {
-            x,
-            y,
-            width: spec.width,
-            height: spec.height,
-        },
-    );
+    let popup = clamp_rect(area, crate::lua_dialog::confirm_dialog_popup_rect(spec, area));
 
     if spec.shadow_dx > 0 || spec.shadow_dy > 0 {
         let sh = Rect {
@@ -321,6 +314,8 @@ fn render_confirm_box_text(
     } else {
         text.message_text.clone()
     };
+    let max_width = inner.width as usize;
+    let message = truncate_multiline_to_width(&message, max_width);
     safe_render_widget(
         f,
         Paragraph::new(message).alignment(alignment).style(style),
@@ -331,6 +326,37 @@ fn render_confirm_box_text(
             height: text.message_height,
         },
     );
+}
+
+fn truncate_to_display_width(text: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+    if unicode_width::UnicodeWidthStr::width(text) <= max_width {
+        return text.to_string();
+    }
+    if max_width == 1 {
+        return "…".to_string();
+    }
+    let mut out = String::new();
+    let mut width = 0usize;
+    for ch in text.chars() {
+        let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+        if width + cw > max_width - 1 {
+            break;
+        }
+        out.push(ch);
+        width += cw;
+    }
+    out.push('…');
+    out
+}
+
+fn truncate_multiline_to_width(text: &str, max_width: usize) -> String {
+    text.lines()
+        .map(|line| truncate_to_display_width(line, max_width))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn render_dialog_buttons(
@@ -381,12 +407,16 @@ fn render_dialog_button(
         DialogButtonPalette::Danger => Color::Rgb(190, 58, 44),
     };
     let inactive_bg = match palette {
-        DialogButtonPalette::Normal => CLR_APP_BG,
-        DialogButtonPalette::Danger => Color::Rgb(38, 18, 14),
+        DialogButtonPalette::Normal => Color::Rgb(108, 92, 74),
+        DialogButtonPalette::Danger => Color::Rgb(30, 14, 12),
     };
     let inactive_fg = match palette {
-        DialogButtonPalette::Normal => Color::Rgb(80, 60, 40),
-        DialogButtonPalette::Danger => Color::Rgb(180, 140, 120),
+        DialogButtonPalette::Normal => Color::Rgb(132, 118, 98),
+        DialogButtonPalette::Danger => Color::Rgb(124, 92, 80),
+    };
+     let shadow_bg = match palette {
+        DialogButtonPalette::Normal => CLR_APP_BG,
+        DialogButtonPalette::Danger => Color::Rgb(38, 18, 14),
     };
     let shadow_fg = match palette {
         DialogButtonPalette::Normal => Color::Rgb(118, 95, 70),
@@ -404,7 +434,7 @@ fn render_dialog_button(
     } else {
         Style::default().fg(inactive_fg).bg(inactive_bg)
     };
-    let shadow_style = Style::default().fg(shadow_fg).bg(inactive_bg);
+    let shadow_style = Style::default().fg(shadow_fg).bg(shadow_bg);
     let bg_style = Style::default().bg(inactive_bg);
     let text = format!("{:^width$}", label, width = area.width as usize);
 
@@ -425,7 +455,7 @@ fn render_dialog_button(
     safe_render_widget(
         f,
         Paragraph::new(Line::from(vec![
-            Span::styled(" ", bg_style),
+            Span::styled(" ", shadow_style),
             Span::styled(
                 "▀".repeat(area.width.saturating_sub(1) as usize),
                 shadow_style,

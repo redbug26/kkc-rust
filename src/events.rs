@@ -1555,6 +1555,22 @@ fn first_menu_selectable(items: &[crate::app::MenuEntry]) -> usize {
 }
 
 fn confirm_button_rects(dlg: &ConfirmDialog, area: Rect) -> (Rect, Option<Rect>) {
+    if dlg.macro_name.is_some() {
+        let Some(spec) = crate::lua_dialog::confirm_render_spec(dlg) else {
+            return (
+                Rect {
+                    x: area.x,
+                    y: area.y,
+                    width: 0,
+                    height: 0,
+                },
+                None,
+            );
+        };
+        let (accept, reject) = crate::lua_dialog::confirm_dialog_button_rect_pair(&spec, area);
+        return (accept, Some(reject));
+    }
+
     match &dlg.action {
         ConfirmAction::Message | ConfirmAction::MessageThen(_) => {
             let width = 72u16.min(area.width.saturating_sub(4)).max(40);
@@ -1576,21 +1592,15 @@ fn confirm_button_rects(dlg: &ConfirmDialog, area: Rect) -> (Rect, Option<Rect>)
                 None,
             )
         }
-        ConfirmAction::Quit | ConfirmAction::Delete(_) | ConfirmAction::DeleteRemote(_) => {
-            let Some(spec) = crate::lua_dialog::confirm_render_spec(dlg) else {
-                return (
-                    Rect {
-                        x: area.x,
-                        y: area.y,
-                        width: 0,
-                        height: 0,
-                    },
-                    None,
-                );
-            };
-            let (accept, reject) = crate::lua_dialog::confirm_dialog_button_rect_pair(&spec, area);
-            (accept, Some(reject))
-        }
+        ConfirmAction::Quit | ConfirmAction::Delete(_) | ConfirmAction::DeleteRemote(_) => (
+            Rect {
+                x: area.x,
+                y: area.y,
+                width: 0,
+                height: 0,
+            },
+            None,
+        ),
         ConfirmAction::CloseTextEditorUnsaved | ConfirmAction::SaveEditorBeforeQuit => {
             let popup = Rect {
                 x: area.x + area.width.saturating_sub(58) / 2,
@@ -3162,7 +3172,7 @@ fn handle_confirm(app: &mut App, key: KeyEvent) -> Result<bool> {
     match key.code {
         KeyCode::Left | KeyCode::Right | KeyCode::Tab => {
             if let AppMode::Confirm(dlg) = &mut app.mode
-                && confirm_has_secondary_button(&dlg.action)
+                && confirm_has_secondary_button(dlg)
             {
                 dlg.active_button = match dlg.active_button {
                     ConfirmButton::Primary => ConfirmButton::Secondary,
@@ -3218,11 +3228,12 @@ fn handle_confirm(app: &mut App, key: KeyEvent) -> Result<bool> {
     Ok(false)
 }
 
-fn confirm_has_secondary_button(action: &ConfirmAction) -> bool {
-    matches!(
-        action,
-        ConfirmAction::Quit | ConfirmAction::Delete(_) | ConfirmAction::DeleteRemote(_)
-    )
+fn confirm_has_secondary_button(dlg: &ConfirmDialog) -> bool {
+    dlg.macro_name.is_some()
+        || matches!(
+            dlg.action,
+            ConfirmAction::Quit | ConfirmAction::Delete(_) | ConfirmAction::DeleteRemote(_)
+        )
 }
 
 fn confirm_button_index(button: ConfirmButton) -> usize {

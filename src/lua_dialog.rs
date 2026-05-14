@@ -38,6 +38,8 @@ const CLR_PAL_FOOTER_FG: Color = Color::Rgb(230, 230, 230);
 
 const CONFIRM_QUIT_MACRO: &str = include_str!("../assets/macros/confirm_quit.lua");
 const CONFIRM_DELETE_MACRO: &str = include_str!("../assets/macros/confirm_delete.lua");
+const CONFIRM_TEXT_EDITOR_UNSAVED_MACRO: &str =
+    include_str!("../assets/macros/confirm_text_editor_unsaved.lua");
 
 #[derive(Debug, Clone)]
 pub struct ConfirmDialogSpec {
@@ -131,50 +133,22 @@ pub fn confirm_button_callback(dlg: &ConfirmDialog, button_idx: usize) -> Option
     })
 }
 
-fn default_confirm_dialog_spec(name: &str, dlg: &ConfirmDialog) -> ConfirmDialogSpec {
-    if name == "confirm_delete" {
-        let count = confirm_delete_count(&dlg.action);
-        return ConfirmDialogSpec {
-            width: 44,
-            height: 9,
-            shadow_dx: 0,
-            shadow_dy: 0,
-            title: " Delete ".into(),
-            palette: ConfirmDialogPalette::Danger,
-            separators: Vec::new(),
-            header: Some(ConfirmDialogText {
-                message_text: if count == 1 {
-                    "⚠  Delete this item?".into()
-                } else {
-                    "⚠  Delete these items?".into()
-                },
-                message_y: 0,
-                message_height: 1,
-                message_prefix_blank: false,
-            }),
-            message: ConfirmDialogText {
-                message_text: dlg.message.clone(),
-                message_y: 2,
-                message_height: 2,
-                message_prefix_blank: false,
-            },
-            buttons_y: 5,
-            button_gap: 4,
-            buttons: vec![
-                ConfirmDialogButtonSpec {
-                    callback: "confirm".into(),
-                    label: "▶ Delete ◀".into(),
-                    width: 13,
-                },
-                ConfirmDialogButtonSpec {
-                    callback: "cancel".into(),
-                    label: "▶ Cancel ◀".into(),
-                    width: 13,
-                },
-            ],
-        };
+fn default_confirm_dialog_spec(_name: &str, dlg: &ConfirmDialog) -> ConfirmDialogSpec {
+    let title = if dlg.title.is_empty() {
+        " Confirm ".to_string()
+    } else {
+        format!(" {} ", dlg.title)
+    };
+    ConfirmDialogSpec {
+        title,
+        message: ConfirmDialogText {
+            message_text: dlg.message.clone(),
+            message_y: 1,
+            message_height: 2,
+            message_prefix_blank: false,
+        },
+        ..ConfirmDialogSpec::default()
     }
-    ConfirmDialogSpec::default()
 }
 
 #[derive(Debug, Default, Clone)]
@@ -196,21 +170,8 @@ impl ConfirmDialogContext {
     }
 }
 
-fn confirm_delete_count(action: &ConfirmAction) -> usize {
-    match action {
-        ConfirmAction::Delete(paths) => paths.len(),
-        ConfirmAction::DeleteRemote(targets) => targets.len(),
-        _ => 0,
-    }
-}
-
 pub fn confirm_dialog_button_rects(spec: &ConfirmDialogSpec, area: Rect) -> Vec<Rect> {
-    let popup = Rect {
-        x: area.x + area.width.saturating_sub(spec.width) / 2,
-        y: area.y + area.height.saturating_sub(spec.height) / 2,
-        width: spec.width,
-        height: spec.height,
-    };
+    let popup = confirm_dialog_popup_rect(spec, area);
     let inner = inner_rect(popup);
     let buttons_total = spec
         .buttons
@@ -240,6 +201,40 @@ pub fn confirm_dialog_button_rects(spec: &ConfirmDialogSpec, area: Rect) -> Vec<
         .collect()
 }
 
+pub fn confirm_dialog_popup_rect(spec: &ConfirmDialogSpec, area: Rect) -> Rect {
+    let buttons_total = spec
+        .buttons
+        .iter()
+        .fold(0u16, |acc, button| acc.saturating_add(button.width));
+    let gap_total = spec
+        .button_gap
+        .saturating_mul(spec.buttons.len().saturating_sub(1) as u16);
+    let buttons_group_w = buttons_total.saturating_add(gap_total).saturating_add(1);
+
+    let header_w = spec
+        .header
+        .as_ref()
+        .map(|h| max_line_width(&h.message_text))
+        .unwrap_or(0);
+    let message_w = max_line_width(&spec.message.message_text);
+    let title_w = display_width(&spec.title);
+
+    let inner_w = title_w.max(header_w).max(message_w).max(buttons_group_w);
+    let desired_w = inner_w.saturating_add(2).clamp(20, 120);
+
+    let max_w = area.width.saturating_sub(2).max(3);
+    let max_h = area.height.saturating_sub(2).max(6);
+    let width = desired_w.min(max_w);
+    let height = spec.height.clamp(8, 40).min(max_h);
+
+    Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    }
+}
+
 pub fn confirm_dialog_button_rect_pair(spec: &ConfirmDialogSpec, area: Rect) -> (Rect, Rect) {
     let rects = confirm_dialog_button_rects(spec, area);
     (
@@ -263,7 +258,9 @@ fn load_confirm_dialog_spec(
     ctx: ConfirmDialogContext,
     default: ConfirmDialogSpec,
 ) -> Result<ConfirmDialogSpec> {
-    let source = confirm_macro_source(name).unwrap_or(Cow::Borrowed(CONFIRM_QUIT_MACRO));
+    let Some(source) = confirm_macro_source(name) else {
+        anyhow::bail!("unknown confirm macro: {}", name);
+    };
     let lua = Lua::new();
     let package: Table = lua.globals().get("package")?;
     let preload: Table = package.get("preload")?;
@@ -294,6 +291,7 @@ fn confirm_macro_source(name: &str) -> Option<Cow<'static, str>> {
     match name {
         "confirm_quit" => Some(Cow::Borrowed(CONFIRM_QUIT_MACRO)),
         "confirm_delete" => Some(Cow::Borrowed(CONFIRM_DELETE_MACRO)),
+        "confirm_text_editor_unsaved" => Some(Cow::Borrowed(CONFIRM_TEXT_EDITOR_UNSAVED_MACRO)),
         _ => None,
     }
 }
@@ -470,18 +468,12 @@ pub fn install_lua_dialog_module(lua: &Lua, preload: &Table) -> Result<()> {
             "message",
             lua.create_function(move |_, text: String| {
                 run_in_tui(|terminal| {
-                    let hint = "Enter:OK  Esc:Cancel";
                     loop {
                         terminal.draw(|f| {
-                            let content_w = max_line_width(&text)
-                                .max(display_width(hint))
-                                .max(display_width("Lua Message"));
-                            let content_h = line_count(&text).max(1).saturating_add(1);
+                            let content_w = max_line_width(&text).max(display_width("Lua Message"));
+                            let content_h = line_count(&text).max(1);
                             let area = popup_rect(f.area(), content_w, content_h, 38, 96, 7, 28);
-                            let chunks = Layout::default()
-                                .direction(Direction::Vertical)
-                                .constraints([Constraint::Min(1), Constraint::Length(1)])
-                                .split(inner_rect(area));
+                            let inner = inner_rect(area);
 
                             f.render_widget(Clear, area);
                             f.render_widget(
@@ -500,13 +492,7 @@ pub fn install_lua_dialog_module(lua: &Lua, preload: &Table) -> Result<()> {
                             f.render_widget(
                                 Paragraph::new(text.as_str())
                                     .style(Style::default().fg(CLR_DIALOG_FG).bg(CLR_DIALOG_BG)),
-                                chunks[0],
-                            );
-                            f.render_widget(
-                                Paragraph::new(hint)
-                                    .alignment(ratatui::layout::Alignment::Center)
-                                    .style(Style::default().fg(CLR_DIALOG_HINT).bg(CLR_DIALOG_BG)),
-                                chunks[1],
+                                inner,
                             );
                         })?;
 
@@ -528,7 +514,6 @@ pub fn install_lua_dialog_module(lua: &Lua, preload: &Table) -> Result<()> {
             lua.create_function(move |_, (prompt, default): (String, Option<String>)| {
                 run_in_tui(|terminal| {
                     let mut value = default.clone().unwrap_or_default();
-                    let hint = "Type text  Backspace/Delete  Enter:OK  Esc:Cancel";
                     loop {
                         terminal.draw(|f| {
                             let value_line = if value.is_empty() {
@@ -537,7 +522,6 @@ pub fn install_lua_dialog_module(lua: &Lua, preload: &Table) -> Result<()> {
                                 "Value:"
                             };
                             let content_w = max_line_width(&prompt)
-                                .max(display_width(hint))
                                 .max(
                                     display_width(value_line)
                                         .saturating_add(max_line_width(&value)),
@@ -547,11 +531,7 @@ pub fn install_lua_dialog_module(lua: &Lua, preload: &Table) -> Result<()> {
                             let area = popup_rect(f.area(), content_w, content_h, 42, 104, 8, 30);
                             let chunks = Layout::default()
                                 .direction(Direction::Vertical)
-                                .constraints([
-                                    Constraint::Min(1),
-                                    Constraint::Length(1),
-                                    Constraint::Length(1),
-                                ])
+                                .constraints([Constraint::Min(1), Constraint::Length(1)])
                                 .split(inner_rect(area));
 
                             f.render_widget(Clear, area);
@@ -580,12 +560,6 @@ pub fn install_lua_dialog_module(lua: &Lua, preload: &Table) -> Result<()> {
                                         .bg(CLR_DIALOG_SELECTED_BG),
                                 ),
                                 chunks[1],
-                            );
-                            f.render_widget(
-                                Paragraph::new(hint)
-                                    .alignment(ratatui::layout::Alignment::Center)
-                                    .style(Style::default().fg(CLR_DIALOG_HINT).bg(CLR_DIALOG_BG)),
-                                chunks[2],
                             );
                         })?;
 
@@ -622,22 +596,13 @@ pub fn install_lua_dialog_module(lua: &Lua, preload: &Table) -> Result<()> {
             "confirm",
             lua.create_function(move |_, (prompt, default_yes): (String, Option<bool>)| {
                 let default_yes = default_yes.unwrap_or(true);
-                let hint = if default_yes {
-                    "[Y]es / [N]o  Enter:default (yes)  Esc:default"
-                } else {
-                    "[Y]es / [N]o  Enter:default (no)  Esc:default"
-                };
                 run_in_tui(|terminal| {
                     loop {
                         terminal.draw(|f| {
-                            let content_w = max_line_width(&prompt)
-                                .max(display_width(hint))
-                                .max(display_width("Lua Confirm"));
-                            let area = popup_rect(f.area(), content_w, 3, 38, 96, 7, 20);
-                            let chunks = Layout::default()
-                                .direction(Direction::Vertical)
-                                .constraints([Constraint::Min(1), Constraint::Length(1)])
-                                .split(inner_rect(area));
+                            let content_w =
+                                max_line_width(&prompt).max(display_width("Lua Confirm"));
+                            let area = popup_rect(f.area(), content_w, 1, 38, 96, 7, 20);
+                            let inner = inner_rect(area);
 
                             f.render_widget(Clear, area);
                             f.render_widget(
@@ -656,13 +621,7 @@ pub fn install_lua_dialog_module(lua: &Lua, preload: &Table) -> Result<()> {
                             f.render_widget(
                                 Paragraph::new(prompt.as_str())
                                     .style(Style::default().fg(CLR_DIALOG_FG).bg(CLR_DIALOG_BG)),
-                                chunks[0],
-                            );
-                            f.render_widget(
-                                Paragraph::new(hint)
-                                    .alignment(ratatui::layout::Alignment::Center)
-                                    .style(Style::default().fg(CLR_DIALOG_HINT).bg(CLR_DIALOG_BG)),
-                                chunks[1],
+                                inner,
                             );
                         })?;
 
@@ -1600,5 +1559,23 @@ mod tests {
         assert_eq!(spec.message.message_text, "Delete foo.txt?");
         assert_eq!(spec.buttons[0].callback, "confirm");
         assert_eq!(spec.buttons[1].callback, "cancel");
+    }
+
+    #[test]
+    fn confirm_text_editor_unsaved_macro_uses_generic_dialog_flow() {
+        let dlg = ConfirmDialog {
+            title: "Unsaved changes".into(),
+            message: "Save changes before closing the text editor?".into(),
+            action: ConfirmAction::CloseTextEditorUnsaved,
+            macro_name: Some("confirm_text_editor_unsaved"),
+            active_button: crate::app::ConfirmButton::Primary,
+        };
+        let spec = confirm_render_spec(&dlg).expect("confirm text editor unsaved spec");
+
+        assert_eq!(spec.title, " Unsaved Changes ");
+        assert_eq!(spec.buttons[0].callback, "confirm");
+        assert_eq!(spec.buttons[1].callback, "cancel");
+        assert_eq!(spec.buttons[0].label, "▶ Save ◀");
+        assert_eq!(spec.buttons[1].label, "▶ Discard ◀");
     }
 }
