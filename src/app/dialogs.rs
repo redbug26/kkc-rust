@@ -39,8 +39,8 @@ pub struct RemoteDeleteTarget {
 
 #[derive(Clone)]
 pub struct InputDialog {
-    pub title: String,
-    pub prompt: String,
+    pub title: Option<String>,
+    pub prompt: Option<String>,
     pub textarea: TextArea<'static>,
     pub action: InputAction,
     pub macro_name: Option<&'static str>,

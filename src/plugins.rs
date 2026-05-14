@@ -2113,7 +2113,16 @@ fn fetch_url_text(url: &str) -> Result<String> {
 }
 
 fn fetch_url_bytes(url: &str) -> Result<Vec<u8>> {
-    let mut response = match ureq::get(url)
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .tls_config(
+            ureq::tls::TlsConfig::builder()
+                .provider(ureq::tls::TlsProvider::NativeTls)
+                .build(),
+        )
+        .build()
+        .into();
+    let mut response = match agent
+        .get(url)
         .header("User-Agent", "kkc-plugin-store")
         .config()
         .http_status_as_error(false)

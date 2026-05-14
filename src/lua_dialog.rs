@@ -93,8 +93,8 @@ impl Default for InputDialogSpec {
 pub fn input_render_spec(dlg: &crate::app::InputDialog) -> Option<InputDialogSpec> {
     let macro_name = dlg.macro_name?;
     let default = InputDialogSpec {
-        title: format!(" {} ", dlg.title),
-        prompt: dlg.prompt.clone(),
+        title: format!(" {} ", dlg.title.as_deref().unwrap_or("Input")),
+        prompt: dlg.prompt.clone().unwrap_or_default(),
         ..InputDialogSpec::default()
     };
     load_input_dialog_spec(macro_name, default.clone())

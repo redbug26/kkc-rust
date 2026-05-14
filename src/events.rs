@@ -2967,8 +2967,8 @@ fn start_rename(app: &mut App) {
             InputAction::Rename(path)
         };
         app.mode = AppMode::Input(InputDialog {
-            title: "Rename".into(),
-            prompt: "New name:".into(),
+            title: Some("Rename".into()),
+            prompt: Some("New name:".into()),
             textarea: InputDialog::make_textarea(name.clone()),
             action,
             macro_name: Some("input_rename"),
@@ -2991,8 +2991,8 @@ fn start_mkdir(app: &mut App) {
         InputAction::Mkdir(app.active_panel().path.clone())
     };
     app.mode = AppMode::Input(InputDialog {
-        title: "Create Directory".into(),
-        prompt: "Directory name:".into(),
+        title: Some("Create Directory".into()),
+        prompt: Some("Directory name:".into()),
         textarea: InputDialog::make_textarea(""),
         action,
         macro_name: Some("input_mkdir"),
@@ -3002,8 +3002,8 @@ fn start_mkdir(app: &mut App) {
 
 fn open_wildcard_dialog(prompt: &str, select: bool) -> AppMode {
     AppMode::Input(InputDialog {
-        title: "Wildcard".into(),
-        prompt: prompt.into(),
+        title: Some("Wildcard".into()),
+        prompt: Some(prompt.into()),
         textarea: InputDialog::make_textarea("*"),
         action: if select {
             InputAction::SelectPattern
@@ -4470,8 +4470,8 @@ fn handle_action_palette(app: &mut App, key: KeyEvent) -> Result<bool> {
             app.mode = AppMode::Browse;
             if let Some(prompt) = action.prompt.clone() {
                 app.mode = AppMode::Input(InputDialog {
-                    title: action.title,
-                    prompt,
+                    title: Some(action.title),
+                    prompt: Some(prompt),
                     textarea: InputDialog::make_textarea(""),
                     action: InputAction::PluginAction {
                         plugin: action.plugin,
