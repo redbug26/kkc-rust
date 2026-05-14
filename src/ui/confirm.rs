@@ -709,10 +709,10 @@ fn render_input_box(
         },
     );
 
-    // Row 2: input field (backed by tui-textarea state)
+    // Row 2: input field (backed by ratatui-textarea state)
     let input_w = inner.width.saturating_sub(2) as usize;
     let text = dlg.textarea.lines().first().map(|s| s.as_str()).unwrap_or("");
-    let (_, cursor_col) = dlg.textarea.cursor(); // (row, char-column)
+    let cursor_col = dlg.textarea.cursor().1; // char-column
     let hscroll = cursor_col.saturating_sub(input_w.saturating_sub(1));
     let shown: String = text.chars().skip(hscroll).take(input_w).collect();
     let value_display = format!("{:<width$}", shown, width = input_w);
@@ -752,7 +752,8 @@ fn render_input_box(
 
 pub(super) fn render_assoc_input(f: &mut Frame, dlg: &AssocInputDialog, area: Rect) {
     let is_multiline = matches!(dlg.action, AssocInputAction::Openers { .. });
-    let (cursor_row, cursor_col) = dlg.textarea.cursor();
+    let cursor = dlg.textarea.cursor();
+    let (cursor_row, cursor_col) = (cursor.0, cursor.1);
     render_text_input_dialog(
         f,
         &dlg.title,

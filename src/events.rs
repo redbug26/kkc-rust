@@ -1104,7 +1104,7 @@ fn handle_mouse_input(app: &mut App, mouse: MouseEvent) -> Result<bool> {
     {
         let offset = mouse.column.saturating_sub(input_area.x);
         dlg.textarea
-            .move_cursor(tui_textarea::CursorMove::Jump(0, offset));
+            .move_cursor(ratatui_textarea::CursorMove::Jump(0, offset));
     }
     Ok(false)
 }
@@ -1168,9 +1168,9 @@ fn handle_mouse_assoc_input(app: &mut App, mouse: MouseEvent) -> Result<bool> {
         let col = mouse.column.saturating_sub(input_area.x);
         if is_openers {
             let row = mouse.row.saturating_sub(input_area.y);
-            dlg.textarea.move_cursor(tui_textarea::CursorMove::Jump(row, col));
+            dlg.textarea.move_cursor(ratatui_textarea::CursorMove::Jump(row, col));
         } else {
-            dlg.textarea.move_cursor(tui_textarea::CursorMove::Jump(0, col));
+            dlg.textarea.move_cursor(ratatui_textarea::CursorMove::Jump(0, col));
         }
     }
     Ok(false)
@@ -3396,8 +3396,8 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
     {
         if let Some(text) = paste_text_from_clipboard() {
             for ch in text.chars().filter(|&c| c != '\n' && c != '\r') {
-                dlg.textarea.input(tui_textarea::Input {
-                    key: tui_textarea::Key::Char(ch),
+                dlg.textarea.input(ratatui_textarea::Input {
+                    key: ratatui_textarea::Key::Char(ch),
                     ctrl: false,
                     alt: false,
                     shift: false,
@@ -3537,16 +3537,16 @@ fn handle_assoc_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             for ch in text.chars() {
                 if ch == '\n' || ch == '\r' {
                     if is_openers {
-                        dlg.textarea.input(tui_textarea::Input {
-                            key: tui_textarea::Key::Enter,
+                        dlg.textarea.input(ratatui_textarea::Input {
+                            key: ratatui_textarea::Key::Enter,
                             ctrl: false,
                             alt: false,
                             shift: false,
                         });
                     }
                 } else {
-                    dlg.textarea.input(tui_textarea::Input {
-                        key: tui_textarea::Key::Char(ch),
+                    dlg.textarea.input(ratatui_textarea::Input {
+                        key: ratatui_textarea::Key::Char(ch),
                         ctrl: false,
                         alt: false,
                         shift: false,
@@ -3562,8 +3562,8 @@ fn handle_assoc_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         && key.modifiers.contains(KeyModifiers::CONTROL)
         && matches!(key.code, KeyCode::Char('j') | KeyCode::Char('J'))
     {
-        dlg.textarea.input(tui_textarea::Input {
-            key: tui_textarea::Key::Enter,
+        dlg.textarea.input(ratatui_textarea::Input {
+            key: ratatui_textarea::Key::Enter,
             ctrl: false,
             alt: false,
             shift: false,
@@ -3590,8 +3590,8 @@ fn handle_assoc_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                 let AppMode::AssocInput(ref mut dlg) = app.mode else {
                     return Ok(false);
                 };
-                dlg.textarea.input(tui_textarea::Input {
-                    key: tui_textarea::Key::Enter,
+                dlg.textarea.input(ratatui_textarea::Input {
+                    key: ratatui_textarea::Key::Enter,
                     ctrl: false,
                     alt: false,
                     shift: false,

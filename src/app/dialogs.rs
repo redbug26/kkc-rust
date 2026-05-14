@@ -1,5 +1,5 @@
 use super::*;
-use tui_textarea::{CursorMove, TextArea};
+use ratatui_textarea::{CursorMove, TextArea};
 
 #[derive(Debug)]
 pub struct ConfirmDialog {

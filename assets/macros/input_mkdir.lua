@@ -6,7 +6,7 @@ return dlg.input_box({
     buttons = {
         gap = 4,
         items = {
-            { id = "confirm", label = "▶ OK ◀" },
+            { id = "confirm", label = "▶  OK  ◀" },
             { id = "cancel", label = "▶ Cancel ◀" },
         },
     },

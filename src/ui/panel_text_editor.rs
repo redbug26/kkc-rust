@@ -55,7 +55,8 @@ pub(super) fn render_panel_text_editor(
     let text_lines = editor.textarea.lines();
     let line_number_width = text_lines.len().max(1).to_string().len().max(2);
     let gutter_width = (line_number_width + 1) as u16;
-    let (cursor_row, cursor_col) = editor.textarea.cursor();
+    let cursor = editor.textarea.cursor();
+    let (cursor_row, cursor_col) = (cursor.0, cursor.1);
 
     let text_width = inner.width.saturating_sub(gutter_width).max(1) as usize;
     if editor.wrap {

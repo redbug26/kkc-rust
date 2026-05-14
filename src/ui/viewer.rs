@@ -4,16 +4,16 @@ pub(crate) fn viewer_footer_shortcuts(v: &Viewer) -> Vec<FooterShortcut> {
     if v.is_image_mode() && crate::viewer::kitty_graphics_supported() {
         vec![
             FooterShortcut {
-                label: "F10:Close",
-                key: KeyCode::F(10),
-            },
-            FooterShortcut {
                 label: "F4:Mode",
                 key: KeyCode::F(4),
             },
             FooterShortcut {
                 label: "F5:Zoom",
                 key: KeyCode::F(5),
+            },
+            FooterShortcut {
+                label: "F10:Close",
+                key: KeyCode::F(10),
             },
             FooterShortcut {
                 label: "p:Autoplay",
@@ -23,12 +23,12 @@ pub(crate) fn viewer_footer_shortcuts(v: &Viewer) -> Vec<FooterShortcut> {
     } else if matches!(v.mode, ViewMode::Module) {
         vec![
             FooterShortcut {
-                label: "F10:Close",
-                key: KeyCode::F(10),
-            },
-            FooterShortcut {
                 label: "F4:Mode",
                 key: KeyCode::F(4),
+            },
+            FooterShortcut {
+                label: "F10:Close",
+                key: KeyCode::F(10),
             },
             FooterShortcut {
                 label: "Tab:Section",
