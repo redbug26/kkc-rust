@@ -15,17 +15,50 @@ use std::path::Path;
 // ── Token colour palette  (VS Code Dark+ inspired) ────────────────────────────
 use crate::theme::theme;
 
-#[inline] fn clr_keyword() -> Color { theme().syntax.keyword }
-#[inline] fn clr_type() -> Color { theme().syntax.type_name }
-#[inline] fn clr_string() -> Color { theme().syntax.string }
-#[inline] fn clr_comment() -> Color { theme().syntax.comment }
-#[inline] fn clr_number() -> Color { theme().syntax.number }
-#[inline] fn clr_preproc() -> Color { theme().syntax.preprocessor }
-#[inline] fn clr_func() -> Color { theme().syntax.function }
-#[inline] fn clr_operator() -> Color { theme().syntax.operator }
-#[inline] fn clr_plain() -> Color { theme().syntax.plain }
-#[inline] fn clr_var_lang() -> Color { theme().syntax.variable_language }
-#[inline] fn clr_ketchup() -> Color { theme().syntax.ketchup }
+#[inline]
+fn clr_keyword() -> Color {
+    theme().syntax.keyword
+}
+#[inline]
+fn clr_type() -> Color {
+    theme().syntax.type_name
+}
+#[inline]
+fn clr_string() -> Color {
+    theme().syntax.string
+}
+#[inline]
+fn clr_comment() -> Color {
+    theme().syntax.comment
+}
+#[inline]
+fn clr_number() -> Color {
+    theme().syntax.number
+}
+#[inline]
+fn clr_preproc() -> Color {
+    theme().syntax.preprocessor
+}
+#[inline]
+fn clr_func() -> Color {
+    theme().syntax.function
+}
+#[inline]
+fn clr_operator() -> Color {
+    theme().syntax.operator
+}
+#[inline]
+fn clr_plain() -> Color {
+    theme().syntax.plain
+}
+#[inline]
+fn clr_var_lang() -> Color {
+    theme().syntax.variable_language
+}
+#[inline]
+fn clr_ketchup() -> Color {
+    theme().syntax.ketchup
+}
 
 #[inline]
 fn kw() -> Style {
@@ -43,7 +76,9 @@ fn str_s() -> Style {
 }
 #[inline]
 fn cmt() -> Style {
-    Style::default().fg(clr_comment()).add_modifier(Modifier::DIM)
+    Style::default()
+        .fg(clr_comment())
+        .add_modifier(Modifier::DIM)
 }
 #[inline]
 fn num() -> Style {

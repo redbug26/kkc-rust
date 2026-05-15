@@ -89,72 +89,258 @@ use unicode_width::UnicodeWidthStr;
 // ---------------------------------------------------------------------------
 use crate::theme::theme;
 
-#[inline] fn clr_app_bg() -> Color { theme().app.background }
-#[inline] fn clr_panel_bg() -> Color { theme().panel.background }
-#[inline] fn clr_panel_border() -> Color { theme().panel.border }
-#[inline] fn clr_panel_border_dim() -> Color { theme().panel.border_dim }
-#[inline] fn clr_panel_title() -> Color { theme().panel.title }
-#[inline] fn clr_header_bg() -> Color { theme().header.background }
-#[inline] fn clr_header_fg() -> Color { theme().header.foreground }
-#[inline] fn clr_cursor_bg() -> Color { theme().cursor.background }
-#[inline] fn clr_cursor_fg() -> Color { theme().cursor.foreground }
-#[inline] fn clr_selected() -> Color { theme().selection.foreground }
-#[inline] fn clr_dir() -> Color { theme().files.directory }
-#[inline] fn clr_tree() -> Color { theme().panel.tree_connector }
-#[inline] fn clr_exec() -> Color { theme().files.executable }
-#[inline] fn clr_archive() -> Color { theme().files.archive }
-#[inline] fn clr_audio() -> Color { theme().files.audio }
-#[inline] fn clr_image() -> Color { theme().files.image }
-#[inline] fn clr_video() -> Color { theme().files.video }
-#[inline] fn clr_doc() -> Color { theme().files.document }
-#[inline] fn clr_source() -> Color { theme().files.source }
-#[inline] fn clr_data() -> Color { theme().files.data }
-#[inline] fn clr_text() -> Color { theme().files.text }
-#[inline] fn clr_unknown() -> Color { theme().files.unknown }
-#[inline] fn clr_status_bg() -> Color { theme().status.background }
-#[inline] fn clr_status_fg() -> Color { theme().status.foreground }
-#[inline] fn clr_fkey_bg() -> Color { theme().fkeys.background }
-#[inline] fn clr_fkey_num() -> Color { theme().fkeys.number_foreground }
-#[inline] fn clr_fkey_label() -> Color { theme().fkeys.label }
-#[inline] fn clr_fkey_num_bg() -> Color { theme().fkeys.number_background }
-#[inline] fn clr_button_bg() -> Color { theme().buttons.background }
-#[inline] fn clr_button_fg() -> Color { theme().buttons.foreground }
+#[inline]
+fn clr_app_bg() -> Color {
+    theme().app.background
+}
+#[inline]
+fn clr_panel_bg() -> Color {
+    theme().panel.background
+}
+#[inline]
+fn clr_panel_border() -> Color {
+    theme().panel.border
+}
+#[inline]
+fn clr_panel_border_dim() -> Color {
+    theme().panel.border_dim
+}
+#[inline]
+fn clr_panel_title() -> Color {
+    theme().panel.title
+}
+#[inline]
+fn clr_header_bg() -> Color {
+    theme().header.background
+}
+#[inline]
+fn clr_header_fg() -> Color {
+    theme().header.foreground
+}
+#[inline]
+fn clr_cursor_bg() -> Color {
+    theme().cursor.background
+}
+#[inline]
+fn clr_cursor_fg() -> Color {
+    theme().cursor.foreground
+}
+#[inline]
+fn clr_selected() -> Color {
+    theme().selection.foreground
+}
+#[inline]
+fn clr_dir() -> Color {
+    theme().files.directory
+}
+#[inline]
+fn clr_tree() -> Color {
+    theme().panel.tree_connector
+}
+#[inline]
+fn clr_exec() -> Color {
+    theme().files.executable
+}
+#[inline]
+fn clr_archive() -> Color {
+    theme().files.archive
+}
+#[inline]
+fn clr_audio() -> Color {
+    theme().files.audio
+}
+#[inline]
+fn clr_image() -> Color {
+    theme().files.image
+}
+#[inline]
+fn clr_video() -> Color {
+    theme().files.video
+}
+#[inline]
+fn clr_doc() -> Color {
+    theme().files.document
+}
+#[inline]
+fn clr_source() -> Color {
+    theme().files.source
+}
+#[inline]
+fn clr_data() -> Color {
+    theme().files.data
+}
+#[inline]
+fn clr_text() -> Color {
+    theme().files.text
+}
+#[inline]
+fn clr_unknown() -> Color {
+    theme().files.unknown
+}
+#[inline]
+fn clr_status_bg() -> Color {
+    theme().status.background
+}
+#[inline]
+fn clr_status_fg() -> Color {
+    theme().status.foreground
+}
+#[inline]
+fn clr_fkey_bg() -> Color {
+    theme().fkeys.background
+}
+#[inline]
+fn clr_fkey_num() -> Color {
+    theme().fkeys.number_foreground
+}
+#[inline]
+fn clr_fkey_label() -> Color {
+    theme().fkeys.label
+}
+#[inline]
+fn clr_fkey_num_bg() -> Color {
+    theme().fkeys.number_background
+}
+#[inline]
+fn clr_button_bg() -> Color {
+    theme().buttons.background
+}
+#[inline]
+fn clr_button_fg() -> Color {
+    theme().buttons.foreground
+}
 
-#[inline] fn clr_menu_bar_bg() -> Color { theme().menu.bar_background }
-#[inline] fn clr_menu_bar_fg() -> Color { theme().menu.bar_foreground }
-#[inline] fn clr_menu_sel_bg() -> Color { theme().menu.selected_background }
-#[inline] fn clr_menu_sel_fg() -> Color { theme().menu.selected_foreground }
-#[inline] fn clr_menu_dd_bg() -> Color { theme().menu.dropdown_background }
-#[inline] fn clr_menu_dd_fg() -> Color { theme().menu.dropdown_foreground }
-#[inline] fn clr_menu_dd_sep() -> Color { theme().menu.dropdown_separator }
-#[inline] fn clr_menu_border() -> Color { theme().menu.border }
-#[inline] fn clr_menu_hotkey() -> Color { theme().menu.hotkey }
-#[inline] fn clr_menu_danger_button_inactive_bg() -> Color { theme().menu.danger_button_inactive_background }
-#[inline] fn clr_menu_danger_button_inactive_fg() -> Color { theme().menu.danger_button_inactive_foreground }
+#[inline]
+fn clr_menu_bar_bg() -> Color {
+    theme().menu.bar_background
+}
+#[inline]
+fn clr_menu_bar_fg() -> Color {
+    theme().menu.bar_foreground
+}
+#[inline]
+fn clr_menu_sel_bg() -> Color {
+    theme().menu.selected_background
+}
+#[inline]
+fn clr_menu_sel_fg() -> Color {
+    theme().menu.selected_foreground
+}
+#[inline]
+fn clr_menu_dd_bg() -> Color {
+    theme().menu.dropdown_background
+}
+#[inline]
+fn clr_menu_dd_fg() -> Color {
+    theme().menu.dropdown_foreground
+}
+#[inline]
+fn clr_menu_dd_sep() -> Color {
+    theme().menu.dropdown_separator
+}
+#[inline]
+fn clr_menu_border() -> Color {
+    theme().menu.border
+}
+#[inline]
+fn clr_menu_hotkey() -> Color {
+    theme().menu.hotkey
+}
+#[inline]
+fn clr_menu_danger_button_inactive_bg() -> Color {
+    theme().menu.danger_button_inactive_background
+}
+#[inline]
+fn clr_menu_danger_button_inactive_fg() -> Color {
+    theme().menu.danger_button_inactive_foreground
+}
 
 // Quick-palette (VSCode-style)
-#[inline] fn clr_qs_bg() -> Color { theme().palette.background }
-#[inline] fn clr_qs_border() -> Color { theme().palette.border }
-#[inline] fn clr_qs_input_bg() -> Color { theme().palette.input_background }
-#[inline] fn clr_qs_input_fg() -> Color { theme().palette.input_foreground }
-#[inline] fn clr_qs_sep() -> Color { theme().palette.separator }
-#[inline] fn clr_qs_list_fg() -> Color { theme().palette.list_foreground }
-#[inline] fn clr_qs_sel_bg() -> Color { theme().palette.selected_background }
-#[inline] fn clr_qs_sel_fg() -> Color { theme().palette.selected_foreground }
-#[inline] fn clr_qs_match_hi() -> Color { theme().palette.match_highlight }
-#[inline] fn clr_qs_match_hi_sel() -> Color { theme().palette.match_highlight_selected }
-#[inline] fn clr_qs_no_match() -> Color { theme().palette.no_match }
-#[inline] fn clr_qs_dir_fg() -> Color { theme().palette.directory_foreground }
+#[inline]
+fn clr_qs_bg() -> Color {
+    theme().palette.background
+}
+#[inline]
+fn clr_qs_border() -> Color {
+    theme().palette.border
+}
+#[inline]
+fn clr_qs_input_bg() -> Color {
+    theme().palette.input_background
+}
+#[inline]
+fn clr_qs_input_fg() -> Color {
+    theme().palette.input_foreground
+}
+#[inline]
+fn clr_qs_sep() -> Color {
+    theme().palette.separator
+}
+#[inline]
+fn clr_qs_list_fg() -> Color {
+    theme().palette.list_foreground
+}
+#[inline]
+fn clr_qs_sel_bg() -> Color {
+    theme().palette.selected_background
+}
+#[inline]
+fn clr_qs_sel_fg() -> Color {
+    theme().palette.selected_foreground
+}
+#[inline]
+fn clr_qs_match_hi() -> Color {
+    theme().palette.match_highlight
+}
+#[inline]
+fn clr_qs_match_hi_sel() -> Color {
+    theme().palette.match_highlight_selected
+}
+#[inline]
+fn clr_qs_no_match() -> Color {
+    theme().palette.no_match
+}
+#[inline]
+fn clr_qs_dir_fg() -> Color {
+    theme().palette.directory_foreground
+}
 
-#[inline] fn clr_dialog_bg() -> Color { theme().dialog.background }
-#[inline] fn clr_dialog_fg() -> Color { theme().dialog.foreground }
-#[inline] fn clr_dialog_border() -> Color { theme().dialog.border }
-#[inline] fn clr_dialog_title() -> Color { theme().dialog.title }
-#[inline] fn clr_dialog_selected_bg() -> Color { theme().dialog.selected_background }
-#[inline] fn clr_dialog_selected_fg() -> Color { theme().dialog.selected_foreground }
-#[inline] fn clr_dialog_hint() -> Color { theme().dialog.hint }
-#[inline] fn clr_dialog_inactive_button_bg() -> Color { theme().dialog.inactive_button_background }
-#[inline] fn clr_dialog_inactive_button_fg() -> Color { theme().dialog.inactive_button_foreground }
+#[inline]
+fn clr_dialog_bg() -> Color {
+    theme().dialog.background
+}
+#[inline]
+fn clr_dialog_fg() -> Color {
+    theme().dialog.foreground
+}
+#[inline]
+fn clr_dialog_border() -> Color {
+    theme().dialog.border
+}
+#[inline]
+fn clr_dialog_title() -> Color {
+    theme().dialog.title
+}
+#[inline]
+fn clr_dialog_selected_bg() -> Color {
+    theme().dialog.selected_background
+}
+#[inline]
+fn clr_dialog_selected_fg() -> Color {
+    theme().dialog.selected_foreground
+}
+#[inline]
+fn clr_dialog_hint() -> Color {
+    theme().dialog.hint
+}
+#[inline]
+fn clr_dialog_inactive_button_bg() -> Color {
+    theme().dialog.inactive_button_background
+}
+#[inline]
+fn clr_dialog_inactive_button_fg() -> Color {
+    theme().dialog.inactive_button_foreground
+}
 
 // ---------------------------------------------------------------------------
 // Entry style by category
@@ -603,7 +789,8 @@ fn render_menu(f: &mut Frame, app: &App, state: &MenuState, area: Rect) {
         if *action == MenuAction::Separator {
             let sep = "─".repeat(avail);
             f.render_widget(
-                Paragraph::new(sep).style(Style::default().fg(clr_menu_dd_sep()).bg(clr_menu_dd_bg())),
+                Paragraph::new(sep)
+                    .style(Style::default().fg(clr_menu_dd_sep()).bg(clr_menu_dd_bg())),
                 row,
             );
         } else {
@@ -837,7 +1024,7 @@ pub(crate) fn render_shortcut_bar(
     let mut spans = Vec::new();
     for (idx, item) in items.iter().enumerate() {
         spans.push(Span::styled(
-                item.key.to_string(),
+            item.key.to_string(),
             Style::default().fg(style.key_fg).bg(style.key_bg),
         ));
         spans.push(Span::styled(

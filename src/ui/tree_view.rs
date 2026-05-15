@@ -65,9 +65,7 @@ pub(super) fn render_tree_view(f: &mut Frame, state: &TreeViewState, area: Rect)
         Span::styled("  ", Style::default().bg(clr_qs_input_bg())),
         Span::styled(
             format!(" {}_ ", query_label),
-            Style::default()
-                .fg(clr_qs_input_fg())
-                .bg(clr_qs_input_bg()),
+            Style::default().fg(clr_qs_input_fg()).bg(clr_qs_input_bg()),
         ),
         Span::raw("  "),
         Span::styled(root, Style::default().fg(clr_qs_no_match())),
@@ -117,11 +115,7 @@ pub(super) fn render_tree_view(f: &mut Frame, state: &TreeViewState, area: Rect)
             safe_render_widget(
                 f,
                 Gauge::default()
-                    .gauge_style(
-                        Style::default()
-                            .fg(clr_header_fg())
-                            .bg(clr_qs_input_bg()),
-                    )
+                    .gauge_style(Style::default().fg(clr_header_fg()).bg(clr_qs_input_bg()))
                     .label(label)
                     .ratio(level.ratio.clamp(0.0, 1.0)),
                 area,
@@ -140,11 +134,7 @@ pub(super) fn render_tree_view(f: &mut Frame, state: &TreeViewState, area: Rect)
         safe_render_widget(
             f,
             Gauge::default()
-                .gauge_style(
-                    Style::default()
-                        .fg(clr_header_fg())
-                        .bg(clr_qs_input_bg()),
-                )
+                .gauge_style(Style::default().fg(clr_header_fg()).bg(clr_qs_input_bg()))
                 .label(gauge_label)
                 .ratio(1.0),
             chunks[1],
@@ -163,11 +153,7 @@ pub(super) fn render_tree_view(f: &mut Frame, state: &TreeViewState, area: Rect)
     };
     safe_render_widget(
         f,
-        Paragraph::new(count_line).style(
-            Style::default()
-                .fg(clr_qs_no_match())
-                .bg(clr_qs_bg()),
-        ),
+        Paragraph::new(count_line).style(Style::default().fg(clr_qs_no_match()).bg(clr_qs_bg())),
         chunks[2],
     );
 

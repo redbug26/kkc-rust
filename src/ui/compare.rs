@@ -226,11 +226,7 @@ pub(super) fn render_compare_panel(f: &mut Frame, state: &ComparePanelState, are
     };
     safe_render_widget(
         f,
-        Paragraph::new(footer).style(
-            Style::default()
-                .fg(clr_qs_no_match())
-                .bg(clr_qs_bg()),
-        ),
+        Paragraph::new(footer).style(Style::default().fg(clr_qs_no_match()).bg(clr_qs_bg())),
         chunks[3],
     );
 }

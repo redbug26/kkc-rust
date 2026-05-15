@@ -86,7 +86,6 @@ impl RemoteProtocol {
             RemoteProtocol::RemotePlugin => "PLUGIN",
         }
     }
-
 }
 
 impl RemoteProfile {

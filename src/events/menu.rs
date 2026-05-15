@@ -582,7 +582,9 @@ pub(super) fn execute_menu_action(app: &mut App, action: MenuAction) -> Result<b
                             Ok(()) => {
                                 app.config.theme = theme_name.clone();
                                 match app.save_config() {
-                                    Ok(()) => app.set_status(format!("Theme switched: {theme_name}")),
+                                    Ok(()) => {
+                                        app.set_status(format!("Theme switched: {theme_name}"))
+                                    }
                                     Err(err) => app.set_status(format!("Theme save error: {err}")),
                                 }
                             }

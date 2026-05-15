@@ -719,7 +719,11 @@ impl DialogSelectTheme {
 }
 
 #[allow(dead_code)]
-pub fn dialog_select(prompt: &str, options: &[String], default_idx: usize) -> Result<Option<usize>> {
+pub fn dialog_select(
+    prompt: &str,
+    options: &[String],
+    default_idx: usize,
+) -> Result<Option<usize>> {
     let (selected, _) = dialog_select_with_checks(
         prompt,
         options,
@@ -738,7 +742,10 @@ pub fn dialog_select_with_checks(
     theme: DialogSelectTheme,
 ) -> Result<(Option<usize>, Vec<bool>)> {
     if options.is_empty() {
-        return Ok((None, checkboxes.iter().map(|(_, checked)| *checked).collect()));
+        return Ok((
+            None,
+            checkboxes.iter().map(|(_, checked)| *checked).collect(),
+        ));
     }
 
     let lua = plugin_lua();

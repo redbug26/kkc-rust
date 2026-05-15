@@ -194,7 +194,10 @@ fn render_confirm_box(
     area: Rect,
     active_button: ConfirmButton,
 ) {
-    let popup = clamp_rect(area, crate::lua_dialog::confirm_dialog_popup_rect(spec, area));
+    let popup = clamp_rect(
+        area,
+        crate::lua_dialog::confirm_dialog_popup_rect(spec, area),
+    );
 
     if spec.shadow_dx > 0 || spec.shadow_dy > 0 {
         let sh = Rect {
@@ -295,9 +298,7 @@ fn confirm_box_style(palette: DialogButtonPalette) -> ConfirmBoxStyle {
                 .fg(clr_archive())
                 .bg(clr_menu_dd_bg())
                 .add_modifier(Modifier::BOLD),
-            message: Style::default()
-                .fg(clr_menu_dd_fg())
-                .bg(clr_menu_dd_bg()),
+            message: Style::default().fg(clr_menu_dd_fg()).bg(clr_menu_dd_bg()),
         },
     }
 }
@@ -414,7 +415,7 @@ fn render_dialog_button(
         DialogButtonPalette::Normal => clr_dialog_inactive_button_fg(),
         DialogButtonPalette::Danger => clr_menu_danger_button_inactive_fg(),
     };
-     let shadow_bg = match palette {
+    let shadow_bg = match palette {
         DialogButtonPalette::Normal => clr_dialog_bg(),
         DialogButtonPalette::Danger => clr_menu_dd_bg(),
     };
@@ -711,7 +712,12 @@ fn render_input_box(
 
     // Row 2: input field (backed by ratatui-textarea state)
     let input_w = inner.width.saturating_sub(2) as usize;
-    let text = dlg.textarea.lines().first().map(|s| s.as_str()).unwrap_or("");
+    let text = dlg
+        .textarea
+        .lines()
+        .first()
+        .map(|s| s.as_str())
+        .unwrap_or("");
     let cursor_col = dlg.textarea.cursor().1; // char-column
     let hscroll = cursor_col.saturating_sub(input_w.saturating_sub(1));
     let shown: String = text.chars().skip(hscroll).take(input_w).collect();

@@ -86,7 +86,8 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
     let sep: String = std::iter::repeat('─').take(inner.width as usize).collect();
     safe_render_widget(
         f,
-        Paragraph::new(sep.clone()).style(Style::default().fg(clr_panel_border_dim()).bg(clr_app_bg())),
+        Paragraph::new(sep.clone())
+            .style(Style::default().fg(clr_panel_border_dim()).bg(clr_app_bg())),
         Rect {
             x: inner.x,
             y: inner.y + 1,
@@ -108,9 +109,7 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
     let input_row = Line::from(vec![
         Span::styled(
             truncate_str(&input_text, input_inner_w),
-            Style::default()
-                .fg(clr_cursor_fg())
-                .bg(clr_cursor_bg()),
+            Style::default().fg(clr_cursor_fg()).bg(clr_cursor_bg()),
         ),
         Span::styled(
             count_hint,
@@ -131,7 +130,8 @@ pub(super) fn render_plugins(f: &mut Frame, s: &PluginsState, area: Rect) {
     );
     safe_render_widget(
         f,
-        Paragraph::new(sep.clone()).style(Style::default().fg(clr_panel_border_dim()).bg(clr_app_bg())),
+        Paragraph::new(sep.clone())
+            .style(Style::default().fg(clr_panel_border_dim()).bg(clr_app_bg())),
         Rect {
             x: inner.x,
             y: inner.y + 3,

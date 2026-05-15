@@ -1,7 +1,7 @@
 use anyhow::Result;
+use ratatui_textarea::TextArea;
 use std::fs;
 use std::path::PathBuf;
-use ratatui_textarea::TextArea;
 
 use super::{ActivePanel, App, AppMode, ConfirmAction, ConfirmDialog};
 

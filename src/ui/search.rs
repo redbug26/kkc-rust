@@ -222,7 +222,8 @@ pub(super) fn render_search(f: &mut Frame, state: &SearchState, area: Rect) {
 
     safe_render_widget(
         f,
-        Paragraph::new(input_lines).style(Style::default().bg(crate::theme::theme().search.background)),
+        Paragraph::new(input_lines)
+            .style(Style::default().bg(crate::theme::theme().search.background)),
         Rect {
             x: inner.x,
             y: inner.y,

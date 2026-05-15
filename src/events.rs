@@ -5204,8 +5204,7 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
             s.focus_field_at_end(s.cursor.saturating_sub(1));
         }
         KeyCode::Char(_) => {
-            if s.cursor < s.input_count()
-            {
+            if s.cursor < s.input_count() {
                 if let Some(input) = textarea_input_from_key_event(key) {
                     s.textarea.input(input);
                     s.commit_textarea();

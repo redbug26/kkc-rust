@@ -256,7 +256,10 @@ fn render_panel_header(
                 .bg(clr_header_bg())
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("│", Style::default().fg(clr_panel_border()).bg(clr_panel_bg())),
+        Span::styled(
+            "│",
+            Style::default().fg(clr_panel_border()).bg(clr_panel_bg()),
+        ),
         Span::styled(
             format!("{:^width$}", "Size", width = size_w),
             Style::default()
@@ -264,7 +267,10 @@ fn render_panel_header(
                 .bg(clr_header_bg())
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("│", Style::default().fg(clr_panel_border()).bg(clr_panel_bg())),
+        Span::styled(
+            "│",
+            Style::default().fg(clr_panel_border()).bg(clr_panel_bg()),
+        ),
         Span::styled(
             format!("{:^width$}", "Date", width = date_w),
             Style::default()
@@ -272,7 +278,10 @@ fn render_panel_header(
                 .bg(clr_header_bg())
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("│", Style::default().fg(clr_panel_border()).bg(clr_panel_bg())),
+        Span::styled(
+            "│",
+            Style::default().fg(clr_panel_border()).bg(clr_panel_bg()),
+        ),
         Span::styled(
             format!("{:^width$}", "Time", width = time_w),
             Style::default()
@@ -622,7 +631,9 @@ fn render_file_id_panel(f: &mut Frame, app: &App, area: Rect) {
     let right_col = cols[2];
 
     // Render decorative inner gutter bars (pipe + padding space)
-    let gutter_style = Style::default().fg(clr_panel_border_dim()).bg(clr_panel_bg());
+    let gutter_style = Style::default()
+        .fg(clr_panel_border_dim())
+        .bg(clr_panel_bg());
     let left_gutter_lines: Vec<Line<'static>> = (0..inner.height as usize)
         .map(|_| Line::from(Span::styled("│ ", gutter_style)))
         .collect();

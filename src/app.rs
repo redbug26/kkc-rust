@@ -2748,7 +2748,10 @@ impl App {
 
         let mut content = String::new();
         content.push_str("# kkc selection session v1\n");
-        content.push_str(&format!("# panel_path={}\n", self.active_panel().path.display()));
+        content.push_str(&format!(
+            "# panel_path={}\n",
+            self.active_panel().path.display()
+        ));
         for item in &selected_names {
             content.push_str(item);
             content.push('\n');
@@ -2770,7 +2773,11 @@ impl App {
         self.cmd_load_selection_session_with_options(raw_name, false);
     }
 
-    pub fn cmd_load_selection_session_with_options(&mut self, raw_name: &str, force_panel_path: bool) {
+    pub fn cmd_load_selection_session_with_options(
+        &mut self,
+        raw_name: &str,
+        force_panel_path: bool,
+    ) {
         if self.active_panel().is_remote_view() || self.active_panel().is_archive_view() {
             self.notify("Selection sessions are available on local directories only");
             return;
@@ -2801,9 +2808,7 @@ impl App {
             .filter(|value| !value.is_empty())
             .map(std::path::PathBuf::from);
 
-        if force_panel_path
-            && let Some(saved_path) = saved_panel_path
-        {
+        if force_panel_path && let Some(saved_path) = saved_panel_path {
             if saved_path.is_dir() {
                 if let Err(err) = self.active_panel_mut().enter_dir(saved_path.clone()) {
                     self.notify(format!(

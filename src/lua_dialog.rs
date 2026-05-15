@@ -16,27 +16,84 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::theme::theme;
 
-#[inline] fn clr_dialog_bg() -> Color { theme().dialog.background }
-#[inline] fn clr_dialog_fg() -> Color { theme().dialog.foreground }
-#[inline] fn clr_dialog_border() -> Color { theme().dialog.border }
-#[inline] fn clr_dialog_title() -> Color { theme().dialog.title }
-#[inline] fn clr_dialog_selected_bg() -> Color { theme().dialog.selected_background }
-#[inline] fn clr_dialog_selected_fg() -> Color { theme().dialog.selected_foreground }
-#[inline] fn clr_dialog_hint() -> Color { theme().dialog.hint }
+#[inline]
+fn clr_dialog_bg() -> Color {
+    theme().dialog.background
+}
+#[inline]
+fn clr_dialog_fg() -> Color {
+    theme().dialog.foreground
+}
+#[inline]
+fn clr_dialog_border() -> Color {
+    theme().dialog.border
+}
+#[inline]
+fn clr_dialog_title() -> Color {
+    theme().dialog.title
+}
+#[inline]
+fn clr_dialog_selected_bg() -> Color {
+    theme().dialog.selected_background
+}
+#[inline]
+fn clr_dialog_selected_fg() -> Color {
+    theme().dialog.selected_foreground
+}
+#[inline]
+fn clr_dialog_hint() -> Color {
+    theme().dialog.hint
+}
 
 // Match the native command palette visual language.
-#[inline] fn clr_pal_bg() -> Color { theme().palette.background }
-#[inline] fn clr_pal_border() -> Color { theme().palette.border }
-#[inline] fn clr_pal_input_bg() -> Color { theme().palette.input_background }
-#[inline] fn clr_pal_input_fg() -> Color { theme().palette.input_foreground }
-#[inline] fn clr_pal_sep() -> Color { theme().palette.separator }
-#[inline] fn clr_pal_list_fg() -> Color { theme().palette.list_foreground }
-#[inline] fn clr_pal_sel_bg() -> Color { theme().palette.selected_background }
-#[inline] fn clr_pal_sel_fg() -> Color { theme().palette.selected_foreground }
-#[inline] fn clr_pal_hint() -> Color { theme().palette.no_match }
-#[inline] fn clr_pal_title() -> Color { theme().palette.title }
-#[inline] fn clr_pal_footer_bg() -> Color { theme().palette.footer_background }
-#[inline] fn clr_pal_footer_fg() -> Color { theme().palette.footer_foreground }
+#[inline]
+fn clr_pal_bg() -> Color {
+    theme().palette.background
+}
+#[inline]
+fn clr_pal_border() -> Color {
+    theme().palette.border
+}
+#[inline]
+fn clr_pal_input_bg() -> Color {
+    theme().palette.input_background
+}
+#[inline]
+fn clr_pal_input_fg() -> Color {
+    theme().palette.input_foreground
+}
+#[inline]
+fn clr_pal_sep() -> Color {
+    theme().palette.separator
+}
+#[inline]
+fn clr_pal_list_fg() -> Color {
+    theme().palette.list_foreground
+}
+#[inline]
+fn clr_pal_sel_bg() -> Color {
+    theme().palette.selected_background
+}
+#[inline]
+fn clr_pal_sel_fg() -> Color {
+    theme().palette.selected_foreground
+}
+#[inline]
+fn clr_pal_hint() -> Color {
+    theme().palette.no_match
+}
+#[inline]
+fn clr_pal_title() -> Color {
+    theme().palette.title
+}
+#[inline]
+fn clr_pal_footer_bg() -> Color {
+    theme().palette.footer_background
+}
+#[inline]
+fn clr_pal_footer_fg() -> Color {
+    theme().palette.footer_foreground
+}
 
 const CONFIRM_QUIT_MACRO: &str = include_str!("../assets/macros/confirm_quit.lua");
 const CONFIRM_DELETE_MACRO: &str = include_str!("../assets/macros/confirm_delete.lua");
@@ -402,7 +459,7 @@ pub fn confirm_dialog_popup_rect(spec: &ConfirmDialogSpec, area: Rect) -> Rect {
     let gap_total = spec
         .button_gap
         .saturating_mul(spec.buttons.len().saturating_sub(1) as u16);
-    let buttons_group_w = buttons_total.saturating_add(gap_total).saturating_add(1)+1;
+    let buttons_group_w = buttons_total.saturating_add(gap_total).saturating_add(1) + 1;
 
     let header_w = spec
         .header
@@ -489,7 +546,9 @@ fn confirm_macro_source(name: &str) -> Option<Cow<'static, str>> {
         "confirm_quit" => Some(Cow::Borrowed(CONFIRM_QUIT_MACRO)),
         "confirm_delete" => Some(Cow::Borrowed(CONFIRM_DELETE_MACRO)),
         "confirm_text_editor_unsaved" => Some(Cow::Borrowed(CONFIRM_TEXT_EDITOR_UNSAVED_MACRO)),
-        "confirm_save_editor_before_quit" => Some(Cow::Borrowed(CONFIRM_SAVE_EDITOR_BEFORE_QUIT_MACRO)),
+        "confirm_save_editor_before_quit" => {
+            Some(Cow::Borrowed(CONFIRM_SAVE_EDITOR_BEFORE_QUIT_MACRO))
+        }
         "confirm_notify" => Some(Cow::Borrowed(CONFIRM_NOTIFY_MACRO)),
         _ => None,
     }
@@ -744,8 +803,9 @@ pub fn install_lua_dialog_module(lua: &Lua, preload: &Table) -> Result<()> {
                                 area,
                             );
                             f.render_widget(
-                                Paragraph::new(text.as_str())
-                                    .style(Style::default().fg(clr_dialog_fg()).bg(clr_dialog_bg())),
+                                Paragraph::new(text.as_str()).style(
+                                    Style::default().fg(clr_dialog_fg()).bg(clr_dialog_bg()),
+                                ),
                                 inner,
                             );
                         })?;
@@ -803,8 +863,9 @@ pub fn install_lua_dialog_module(lua: &Lua, preload: &Table) -> Result<()> {
                                 area,
                             );
                             f.render_widget(
-                                Paragraph::new(prompt.as_str())
-                                    .style(Style::default().fg(clr_dialog_fg()).bg(clr_dialog_bg())),
+                                Paragraph::new(prompt.as_str()).style(
+                                    Style::default().fg(clr_dialog_fg()).bg(clr_dialog_bg()),
+                                ),
                                 chunks[0],
                             );
                             f.render_widget(
@@ -873,8 +934,9 @@ pub fn install_lua_dialog_module(lua: &Lua, preload: &Table) -> Result<()> {
                                 area,
                             );
                             f.render_widget(
-                                Paragraph::new(prompt.as_str())
-                                    .style(Style::default().fg(clr_dialog_fg()).bg(clr_dialog_bg())),
+                                Paragraph::new(prompt.as_str()).style(
+                                    Style::default().fg(clr_dialog_fg()).bg(clr_dialog_bg()),
+                                ),
                                 inner,
                             );
                         })?;

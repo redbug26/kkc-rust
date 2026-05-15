@@ -1,5 +1,5 @@
-use crate::ui::{ShortcutBarItem, ShortcutBarStyle, render_shortcut_bar};
 use crate::theme::theme;
+use crate::ui::{ShortcutBarItem, ShortcutBarStyle, render_shortcut_bar};
 use anyhow::{Context, Result, anyhow, bail};
 use crossterm::{
     cursor::{Hide, Show},

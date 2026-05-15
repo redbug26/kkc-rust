@@ -554,12 +554,20 @@ impl From<RawTheme> for Theme {
                 dropdown_separator: parse_color(&r.menu.dropdown_separator),
                 border: parse_color(&r.menu.border),
                 hotkey: parse_color(&r.menu.hotkey),
-                danger_button_inactive_background: if r.menu.danger_button_inactive_background.is_empty() {
+                danger_button_inactive_background: if r
+                    .menu
+                    .danger_button_inactive_background
+                    .is_empty()
+                {
                     parse_color(&r.menu.dropdown_background)
                 } else {
                     parse_color(&r.menu.danger_button_inactive_background)
                 },
-                danger_button_inactive_foreground: if r.menu.danger_button_inactive_foreground.is_empty() {
+                danger_button_inactive_foreground: if r
+                    .menu
+                    .danger_button_inactive_foreground
+                    .is_empty()
+                {
                     parse_color(&r.menu.dropdown_foreground)
                 } else {
                     parse_color(&r.menu.danger_button_inactive_foreground)

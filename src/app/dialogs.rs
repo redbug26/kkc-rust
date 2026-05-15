@@ -71,7 +71,11 @@ impl InputDialog {
 
     /// Return the current single-line text value.
     pub fn text(&self) -> &str {
-        self.textarea.lines().first().map(|s| s.as_str()).unwrap_or("")
+        self.textarea
+            .lines()
+            .first()
+            .map(|s| s.as_str())
+            .unwrap_or("")
     }
 }
 
@@ -115,7 +119,11 @@ impl AssocInputDialog {
 
     /// Return only the first line (used for MimeType step).
     pub fn first_line(&self) -> &str {
-        self.textarea.lines().first().map(|s| s.as_str()).unwrap_or("")
+        self.textarea
+            .lines()
+            .first()
+            .map(|s| s.as_str())
+            .unwrap_or("")
     }
 }
 
