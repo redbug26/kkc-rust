@@ -382,6 +382,7 @@ fn handle_mouse_remote_edit(app: &mut App, mouse: MouseEvent) -> Result<bool> {
                 area,
                 inner,
                 s.path_field_index() as u16,
+                s.field_value_offset(s.path_field_index()),
                 shares.len(),
                 picker_cur,
             ) {
@@ -392,12 +393,9 @@ fn handle_mouse_remote_edit(app: &mut App, mouse: MouseEvent) -> Result<bool> {
                     let idx = scroll + rel;
                     if idx < shares.len() {
                         let path_idx = s.path_field_index();
-                        let next_cursor = s.fields[path_idx].len();
-                        s.fields[path_idx] = shares[idx].clone();
-                        s.input_cursor = next_cursor;
+                        s.set_field_text(path_idx, shares[idx].clone());
                         s.share_picker = None;
-                        s.cursor = crate::app::RemoteEditState::SECRET;
-                        s.sync_cursor();
+                        s.focus_field_at_end(crate::app::RemoteEditState::SECRET);
                     }
                 } else {
                     s.share_picker = None;
@@ -411,11 +409,9 @@ fn handle_mouse_remote_edit(app: &mut App, mouse: MouseEvent) -> Result<bool> {
             let idx = (mouse.row - inner.y) as usize;
             let label = labels.get(idx).map(String::as_str).unwrap_or_default();
             if idx < s.input_count() && !label.is_empty() {
-                s.cursor = idx;
-                let value_x = inner.x + 9;
+                let value_x = inner.x + s.field_value_offset(idx);
                 let col = mouse.column.saturating_sub(value_x) as usize;
-                let len = s.fields[idx].len();
-                s.input_cursor = byte_index_for_display_column(&s.fields[idx], col.min(len));
+                s.focus_field_at_column(idx, col);
                 return Ok(false);
             }
         }
@@ -1168,9 +1164,11 @@ fn handle_mouse_assoc_input(app: &mut App, mouse: MouseEvent) -> Result<bool> {
         let col = mouse.column.saturating_sub(input_area.x);
         if is_openers {
             let row = mouse.row.saturating_sub(input_area.y);
-            dlg.textarea.move_cursor(ratatui_textarea::CursorMove::Jump(row, col));
+            dlg.textarea
+                .move_cursor(ratatui_textarea::CursorMove::Jump(row, col));
         } else {
-            dlg.textarea.move_cursor(ratatui_textarea::CursorMove::Jump(0, col));
+            dlg.textarea
+                .move_cursor(ratatui_textarea::CursorMove::Jump(0, col));
         }
     }
     Ok(false)
@@ -1710,12 +1708,13 @@ fn remote_edit_share_picker_rect(
     area: Rect,
     inner: Rect,
     path_row: u16,
+    value_offset: u16,
     shares_len: usize,
     picker_cur: usize,
 ) -> Option<(Rect, Rect, usize)> {
-    let dd_x = inner.x + 9;
+    let dd_x = inner.x + value_offset;
     let dd_y = inner.y + path_row + 1;
-    let dd_w = inner.width.saturating_sub(9).clamp(16, 40);
+    let dd_w = inner.width.saturating_sub(value_offset).clamp(16, 40);
     let max_visible: usize = 8;
     let visible = shares_len.min(max_visible);
     let dd_h = (visible as u16 + 2).min(area.height.saturating_sub(dd_y));
@@ -3352,20 +3351,19 @@ fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                 dlg.focused_button = None;
             }
             KeyCode::Enter => {
-                let (is_cancel, value, action) =
-                    if let AppMode::Input(ref dlg) = app.mode {
-                        let spec = dlg
-                            .macro_name
-                            .and_then(|_| crate::lua_dialog::input_render_spec(dlg));
-                        let is_cancel = spec
-                            .as_ref()
-                            .and_then(|s| s.buttons.get(focused_idx))
-                            .map(|b| b.callback == "cancel")
-                            .unwrap_or(false);
-                        (is_cancel, dlg.text().to_string(), dlg.action.clone())
-                    } else {
-                        return Ok(false);
-                    };
+                let (is_cancel, value, action) = if let AppMode::Input(ref dlg) = app.mode {
+                    let spec = dlg
+                        .macro_name
+                        .and_then(|_| crate::lua_dialog::input_render_spec(dlg));
+                    let is_cancel = spec
+                        .as_ref()
+                        .and_then(|s| s.buttons.get(focused_idx))
+                        .map(|b| b.callback == "cancel")
+                        .unwrap_or(false);
+                    (is_cancel, dlg.text().to_string(), dlg.action.clone())
+                } else {
+                    return Ok(false);
+                };
                 app.mode = AppMode::Browse;
                 if !is_cancel {
                     input_execute_action(app, action, &value)?;
@@ -3629,7 +3627,9 @@ fn handle_assoc_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             }
         }
         _ => {
-            if let Some(input) = crate::events::panel_text_editor::textarea_input_from_key_event(key) {
+            if let Some(input) =
+                crate::events::panel_text_editor::textarea_input_from_key_event(key)
+            {
                 let AppMode::AssocInput(ref mut dlg) = app.mode else {
                     return Ok(false);
                 };
@@ -5046,13 +5046,11 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
             KeyCode::Enter => {
                 if let Some((ref shares, cur)) = s.share_picker {
                     let path_idx = s.path_field_index();
-                    s.fields[path_idx] = shares[cur].clone();
-                    s.input_cursor = s.fields[path_idx].len();
+                    s.set_field_text(path_idx, shares[cur].clone());
                 }
                 s.share_picker = None;
                 // Move cursor to Password field after selecting share
-                s.cursor = crate::app::RemoteEditState::SECRET;
-                s.sync_cursor();
+                s.focus_field_at_end(crate::app::RemoteEditState::SECRET);
             }
             _ => {}
         }
@@ -5105,7 +5103,7 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
                 return Ok(false);
             };
             let config_json = s.plugin_config_json().unwrap_or_else(|| "{}".to_string());
-            let input = s.plugin_auth_input().unwrap_or("");
+            let input = s.plugin_auth_input().unwrap_or_default();
             crate::viewer::debug_log(&format!(
                 "remote-plugin-auth: complete requested for '{}'",
                 plugin_id
@@ -5114,7 +5112,7 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
                 &plugin_id,
                 &config_json,
                 &auth_session,
-                input,
+                &input,
             ) {
                 Ok(updated_config_json) => {
                     if serde_json::from_str::<serde_json::Value>(&updated_config_json).is_err() {
@@ -5123,7 +5121,7 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
                     }
                     s.set_remote_plugin_config_json(&updated_config_json);
                     if let Some(auth_idx) = s.auth_field_index() {
-                        s.fields[auth_idx].clear();
+                        s.set_field_text(auth_idx, "");
                     }
                     s.plugin_auth_session_json = None;
                     app.set_status("Plugin auth completed");
@@ -5145,6 +5143,7 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
         && matches!(&s.kind, crate::app::RemoteEditKind::Smb)
         && s.cursor == s.path_field_index()
     {
+        s.commit_textarea();
         let host = s.fields[crate::app::RemoteEditState::HOST]
             .trim()
             .to_string();
@@ -5199,55 +5198,20 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
     match key.code {
         KeyCode::Esc => app.mode = AppMode::RemoteConnect(crate::app::RemoteConnectState::load()),
         KeyCode::Tab | KeyCode::Down => {
-            s.cursor = (s.cursor + 1).min(s.cancel_index());
-            s.sync_cursor();
+            s.focus_field_at_end((s.cursor + 1).min(s.cancel_index()));
         }
         KeyCode::BackTab | KeyCode::Up => {
-            s.cursor = s.cursor.saturating_sub(1);
-            s.sync_cursor();
+            s.focus_field_at_end(s.cursor.saturating_sub(1));
         }
-        KeyCode::Left => {
-            if s.cursor < s.input_count() && s.input_cursor > 0 {
-                s.input_cursor -= 1;
-            }
-        }
-        KeyCode::Right => {
-            if s.cursor < s.input_count() {
-                s.input_cursor =
-                    (s.input_cursor + 1).min(s.current_value().map(|v| v.len()).unwrap_or(0));
-            }
-        }
-        KeyCode::Backspace => {
-            let pos = s.input_cursor;
-            if s.cursor < s.input_count() && pos > 0 {
-                if let Some(value) = s.current_value_mut() {
-                    value.remove(pos - 1);
-                }
-                s.input_cursor -= 1;
-            }
-        }
-        KeyCode::Delete => {
-            if s.cursor < s.input_count() {
-                let pos = s.input_cursor;
-                if let Some(value) = s.current_value_mut()
-                    && pos < value.len()
-                {
-                    value.remove(pos);
-                }
-            }
-        }
-        KeyCode::Char(ch) => {
+        KeyCode::Char(_) => {
             if s.cursor < s.input_count()
-                && !key.modifiers.contains(KeyModifiers::CONTROL)
-                && !key.modifiers.contains(KeyModifiers::ALT)
             {
-                let pos = s.input_cursor;
-                if let Some(value) = s.current_value_mut() {
-                    value.insert(pos, ch);
-                    s.input_cursor += ch.len_utf8();
-                    if s.is_remote_plugin() && s.is_remote_plugin_config_cursor() {
-                        s.plugin_auth_session_json = None;
-                    }
+                if let Some(input) = textarea_input_from_key_event(key) {
+                    s.textarea.input(input);
+                    s.commit_textarea();
+                }
+                if s.is_remote_plugin() && s.is_remote_plugin_config_cursor() {
+                    s.plugin_auth_session_json = None;
                 }
             }
         }
@@ -5271,8 +5235,23 @@ fn handle_remote_edit(app: &mut App, key: KeyEvent) -> Result<bool> {
                     app.set_status(message);
                 }
             } else {
-                s.cursor = (s.cursor + 1).min(s.cancel_index());
-                s.sync_cursor();
+                s.focus_field_at_end((s.cursor + 1).min(s.cancel_index()));
+            }
+        }
+        KeyCode::Left
+        | KeyCode::Right
+        | KeyCode::Backspace
+        | KeyCode::Delete
+        | KeyCode::Home
+        | KeyCode::End => {
+            if s.cursor < s.input_count()
+                && let Some(input) = textarea_input_from_key_event(key)
+            {
+                s.textarea.input(input);
+                s.commit_textarea();
+                if s.is_remote_plugin() && s.is_remote_plugin_config_cursor() {
+                    s.plugin_auth_session_json = None;
+                }
             }
         }
         _ => {}

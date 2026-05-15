@@ -270,21 +270,15 @@ pub(super) fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, a
                 let (source, badge_style) = match item.source {
                     RemoteSource::SshConfig => (
                         "ssh",
-                        Style::default()
-                            .fg(clr_menu_hotkey())
-                            .bg(clr_menu_dd_bg()),
+                        Style::default().fg(clr_menu_hotkey()).bg(clr_menu_dd_bg()),
                     ),
                     RemoteSource::UserToml => (
                         "toml",
-                        Style::default()
-                            .fg(clr_menu_dd_fg())
-                            .bg(clr_menu_dd_bg()),
+                        Style::default().fg(clr_menu_dd_fg()).bg(clr_menu_dd_bg()),
                     ),
                     RemoteSource::PluginAuto => (
                         "plugin",
-                        Style::default()
-                            .fg(clr_exec())
-                            .bg(clr_menu_dd_bg()),
+                        Style::default().fg(clr_exec()).bg(clr_menu_dd_bg()),
                     ),
                 };
                 let host = item.host_label();
@@ -298,12 +292,16 @@ pub(super) fn render_remote_connect(f: &mut Frame, state: &RemoteConnectState, a
                     Style::default().fg(clr_menu_dd_fg()).bg(clr_menu_dd_bg())
                 };
                 let badge_style = if selected {
-                    badge_style.bg(clr_menu_sel_bg()).add_modifier(Modifier::BOLD)
+                    badge_style
+                        .bg(clr_menu_sel_bg())
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     badge_style
                 };
                 let proto_style = if selected {
-                    proto_style.bg(clr_menu_sel_bg()).add_modifier(Modifier::BOLD)
+                    proto_style
+                        .bg(clr_menu_sel_bg())
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     proto_style
                 };
@@ -460,10 +458,12 @@ pub(super) fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: R
         .style(Style::default().bg(clr_menu_dd_bg()));
     let inner = block.inner(popup);
     safe_render_widget(f, block, popup);
-    let value_w = (inner.width as usize).saturating_sub(9);
     let mut lines = Vec::new();
+    let mut selected_input_area = None;
     for (idx, label) in labels.iter().enumerate() {
         let selected = state.cursor == idx;
+        let value_offset = state.field_value_offset(idx);
+        let value_w = inner.width.saturating_sub(value_offset) as usize;
         // Label: always dark background; arrow prefix on selected row
         let label_style = Style::default()
             .fg(clr_header_fg())
@@ -483,10 +483,22 @@ pub(super) fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: R
         lines.push(Line::from(vec![
             Span::styled(format!("{}{:<8}", prefix, format!("{label}:")), label_style),
             Span::styled(
-                format!("{:<width$}", state.fields[idx], width = value_w),
+                if selected {
+                    " ".repeat(value_w)
+                } else {
+                    format!("{:<width$}", state.fields[idx], width = value_w)
+                },
                 value_style,
             ),
         ]));
+        if selected {
+            selected_input_area = Some(Rect {
+                x: inner.x + value_offset,
+                y: inner.y + idx as u16,
+                width: inner.width.saturating_sub(value_offset),
+                height: 1,
+            });
+        }
     }
     lines.push(Line::default());
     let save_style = if state.cursor == state.save_index() {
@@ -517,6 +529,13 @@ pub(super) fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: R
         Paragraph::new(lines).style(Style::default().bg(clr_menu_dd_bg())),
         inner,
     );
+    if state.cursor < state.input_count()
+        && let Some(input_area) = selected_input_area
+    {
+        let mut textarea = state.textarea.clone();
+        textarea.set_style(Style::default().fg(Color::Black).bg(Color::White));
+        safe_render_widget(f, &textarea, input_area);
+    }
     let hint_row = Rect {
         x: inner.x,
         y: inner.y + labels.len() as u16 + 3,
@@ -526,8 +545,9 @@ pub(super) fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: R
     let hint_items = footer_shortcut_items(&remote_edit_shortcuts(state));
     render_shortcut_bar(f, hint_row, &hint_items, secondary_shortcut_bar_style());
     if state.cursor < state.input_count() {
-        let cursor_x =
-            (inner.x + 9 + state.input_cursor as u16).min(inner.x + inner.width.saturating_sub(2));
+        let cursor_col = state.textarea.cursor().1 as u16;
+        let cursor_x = (inner.x + state.field_value_offset(state.cursor) + cursor_col)
+            .min(inner.x + inner.width.saturating_sub(2));
         let cursor_y = inner.y + state.cursor as u16;
         safe_set_cursor_position(f, cursor_x, cursor_y);
     }
@@ -535,10 +555,12 @@ pub(super) fn render_remote_edit(f: &mut Frame, state: &RemoteEditState, area: R
     // ── SMB share picker dropdown ─────────────────────────────────────────
     if let Some((ref shares, picker_cur)) = state.share_picker {
         // Anchor: Share field is at cursor row PATH (4); dropdown sits below it.
-        let path_row: u16 = state.path_field_index() as u16;
-        let dd_x = inner.x + 9;
+        let path_idx = state.path_field_index();
+        let path_row: u16 = path_idx as u16;
+        let value_offset = state.field_value_offset(path_idx);
+        let dd_x = inner.x + value_offset;
         let dd_y = inner.y + path_row + 1;
-        let dd_w = inner.width.saturating_sub(9).min(40).max(16);
+        let dd_w = inner.width.saturating_sub(value_offset).min(40).max(16);
         let max_visible: usize = 8;
         let visible = shares.len().min(max_visible);
         let dd_h = (visible as u16 + 2).min(area.height.saturating_sub(dd_y));

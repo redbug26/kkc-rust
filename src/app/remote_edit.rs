@@ -1,4 +1,6 @@
 use super::*;
+use ratatui_textarea::{CursorMove, TextArea};
+use unicode_width::UnicodeWidthStr;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RemoteEditKind {
@@ -85,10 +87,11 @@ impl RemoteEditKind {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct RemoteEditState {
     pub kind: RemoteEditKind,
     pub fields: Vec<String>,
+    pub textarea: TextArea<'static>,
     pub cursor: usize,
     pub input_cursor: usize,
     /// Original name when editing an existing profile (for rename support).
@@ -99,6 +102,21 @@ pub struct RemoteEditState {
     pub plugin_auth_session_json: Option<String>,
     /// Authentication shortcuts are only available when creating from F7:Add.
     pub plugin_auth_enabled: bool,
+}
+
+impl std::fmt::Debug for RemoteEditState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RemoteEditState")
+            .field("kind", &self.kind)
+            .field("fields", &self.fields)
+            .field("cursor", &self.cursor)
+            .field("input_cursor", &self.input_cursor)
+            .field("edit_original_name", &self.edit_original_name)
+            .field("share_picker", &self.share_picker)
+            .field("plugin_auth_session_json", &self.plugin_auth_session_json)
+            .field("plugin_auth_enabled", &self.plugin_auth_enabled)
+            .finish()
+    }
 }
 
 impl RemoteEditState {
@@ -144,9 +162,11 @@ impl RemoteEditState {
             }
         };
         let input_cursor = fields[Self::NAME].len();
+        let textarea = Self::make_textarea(&fields[Self::NAME]);
         Self {
             kind,
             fields,
+            textarea,
             cursor: 0,
             input_cursor,
             edit_original_name: None,
@@ -208,6 +228,7 @@ impl RemoteEditState {
         Self {
             kind,
             input_cursor: fields[Self::NAME].len(),
+            textarea: Self::make_textarea(&fields[Self::NAME]),
             fields,
             cursor: 0,
             edit_original_name: Some(profile.name.clone()),
@@ -217,16 +238,75 @@ impl RemoteEditState {
         }
     }
 
-    pub fn current_value(&self) -> Option<&String> {
-        self.fields.get(self.cursor)
+    pub fn make_textarea(initial: impl AsRef<str>) -> TextArea<'static> {
+        let mut textarea = TextArea::new(vec![initial.as_ref().to_string()]);
+        textarea.move_cursor(CursorMove::End);
+        textarea
     }
 
-    pub fn current_value_mut(&mut self) -> Option<&mut String> {
-        self.fields.get_mut(self.cursor)
+    pub fn textarea_text(&self) -> &str {
+        self.textarea
+            .lines()
+            .first()
+            .map(String::as_str)
+            .unwrap_or("")
+    }
+
+    pub fn commit_textarea(&mut self) {
+        if self.cursor < self.input_count() {
+            let value = self.textarea_text().to_string();
+            if let Some(slot) = self.fields.get_mut(self.cursor) {
+                *slot = value;
+            }
+            self.input_cursor = self.textarea.cursor().1;
+        }
+    }
+
+    pub fn focus_field_at_end(&mut self, cursor: usize) {
+        self.commit_textarea();
+        self.cursor = cursor.min(self.cancel_index());
+        if self.cursor < self.input_count() {
+            let value = self.fields[self.cursor].clone();
+            self.textarea = Self::make_textarea(value);
+            self.input_cursor = self.textarea.cursor().1;
+        }
+    }
+
+    pub fn focus_field_at_column(&mut self, cursor: usize, column: usize) {
+        self.focus_field_at_end(cursor);
+        if self.cursor < self.input_count() {
+            let col = column.min(self.fields[self.cursor].chars().count());
+            self.textarea
+                .move_cursor(CursorMove::Jump(0, col.min(u16::MAX as usize) as u16));
+            self.input_cursor = self.textarea.cursor().1;
+        }
+    }
+
+    pub fn set_field_text(&mut self, cursor: usize, value: impl Into<String>) {
+        if cursor >= self.input_count() {
+            return;
+        }
+        let value = value.into();
+        self.fields[cursor] = value.clone();
+        if self.cursor == cursor {
+            self.textarea = Self::make_textarea(value);
+            self.input_cursor = self.textarea.cursor().1;
+        }
     }
 
     pub fn sync_cursor(&mut self) {
-        self.input_cursor = self.current_value().map(|s| s.len()).unwrap_or(0);
+        self.focus_field_at_end(self.cursor);
+    }
+
+    pub fn field_value_offset(&self, cursor: usize) -> u16 {
+        let label = self
+            .kind
+            .field_labels()
+            .get(cursor)
+            .cloned()
+            .unwrap_or_default();
+        let label_width = UnicodeWidthStr::width(format!("{label}:").as_str()).max(8);
+        (1 + label_width).min(u16::MAX as usize) as u16
     }
 
     pub fn input_count(&self) -> usize {
@@ -279,31 +359,36 @@ impl RemoteEditState {
     }
 
     pub fn build_profile(&self) -> Option<RemoteProfile> {
-        let name = self.fields[Self::NAME].trim();
+        let mut fields = self.fields.clone();
+        if self.cursor < fields.len() {
+            fields[self.cursor] = self.textarea_text().to_string();
+        }
+
+        let name = fields[Self::NAME].trim();
         if name.is_empty() {
             return None;
         }
         Some(match &self.kind {
             RemoteEditKind::Sftp => {
-                let port = if self.fields[Self::PORT].trim().is_empty() {
+                let port = if fields[Self::PORT].trim().is_empty() {
                     None
                 } else {
-                    self.fields[Self::PORT].trim().parse::<u16>().ok()
+                    fields[Self::PORT].trim().parse::<u16>().ok()
                 };
                 RemoteProfile {
                     name: name.to_string(),
                     source: RemoteSource::UserToml,
                     kind: RemoteKind::Sftp(crate::remote::SftpProfile {
-                        host: trim_opt(&self.fields[Self::HOST]),
-                        user: trim_opt(&self.fields[Self::USER]),
+                        host: trim_opt(&fields[Self::HOST]),
+                        user: trim_opt(&fields[Self::USER]),
                         port,
-                        path: trim_opt(&self.fields[Self::PATH]),
-                        identity_file: trim_opt(&self.fields[Self::SECRET]),
+                        path: trim_opt(&fields[Self::PATH]),
+                        identity_file: trim_opt(&fields[Self::SECRET]),
                     }),
                 }
             }
             RemoteEditKind::Smb => {
-                let host = self.fields[Self::HOST].trim();
+                let host = fields[Self::HOST].trim();
                 if host.is_empty() {
                     return None;
                 }
@@ -312,10 +397,10 @@ impl RemoteEditState {
                     source: RemoteSource::UserToml,
                     kind: RemoteKind::Smb(crate::remote::SmbProfile {
                         host: host.to_string(),
-                        user: trim_opt(&self.fields[Self::USER]),
-                        workgroup: trim_opt(&self.fields[Self::PORT]),
-                        share: trim_opt(&self.fields[Self::PATH]),
-                        password: trim_opt(&self.fields[Self::SECRET]),
+                        user: trim_opt(&fields[Self::USER]),
+                        workgroup: trim_opt(&fields[Self::PORT]),
+                        share: trim_opt(&fields[Self::PATH]),
+                        password: trim_opt(&fields[Self::SECRET]),
                         path: None,
                     }),
                 }
@@ -326,11 +411,11 @@ impl RemoteEditState {
                 config_fields,
                 ..
             } => {
-                let parsed = build_remote_plugin_config_value(&self.fields, config_fields);
+                let parsed = build_remote_plugin_config_value(&fields, config_fields);
                 if validate_remote_plugin_config_json(&parsed, config_fields).is_err() {
                     return None;
                 }
-                let path = trim_opt(&self.fields[self.path_field_index()]);
+                let path = trim_opt(&fields[self.path_field_index()]);
                 RemoteProfile {
                     name: name.to_string(),
                     source: RemoteSource::UserToml,
@@ -353,13 +438,20 @@ impl RemoteEditState {
         let RemoteEditKind::RemotePlugin { config_fields, .. } = &self.kind else {
             return None;
         };
-        Some(build_remote_plugin_config_value(&self.fields, config_fields).to_string())
+        let mut fields = self.fields.clone();
+        if self.cursor < fields.len() {
+            fields[self.cursor] = self.textarea_text().to_string();
+        }
+        Some(build_remote_plugin_config_value(&fields, config_fields).to_string())
     }
 
-    pub fn plugin_auth_input(&self) -> Option<&str> {
-        self.auth_field_index()
-            .and_then(|idx| self.fields.get(idx))
-            .map(|value| value.trim())
+    pub fn plugin_auth_input(&self) -> Option<String> {
+        let idx = self.auth_field_index()?;
+        if self.cursor == idx {
+            Some(self.textarea_text().trim().to_string())
+        } else {
+            self.fields.get(idx).map(|value| value.trim().to_string())
+        }
     }
 }
 
