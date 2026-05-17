@@ -401,7 +401,7 @@ pub(super) fn render_viewer(
         v.mode,
         ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi | ViewMode::Hex
     )
-        .then(|| v.encoding_label());
+    .then(|| v.encoding_label());
     let mask_info = matches!(v.mode, ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi)
         .then(|| v.mask_label());
     let ansi_canvas_info = matches!(v.mode, ViewMode::Ansi).then(|| v.ansi_canvas_label());
@@ -410,12 +410,12 @@ pub(super) fn render_viewer(
     let autoplay_info = v.autoplay_display(autoplay_delay_secs);
     let auto_detected_info =
         if matches!(v.mode, ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi) {
-        v.detected_mask_label()
-            .map(|label| format!("({label}) "))
-            .unwrap_or_default()
-    } else {
-        String::new()
-    };
+            v.detected_mask_label()
+                .map(|label| format!("({label}) "))
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
     let image_info = if let Some(image) = v.image_info() {
         match (image.width, image.height) {
             (Some(w), Some(h)) => format!(" {} {}x{} ", image.format, w, h),

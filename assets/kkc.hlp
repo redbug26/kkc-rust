@@ -1,4 +1,12 @@
-# RedBug Help Ver 1.0
+
+██╗  ██╗███████╗████████╗ ██████╗██╗  ██╗██╗   ██╗██████╗         
+██║ ██╔╝██╔════╝╚══██╔══╝██╔════╝██║  ██║██║   ██║██╔══██╗        
+█████╔╝ █████╗     ██║   ██║     ███████║██║   ██║██████╔╝        
+██╔═██╗ ██╔══╝     ██║   ██║     ██╔══██║██║   ██║██╔═══╝         
+██║  ██╗███████╗   ██║   ╚██████╗██║  ██║╚██████╔╝██║              
+╚═╝  ╚═╝╚══════╝   ╚═╝    ╚═════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝             
+                                                                         
+K I L L E R S   C O M M A N D E R   ::   K K C                 
 
 ## Introduction
 
@@ -340,8 +348,16 @@ Ctrl-D opens the bookmarks panel, which shows saved directory paths.
 ### Installation
 
 KKC is available on:
-- **Homebrew (macOS/Linux):** `brew install redbug26/tap/kkc`
-- **Build from source:** `git clone https://github.com/redbug26/kkc-rust.git && cd kkc-rust && cargo build --release`
+- **Homebrew (macOS/Linux):** 
+```sh
+brew install redbug26/tap/kkc
+```
+- **Build from source:** 
+```sh
+git clone https://github.com/redbug26/kkc-rust.git
+cd kkc-rust
+cargo build --release
+```
 
 Requirements: Rust stable toolchain. On Linux: also libssl-dev.
 

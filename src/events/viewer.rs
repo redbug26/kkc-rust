@@ -206,8 +206,9 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
                 if let Some(link_line_str) = v.plugin_state.get("__md_link_line") {
                     if let Ok(link_line) = link_line_str.parse::<usize>() {
                         let display_rows = display_rows.max(1);
-                        let is_visible = link_line >= v.scroll && link_line < v.scroll + display_rows;
-                        
+                        let is_visible =
+                            link_line >= v.scroll && link_line < v.scroll + display_rows;
+
                         if !is_visible {
                             // Link is off-screen, select first visible link instead
                             status_message = v
@@ -240,8 +241,9 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
                 if let Some(link_line_str) = v.plugin_state.get("__md_link_line") {
                     if let Ok(link_line) = link_line_str.parse::<usize>() {
                         let display_rows = display_rows.max(1);
-                        let is_visible = link_line >= v.scroll && link_line < v.scroll + display_rows;
-                        
+                        let is_visible =
+                            link_line >= v.scroll && link_line < v.scroll + display_rows;
+
                         if !is_visible {
                             // Link is off-screen, select first visible link instead
                             status_message = v

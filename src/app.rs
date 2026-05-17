@@ -3365,7 +3365,7 @@ impl App {
         match Viewer::open(&help_path, self.config.viewer.word_wrap) {
             Ok(mut viewer) => {
                 viewer.set_mode(ViewMode::Markdown);
-                viewer.zoomed = false;  // Always show help in non-zoomed mode (80 chars)
+                viewer.zoomed = false; // Always show help in non-zoomed mode (80 chars)
                 self.mode = AppMode::Viewer(viewer);
             }
             Err(e) => self.notify(format!("Cannot open help: {}", e)),
@@ -3373,7 +3373,10 @@ impl App {
     }
 
     pub fn open_help_with_anchor_and_return(&mut self, anchor: &str, return_panel: &str) {
-        debug_log(&format!("open_help_with_anchor_and_return: anchor={}, return_panel={}", anchor, return_panel));
+        debug_log(&format!(
+            "open_help_with_anchor_and_return: anchor={}, return_panel={}",
+            anchor, return_panel
+        ));
         // ... rest of the code
         let help_path = if let Ok(dirs) = crate::config::project_dirs() {
             let path = dirs.preference_dir().join("kkc.hlp");
@@ -3393,7 +3396,7 @@ impl App {
         match Viewer::open(&help_path, self.config.viewer.word_wrap) {
             Ok(mut viewer) => {
                 viewer.set_mode(ViewMode::Markdown);
-                viewer.zoomed = false;  // Always show help in non-zoomed mode (80 chars)
+                viewer.zoomed = false; // Always show help in non-zoomed mode (80 chars)
                 // Jump to the anchor
                 viewer.markdown_goto_anchor(anchor);
                 self.help_return_mode = Some(return_panel.to_string());
@@ -3426,9 +3429,7 @@ impl App {
                 })
             }
             "bookmarks" => AppMode::DirBookmarks,
-            "associations" => {
-                AppMode::AssocEditor(AssocEditorState::from_config(&self.config))
-            }
+            "associations" => AppMode::AssocEditor(AssocEditorState::from_config(&self.config)),
             "remote" => AppMode::RemoteConnect(RemoteConnectState::load()),
             _ => AppMode::Browse,
         };

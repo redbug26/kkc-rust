@@ -161,7 +161,9 @@ impl RenderState {
             self.continuation_prefix = Some(" ".repeat(prefix.chars().count()));
             self.push_with_style(
                 &prefix,
-                Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::LightCyan)
+                    .add_modifier(Modifier::BOLD),
             );
         } else if self.in_item
             && let Some(prefix) = self.continuation_prefix.clone()
@@ -186,7 +188,9 @@ impl RenderState {
                 HeadingLevel::H3 => Style::default()
                     .fg(Color::LightMagenta)
                     .add_modifier(Modifier::BOLD),
-                _ => Style::default().fg(Color::LightBlue).add_modifier(Modifier::BOLD),
+                _ => Style::default()
+                    .fg(Color::LightBlue)
+                    .add_modifier(Modifier::BOLD),
             };
         }
         if self.emphasis_depth > 0 {
@@ -239,7 +243,11 @@ impl RenderState {
     }
 
     fn blank_line(&mut self) {
-        let needs_blank = self.lines.last().map(|line| !line.plain.is_empty()).unwrap_or(true);
+        let needs_blank = self
+            .lines
+            .last()
+            .map(|line| !line.plain.is_empty())
+            .unwrap_or(true);
         if needs_blank {
             self.lines.push(MarkdownRenderedLine {
                 plain: String::new(),
@@ -444,19 +452,17 @@ fn render_table_lines(table: TableState, max_total_width: usize) -> Vec<Markdown
                 wrap_cell_text(&table_strip_link_markers(text), widths[col])
             })
             .collect::<Vec<_>>();
-        let visual_rows = wrapped_cells
-            .iter()
-            .map(Vec::len)
-            .max()
-            .unwrap_or(1)
-            .max(1);
+        let visual_rows = wrapped_cells.iter().map(Vec::len).max().unwrap_or(1).max(1);
 
         for visual_idx in 0..visual_rows {
             let mut spans = Vec::new();
             let mut plain = String::new();
             for col in 0..col_count {
                 if col > 0 {
-                    spans.push(Span::styled(" │ ".to_string(), Style::default().fg(Color::DarkGray)));
+                    spans.push(Span::styled(
+                        " │ ".to_string(),
+                        Style::default().fg(Color::DarkGray),
+                    ));
                     plain.push_str(" │ ");
                 }
                 let align = table
@@ -499,35 +505,38 @@ fn render_table_lines(table: TableState, max_total_width: usize) -> Vec<Markdown
 }
 
 /// Wrap lines that exceed max_width, breaking at word boundaries.
-fn wrap_markdown_lines(lines: Vec<MarkdownRenderedLine>, max_width: usize) -> Vec<MarkdownRenderedLine> {
+fn wrap_markdown_lines(
+    lines: Vec<MarkdownRenderedLine>,
+    max_width: usize,
+) -> Vec<MarkdownRenderedLine> {
     if max_width == 0 {
         return lines;
     }
-    
+
     let mut wrapped = Vec::new();
-    
+
     for line in lines {
         let line_width = UnicodeWidthStr::width(line.plain.as_str());
-        
+
         // If line fits within max_width, keep it as-is
         if line_width <= max_width {
             wrapped.push(line);
             continue;
         }
-        
+
         // Line is too long; we need to wrap it by breaking at word boundaries
         // while preserving the styling from the original spans.
         // Strategy: collect all styled words, then redistribute them across lines.
-        
+
         let mut word_spans: Vec<(String, Style)> = Vec::new();
         let mut current_word = String::new();
         let mut current_style = Style::default();
-        
+
         // Extract words with their styles from the original spans
         for span in &line.styled.spans {
             let text = span.content.as_ref();
             let style = span.style;
-            
+
             for ch in text.chars() {
                 if ch == ' ' || ch == '\t' || ch == '\n' {
                     if !current_word.is_empty() {
@@ -541,19 +550,19 @@ fn wrap_markdown_lines(lines: Vec<MarkdownRenderedLine>, max_width: usize) -> Ve
                 }
             }
         }
-        
+
         if !current_word.is_empty() {
             word_spans.push((current_word, current_style));
         }
-        
+
         // Now redistribute words across lines, respecting max_width
         let mut current_line_plain = String::new();
         let mut current_line_spans: Vec<Span<'static>> = Vec::new();
         let mut current_line_width = 0usize;
-        
+
         for (word, style) in word_spans {
             let word_width = UnicodeWidthStr::width(word.as_str());
-            
+
             // If adding this word to current line would exceed max_width, flush current line
             if current_line_width > 0 && current_line_width + word_width > max_width {
                 wrapped.push(MarkdownRenderedLine {
@@ -564,13 +573,13 @@ fn wrap_markdown_lines(lines: Vec<MarkdownRenderedLine>, max_width: usize) -> Ve
                 current_line_spans = Vec::new();
                 current_line_width = 0;
             }
-            
+
             // Add word to current line
             current_line_plain.push_str(&word);
             current_line_spans.push(Span::styled(word, style));
             current_line_width += word_width;
         }
-        
+
         // Add remaining content
         if !current_line_plain.is_empty() {
             wrapped.push(MarkdownRenderedLine {
@@ -579,11 +588,15 @@ fn wrap_markdown_lines(lines: Vec<MarkdownRenderedLine>, max_width: usize) -> Ve
             });
         }
     }
-    
+
     wrapped
 }
 
-pub(crate) fn render_commonmark(source: &str, max_table_width: usize, wrap_text: bool) -> Vec<MarkdownRenderedLine> {
+pub(crate) fn render_commonmark(
+    source: &str,
+    max_table_width: usize,
+    wrap_text: bool,
+) -> Vec<MarkdownRenderedLine> {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
@@ -622,7 +635,9 @@ pub(crate) fn render_commonmark(source: &str, max_table_width: usize, wrap_text:
                     state.heading_level = Some(level);
                     state.push_with_style(
                         heading_prefix(level),
-                        Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::BOLD),
                     );
                 }
                 Tag::BlockQuote(_) => {
@@ -643,7 +658,9 @@ pub(crate) fn render_commonmark(source: &str, max_table_width: usize, wrap_text:
                     };
                     state.push_with_style(
                         &header,
-                        Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::BOLD),
                     );
                     state.flush_line(true);
                 }
@@ -730,7 +747,9 @@ pub(crate) fn render_commonmark(source: &str, max_table_width: usize, wrap_text:
                     state.code_block_lang = None;
                     state.push_with_style(
                         "└─",
-                        Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::BOLD),
                     );
                     state.flush_line(true);
                     state.blank_line();
@@ -794,7 +813,9 @@ pub(crate) fn render_commonmark(source: &str, max_table_width: usize, wrap_text:
                 } else {
                     state.push_with_style(
                         &code,
-                        Style::default().fg(Color::LightYellow).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(Color::LightYellow)
+                            .add_modifier(Modifier::BOLD),
                     );
                 }
             }
@@ -819,11 +840,8 @@ pub(crate) fn render_commonmark(source: &str, max_table_width: usize, wrap_text:
             Event::Rule => {
                 state.flush_line(false);
                 let rule_width = max_table_width.max(1);
-                let rule = "─".repeat(rule_width-2);
-                state.push_with_style(
-                    &rule,
-                    Style::default().fg(Color::DarkGray),
-                );
+                let rule = "─".repeat(rule_width - 2);
+                state.push_with_style(&rule, Style::default().fg(Color::DarkGray));
                 state.flush_line(true);
                 state.blank_line();
             }
@@ -833,7 +851,9 @@ pub(crate) fn render_commonmark(source: &str, max_table_width: usize, wrap_text:
                 } else {
                     state.push_with_style(
                         &text,
-                        Style::default().fg(Color::LightMagenta).add_modifier(Modifier::ITALIC),
+                        Style::default()
+                            .fg(Color::LightMagenta)
+                            .add_modifier(Modifier::ITALIC),
                     );
                 }
             }
@@ -843,7 +863,9 @@ pub(crate) fn render_commonmark(source: &str, max_table_width: usize, wrap_text:
                 } else {
                     state.push_with_style(
                         &format!("[^{}]", label),
-                        Style::default().fg(Color::LightBlue).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(Color::LightBlue)
+                            .add_modifier(Modifier::BOLD),
                     );
                 }
             }
@@ -854,7 +876,9 @@ pub(crate) fn render_commonmark(source: &str, max_table_width: usize, wrap_text:
                 } else {
                     state.push_with_style(
                         marker,
-                        Style::default().fg(Color::LightBlue).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(Color::LightBlue)
+                            .add_modifier(Modifier::BOLD),
                     );
                 }
             }
@@ -864,7 +888,9 @@ pub(crate) fn render_commonmark(source: &str, max_table_width: usize, wrap_text:
                 } else {
                     state.push_with_style(
                         &text,
-                        Style::default().fg(Color::LightMagenta).add_modifier(Modifier::ITALIC),
+                        Style::default()
+                            .fg(Color::LightMagenta)
+                            .add_modifier(Modifier::ITALIC),
                     );
                 }
             }
@@ -889,7 +915,7 @@ pub(crate) fn render_commonmark(source: &str, max_table_width: usize, wrap_text:
             styled: Line::from(Span::raw(String::new())),
         });
     }
-    
+
     // Wrap lines to max_table_width only when wrap_text is true (non-zoomed mode)
     if wrap_text {
         wrap_markdown_lines(state.lines, max_table_width)

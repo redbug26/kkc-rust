@@ -23,8 +23,8 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-mod syntax;
 mod markdown;
+mod syntax;
 mod viewer_decode;
 mod viewer_render;
 mod viewer_search;
@@ -838,7 +838,10 @@ impl Viewer {
     }
 
     pub fn toggle_wrap(&mut self) {
-        if matches!(self.mode, ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi) {
+        if matches!(
+            self.mode,
+            ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi
+        ) {
             self.wrap = !self.wrap;
             self.wrap_row_offset = 0;
         }
@@ -851,6 +854,7 @@ impl Viewer {
         // Invalidate markdown cache when toggling zoom, so it re-renders with new width
         self.markdown_lines = Vec::new();
         self.markdown_plain_lines = Vec::new();
+        self.ensure_mode_decoded(self.mode);
         // Reset scroll since line count may change when wrapping is applied/removed
         self.scroll = 0;
     }
@@ -892,7 +896,10 @@ impl Viewer {
     pub fn supports_mouse_text_selection(&self) -> bool {
         !self.wrap
             && self.viewer_plugin.is_none()
-            && matches!(self.mode, ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi)
+            && matches!(
+                self.mode,
+                ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi
+            )
     }
 
     pub fn clear_mouse_selection(&mut self) {
@@ -904,7 +911,8 @@ impl Viewer {
             return Vec::new();
         }
 
-        let source = text_lines(&self.raw, self.line_feed, &self.preproc_ops, self.encoding).join("\n");
+        let source =
+            text_lines(&self.raw, self.line_feed, &self.preproc_ops, self.encoding).join("\n");
         let source_links: Vec<(String, String)> = source
             .lines()
             .flat_map(markdown_source_line_links)
@@ -972,30 +980,36 @@ impl Viewer {
             self.plugin_state.remove("__md_link_text");
             return None;
         }
-        
+
         let display_rows = visible_rows.max(1);
-        
+
         // Find the first link visible in the current viewport
         for (idx, ((display_text, target), line_idx)) in links.iter().enumerate() {
             if self.markdown_is_line_visible(*line_idx, visible_rows) {
-                self.plugin_state.insert("__md_link_idx".into(), idx.to_string());
-                self.plugin_state.insert("__md_link_line".into(), line_idx.to_string());
-                self.plugin_state.insert("__md_link_text".into(), display_text.clone());
+                self.plugin_state
+                    .insert("__md_link_idx".into(), idx.to_string());
+                self.plugin_state
+                    .insert("__md_link_line".into(), line_idx.to_string());
+                self.plugin_state
+                    .insert("__md_link_text".into(), display_text.clone());
                 return Some(target.clone());
             }
         }
-        
+
         // If no link is visible, select the first link after the current viewport
         if !links.is_empty() {
             let idx = 0;
             let ((display_text, target), line_idx) = links[idx].clone();
-            self.plugin_state.insert("__md_link_idx".into(), idx.to_string());
-            self.plugin_state.insert("__md_link_line".into(), line_idx.to_string());
-            self.plugin_state.insert("__md_link_text".into(), display_text.clone());
+            self.plugin_state
+                .insert("__md_link_idx".into(), idx.to_string());
+            self.plugin_state
+                .insert("__md_link_line".into(), line_idx.to_string());
+            self.plugin_state
+                .insert("__md_link_text".into(), display_text.clone());
             self.scroll = line_idx.saturating_sub(display_rows / 3);
             return Some(target);
         }
-        
+
         None
     }
 
@@ -1076,7 +1090,10 @@ impl Viewer {
         self.plugin_state
             .insert("__md_link_line".into(), line_idx.to_string());
 
-        let target_line = self.markdown_heading_targets().get(&markdown_slug(&target)).copied();
+        let target_line = self
+            .markdown_heading_targets()
+            .get(&markdown_slug(&target))
+            .copied();
         if let Some(line) = target_line {
             self.goto_line(line);
             Some((target, true))
@@ -1237,7 +1254,10 @@ impl Viewer {
     pub fn scroll_up_visual(&mut self, text_width: usize) {
         if !self.wrap
             || self.viewer_plugin.is_some()
-            || !matches!(self.mode, ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi)
+            || !matches!(
+                self.mode,
+                ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi
+            )
             || text_width == 0
         {
             self.scroll_up();
@@ -1259,7 +1279,10 @@ impl Viewer {
     pub fn scroll_down_visual(&mut self, text_width: usize) {
         if !self.wrap
             || self.viewer_plugin.is_some()
-            || !matches!(self.mode, ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi)
+            || !matches!(
+                self.mode,
+                ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi
+            )
             || text_width == 0
         {
             self.scroll_down();
@@ -1296,7 +1319,10 @@ impl Viewer {
     pub fn page_up_visual(&mut self, visual_rows: usize, text_width: usize) {
         if !self.wrap
             || self.viewer_plugin.is_some()
-            || !matches!(self.mode, ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi)
+            || !matches!(
+                self.mode,
+                ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi
+            )
             || text_width == 0
         {
             self.page_up(visual_rows);
@@ -1316,7 +1342,10 @@ impl Viewer {
     pub fn page_down_visual(&mut self, visual_rows: usize, text_width: usize) {
         if !self.wrap
             || self.viewer_plugin.is_some()
-            || !matches!(self.mode, ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi)
+            || !matches!(
+                self.mode,
+                ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi
+            )
             || text_width == 0
         {
             self.page_down(visual_rows);
@@ -1371,7 +1400,10 @@ impl Viewer {
             return 1;
         }
         if !self.wrap
-            || !matches!(self.mode, ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi)
+            || !matches!(
+                self.mode,
+                ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi
+            )
             || self.viewer_plugin.is_some()
             || text_width == 0
         {
@@ -1415,19 +1447,30 @@ impl Viewer {
     }
 
     pub fn scroll_left(&mut self, amount: usize) {
-        if matches!(self.mode, ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi) && !self.wrap {
+        if matches!(
+            self.mode,
+            ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi
+        ) && !self.wrap
+        {
             self.hscroll = self.hscroll.saturating_sub(amount);
         }
     }
 
     pub fn scroll_right(&mut self, amount: usize) {
-        if matches!(self.mode, ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi) && !self.wrap {
+        if matches!(
+            self.mode,
+            ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi
+        ) && !self.wrap
+        {
             self.hscroll = self.hscroll.saturating_add(amount);
         }
     }
 
     pub fn scroll_left_max(&mut self) {
-        if matches!(self.mode, ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi) {
+        if matches!(
+            self.mode,
+            ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi
+        ) {
             self.hscroll = 0;
         }
     }
@@ -1487,10 +1530,7 @@ impl Viewer {
             .plugin_state
             .get("__md_link_line")
             .and_then(|s| s.parse::<usize>().ok());
-        let selected_text = self
-            .plugin_state
-            .get("__md_link_text")
-            .map(|s| s.as_str());
+        let selected_text = self.plugin_state.get("__md_link_text").map(|s| s.as_str());
 
         self.markdown_lines
             .iter()
@@ -1508,20 +1548,23 @@ impl Viewer {
                         if let Some(link_text) = selected_text {
                             if span.content.contains(link_text) {
                                 matched = true;
-                                span.style = span.style
+                                span.style = span
+                                    .style
                                     .add_modifier(Modifier::REVERSED)
                                     .add_modifier(Modifier::BOLD);
                             }
                         } else {
                             // Fallback: highlight all if no text stored
-                            span.style = span.style
+                            span.style = span
+                                .style
                                 .add_modifier(Modifier::REVERSED)
                                 .add_modifier(Modifier::BOLD);
                         }
                     }
                     if selected_text.is_some() && !matched {
                         for span in &mut line.spans {
-                            span.style = span.style
+                            span.style = span
+                                .style
                                 .add_modifier(Modifier::REVERSED)
                                 .add_modifier(Modifier::BOLD);
                         }
@@ -2211,7 +2254,11 @@ impl Viewer {
     fn plain_line_at(&self, idx: usize) -> String {
         match self.mode {
             ViewMode::Text => self.text_lines.get(idx).cloned().unwrap_or_default(),
-            ViewMode::Markdown => self.markdown_plain_lines.get(idx).cloned().unwrap_or_default(),
+            ViewMode::Markdown => self
+                .markdown_plain_lines
+                .get(idx)
+                .cloned()
+                .unwrap_or_default(),
             ViewMode::Hex => self.hex_plain_line_at(idx),
             ViewMode::Ansi => self.ansi_lines.get(idx).cloned().unwrap_or_default(),
             ViewMode::Image => String::new(),
@@ -2574,7 +2621,11 @@ impl Viewer {
                         text_lines(&self.raw, self.line_feed, &self.preproc_ops, self.encoding)
                             .join("\n");
                     // Pass wrap_text=true only when not zoomed (fixed 80-char mode)
-                    let rendered = markdown::render_commonmark(&source, self.markdown_table_width_hint(), !self.zoomed);
+                    let rendered = markdown::render_commonmark(
+                        &source,
+                        self.markdown_table_width_hint(),
+                        !self.zoomed,
+                    );
                     self.markdown_plain_lines =
                         rendered.iter().map(|line| line.plain.clone()).collect();
                     self.markdown_lines = rendered.into_iter().map(|line| line.styled).collect();
@@ -2613,7 +2664,7 @@ impl Viewer {
         if !self.zoomed {
             return 80;
         }
-        
+
         // Keep markdown tables responsive to the current terminal width.
         // We subtract borders/margins and line-number gutter to approximate the
         // effective viewer content width.
@@ -4073,5 +4124,23 @@ mod tests {
         assert_eq!(image.format, "WEBP");
         assert_eq!(image.width, Some(1920));
         assert_eq!(image.height, Some(1080));
+    }
+
+    #[test]
+    fn markdown_zoom_toggle_keeps_rendered_lines_available() {
+        let mut viewer = Viewer::placeholder(
+            Path::new("notes.md"),
+            "# Title\n\nSome markdown content.",
+            true,
+        );
+        viewer.set_mode(ViewMode::Markdown);
+
+        assert!(!viewer.markdown_lines.is_empty());
+
+        viewer.toggle_zoom();
+
+        assert!(viewer.zoomed);
+        assert!(!viewer.markdown_lines.is_empty());
+        assert!(!viewer.render_lines(80, 0, 10).is_empty());
     }
 }
