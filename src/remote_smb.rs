@@ -50,7 +50,7 @@ pub(super) fn smb_rename(smb: &SmbProfile, old_path: &str, new_path: &str) -> Re
 pub(super) fn smb_mkdir(smb: &SmbProfile, path: &str) -> Result<()> {
     let client = smb_client(smb)?;
     client
-        .mkdir(path, SmbMode::from(0o755u16))
+    .mkdir(path, SmbMode::from(0o755u32))
         .map_err(|e| anyhow::anyhow!("SMB mkdir error: {e}"))
 }
 
@@ -409,7 +409,7 @@ where
     };
     if recursive && local_path.is_dir() {
         let client = smb_client(smb)?;
-        let _ = client.mkdir(remote_target, SmbMode::from(0o755u16));
+        let _ = client.mkdir(remote_target, SmbMode::from(0o755u32));
         drop(client);
         for entry in fs::read_dir(local_path)? {
             let entry = entry?;

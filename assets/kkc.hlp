@@ -684,7 +684,7 @@ The goal of KKC is simple: keep daily file operations fast, scriptable, and comf
 
 ### History
 
-**Version 0.1.20 (2026-05-17)**
+**Version 0.1.21 (2026-05-17)**
 - Gemini support in the internal viewer (open and browse gemini:// pages) (**view_file**).
 - Help moved to the Markdown viewer; F1 behavior fixed in multiple panels (**help**).
 - Better help navigation (Tab/Shift-Tab on links, improved table link visibility) (**help**).
