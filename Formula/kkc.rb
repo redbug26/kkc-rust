@@ -1,31 +1,28 @@
 class Kkc < Formula
   desc "Dual-panel file manager inspired by Norton Commander, written in Rust"
   homepage "https://github.com/redbug26/kkc-rust"
-  version "0.1.18"
+  version "0.1.22"
   license "MIT"
 
   on_macos do
-    url "https://github.com/redbug26/kkc-rust/releases/download/v0.1.18/kkc-macos-arm64.tar.gz"
-    sha256 "85ba71204726b7be7883ce166c2c40e0444c64ac0b3d6fec47533306480b5610"
+    url "https://github.com/redbug26/kkc-rust/releases/download/v0.1.22/kkc-macos-arm64.tar.gz"
+    sha256 "9adfcdfcf818b4347c59150b4dbea02545d815e9c0cdd23b0cdb6185b5d684a8"
   end
 
   on_linux do
-    url "https://github.com/redbug26/kkc-rust/releases/download/v0.1.18/kkc-linux-x86_64.tar.gz"
-    sha256 "be5348acd6bf749ddf101b8b8e85f85ca651ea8024c0afeb73f3bf1ece0b55b6"
+    url "https://github.com/redbug26/kkc-rust/releases/download/v0.1.22/kkc-linux-x86_64.tar.gz"
+    sha256 "c641aa3052b84fd23e6fba611c499871c496cfb519cfb1f2a6d433c9aed71a1a"
   end
 
   # Build from source with: brew install --HEAD redbug26/kkc-rust/kkc
   head do
     url "https://github.com/redbug26/kkc-rust.git", branch: "main"
     depends_on "rust" => :build
-    depends_on "samba" => :build
   end
 
   def install
     if build.head?
-      system "cargo", "install", *std_cargo_args,
-             "--features", "smb",
-             "--env", "PKG_CONFIG_PATH=#{Formula["samba"].opt_lib}/pkgconfig"
+      system "cargo", "install", *std_cargo_args
     else
       bin.install "kkc"
     end
