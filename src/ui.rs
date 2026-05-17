@@ -43,7 +43,8 @@ pub(crate) use self::viewer::viewer_area;
 pub(crate) use self::viewer::viewer_footer_shortcuts;
 pub use self::viewer::{kitty_image_area, kitty_image_area_quick_preview};
 use self::viewer::{
-    menu_dropdown_line, mnemonics_for_labels, render_viewer, render_viewer_goto, render_viewer_menu,
+    menu_dropdown_line, mnemonics_for_labels, render_viewer, render_viewer_goto,
+    render_viewer_history, render_viewer_location_input, render_viewer_menu,
 };
 
 pub(crate) use self::command_palette::command_palette_shortcuts;
@@ -57,7 +58,7 @@ use crate::app::{
     BookmarkListItem, ComparePanelState, ConfigState, ConfirmAction, ConfirmButton, ConfirmDialog,
     InputDialog, MENU_DATA, MENU_HEADERS, MenuAction, MenuState, OpenerState, PluginsState,
     RemoteConnectState, RemoteConnectingState, RemoteEditKind, RemoteEditState, SearchState,
-    StoreInstallPaletteState, ViewerGotoState, ViewerMenuKind, ViewerMenuState,
+    StoreInstallPaletteState, ViewerGotoState, ViewerHistoryState, ViewerMenuKind, ViewerMenuState,
     ViewerPluginPaletteState,
 };
 use crate::config::SortMode;
@@ -423,6 +424,36 @@ pub fn render(f: &mut Frame, app: &App) {
                 None,
                 app.config.viewer.autoplay_delay_secs,
             );
+            return;
+        }
+        AppMode::ViewerLocationInput(v, input) => {
+            render_viewer(
+                f,
+                v,
+                false,
+                None,
+                f.area(),
+                true,
+                true,
+                None,
+                app.config.viewer.autoplay_delay_secs,
+            );
+            render_viewer_location_input(f, input, f.area());
+            return;
+        }
+        AppMode::ViewerHistory(v, state) => {
+            render_viewer(
+                f,
+                v,
+                false,
+                None,
+                f.area(),
+                true,
+                true,
+                None,
+                app.config.viewer.autoplay_delay_secs,
+            );
+            render_viewer_history(f, state, &app.viewer_history, f.area());
             return;
         }
         AppMode::ViewerGoto(v, state) => {

@@ -4,6 +4,10 @@ pub(crate) fn viewer_footer_shortcuts(v: &Viewer) -> Vec<FooterShortcut> {
     if v.is_image_mode() && crate::viewer::kitty_graphics_supported() {
         vec![
             FooterShortcut {
+                label: "F1:Help",
+                key: KeyCode::F(1),
+            },
+            FooterShortcut {
                 label: "F4:Mode",
                 key: KeyCode::F(4),
             },
@@ -19,9 +23,21 @@ pub(crate) fn viewer_footer_shortcuts(v: &Viewer) -> Vec<FooterShortcut> {
                 label: "p:Autoplay",
                 key: KeyCode::Char('p'),
             },
+            // FooterShortcut {
+            //     label: "Ctrl+L Open",
+            //     key: KeyCode::Char('l'),
+            // },
+            // FooterShortcut {
+            //     label: "Ctrl+Y History",
+            //     key: KeyCode::Char('y'),
+            // },
         ]
     } else if matches!(v.mode, ViewMode::Module) {
         vec![
+            FooterShortcut {
+                label: "F1:Help",
+                key: KeyCode::F(1),
+            },
             FooterShortcut {
                 label: "F4:Mode",
                 key: KeyCode::F(4),
@@ -46,9 +62,21 @@ pub(crate) fn viewer_footer_shortcuts(v: &Viewer) -> Vec<FooterShortcut> {
                 label: "p:Autoplay",
                 key: KeyCode::Char('p'),
             },
+            // FooterShortcut {
+            //     label: "Ctrl+L Open",
+            //     key: KeyCode::Char('l'),
+            // },
+            // FooterShortcut {
+            //     label: "Ctrl+Y History",
+            //     key: KeyCode::Char('y'),
+            // },
         ]
     } else {
         let mut shortcuts = vec![
+            FooterShortcut {
+                label: "F1:Help",
+                key: KeyCode::F(1),
+            },
             FooterShortcut {
                 label: "F2:Wrap",
                 key: KeyCode::F(2),
@@ -96,6 +124,14 @@ pub(crate) fn viewer_footer_shortcuts(v: &Viewer) -> Vec<FooterShortcut> {
             label: "g:Goto",
             key: KeyCode::Char('g'),
         });
+        // shortcuts.push(FooterShortcut {
+        //     label: "Ctrl+L Open",
+        //     key: KeyCode::Char('l'),
+        // });
+        // shortcuts.push(FooterShortcut {
+        //     label: "Ctrl+Y History",
+        //     key: KeyCode::Char('y'),
+        // });
         shortcuts
     }
 }
@@ -1022,6 +1058,210 @@ pub(super) fn render_viewer_menu(
             info_area,
         );
     }
+}
+
+pub(super) fn render_viewer_location_input(
+    f: &mut Frame,
+    input: &ratatui_textarea::TextArea<'static>,
+    area: Rect,
+) {
+    let width = area.width.saturating_sub(6).clamp(48, 96);
+    let popup = clamp_rect(
+        area,
+        Rect {
+            x: area.x + area.width.saturating_sub(width) / 2,
+            y: area.y + 2,
+            width,
+            height: 5,
+        },
+    );
+    safe_render_widget(f, Clear, popup);
+    let block = Block::default()
+        .title(" Open local file or Gemini URL ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(clr_qs_border()))
+        .style(Style::default().bg(clr_qs_bg()));
+    let inner = block.inner(popup);
+    safe_render_widget(f, block, popup);
+
+    if inner.height == 0 {
+        return;
+    }
+    let mut textarea = input.clone();
+    textarea.set_style(Style::default().fg(clr_qs_input_fg()).bg(clr_qs_input_bg()));
+    safe_render_widget(
+        f,
+        &textarea,
+        Rect {
+            x: inner.x,
+            y: inner.y,
+            width: inner.width,
+            height: 1,
+        },
+    );
+    if inner.height > 1 {
+        safe_render_widget(
+            f,
+            Paragraph::new(" Enter:open  Esc:cancel ")
+                .style(Style::default().fg(clr_dialog_hint()).bg(clr_qs_bg())),
+            Rect {
+                x: inner.x,
+                y: inner.y + 1,
+                width: inner.width,
+                height: 1,
+            },
+        );
+    }
+    let cursor_col = input.cursor().1 as u16;
+    let cx = (inner.x + cursor_col).min(inner.x + inner.width.saturating_sub(1));
+    safe_set_cursor_position(f, cx, inner.y);
+}
+
+pub(super) fn render_viewer_history(
+    f: &mut Frame,
+    state: &ViewerHistoryState,
+    items: &[String],
+    area: Rect,
+) {
+    let indices = state.filtered_indices(items);
+    let total = indices.len();
+    let width = area.width.saturating_sub(6).clamp(56, 100);
+    let visible = (total as u16).min(14).max(4);
+    let height = (visible + 4).min(area.height.saturating_sub(3)).max(8);
+    let popup = clamp_rect(
+        area,
+        Rect {
+            x: area.x + area.width.saturating_sub(width) / 2,
+            y: area.y + area.height.saturating_sub(height) / 3,
+            width,
+            height,
+        },
+    );
+
+    safe_render_widget(f, Clear, popup);
+    let block = Block::default()
+        .title(" Viewer History ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(clr_qs_border()))
+        .style(Style::default().bg(clr_qs_bg()));
+    let inner = block.inner(popup);
+    safe_render_widget(f, block, popup);
+    if inner.height < 3 {
+        return;
+    }
+
+    let count_hint = if total > 0 {
+        format!(" {}/{} ", state.match_pos.min(total - 1) + 1, total)
+    } else {
+        " 0/0 ".to_string()
+    };
+    let hint_w = count_hint.len() as u16;
+    let prefix_w = 3u16;
+    let textarea_w = inner.width.saturating_sub(hint_w + prefix_w);
+    let mut query_textarea = state.query.clone();
+    query_textarea.set_style(Style::default().fg(clr_qs_input_fg()).bg(clr_qs_input_bg()));
+    safe_render_widget(
+        f,
+        Paragraph::new(" \u{2315} ")
+            .style(Style::default().fg(clr_qs_input_fg()).bg(clr_qs_input_bg())),
+        Rect {
+            x: inner.x,
+            y: inner.y,
+            width: prefix_w,
+            height: 1,
+        },
+    );
+    safe_render_widget(
+        f,
+        &query_textarea,
+        Rect {
+            x: inner.x + prefix_w,
+            y: inner.y,
+            width: textarea_w,
+            height: 1,
+        },
+    );
+    safe_render_widget(
+        f,
+        Paragraph::new(count_hint)
+            .style(Style::default().fg(clr_qs_no_match()).bg(clr_qs_input_bg())),
+        Rect {
+            x: inner.x + prefix_w + textarea_w,
+            y: inner.y,
+            width: hint_w,
+            height: 1,
+        },
+    );
+
+    let sep = "─".repeat(inner.width as usize);
+    safe_render_widget(
+        f,
+        Paragraph::new(sep).style(Style::default().fg(clr_qs_sep()).bg(clr_qs_bg())),
+        Rect {
+            x: inner.x,
+            y: inner.y + 1,
+            width: inner.width,
+            height: 1,
+        },
+    );
+
+    let list_h = inner.height.saturating_sub(3) as usize;
+    let start = state.visible_start(list_h, indices.len());
+    if total == 0 {
+        let message = if items.is_empty() {
+            " No viewed files yet"
+        } else {
+            " No match"
+        };
+        safe_render_widget(
+            f,
+            Paragraph::new(message).style(Style::default().fg(clr_qs_no_match()).bg(clr_qs_bg())),
+            Rect {
+                x: inner.x,
+                y: inner.y + 2,
+                width: inner.width,
+                height: list_h as u16,
+            },
+        );
+    } else {
+        for (row_idx, item_idx) in indices.iter().skip(start).take(list_h).enumerate() {
+            let selected = start + row_idx == state.match_pos;
+            let item = items.get(*item_idx).map(String::as_str).unwrap_or("");
+            let marker = if item.starts_with("gemini://") {
+                "◆"
+            } else {
+                "•"
+            };
+            let line = format!(" {} {}", marker, item);
+            let style = if selected {
+                Style::default().fg(clr_qs_sel_fg()).bg(clr_qs_sel_bg())
+            } else {
+                Style::default().fg(clr_text()).bg(clr_qs_bg())
+            };
+            safe_render_widget(
+                f,
+                Paragraph::new(truncate_str(&line, inner.width as usize)).style(style),
+                Rect {
+                    x: inner.x,
+                    y: inner.y + 2 + row_idx as u16,
+                    width: inner.width,
+                    height: 1,
+                },
+            );
+        }
+    }
+
+    safe_render_widget(
+        f,
+        Paragraph::new(" Enter:open  Esc:cancel ")
+            .style(Style::default().fg(clr_dialog_hint()).bg(clr_qs_bg())),
+        Rect {
+            x: inner.x,
+            y: inner.y + inner.height.saturating_sub(1),
+            width: inner.width,
+            height: 1,
+        },
+    );
 }
 
 fn viewer_mode_menu_line(idx: usize, item: &str, style: Style) -> Line<'static> {

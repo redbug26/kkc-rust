@@ -192,27 +192,45 @@ Navigation works the same as locally.
 #### Opening
 
 F3 on any file opens the internal viewer.
+The viewer keeps the last position for normal files and stores recently viewed local files and Gemini URLs in the viewer history.
+
 The viewer automatically detects the file type:
 
 | Type | Description |
 | --- | --- |
 | Text | plain text or source code |
+| Markdown | rendered Markdown, also used for .gmi / .gemini Gemtext files |
 | Hex | binary or unknown format |
 | Ansi | file containing ANSI escape sequences |
 | Image | PNG, JPEG, GIF, BMP, WebP |
+| Audio | tracker/module audio preview |
+| Plugin viewer | document rendered by a Lua viewer plugin |
+
+You can also open a target from inside the viewer:
+
+| Shortcut | Description |
+| --- | --- |
+| C-L | Open a local path or a gemini:// URL. Relative paths are resolved from the active panel directory; ~/ is expanded to the home directory. |
+| C-Y | Open viewer history. Type to filter, use Up / Down to select, Enter to open. |
 
 #### Navigation
 
 | Shortcut | Description |
 | --- | --- |
+| F1 | Show this viewer help page. |
 | UP / DOWN | Scroll one line up / down. |
 | PGUP / PGDN | Scroll one page up / down. |
+| SPACE | Scroll one page down. |
 | HOME | Go to beginning of file. |
 | END | Go to end of file. |
 | LEFT / RIGHT | Scroll 8 columns left / right (Text mode). |
 | C-LEFT / C-RIGHT | Scroll 40 columns left / right. |
 | C-HOME | Scroll to column 0. |
+| C-UP / C-DOWN | Scroll one visual line up / down. |
+| C-PGUP / C-PGDN | Scroll one visual page up / down. |
+| C-END | Go to end of file. |
 | g | Open goto dropdown. |
+| C-G | Open direct goto input. In Hex mode, the input is a byte offset in hexadecimal; otherwise it is a line number. |
 
 | Goto key | Description |
 | --- | --- |
@@ -222,33 +240,133 @@ The viewer automatically detects the file type:
 | n | Go to next page. |
 | p | Go to previous page. |
 
+In the goto dropdown, type digits before choosing an item to provide <n>.
+Use Up / Down, Home / End, shortcut letters, or Enter to select an item.
+ESC closes the dropdown.
+
 #### Search
 
 | Shortcut | Description |
 | --- | --- |
-| F7 or / | Open search bar. |
+| / | Open search bar. |
 | n | Jump to next match. |
 | N | Jump to previous match. |
 | C-N | Jump to next match (alternative). |
 | C-J / C-K | Open next / previous file from the active panel. |
 
+In the search bar:
+
+| Shortcut | Description |
+| --- | --- |
+| Type text | Update the search query immediately. |
+| Backspace | Remove the last character from the query. |
+| Enter | Keep the current search and return to normal viewer mode. |
+| ESC | Clear the search and return to normal viewer mode. |
+
+#### Markdown and Gemtext
+
+Markdown mode renders CommonMark content with wrapping, tables, block quotes, syntax highlighting and visible link markers.
+.gmi and .gemini files are converted from Gemtext and displayed with the same internal Markdown viewer.
+
+| Shortcut | Description |
+| --- | --- |
+| Tab | Select the first visible link, or the next visible link. |
+| S-Tab | Select the previous visible link. |
+| Enter | Open the selected link. |
+
+Links are shown with a link marker after their visible text.
+gemini:// links are fetched with the built-in Gemini client and opened in the viewer.
+Relative Gemini links are resolved against the current Gemini document.
+Other unknown targets are reported in the status line.
+
+#### Open Target and History
+
+C-L opens a command-palette style input for a local file path or Gemini URL.
+C-Y opens a filterable history of the last viewed local files and Gemini URLs.
+
+| Shortcut | Description |
+| --- | --- |
+| Type text | Edit the path, URL or history filter. |
+| Up / Down | Move the history selection. |
+| Enter | Open the typed target or selected history item. |
+| ESC | Cancel and return to the current viewer. |
+
 #### Viewer menus (F-keys)
 
 | Shortcut | Description |
 | --- | --- |
-| F2 | Toggle word wrap (Text / Ansi modes). |
+| F1 | This help. |
+| F2 | Toggle word wrap (Text / Markdown / Ansi modes). |
 | F3 | Line-feed mode: DOS (CR/LF) \| Unix (LF) \| Mac (CR) \| Mixed. |
-| F4 | View mode: Text \| Binary (Hex) \| Ansi \| Image \| Plugin viewer. |
+| F4 | View mode: Text \| Markdown \| Binary (Hex) \| Ansi \| Image \| Audio \| Plugin viewer \| Audio player. |
 | F5 | Toggle zoom (fullscreen / windowed). |
 | F6 | Pre-processing pipeline (XOR, AND, OR, NEG, ROR, ADD, Latin, Elite). |
+| F7 | |
 | F8 | Encoding: Plain ASCII \| DOS CP437. |
-| F9 | [Keyword mask](#mask-configuration) style: C \| Pascal \| Assembler \| Ketchup \| Off. |
+| F9 | Syntax highlighting: Auto \| Markdown \| C/C++ \| Rust \| JavaScript/TS \| Python \| PHP \| HTML/XML \| CSS/SCSS \| TOML \| SQL \| Shell/Bash \| Pascal \| Assembler \| Ketchup \| Off. |
+
+In viewer menus:
+
+| Shortcut | Description |
+| --- | --- |
+| Up / Down | Move selection. |
+| Home / End | Jump to first / last item. |
+| 1..9 | Select item by number. |
+| Letter | Select item by mnemonic. |
+| Enter | Apply selected item. |
+| ESC | Close the menu and return to the viewer. |
+
+The F6 pre-processing menu is a pipeline editor:
+
+| Shortcut | Description |
+| --- | --- |
+| Left / Right | Edit the parameter of the selected operation, or the default parameter for new operations. |
+| C-Up / C-Down | Move an existing operation up / down in the pipeline. |
+| Delete / Backspace | Remove the selected operation, or clear all when Clear All is selected. |
+
+Pre-processing is applied before decoding and rendering, which is useful for simple encoded or obfuscated text and binary files.
+
+#### ANSI, Image and Audio
+
+| Shortcut | Description |
+| --- | --- |
+| a | Toggle ANSI canvas rendering when viewing ANSI files. |
+| p | Toggle autoplay for audio/module files. |
+| Tab / S-Tab | Switch audio viewer sections in Audio mode. |
+
+Image mode uses inline terminal graphics when supported by the terminal, and falls back to an in-terminal textual preview otherwise.
+Audio mode shows module metadata and playback-related views; F4 can also choose an external audio player plugin for compatible files.
+
+#### Plugins
+
+F4 > Plugins viewer opens a filterable plugin palette.
+F4 > Audio player opens a filterable audio player palette and can remember the selected player for the detected MIME type.
+
+| Shortcut | Description |
+| --- | --- |
+| Type text | Filter plugins. |
+| Up / Down | Move selection. |
+| Home / End | Jump to first / last match. |
+| Backspace | Edit the filter. |
+| Enter | Use selected plugin. |
+| ESC | Return to the F4 mode menu. |
+
+When a plugin viewer is active, ordinary navigation keys are offered to the plugin first.
+
+#### Mouse
+
+| Action | Description |
+| --- | --- |
+| Wheel up / down | Scroll viewer content. |
+| Click footer shortcut | Trigger that viewer shortcut. |
+| Drag text with left button | Select visible text in text-like modes. |
+| Release left button | Copy selected text to clipboard. |
 
 #### Closing
 
 | Shortcut | Description |
 | --- | --- |
-| ESC or F10 | Return to file panel. |
+| ESC | Return to file panel. |
 
 ### Search Files
 

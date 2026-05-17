@@ -1,7 +1,8 @@
 use super::fx_shortcut;
+use super::panel_text_editor::textarea_input_from_key_event;
 use crate::app::{
-    App, AppMode, AudioPlayerPaletteState, ViewerGotoState, ViewerMenuKind, ViewerMenuState,
-    ViewerPluginPaletteState,
+    App, AppMode, AudioPlayerPaletteState, ViewerGotoState, ViewerHistoryState, ViewerMenuKind,
+    ViewerMenuState, ViewerPluginPaletteState, viewer_single_line_textarea,
 };
 use crate::viewer::{EncodingMode, LineFeedMode, MaskKind, PreprocOpKind, ViewMode, Viewer};
 use anyhow::Result;
@@ -99,6 +100,14 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
 
     // '/' and Esc/F3 require moving app.mode; handle them before borrowing.
     match key.code {
+        KeyCode::F(1) => {
+            let AppMode::Viewer(v) = std::mem::replace(&mut app.mode, AppMode::Browse) else {
+                return Ok(false);
+            };
+            app.help_return_viewer = Some(v);
+            app.open_help_with_anchor_and_return("view-file-internal-viewer", "viewer");
+            return Ok(false);
+        }
         KeyCode::Esc => {
             if let AppMode::Viewer(ref v) = app.mode {
                 v.save_position();
@@ -122,6 +131,23 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
                 return Ok(false);
             };
             app.mode = AppMode::ViewerGotoLine(v, String::new());
+            return Ok(false);
+        }
+        KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            let AppMode::Viewer(v) = std::mem::replace(&mut app.mode, AppMode::Browse) else {
+                return Ok(false);
+            };
+            let input = viewer_single_line_textarea(v.path.to_string_lossy().into_owned());
+            app.mode = AppMode::ViewerLocationInput(v, input);
+            return Ok(false);
+        }
+        KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            let AppMode::Viewer(v) = std::mem::replace(&mut app.mode, AppMode::Browse) else {
+                return Ok(false);
+            };
+            let mut state = ViewerHistoryState::new();
+            state.clamp_match(&app.viewer_history);
+            app.mode = AppMode::ViewerHistory(v, state);
             return Ok(false);
         }
         KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -346,6 +372,9 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
         }
     }
     if let Some(message) = status_message {
+        if let Some(url) = message.strip_prefix("Opened Gemini: ") {
+            app.record_viewer_history(url.to_string());
+        }
         app.set_status(message);
     }
     Ok(false)
@@ -1197,6 +1226,147 @@ pub(super) fn handle_viewer_goto_line(app: &mut App, key: KeyEvent) -> Result<bo
             }
         }
         _ => {}
+    }
+    Ok(false)
+}
+
+pub(super) fn handle_viewer_location_input(app: &mut App, key: KeyEvent) -> Result<bool> {
+    let (viewer, mut textarea) = match std::mem::replace(&mut app.mode, AppMode::Browse) {
+        AppMode::ViewerLocationInput(viewer, textarea) => (viewer, textarea),
+        other => {
+            app.mode = other;
+            return Ok(false);
+        }
+    };
+
+    match key.code {
+        KeyCode::Esc => {
+            app.mode = AppMode::Viewer(viewer);
+        }
+        KeyCode::Enter => match app.open_viewer_target(viewer_textarea_text(&textarea)) {
+            Ok(next) => app.mode = AppMode::Viewer(next),
+            Err(err) => {
+                app.set_status(format!("Cannot open: {err}"));
+                app.mode = AppMode::Viewer(viewer);
+            }
+        },
+        _ => {
+            if let Some(input) = textarea_input_from_key_event(key) {
+                textarea.input(input);
+            }
+            app.mode = AppMode::ViewerLocationInput(viewer, textarea);
+        }
+    }
+    Ok(false)
+}
+
+fn viewer_textarea_text<'a>(textarea: &'a ratatui_textarea::TextArea<'static>) -> &'a str {
+    textarea.lines().first().map(String::as_str).unwrap_or("")
+}
+
+fn viewer_history_list_height(state: &ViewerHistoryState, app: &App) -> usize {
+    let item_count = state.filtered_indices(&app.viewer_history).len();
+    crossterm::terminal::size()
+        .map(|(_, h)| {
+            let available = h.saturating_sub(8) as usize;
+            item_count.clamp(4, available.max(4)).min(14)
+        })
+        .unwrap_or(8)
+}
+
+pub(super) fn handle_viewer_history(app: &mut App, key: KeyEvent) -> Result<bool> {
+    let (viewer, mut state) = match std::mem::replace(&mut app.mode, AppMode::Browse) {
+        AppMode::ViewerHistory(viewer, state) => (viewer, state),
+        other => {
+            app.mode = other;
+            return Ok(false);
+        }
+    };
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let alt = key.modifiers.contains(KeyModifiers::ALT);
+
+    match key.code {
+        KeyCode::Esc => {
+            app.mode = AppMode::Viewer(viewer);
+        }
+        KeyCode::Up => {
+            let len = state.filtered_indices(&app.viewer_history).len();
+            if len > 0 {
+                state.match_pos = if state.match_pos == 0 {
+                    len - 1
+                } else {
+                    state.match_pos - 1
+                };
+                state.scroll_match_into_view(
+                    viewer_history_list_height(&state, app),
+                    &app.viewer_history,
+                );
+            }
+            app.mode = AppMode::ViewerHistory(viewer, state);
+        }
+        KeyCode::Down => {
+            let len = state.filtered_indices(&app.viewer_history).len();
+            if len > 0 {
+                state.match_pos = (state.match_pos + 1) % len;
+                state.scroll_match_into_view(
+                    viewer_history_list_height(&state, app),
+                    &app.viewer_history,
+                );
+            }
+            app.mode = AppMode::ViewerHistory(viewer, state);
+        }
+        KeyCode::Backspace => {
+            if let Some(input) = textarea_input_from_key_event(key) {
+                state.query.input(input);
+            }
+            state.match_pos = 0;
+            state.scroll_offset = 0;
+            state.clamp_match(&app.viewer_history);
+            app.mode = AppMode::ViewerHistory(viewer, state);
+        }
+        KeyCode::Char(ch) if !ctrl && !alt => {
+            if let Some(input) =
+                textarea_input_from_key_event(KeyEvent::new(KeyCode::Char(ch), key.modifiers))
+            {
+                state.query.input(input);
+            }
+            state.match_pos = 0;
+            state.scroll_offset = 0;
+            state.clamp_match(&app.viewer_history);
+            app.mode = AppMode::ViewerHistory(viewer, state);
+        }
+        KeyCode::Char('u') if ctrl => {
+            state.query = viewer_single_line_textarea("");
+            state.match_pos = 0;
+            state.scroll_offset = 0;
+            state.clamp_match(&app.viewer_history);
+            app.mode = AppMode::ViewerHistory(viewer, state);
+        }
+        KeyCode::Enter => {
+            let selected = state
+                .selected_index(&app.viewer_history)
+                .and_then(|idx| app.viewer_history.get(idx).cloned());
+            if let Some(target) = selected {
+                match app.open_viewer_target(&target) {
+                    Ok(next) => app.mode = AppMode::Viewer(next),
+                    Err(err) => {
+                        app.set_status(format!("Cannot open history item: {err}"));
+                        app.mode = AppMode::Viewer(viewer);
+                    }
+                }
+            } else {
+                app.mode = AppMode::Viewer(viewer);
+            }
+        }
+        _ => {
+            if let Some(input) = textarea_input_from_key_event(key) {
+                state.query.input(input);
+                state.match_pos = 0;
+                state.scroll_offset = 0;
+                state.clamp_match(&app.viewer_history);
+            }
+            app.mode = AppMode::ViewerHistory(viewer, state);
+        }
     }
     Ok(false)
 }

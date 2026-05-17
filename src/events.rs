@@ -8,8 +8,8 @@ use self::palette::{handle_command_palette, handle_store_install_palette};
 use self::panel_text_editor::textarea_input_from_key_event;
 use self::viewer::{
     handle_audio_player_palette, handle_mouse_viewer, handle_viewer, handle_viewer_goto,
-    handle_viewer_goto_line, handle_viewer_menu, handle_viewer_plugin_palette,
-    handle_viewer_searching,
+    handle_viewer_goto_line, handle_viewer_history, handle_viewer_location_input,
+    handle_viewer_menu, handle_viewer_plugin_palette, handle_viewer_searching,
 };
 use crate::app::{
     ActivePanel, App, AppMode, AssocEditorState, AssocInputAction, AssocInputDialog,
@@ -147,6 +147,8 @@ fn handle_key_mode(app: &mut App, key: KeyEvent) -> Option<Result<bool>> {
         AppMode::Viewer(_) => Some(handle_viewer(app, key)),
         AppMode::ViewerSearching(_) => Some(handle_viewer_searching(app, key)),
         AppMode::ViewerGotoLine(_, _) => Some(handle_viewer_goto_line(app, key)),
+        AppMode::ViewerLocationInput(_, _) => Some(handle_viewer_location_input(app, key)),
+        AppMode::ViewerHistory(_, _) => Some(handle_viewer_history(app, key)),
         AppMode::ViewerGoto(_, _) => Some(handle_viewer_goto(app, key)),
         AppMode::ViewerMenu(_, _) => Some(handle_viewer_menu(app, key)),
         AppMode::ViewerPluginPalette(_, _) => Some(handle_viewer_plugin_palette(app, key)),

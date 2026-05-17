@@ -60,6 +60,7 @@ use crossterm::{
     style::{Print, ResetColor, SetBackgroundColor, SetForegroundColor},
     terminal::{Clear, ClearType, size},
 };
+use ratatui_textarea::{CursorMove, TextArea};
 use std::collections::VecDeque;
 use std::fs;
 use std::io::{self, Write};
@@ -103,6 +104,10 @@ pub enum AppMode {
     ViewerSearching(Viewer),
     /// Viewer with the Ctrl-G goto-line input active.
     ViewerGotoLine(Viewer, String),
+    /// Viewer with the Ctrl-L location input active.
+    ViewerLocationInput(Viewer, TextArea<'static>),
+    /// Viewer history palette (Ctrl-Y).
+    ViewerHistory(Viewer, ViewerHistoryState),
     /// Viewer with Helix-style goto dropdown active.
     ViewerGoto(Viewer, ViewerGotoState),
     /// Viewer with a popup choice menu.
@@ -181,6 +186,77 @@ pub struct ActionPaletteState {
     pub actions: Vec<crate::plugins::ActionItem>,
     pub cwd: PathBuf,
     pub cursor: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct ViewerHistoryState {
+    pub query: TextArea<'static>,
+    pub match_pos: usize,
+    pub scroll_offset: usize,
+}
+
+impl ViewerHistoryState {
+    pub fn new() -> Self {
+        Self {
+            query: viewer_single_line_textarea(""),
+            match_pos: 0,
+            scroll_offset: 0,
+        }
+    }
+
+    pub fn query_text(&self) -> &str {
+        self.query.lines().first().map(String::as_str).unwrap_or("")
+    }
+
+    pub fn filtered_indices(&self, items: &[String]) -> Vec<usize> {
+        ranked_filtered_indices(
+            items,
+            self.query_text(),
+            |_| true,
+            |item| item.clone(),
+            |_, first, lowered| lowered.starts_with(first),
+        )
+    }
+
+    pub fn clamp_match(&mut self, items: &[String]) {
+        let len = self.filtered_indices(items).len();
+        if len == 0 {
+            self.match_pos = 0;
+        } else if self.match_pos >= len {
+            self.match_pos = len - 1;
+        }
+    }
+
+    pub fn selected_index(&self, items: &[String]) -> Option<usize> {
+        self.filtered_indices(items).get(self.match_pos).copied()
+    }
+
+    pub fn visible_start(&self, list_h: usize, len: usize) -> usize {
+        if list_h == 0 || len <= list_h {
+            return 0;
+        }
+        self.scroll_offset.min(len.saturating_sub(list_h))
+    }
+
+    pub fn scroll_match_into_view(&mut self, list_h: usize, items: &[String]) {
+        let len = self.filtered_indices(items).len();
+        if list_h == 0 || len <= list_h {
+            self.scroll_offset = 0;
+            return;
+        }
+        if self.match_pos < self.scroll_offset {
+            self.scroll_offset = self.match_pos;
+        } else if self.match_pos >= self.scroll_offset + list_h {
+            self.scroll_offset = self.match_pos + 1 - list_h;
+        }
+        self.scroll_offset = self.scroll_offset.min(len.saturating_sub(list_h));
+    }
+}
+
+pub fn viewer_single_line_textarea(initial: impl Into<String>) -> TextArea<'static> {
+    let mut textarea = TextArea::new(vec![initial.into()]);
+    textarea.move_cursor(CursorMove::End);
+    textarea
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -858,6 +934,8 @@ pub struct App {
     pub panel_text_editor_active: bool,
     /// Recently-used command palette entries (fn_name values), most-recent first.
     pub palette_recent: Vec<String>,
+    /// Recently viewed local files and Gemini URLs, most-recent first.
+    pub viewer_history: Vec<String>,
     /// When true, the main loop calls terminal.clear() before the next draw to force
     /// a full repaint (e.g. after a Lua app that drew directly on the main terminal).
     pub needs_full_redraw: bool,
@@ -868,6 +946,8 @@ pub struct App {
     /// When help is opened from a context panel (search, associations, remote, bookmarks),
     /// this stores the panel name so we can restore it after exiting the help viewer.
     pub help_return_mode: Option<String>,
+    /// Viewer to restore when contextual help was opened from inside the viewer.
+    pub help_return_viewer: Option<Viewer>,
 }
 
 pub fn default_center_button_actions() -> Vec<MenuAction> {
@@ -1033,10 +1113,12 @@ impl App {
             panel_text_editor_side: None,
             panel_text_editor_active: false,
             palette_recent,
+            viewer_history: Vec::new(),
             needs_full_redraw: false,
             center_buttons: default_center_button_actions(),
             last_menu_action: None,
             help_return_mode: None,
+            help_return_viewer: None,
         };
 
         match app.config.panel_view_type {
@@ -3003,6 +3085,51 @@ impl App {
         self.open_viewer_with_autoplay(None);
     }
 
+    pub fn record_viewer_history(&mut self, target: impl Into<String>) {
+        let target = target.into();
+        if target.trim().is_empty() {
+            return;
+        }
+        self.viewer_history.retain(|item| item != &target);
+        self.viewer_history.insert(0, target);
+        self.viewer_history.truncate(100);
+    }
+
+    pub fn open_viewer_target(&mut self, target: &str) -> anyhow::Result<Viewer> {
+        let target = target.trim();
+        if target.starts_with("gemini://") {
+            let document = crate::gemini::fetch(target)?;
+            let body = String::from_utf8_lossy(&document.body);
+            let mut viewer = Viewer::placeholder(
+                Path::new(&document.url),
+                &body,
+                self.config.viewer.word_wrap,
+            );
+            if document
+                .meta
+                .split(';')
+                .next()
+                .map(|mime| mime.trim().eq_ignore_ascii_case("text/gemini"))
+                .unwrap_or(true)
+            {
+                viewer.set_mode(ViewMode::Markdown);
+            }
+            viewer.zoomed = self.config.viewer.default_zoom;
+            self.record_viewer_history(document.url);
+            return Ok(viewer);
+        }
+
+        let path = resolve_viewer_local_target(target, self.active_panel().path.as_path());
+        let mut viewer = Viewer::open(&path, self.config.viewer.word_wrap)?;
+        if viewer.is_fixed_ansi_canvas() {
+            viewer.zoomed = false;
+        } else if !matches!(viewer.mode, ViewMode::Image) {
+            viewer.zoomed = self.config.viewer.default_zoom;
+        }
+        self.record_viewer_history(path.display().to_string());
+        Ok(viewer)
+    }
+
     fn open_viewer_with_autoplay(&mut self, force_autoplay: Option<bool>) {
         if let Some(entry) = self.active_panel().current_entry().cloned() {
             if entry.is_dir || entry.name == ".." {
@@ -3047,6 +3174,7 @@ impl App {
                     }
                     let autoplay = force_autoplay.unwrap_or(matches!(v.mode, ViewMode::Module));
                     v.set_autoplay(autoplay);
+                    self.record_viewer_history(view_path.display().to_string());
                     self.mode = AppMode::Viewer(v);
                 }
                 Err(e) => self.notify(format!("Cannot open viewer: {}", e)),
@@ -3347,20 +3475,10 @@ impl App {
     }
 
     pub fn open_help(&mut self) {
-        let help_path = if let Ok(dirs) = crate::config::project_dirs() {
-            let path = dirs.preference_dir().join("kkc.hlp");
-            if !path.is_file() {
-                let _ = fs::create_dir_all(dirs.preference_dir());
-                let _ = fs::write(&path, include_bytes!("../assets/kkc.hlp"));
-            }
-            path
-        } else {
-            let path = std::env::temp_dir().join("kkc-help.hlp");
-            if !path.is_file() {
-                let _ = fs::write(&path, include_bytes!("../assets/kkc.hlp"));
-            }
-            path
-        };
+        let help_path = std::env::temp_dir().join("kkc-help.hlp");
+        if !help_path.is_file() {
+            let _ = fs::write(&help_path, include_bytes!("../assets/kkc.hlp"));
+        }
 
         match Viewer::open(&help_path, self.config.viewer.word_wrap) {
             Ok(mut viewer) => {
@@ -3377,21 +3495,10 @@ impl App {
             "open_help_with_anchor_and_return: anchor={}, return_panel={}",
             anchor, return_panel
         ));
-        // ... rest of the code
-        let help_path = if let Ok(dirs) = crate::config::project_dirs() {
-            let path = dirs.preference_dir().join("kkc.hlp");
-            if !path.is_file() {
-                let _ = fs::create_dir_all(dirs.preference_dir());
-                let _ = fs::write(&path, include_bytes!("../assets/kkc.hlp"));
-            }
-            path
-        } else {
-            let path = std::env::temp_dir().join("kkc-help.hlp");
-            if !path.is_file() {
-                let _ = fs::write(&path, include_bytes!("../assets/kkc.hlp"));
-            }
-            path
-        };
+        let help_path = std::env::temp_dir().join("kkc-help.hlp");
+        if !help_path.is_file() {
+            let _ = fs::write(&help_path, include_bytes!("../assets/kkc.hlp"));
+        }
 
         match Viewer::open(&help_path, self.config.viewer.word_wrap) {
             Ok(mut viewer) => {
@@ -3431,6 +3538,11 @@ impl App {
             "bookmarks" => AppMode::DirBookmarks,
             "associations" => AppMode::AssocEditor(AssocEditorState::from_config(&self.config)),
             "remote" => AppMode::RemoteConnect(RemoteConnectState::load()),
+            "viewer" => self
+                .help_return_viewer
+                .take()
+                .map(AppMode::Viewer)
+                .unwrap_or(AppMode::Browse),
             _ => AppMode::Browse,
         };
     }
@@ -3712,6 +3824,21 @@ fn normalize_selection_session_name(name: &str) -> Option<String> {
 
 fn viewer_navigable_entry(entry: &crate::panel::Entry) -> bool {
     !entry.is_dir && entry.name != ".." && !entry.cloud_only
+}
+
+fn resolve_viewer_local_target(target: &str, cwd: &Path) -> PathBuf {
+    let target = target.trim();
+    if let Some(rest) = target.strip_prefix("~/")
+        && let Some(user_dirs) = directories::UserDirs::new()
+    {
+        return user_dirs.home_dir().join(rest);
+    }
+    let path = PathBuf::from(target);
+    if path.is_absolute() {
+        path
+    } else {
+        cwd.join(path)
+    }
 }
 
 #[cfg(test)]
