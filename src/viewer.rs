@@ -106,9 +106,19 @@ fn is_markdown_path(path: &Path) -> bool {
         .map(|ext| {
             matches!(
                 ext.to_ascii_lowercase().as_str(),
-                "md" | "markdown" | "mdown" | "mkd"
+                "md" | "markdown" | "mdown" | "mkd" | "gmi" | "gemini"
             )
         })
+        .unwrap_or(false)
+}
+
+fn is_gemtext_path(path: &Path) -> bool {
+    if path.to_string_lossy().starts_with("gemini://") {
+        return true;
+    }
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| matches!(ext.to_ascii_lowercase().as_str(), "gmi" | "gemini"))
         .unwrap_or(false)
 }
 
@@ -129,15 +139,33 @@ fn markdown_slug(value: &str) -> String {
 
 fn markdown_source_line_links(line: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
+
+    if let Some(rest) = line.strip_prefix("=>") {
+        let mut parts = rest.trim_start().splitn(2, char::is_whitespace);
+        let target = parts.next().unwrap_or("").trim();
+        let display_text = parts.next().unwrap_or("").trim();
+        if !target.is_empty() {
+            out.push((
+                if display_text.is_empty() {
+                    target.to_string()
+                } else {
+                    display_text.to_string()
+                },
+                target.to_string(),
+            ));
+        }
+        return out;
+    }
+
     let mut start = 0usize;
     while let Some(open_rel) = line[start..].find('[') {
         let open = start + open_rel;
         let text_start = open + 1;
-        let Some(mid_rel) = line[text_start..].find("](#") else {
+        let Some(mid_rel) = line[text_start..].find("](") else {
             break;
         };
         let text_end = text_start + mid_rel;
-        let target_start = text_end + 3;
+        let target_start = text_end + 2;
         if let Some(close_rel) = line[target_start..].find(')') {
             let target_end = target_start + close_rel;
             let display_text = line[text_start..text_end].trim();
@@ -844,6 +872,11 @@ impl Viewer {
         ) {
             self.wrap = !self.wrap;
             self.wrap_row_offset = 0;
+            if matches!(self.mode, ViewMode::Markdown) {
+                self.markdown_lines = Vec::new();
+                self.markdown_plain_lines = Vec::new();
+                self.ensure_mode_decoded(self.mode);
+            }
         }
         self.clear_mouse_selection();
     }
@@ -911,8 +944,13 @@ impl Viewer {
             return Vec::new();
         }
 
-        let source =
-            text_lines(&self.raw, self.line_feed, &self.preproc_ops, self.encoding).join("\n");
+        let source = if is_gemtext_path(&self.path) {
+            markdown::gemtext_to_markdown(
+                &text_lines(&self.raw, self.line_feed, &self.preproc_ops, self.encoding).join("\n"),
+            )
+        } else {
+            text_lines(&self.raw, self.line_feed, &self.preproc_ops, self.encoding).join("\n")
+        };
         let source_links: Vec<(String, String)> = source
             .lines()
             .flat_map(markdown_source_line_links)
@@ -2620,11 +2658,16 @@ impl Viewer {
                     let source =
                         text_lines(&self.raw, self.line_feed, &self.preproc_ops, self.encoding)
                             .join("\n");
-                    // Pass wrap_text=true only when not zoomed (fixed 80-char mode)
+                    let source = if is_gemtext_path(&self.path) {
+                        markdown::gemtext_to_markdown(&source)
+                    } else {
+                        source
+                    };
+                    // Let the markdown renderer wrap at the active viewer width.
                     let rendered = markdown::render_commonmark(
                         &source,
                         self.markdown_table_width_hint(),
-                        !self.zoomed,
+                        self.wrap,
                     );
                     self.markdown_plain_lines =
                         rendered.iter().map(|line| line.plain.clone()).collect();
@@ -4142,5 +4185,25 @@ mod tests {
         assert!(viewer.zoomed);
         assert!(!viewer.markdown_lines.is_empty());
         assert!(!viewer.render_lines(80, 0, 10).is_empty());
+    }
+
+    #[test]
+    fn gemtext_files_render_with_markdown_link_navigation() {
+        let mut viewer = Viewer::placeholder(
+            Path::new("capsule.gmi"),
+            "# Capsule\n\n=> gemini://example.org/next Next page\n",
+            true,
+        );
+        viewer.set_mode(ViewMode::Markdown);
+
+        assert_eq!(
+            viewer.markdown_select_first_visible_link(10).as_deref(),
+            Some("gemini://example.org/next")
+        );
+        assert!(viewer.render_lines(80, 0, 10).iter().any(|line| {
+            line.spans
+                .iter()
+                .any(|span| span.content.as_ref().contains("Next page"))
+        }));
     }
 }

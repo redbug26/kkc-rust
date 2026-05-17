@@ -12,6 +12,56 @@ pub(crate) struct MarkdownRenderedLine {
     pub(crate) styled: Line<'static>,
 }
 
+pub(crate) fn gemtext_to_markdown(source: &str) -> String {
+    let mut out = String::new();
+    let mut in_pre = false;
+
+    for line in source.lines() {
+        if line.starts_with("```") {
+            in_pre = !in_pre;
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+        if in_pre {
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+
+        if let Some(rest) = line.strip_prefix("=>") {
+            let mut parts = rest.trim_start().splitn(2, char::is_whitespace);
+            let target = parts.next().unwrap_or("").trim();
+            let label = parts.next().unwrap_or("").trim();
+            if !target.is_empty() {
+                let text = if label.is_empty() { target } else { label };
+                out.push_str(&format!(
+                    "[{}]({})\n",
+                    escape_markdown_link_text(text),
+                    escape_markdown_link_target(target)
+                ));
+                continue;
+            }
+        }
+
+        out.push_str(line);
+        out.push('\n');
+    }
+
+    out
+}
+
+fn escape_markdown_link_text(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('[', "\\[")
+        .replace(']', "\\]")
+}
+
+fn escape_markdown_link_target(value: &str) -> String {
+    value.replace(')', "%29").replace(' ', "%20")
+}
+
 #[derive(Debug, Clone)]
 struct ListFrame {
     ordered: bool,
@@ -524,6 +574,12 @@ fn wrap_markdown_lines(
             continue;
         }
 
+        let continuation_prefix = markdown_wrap_continuation_prefix(&line.plain);
+        let continuation_prefix_width = UnicodeWidthStr::width(continuation_prefix.as_str());
+        let continuation_prefix_style = Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::BOLD);
+
         // Line is too long; we need to wrap it by breaking at word boundaries
         // while preserving the styling from the original spans.
         // Strategy: collect all styled words, then redistribute them across lines.
@@ -569,9 +625,16 @@ fn wrap_markdown_lines(
                     plain: current_line_plain.clone(),
                     styled: Line::from(current_line_spans),
                 });
-                current_line_plain.clear();
-                current_line_spans = Vec::new();
-                current_line_width = 0;
+                current_line_plain = continuation_prefix.clone();
+                current_line_spans = if continuation_prefix.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![Span::styled(
+                        continuation_prefix.clone(),
+                        continuation_prefix_style,
+                    )]
+                };
+                current_line_width = continuation_prefix_width;
             }
 
             // Add word to current line
@@ -590,6 +653,16 @@ fn wrap_markdown_lines(
     }
 
     wrapped
+}
+
+fn markdown_wrap_continuation_prefix(plain: &str) -> String {
+    let mut prefix = String::new();
+    let mut rest = plain;
+    while let Some(after_quote) = rest.strip_prefix("│ ") {
+        prefix.push_str("│ ");
+        rest = after_quote;
+    }
+    prefix
 }
 
 pub(crate) fn render_commonmark(
@@ -916,10 +989,31 @@ pub(crate) fn render_commonmark(
         });
     }
 
-    // Wrap lines to max_table_width only when wrap_text is true (non-zoomed mode)
+    // Wrap lines to max_table_width only when wrapping is enabled.
     if wrap_text {
         wrap_markdown_lines(state.lines, max_table_width)
     } else {
         state.lines
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wrapped_blockquotes_keep_quote_prefix() {
+        let lines = render_commonmark(
+            "> Apres le premier morceau vient une continuation lisible",
+            24,
+            true,
+        );
+        let quote_lines = lines
+            .iter()
+            .filter(|line| line.plain.starts_with("│ "))
+            .collect::<Vec<_>>();
+
+        assert!(quote_lines.len() >= 2);
+        assert!(quote_lines.iter().all(|line| line.plain.starts_with("│ ")));
     }
 }

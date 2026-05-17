@@ -29,6 +29,7 @@ font8x8 = { version = "0.3", features = ["unicode"] }
 mlua = { version = "0.11", default-features = false, features = ["lua54", "vendored", "error-send"] }
 zip = { version = "8.5.1", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 ureq = { version = "3", default-features = false, features = ["native-tls"] }
+native-tls = "0.2"
 pavao = { version = "0.2", optional = true }
 libc = "0.2"
 abi_stable = "0.11.3"
@@ -52,4 +53,3 @@ strip = true
 lto = true
 codegen-units = 1
 panic = "abort"
-

@@ -11,6 +11,7 @@ mod file_cache;
 mod file_icons;
 mod file_ops;
 mod file_types;
+mod gemini;
 mod gif_recorder;
 mod help;
 mod idf;

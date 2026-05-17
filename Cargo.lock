@@ -1511,6 +1511,7 @@ dependencies = [
  "kkc-plugin-api",
  "libc",
  "mlua",
+ "native-tls",
  "open",
  "pavao",
  "pulldown-cmark",

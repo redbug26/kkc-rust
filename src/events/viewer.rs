@@ -32,6 +32,44 @@ fn viewer_page_size(v: &Viewer) -> usize {
     v.page_lines_for(rows, viewer_text_width(v))
 }
 
+fn gemini_url_for_markdown_target(v: &Viewer, target: &str) -> Option<String> {
+    let target = target.trim();
+    if target.starts_with('#') || target.is_empty() {
+        return None;
+    }
+    if target.starts_with("gemini://") {
+        return Some(target.to_string());
+    }
+    if target.contains("://") {
+        return None;
+    }
+
+    let base = v.path.to_string_lossy();
+    if base.starts_with("gemini://") {
+        crate::gemini::resolve_url(&base, target).ok()
+    } else {
+        None
+    }
+}
+
+fn open_gemini_target(v: &mut Viewer, url: &str) -> Result<String> {
+    let document = crate::gemini::fetch(url)?;
+    let body = String::from_utf8_lossy(&document.body);
+    let mut next = Viewer::placeholder(std::path::Path::new(&document.url), &body, v.wrap);
+    if document
+        .meta
+        .split(';')
+        .next()
+        .map(|mime| mime.trim().eq_ignore_ascii_case("text/gemini"))
+        .unwrap_or(true)
+    {
+        next.set_mode(ViewMode::Markdown);
+    }
+    next.zoomed = v.zoomed;
+    *v = next;
+    Ok(format!("Opened Gemini: {}", document.url))
+}
+
 /// Convert a viewer key event to a plugin-facing key string.
 /// Returns `None` for Ctrl-modified keys and unrecognised key codes.
 fn keyevent_to_plugin_key(key: KeyEvent) -> Option<String> {
@@ -213,26 +251,26 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
                             // Link is off-screen, select first visible link instead
                             status_message = v
                                 .markdown_select_first_visible_link(display_rows)
-                                .map(|target| format!("Markdown link: #{target} (Enter to open)"))
+                                .map(|target| format!("Markdown link: {target} (Enter to open)"))
                                 .or_else(|| Some("No visible markdown links".to_string()));
                         } else {
                             // Link is visible, select next link as usual
                             status_message = v
                                 .markdown_select_next_link(display_rows)
-                                .map(|target| format!("Markdown link: #{target} (Enter to open)"))
+                                .map(|target| format!("Markdown link: {target} (Enter to open)"))
                                 .or_else(|| Some("No markdown links in this document".to_string()));
                         }
                     } else {
                         status_message = v
                             .markdown_select_next_link(display_rows)
-                            .map(|target| format!("Markdown link: #{target} (Enter to open)"))
+                            .map(|target| format!("Markdown link: {target} (Enter to open)"))
                             .or_else(|| Some("No markdown links in this document".to_string()));
                     }
                 } else {
                     // No link selected yet, select first visible link
                     status_message = v
                         .markdown_select_first_visible_link(display_rows)
-                        .map(|target| format!("Markdown link: #{target} (Enter to open)"))
+                        .map(|target| format!("Markdown link: {target} (Enter to open)"))
                         .or_else(|| Some("No visible markdown links".to_string()));
                 }
             }
@@ -248,33 +286,42 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
                             // Link is off-screen, select first visible link instead
                             status_message = v
                                 .markdown_select_first_visible_link(display_rows)
-                                .map(|target| format!("Markdown link: #{target} (Enter to open)"))
+                                .map(|target| format!("Markdown link: {target} (Enter to open)"))
                                 .or_else(|| Some("No visible markdown links".to_string()));
                         } else {
                             // Link is visible, select previous link as usual
                             status_message = v
                                 .markdown_select_prev_link(display_rows)
-                                .map(|target| format!("Markdown link: #{target} (Enter to open)"))
+                                .map(|target| format!("Markdown link: {target} (Enter to open)"))
                                 .or_else(|| Some("No markdown links in this document".to_string()));
                         }
                     } else {
                         status_message = v
                             .markdown_select_prev_link(display_rows)
-                            .map(|target| format!("Markdown link: #{target} (Enter to open)"))
+                            .map(|target| format!("Markdown link: {target} (Enter to open)"))
                             .or_else(|| Some("No markdown links in this document".to_string()));
                     }
                 } else {
                     // No link selected yet, select first visible link
                     status_message = v
                         .markdown_select_first_visible_link(display_rows)
-                        .map(|target| format!("Markdown link: #{target} (Enter to open)"))
+                        .map(|target| format!("Markdown link: {target} (Enter to open)"))
                         .or_else(|| Some("No visible markdown links".to_string()));
                 }
             }
             KeyCode::Enter if matches!(v.mode, ViewMode::Markdown) => {
                 status_message = match v.markdown_open_selected_link() {
-                    Some((target, true)) => Some(format!("Opened link: #{target}")),
-                    Some((target, false)) => Some(format!("Unknown markdown target: #{target}")),
+                    Some((target, true)) => Some(format!("Opened link: {target}")),
+                    Some((target, false)) => {
+                        if let Some(url) = gemini_url_for_markdown_target(v, &target) {
+                            Some(match open_gemini_target(v, &url) {
+                                Ok(message) => message,
+                                Err(err) => format!("Gemini error: {err}"),
+                            })
+                        } else {
+                            Some(format!("Unknown markdown target: {target}"))
+                        }
+                    }
                     None => Some("No markdown links in this document".to_string()),
                 };
             }
