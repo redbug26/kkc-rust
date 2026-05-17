@@ -3,52 +3,46 @@
 ## Introduction
 
 ### Features
-**Features**
 
-   KKC (Ketchup Killers Commander) is a dual-panel terminal file manager
-   written in Rust, inspired by the classic Norton Commander interface.
+KKC (Ketchup Killers Commander) is a dual-panel terminal file manager
+written in Rust, inspired by the classic Norton Commander interface.
 
-   Key features:
+Key features:
 
-   - Dual-panel browsing with tab support in each panel
-   - Internal file viewer: Text, Hex, ANSI and Image modes
-   - [File search](#search-file-s) by name and content
-   - [Copy](#copy-file), [Move](#move-file), [Delete](#delete-file), [Mkdir](#create-directory), Rename
-   - [Wildcard selection](#select-files) with pattern matching
-   - [Directory bookmarks](#directory-bookmarks) for quick navigation
-   - [Remote browsing](#remote-browsing) via SFTP and IMAP
-   - [Built-in archive browsing](#commands-in-archives) (ZIP and more)
-   - [Lua plugin system](#plugins) for custom viewers and file handlers
-   - [File associations](#file-associations) to launch any external program
-   - Hundreds of color themes
-   - Configurable via [Options > Setup](#configuration)
+- Dual-panel browsing with tab support in each panel
+- Internal file viewer: Text, Hex, ANSI and Image modes
+- [File search](#search-files) by name and content
+- [Copy](#copy-file), [Move](#move-file), [Delete](#delete-file), [Mkdir](#create-directory), [Rename](#rename-file)
+- [Wildcard selection](#select-files-by-pattern) with pattern matching
+- [Directory bookmarks](#directory-bookmarks) for quick navigation
+- [Remote browsing](#remote-browsing-sftp--imap) via SFTP and IMAP
+- [Built-in archive browsing](#archive-browsing) (ZIP and more)
+- [Lua plugin system](#plugins-lua-system) for custom viewers and file handlers
+- [File associations](#file-associations) to launch any external program
+- Hundreds of color themes
+- Configurable via [Options > Setup](#configuration-options--setup)
 
 ---
 
 ### Disclaimer and Warranty
-**Disclaimer and Warranty**
 
-   KKC is distributed "AS IS". The author specifically disclaims all
-   warranties, expressed or implied. In no event shall the [author](#contact) be
-   liable for any damages either from the direct use of this product or
-   as a consequence of the use of this product.
+KKC is distributed "AS IS". The author specifically disclaims all
+warranties, expressed or implied. In no event shall the [author](#contact) be
+liable for any damages either from the direct use of this product or
+as a consequence of the use of this product.
 
-### Licensing and distribution
-**Licensing and distribution**
+### Licensing and Distribution
 
-   KKC is open-source software released under the MIT license.
-   Source code: https://github.com/redbug26/kkc-rust
+KKC is open-source software released under the MIT license.
+Source code: https://github.com/redbug26/kkc-rust
 
-## Quick use of command
+## Keyboard Reference
 
-### Keyboard Summary
-**Keyboard Summary**
-
-#### Function Keys (Panel)
+### Function Keys (Panel)
 
 | Shortcut | Description |
 | --- | --- |
-| F1 | This Help. |
+| F1 | Display this [Help](#help). |
 | F2 | Open [Menu bar](#menu-bar). |
 | F3 | [View file](#view-file) (internal viewer). |
 | F4 | [Edit file](#edit-file) with configured or internal editor. |
@@ -56,9 +50,9 @@
 | F6 | [Move](#move-file) selected files to other panel. |
 | F7 | [Create directory](#create-directory). |
 | F8 | [Delete](#delete-file) selected files. |
-| F10 | Quit KKC. |
+| F10 | [Quit](#quit). |
 
-#### Navigation
+### Navigation
 
 | Shortcut | Description |
 | --- | --- |
@@ -70,24 +64,24 @@
 | ENTER | Enter directory or open file. |
 | BACKSPACE | Go to parent directory. |
 
-#### Selection
+### Selection
 
 | Shortcut | Description |
 | --- | --- |
 | INS | Select / deselect current file. |
 | SPACE | Select / deselect and move down. |
-| + | [Select by wildcard pattern](#select-files). |
-| - | [Deselect by wildcard pattern](#deselect-files). |
-| * | [Invert selection](#inverse-selection). |
+| + | [Select by wildcard pattern](#select-files-by-pattern). |
+| - | [Deselect by wildcard pattern](#deselect-files-by-pattern). |
+| * | [Invert selection](#invert-selection). |
 
-#### Quick search
+### Quick Search
 
 | Shortcut | Description |
 | --- | --- |
 | Any letter | Start quick-search: type to filter entries in real time. |
-| UP/DOWN | Move between matches, ENTER to jump, ESC to cancel. |
+| UP / DOWN | Move between matches, ENTER to jump, ESC to cancel. |
 
-#### Ctrl shortcuts
+### Ctrl Shortcuts
 
 | Shortcut | Description |
 | --- | --- |
@@ -109,40 +103,40 @@
 | C-W | Close current tab. |
 | C-TAB | Switch to next tab (alternative). |
 
-#### Alt shortcuts
+### Alt Shortcuts
 
 | Shortcut | Description |
 | --- | --- |
 | A-F4 | Toggle file_id.diz preview panel. |
 | A-F7 | [Search files](#search-file-s). |
 
-#### Shift shortcuts
+### Shift Shortcuts
 
 | Shortcut | Description |
 | --- | --- |
 | S-F6 | [Rename](#rename-file) current file. |
 
-### Commands in archives
-**Commands in archives**
+### Archive Browsing
 
-   KKC can browse ZIP archives as if they were directories.
-   Press ENTER on a supported archive file to enter it.
+KKC can browse ZIP archives as if they were directories.
+Press ENTER on a supported archive file to enter it.
 
-   Inside an archive you can:
-   - Navigate the directory tree
-   - View files with the internal viewer (F3)
-   - Copy files out of the archive to a normal directory (F5)
+Supported formats: ZIP, LHA/LZH, Amstrad CPC disk images, Commodore D64 disk images.
 
-   Creating or modifying archives is not supported from within the browser.
+Inside an archive you can:
+- Navigate the directory tree
+- View files with the internal viewer (F3)
+- Copy files out of the archive to a normal directory (F5)
 
-### Remote browsing
-**Remote browsing (SFTP / IMAP)**
+Creating or modifying archives is not supported from within the browser.
 
-   KKC supports remote file systems via SFTP and IMAP.
+### Remote Browsing (SFTP / IMAP)
 
-#### Opening a connection
+KKC supports remote file systems via SFTP and IMAP.
 
-   Press Ctrl-F to open the connection panel.
+#### Connect to Remote Host
+
+Press Ctrl-F to open the connection panel.
 
 | Shortcut | Description |
 | --- | --- |
@@ -175,21 +169,20 @@
 | User | email address / username |
 | Password | password |
 
-#### Inside a remote panel
+#### Navigation in Remote Panel
 
-   Navigation works the same as locally.
+Navigation works the same as locally.
    File operations (view, copy out, delete, rename) are supported.
    Editing uploads the file back after the editor exits.
 
-## Command in details
+## Commands in Details
 
-### View file
-**Internal file viewer**
+### View File (Internal Viewer)
 
 #### Opening
 
-   F3 on any file opens the internal viewer.
-   The viewer automatically detects the file type:
+F3 on any file opens the internal viewer.
+The viewer automatically detects the file type:
 
 | Type | Description |
 | --- | --- |
@@ -247,53 +240,34 @@
 | --- | --- |
 | ESC or F10 | Return to file panel. |
 
-#### Default Command
-   F3
+### Search Files
 
-### Search file(s)
-**Search file(s)**
+Open: Alt-F7 or Tools > Search
 
-   Open: Alt-F7  or  Tools > Search
-
-   The search panel has two input fields:
+The search panel has two input fields:
 
 | Field | Description |
 | --- | --- |
 | Filename | glob pattern (e.g. *.log, report*) |
 | Content | optional text to search inside files |
 
-   Press TAB to switch between the two fields.
-   Press ENTER to start the search.
-   Results appear below; UP/DOWN to navigate them.
-   Press ENTER on a result to jump to that file's directory.
-   Press ESC to close the panel.
+Press TAB to switch between the two fields. Press ENTER to start the search.
+Results appear below; UP/DOWN to navigate them. Press ENTER on a result to jump to that file's directory. Press ESC to close the panel.
 
-#### Default Command
-   A-F7
+### Edit File
 
-### Edit file
-**Edit file**
+F4 on any local file launches the editor configured in Options > Setup.
+The default editor is taken from the EDITOR environment variable or from the 'editor' setting in the config file.
 
-   F4 on any local file launches the editor configured in Options > Setup.
-   The default editor is taken from the EDITOR environment variable
-   or from the 'editor' setting in the config file.
+If the editor field is empty (editor = ""), F4 opens the selected local file in the [Internal editor](#internal-editor) side panel instead.
 
-   If the editor field is empty (editor = ""), F4 opens the selected
-   local file in the [Internal editor](#internal-editor) side panel instead.
+For remote files the file is downloaded, edited locally, then uploaded back automatically when the external editor exits.
 
-   For remote files the file is downloaded, edited locally, then
-   uploaded back automatically when the external editor exits.
+When config.toml is modified and saved, KKC reloads the configuration.
 
-   When config.toml is modified and saved, KKC reloads the configuration.
+### Internal Editor
 
-#### Default Command
-   F4
-
-### Internal editor
-**Internal editor**
-
-   The internal editor is shown inside a side panel and is used by F4
-   when Options > Setup > Editor is empty (editor = "").
+The internal editor is shown inside a side panel and is used by F4 when Options > Setup > Editor is empty (editor = "").
 
 #### Keys
 
@@ -304,19 +278,15 @@
 | TAB | Leave editor focus and return to the opposite panel. |
 | ESC | Close editor; asks before discarding unsaved changes. |
 
-   With wrap off, long lines scroll horizontally to keep the cursor visible.
-   With wrap on, long lines are wrapped to the panel width.
+With wrap off, long lines scroll horizontally to keep the cursor visible. With wrap on, long lines are wrapped to the panel width.
 
-   Saving config.toml from the internal editor reloads the configuration
-   immediately.
+Saving config.toml from the internal editor reloads the configuration immediately.
 
-### Copy file
-**Copy file**
+### Copy File
 
-   F5 copies the selected files (or the current file if nothing is
-   selected) to the other panel's directory.
+F5 copies the selected files (or the current file if nothing is selected) to the other panel's directory.
 
-   Copy dialog fields:
+Copy dialog fields:
 
 | Field | Description |
 | --- | --- |
@@ -325,108 +295,89 @@
 | Newer only | only copy if source is newer |
 | Keep attributes | preserve timestamps and permissions |
 
-   Navigation: Tab / Up / Down between fields.
-   Space toggles checkboxes.  Enter or OK starts the copy.
-   ESC cancels.
+Navigation: Tab / Up / Down between fields. Space toggles checkboxes. Enter or OK starts the copy. ESC cancels.
 
-#### Default Command
-   F5
+### Move File
 
-### Move file
-**Move file**
+F6 moves selected files to the other panel's directory. Same dialog as [Copy](#copy-file).
 
-   F6 moves selected files to the other panel's directory.
-   Same dialog as [Copy](#copy-file).
+### Create Directory
 
-#### Default Command
-   F6
+F7 opens a name prompt. Type the new directory name and press Enter. ESC cancels.
 
-### Create directory
-**Create directory**
+### Delete Files
 
-   F7 opens a name prompt. Type the new directory name and press Enter.
-   ESC cancels.
+F8 deletes the selected files (or current file). A confirmation dialog is shown if 'Confirm delete' is enabled in [Options > Setup](#configuration).
 
-#### Default Command
-   F7
+### Rename File
 
-### Delete file
-**Delete files**
+Shift-F6 opens a rename prompt pre-filled with the current filename. Edit and press Enter to rename. ESC cancels.
 
-   F8 deletes the selected files (or current file).
-   A confirmation dialog is shown if 'Confirm delete' is enabled in
-   [Options > Setup](#configuration).
+### Select Files by Pattern
 
-#### Default Command
-   F8
+The '+' key opens a wildcard dialog. Default pattern is '*'. Examples: `*.txt`, `report_??.* `
 
-### Rename file
-**Rename file**
+### Deselect Files by Pattern
 
-   Shift-F6 opens a rename prompt pre-filled with the current filename.
-   Edit and press Enter to rename.  ESC cancels.
+The '-' key opens a wildcard dialog to deselect matching files.
 
-#### Default Command
-   S-F6
+### Invert Selection
 
-### Select files
-**Select files by pattern**
+The '*' key inverts the current selection (selected becomes unselected and vice versa).
 
-   '+' opens a wildcard dialog.  Default pattern is '*'.
-   Examples: *.txt   report_??.*
+### Directory Bookmarks
 
-#### Default Command
-   +
+Ctrl-D opens the bookmarks panel, which shows saved directory paths.
 
-### Deselect files
-**Deselect files by pattern**
+- Type to filter bookmarks by name
+- UP / DOWN to navigate the list
+- ENTER to jump to the selected directory
+- DELETE to remove the selected bookmark
+- The first item is always "Add current directory"
+- Backspace deletes the last filter character
+- ESC closes the panel
 
-   '-' opens a wildcard dialog to deselect matching files.
+### Installation
 
-#### Default Command
-   -
+KKC is available on:
+- **Homebrew (macOS/Linux):** `brew install redbug26/tap/kkc`
+- **Build from source:** `git clone https://github.com/redbug26/kkc-rust.git && cd kkc-rust && cargo build --release`
 
-### Inverse selection
-**Invert selection**
+Requirements: Rust stable toolchain. On Linux: also libssl-dev.
 
-   '*' inverts the current selection (selected becomes unselected and
-   vice versa).
+### Bundled Plugins
 
-#### Default Command
-   *
+KKC ships with pre-installed plugins:
 
-### Directory bookmarks
-**Directory bookmarks**
+| Plugin | Format Support |
+| --- | --- |
+| text_syntax | Rust, C/C++, Lua, JS/TS syntax highlighting |
+| csv_viewer | CSV table viewing with word-wrap |
+| json_viewer | Formatted JSON viewer |
+| markdown_viewer | Rendered Markdown viewer |
+| html_viewer | HTML viewer |
+| eml_viewer | Email (.eml) files |
+| pdf_file | PDF viewer |
+| lha_lzh | LHA/LZH archive support |
+| amstrad_dsk | Amstrad CPC disk image browser |
+| commodore_d64 | Commodore 64 disk image browser |
 
-   Ctrl-D opens the bookmarks panel, which shows saved directory paths.
+Press Enter on a `.kkplug` file to install custom plugins.
 
-   - Type to filter bookmarks by name.
-   - UP / DOWN to navigate the list.
-   - ENTER to jump to the selected directory.
-   - DELETE to remove the selected bookmark.
-   - The first item is always "Add current directory".
-   - Backspace deletes the last filter character.
-   - ESC closes the panel.
+### Custom Lua Plugins
 
-#### Default Command
-   C-D
+KKC supports Lua plugins that extend the viewer and file handling.
 
-### Plugins
-**Lua plugin system**
-
-   KKC supports Lua plugins that extend the viewer and file handling.
-
-   Each plugin is a directory (or .kkplug bundle) containing:
+Each plugin is a directory (or .kkplug bundle) containing:
 
 | File | Description |
 | --- | --- |
 | plugin.lua | Lua script |
 | plugin.toml | metadata (name, version, description) |
 
-   Installed plugins are stored in the user data directory.
-   Press Enter on a .kkplug file to install it automatically.
+Installed plugins are stored in the user data directory. Press Enter on a .kkplug file to install it automatically.
 
-   Options > Plugins opens the plugin list:
+Options > Plugins opens the plugin list:
 
 | Shortcut | Description |
 | --- | --- |
@@ -434,20 +385,13 @@
 | ENTER / O | open plugin directory |
 | ESC / F10 | close |
 
-   Plugins can provide custom viewers that appear in the F4 viewer
-   mode picker as "Plugins viewer > [plugin name]".
+Plugins can provide custom viewers that appear in the F4 viewer mode picker as "Plugins viewer > [plugin name]".
 
-#### Default Command
-   Options > Plugins
+### File Associations
 
-### File associations
-**File associations**
+Options > Associations manages per-extension openers.
 
-   Options > Associations manages per-extension openers.
-
-   For each extension you can define one or more commands.
-   Use '%f' as a placeholder for the file path, or the path is
-   appended automatically.
+For each extension you can define one or more commands. Use '%f' as a placeholder for the file path, or the path is appended automatically.
 
    Example:
 
@@ -456,7 +400,7 @@
 | Extension | mp4 |
 | Openers | mpv %f, vlc %f |
 
-   If multiple openers exist for a file, a picker is shown on ENTER.
+If multiple openers exist for a file, a picker is shown on ENTER.
 
    Association editor keys:
 
@@ -467,15 +411,25 @@
 | DELETE / D | Delete selected |
 | ESC | Close |
 
-#### Default Command
-   Options > Associations
+## Lua Applications
 
-## Menu
+KKC can run Lua applications (games, tools, utilities) inside the terminal.
 
-### Menu bar
-**Menu bar**
+Use **Tools > Run Lua app** to browse and launch installed applications.
 
-   F2 (or the F2 button in the key bar) opens the menu bar.
+Applications can access:
+- File system operations
+- Graphics rendering (text-based)
+- Keyboard and mouse input
+- KKC internals via `kkc` module
+
+For developers, see the template in `assets/applications/template_lua_app`.
+
+## Menu System
+
+### Menu Bar
+
+F2 (or the F2 button in the key bar) opens the menu bar.
 
 | Menu | Entries |
 | --- | --- |
@@ -487,14 +441,11 @@
 | Options | Setup, Plugins, Associations, F-Key bar, Save Config |
 | Help | Help, About |
 
-   Navigation: LEFT / RIGHT between menus (wraps around).
-   UP / DOWN within a menu.  ENTER or first-letter shortcut to activate.
-   ESC closes the menu.
+Navigation: LEFT / RIGHT between menus (wraps around). UP / DOWN within a menu. ENTER or first-letter shortcut to activate. ESC closes the menu.
 
-### Mask configuration
-**Keyword mask (viewer)**
+### Keyword Mask (Viewer)
 
-   In Text or Ansi viewer mode, F9 opens the mask menu:
+In Text or Ansi viewer mode, F9 opens the mask menu:
 
 | Style | Description |
 | --- | --- |
@@ -504,14 +455,11 @@
 | Ketchup Style | highlights a custom keyword set |
 | Mask OFF | disable highlighting |
 
-   The mask is rendered as bold text on the current line.
+The mask is rendered as bold text on the current line.
 
-### Configuration
-**Configuration (Options > Setup)**
+### Configuration (Options > Setup)
 
-   Setup is split into tabs. Use LEFT / RIGHT, PAGEUP / PAGEDOWN,
-   ALT-LEFT / ALT-RIGHT or CTRL-LEFT / CTRL-RIGHT to switch tab.
-   Use UP / DOWN or TAB / SHIFT-TAB to move inside the active tab.
+Setup is split into tabs. Use LEFT / RIGHT, PAGEUP / PAGEDOWN, ALT-LEFT / ALT-RIGHT or CTRL-LEFT / CTRL-RIGHT to switch tab. Use UP / DOWN or TAB / SHIFT-TAB to move inside the active tab.
 
 #### Checkboxes
 
@@ -528,7 +476,7 @@
 | File icons | Show folder and file-type icons in panels. |
 | Show F-key bar | Display the function-key shortcut bar. |
 
-#### Text fields
+#### Text Fields
 
 | Field | Description |
 | --- | --- |
@@ -536,7 +484,7 @@
 | Pager | Command for viewing large text files. |
 | Dir history max | Maximum number of entries in directory bookmarks. |
 
-   Leave empty to use the internal editor for local files.
+Leave empty to use the internal editor for local files.
 
 #### Buttons
 
@@ -545,227 +493,70 @@
 | OK / Enter | Apply and save configuration. |
 | Cancel / ESC | Discard changes. |
 
-## Miscellaneous
+### Help
+
+F1 (or the Help menu item) displays this help documentation.
+
+In the help viewer:
+- **Navigation:** UP / DOWN to scroll, PGUP / PGDN to page
+- **Tabs:** Press TAB to navigate between links in the text
+- **Search:** F7 or / to search for text
+- **Sections:** Click on or navigate to underlined links to jump to sections
+- **Close:** Press ESC or F10 to return to the file manager
+
+### Quit
+
+F10 exits KKC. A confirmation dialog appears if:
+- "Confirm exit" is enabled in [Options > Setup](#configuration-options--setup)
+- There are unsaved changes in the internal editor
+- There are ongoing operations
+
+## About
 
 ### About KKC
-**About KKC**
 
-   KKC - Ketchup Killers Commander
-   Rust rewrite by [RedBug](#contact) (Miguel Vanhove)
+KKC - **Ketchup Killers Commander**
 
-   Originally created in 1997 as a DOS file manager.
-   This version is a complete rewrite in Rust using the ratatui TUI library.
+Rust rewrite by [RedBug](#contact) (Miguel Vanhove)
 
-   Source code and releases:
-   https://github.com/redbug26/kkc-rust
+Originally created in 1997 as a DOS file manager. This version is a complete rewrite in Rust using the ratatui TUI library.
 
-   Report bugs and ideas via GitHub Issues.
+**Source code and releases:** https://github.com/redbug26/kkc-rust
+
+**Report bugs and ideas:** GitHub Issues
 
 ### Contact
-**How to contact me ?**
 
-   GitHub : https://github.com/redbug26
-   Issues : https://github.com/redbug26/kkc-rust/issues
+- **GitHub:** https://github.com/redbug26
+- **Issues:** https://github.com/redbug26/kkc-rust/issues
 
 ### History
-**History**
 
-  V0.1.18
-   - Error/status messages now displayed in a proper dialog box
-   - Tab support: multiple tabs per panel, tabs saved and restored
-   across sessions
-   - Viewer optimisation: faster rendering, viewer split into
-   sub-modules (events/viewer.rs, ui/panel.rs)
-   - CSV viewer: word-wrap support for long cells
-   - XML viewer plugin added
-   - MIME type detection used throughout (plugins, archive, idf)
-   - IDF/file-ID probing extended: many more formats recognised
-   in the status bar (modules, samples, pictures, animations)
-   - Amstrad CPC & C64 Disk plugin: improved directory listing
-   - Viewer highlight submenu: new sub-menu to control syntax/keyword
-   highlighting; viewer events and UI refactored into separate files
-   - Panels refactored into ui/panel.rs
-   - FileID panel improvment
+**Version 0.1.18**
+- Error/status messages now displayed in a proper dialog box
+- Tab support: multiple tabs per panel, tabs saved and restored across sessions
+- Viewer optimisation: faster rendering, viewer split into sub-modules
+- CSV viewer: word-wrap support for long cells
+- XML viewer plugin added
+- MIME type detection used throughout
+- IDF/file-ID probing extended: many more formats recognised
+- Amstrad CPC & C64 Disk plugin: improved directory listing
+- Viewer highlight submenu: new sub-menu to control syntax/keyword highlighting
+- Panels refactored
+- FileID panel improvement
 
-  V0.1.17
-   - Complete rewrite in Rust using ratatui + crossterm
-   - Dual-panel TUI with tab support in each panel
-   - Internal viewer: Text / Hex / Ansi / Image modes (lazy decoding)
-   - Archive browsing (ZIP)
-   - Remote browsing: SFTP and IMAP
-   - Lua plugin system with viewer plugins
-   - File associations with multi-opener picker
-   - Directory bookmarks with fuzzy filter
-   - File search by name and content
-   - macOS/linux Homebrew distribution
+**Version 0.1.17**
+- Complete rewrite in Rust using ratatui + crossterm
+- Dual-panel TUI with tab support in each panel
+- Internal viewer: Text / Hex / Ansi / Image modes (lazy decoding)
+- Archive browsing (ZIP)
+- Remote browsing: SFTP and IMAP
+- Lua plugin system with viewer plugins
+- File associations with multi-opener picker
+- Directory bookmarks with fuzzy filter
+- File search by name and content
+- macOS/linux Homebrew distribution
 
-  2026 - Rust rewrite
+**Original DOS Version (1997)**
 
-  V0.9  (11/01/97)  The Saturne'97 Release
-   - The idf or the function bar are optionnal (look in screen setup).
-   - Support the KKP macros.
-
-  V0.83 (10/17/97)  The Calimero Release
-   - A new option in the [search function](#search-file-s) and in the [copy function](#copy-file).
-   - A few improvment in the html viewer.
-   - Press ALT to display the true name of a file.
-   - When you close the pannel, you have access to a [optimized command line](#keyboard-summary).
-
-  V0.82 (10/05/97)  The Venus II Release
-   - You can make KKC waiting for a [keypress](#configuration) after a program's execution.
-   - [Selection Function](#configuration) in pannel.
-   - Improve [mouse](#keyboard-summary) handling. (Drag and drop...)
-
-  V0.81 (09/24/97)  The Dark Angel II Release
-   - SHIFT-ENTER to load the [safety resolution](#configuration).
-   - Improvement of all the [viewers](#view-file).
-   - A few others bug corrected (error handler, setup...)
-
-  V0.8  (09/15/97)  The Dark Angel Release
-   - [ALT-F5](#menu-bar) to go in a path directory.
-   - [Keyboard Summary](#keyboard-summary) in help.
-   - ALT-key call the 'quick search of file' window.
-   - CTRL-D to change to a directory so LCD or NCD.
-   - You could alter the size of the pannel.
-   - F2 when you look the format in the setup. (management of the players)
-
-  V0.71 (08/31/97)  The Gedeon II Release
-   - A true color configuration. (try to load the 'peter' section in setup)
-   - Keep attribut in 'copy' box
-
-  V0.7  (08/20/97)  The Gedeon Release
-   - F2 to call the [User Menu](#menu-bar).
-   - Repair the ansi viewer (but no more delay).
-   - Link in help. (Tab for switch)	EG. Press this [button](#keyboard-summary) now.
-   - ALT-F3 on a directory compute the size of the directory.
-   - [ALT-F4](#keyboard-summary) now display the file_id.diz before entering in the directory.
-   - [User directory](#directory-bookmarks) with the environment variable 'KKUSER'.
-   - Many new functions in [internal viewer](#view-file)
-   - Old bug removed:
-   - ARJ works now.
-
-  V0.6  (07/18/97)  The Wired'97 Release
-   - Long filename is handled correctly in Win95 run mode.
-   - Support mouse.
-   - Search function in hexa viewer.
-   - Multi config in .ini file.
-   - Saving state in viewer. (for further viewing)
-   - The 90 column mode ! (Press SHIFT-F9)
-   - ALT-I to display the information on all files in the other window.
-   - Search function (ALT-F7) was improved (view & delete).
-   - F11 to redirect a command to internal viewer.
-   - Keypad '/' to load or save the list of selected files.
-
-  V0.5  (06/08/97)  The Belgian Release
-   - You could modify the highlight files selection.
-   - the CTRL-TAB option was improved.
-   - Command COPY improved (total, estimed time, ...)
-   - Improve LHA support (copy and display)
-   - History line (CTRL-E & ALT-F6)
-   - Multiple selection allowed (EG: *.*;-*.c;-*.h)
-   - Display 'file_id.diz' in other window (alt-f4)
-
-  V0.4  (05/11/97)  The Venus Release
-   - The frontdoor works ! (use alt-F10 after the port setup)
-   - ANSI display (use alt-F10 too)
-   - You could modify setup with your favourite text editor.
-   - Host mode option must be work (I hope :-)
-
-  V0.31 (04/12/97)  The French Release (Bugfixed version of Mekka)
-   - Old bug removed:
-	- Corrected bug when there are no file present on disk
-   - Load old directory. (if required)
-   - A beginning of universal function for display. (with a screen cache)
-   - Highlight files according to the extension.
-
-  V0.3  (03/31/97)  Mekka/Symposium'97 Release
-   - Old bug removed:
-	- ZIP works perfect now.
-   - Increase start-up speed.
-   - Search function works too in a KKD file.
-
-  V0.23 (03/09/97)
-   - Old bug removed:
-	- Increase speed of ansi viewer...
-	- Sort function quicker !
-	- Corrected bug in archive gestion
-   - Change structure of KKD file. I don't think change the structure
-	anymore.
-   - Command MOVE improved
-   - A true menu-bar
-   - Erase file in trash when overflow
-   - Improve search function
-
-  V0.22 (02/24/97)  The First Version.
-   - Old bug removed:
-	- KKSETUP works too if the config file doesn't exist before.
-	- Display '.' in archive only if you will that.
-	- Number of file in KKD was limited to 10000  now: 50000!
-   - Switch hexa-text while view file.
-   - Change directory while change drive.
-   - KKDESC is now easier (try it !)
-
-  V0.21 (02/15/97)
-   - Old bug removed:
-	- KKSETUP gives you the choice of the disk.
-	- When exiting KKC & KKSETUP, the screen mode was restablished.
-	- Removed a bug in HTML viewer (with the A HREF tag)
-	- KKSETUP searches archivers too.
-	- Copy don't crash when your disk is full
-   - CTRL-LEFT to change up-directory.
-   - CTRL-RIGHT to enter in directory.
-   - View text file with varying windows.
-   - When view a text file, you could press F9 key to use the mask.
-   - When view file '..', the viewer open FILE_ID.DIZ
-   - Add mode 30 lines with new fonts (these font works too in mode 25 l.)
-   - Add rename function (SHIFT-F6)
-   - IDF: Add 11 formats  now 115 formats (see key F4 in KKSETUP)
-
-  V0.2	(01/26/97)
-   - Internal viewer (S-F3) (Hex and ansi-file) (see Com. in details)
-   - Old bug removed:
-	- KK.EXE works too with WINdows (I have forgotten to initialize DI)
-   - New things (idea from Betatest-team)
-	- Ctrl-D to change directory.
-	- Display Window 'information on file' with a delay.
-	- Html viewer.
-   - Support KKD file !
-   - ALT-F7 is improved: you could search a filename with wildcards.
-   - New things in secret part. (Once more... Thanks)
-   - A beginning of screensaver...
-   - Ctrl-PGUP to change up-directory.
-   - View and execute work too with an archiver.
-   - Move function works (it's only a copy-delete function).
-   - Internal viewer for FILE_ID.DIZ and small file (SHIFT-F3 too)
-   - Improve error handler.
-
-  V0.11 (01/15/97)
-   - Old bug removed:
-	- Removing bug in KKSETUP and ALT-F7 (The stack wasn't so big than
-	  it would be for the recursivity ).
-	- ESC in ALT-F7 works now.
-	- ALT-F7 works always  I don't search file on good drive.
-	- Don't select label.
-	- Error when changing drive are controled by KK.
-	- Error when copying are controled too.
-	- Use comspec when load KKMAIN.EXE and
-   not display title two times. (Error in my EXEC function)
-   - New things (idea from Betatest-team)
-	- Pgup & pgdn in help.
-   ( Home & End works too ;)
-	- Erase screen when quit (font and palette).
-	- Change info. on SUB-DIR and RELOAD. (see '.' and '..' directories)
-	- A window appears when the destination files exist in a copy.
-	- Verify place on destination disk when copying.
-   - CTRL-F12: Palette configuration.
-   - Save all system when quit.
-   - New things in secret part.
-
-  V0.1  (first version that I would release but I couldn't: 01/07/97)
-   - Clone of Norton Commander(c) with a new look
-   - Use protected mode (pmode/w)
-   - Support RAR, ZIP, ARJ, LHA.
-   - Support more than 100 formats (I use my old IDF)
-   - An I.A.R. very useful (see hlp)
-   - Quick Dir and fast trash.
-   - Setup and other utilities
+KKC was originally created as a DOS file manager in 1997, featuring dual-panel navigation, archive support, and extensive file operations. The Rust version (2026) is a complete rewrite maintaining the same workflow philosophy while leveraging modern TUI capabilities.

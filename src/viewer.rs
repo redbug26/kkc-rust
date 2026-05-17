@@ -848,6 +848,9 @@ impl Viewer {
     pub fn toggle_zoom(&mut self) {
         self.zoomed = !self.zoomed;
         self.clear_mouse_selection();
+        // Invalidate markdown cache when toggling zoom, so it re-renders with new width
+        self.markdown_lines = Vec::new();
+        self.markdown_plain_lines = Vec::new();
     }
 
     pub fn audio_next_tab(&mut self) -> bool {
@@ -950,6 +953,48 @@ impl Viewer {
             }
         }
         targets
+    }
+
+    /// Check if a link at `line_idx` is visible in the current viewport
+    fn markdown_is_line_visible(&self, line_idx: usize, visible_rows: usize) -> bool {
+        let display_rows = visible_rows.max(1);
+        line_idx >= self.scroll && line_idx < self.scroll + display_rows
+    }
+
+    /// Select the first link visible in the current viewport
+    pub fn markdown_select_first_visible_link(&mut self, visible_rows: usize) -> Option<String> {
+        self.ensure_mode_decoded(ViewMode::Markdown);
+        let links = self.markdown_internal_links();
+        if links.is_empty() {
+            self.plugin_state.remove("__md_link_line");
+            self.plugin_state.remove("__md_link_text");
+            return None;
+        }
+        
+        let display_rows = visible_rows.max(1);
+        
+        // Find the first link visible in the current viewport
+        for (idx, ((display_text, target), line_idx)) in links.iter().enumerate() {
+            if self.markdown_is_line_visible(*line_idx, visible_rows) {
+                self.plugin_state.insert("__md_link_idx".into(), idx.to_string());
+                self.plugin_state.insert("__md_link_line".into(), line_idx.to_string());
+                self.plugin_state.insert("__md_link_text".into(), display_text.clone());
+                return Some(target.clone());
+            }
+        }
+        
+        // If no link is visible, select the first link after the current viewport
+        if !links.is_empty() {
+            let idx = 0;
+            let ((display_text, target), line_idx) = links[idx].clone();
+            self.plugin_state.insert("__md_link_idx".into(), idx.to_string());
+            self.plugin_state.insert("__md_link_line".into(), line_idx.to_string());
+            self.plugin_state.insert("__md_link_text".into(), display_text.clone());
+            self.scroll = line_idx.saturating_sub(display_rows / 3);
+            return Some(target);
+        }
+        
+        None
     }
 
     pub fn markdown_select_next_link(&mut self, visible_rows: usize) -> Option<String> {
@@ -2561,6 +2606,11 @@ impl Viewer {
     }
 
     fn markdown_table_width_hint(&self) -> usize {
+        // If not zoomed, use fixed 80-char width for help files and other markdown
+        if !self.zoomed {
+            return 80;
+        }
+        
         // Keep markdown tables responsive to the current terminal width.
         // We subtract borders/margins and line-number gutter to approximate the
         // effective viewer content width.

@@ -498,6 +498,91 @@ fn render_table_lines(table: TableState, max_total_width: usize) -> Vec<Markdown
     out
 }
 
+/// Wrap lines that exceed max_width, breaking at word boundaries.
+fn wrap_markdown_lines(lines: Vec<MarkdownRenderedLine>, max_width: usize) -> Vec<MarkdownRenderedLine> {
+    if max_width == 0 {
+        return lines;
+    }
+    
+    let mut wrapped = Vec::new();
+    
+    for line in lines {
+        let line_width = UnicodeWidthStr::width(line.plain.as_str());
+        
+        // If line fits within max_width, keep it as-is
+        if line_width <= max_width {
+            wrapped.push(line);
+            continue;
+        }
+        
+        // Line is too long; we need to wrap it by breaking at word boundaries
+        // while preserving the styling from the original spans.
+        // Strategy: collect all styled words, then redistribute them across lines.
+        
+        let mut word_spans: Vec<(String, Style)> = Vec::new();
+        let mut current_word = String::new();
+        let mut current_style = Style::default();
+        
+        // Extract words with their styles from the original spans
+        for span in &line.styled.spans {
+            let text = span.content.as_ref();
+            let style = span.style;
+            
+            for ch in text.chars() {
+                if ch == ' ' || ch == '\t' || ch == '\n' {
+                    if !current_word.is_empty() {
+                        word_spans.push((current_word.clone(), current_style));
+                        current_word.clear();
+                    }
+                    word_spans.push((ch.to_string(), style)); // Space as separate "word"
+                } else {
+                    current_word.push(ch);
+                    current_style = style;
+                }
+            }
+        }
+        
+        if !current_word.is_empty() {
+            word_spans.push((current_word, current_style));
+        }
+        
+        // Now redistribute words across lines, respecting max_width
+        let mut current_line_plain = String::new();
+        let mut current_line_spans: Vec<Span<'static>> = Vec::new();
+        let mut current_line_width = 0usize;
+        
+        for (word, style) in word_spans {
+            let word_width = UnicodeWidthStr::width(word.as_str());
+            
+            // If adding this word to current line would exceed max_width, flush current line
+            if current_line_width > 0 && current_line_width + word_width > max_width {
+                wrapped.push(MarkdownRenderedLine {
+                    plain: current_line_plain.clone(),
+                    styled: Line::from(current_line_spans),
+                });
+                current_line_plain.clear();
+                current_line_spans = Vec::new();
+                current_line_width = 0;
+            }
+            
+            // Add word to current line
+            current_line_plain.push_str(&word);
+            current_line_spans.push(Span::styled(word, style));
+            current_line_width += word_width;
+        }
+        
+        // Add remaining content
+        if !current_line_plain.is_empty() {
+            wrapped.push(MarkdownRenderedLine {
+                plain: current_line_plain,
+                styled: Line::from(current_line_spans),
+            });
+        }
+    }
+    
+    wrapped
+}
+
 pub(crate) fn render_commonmark(source: &str, max_table_width: usize) -> Vec<MarkdownRenderedLine> {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);
@@ -804,5 +889,7 @@ pub(crate) fn render_commonmark(source: &str, max_table_width: usize) -> Vec<Mar
             styled: Line::from(Span::raw(String::new())),
         });
     }
-    state.lines
+    
+    // Wrap lines to max_table_width to enforce fixed-width display (e.g. 80 chars for help)
+    wrap_markdown_lines(state.lines, max_table_width)
 }

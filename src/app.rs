@@ -3365,7 +3365,7 @@ impl App {
         match Viewer::open(&help_path, self.config.viewer.word_wrap) {
             Ok(mut viewer) => {
                 viewer.set_mode(ViewMode::Markdown);
-                viewer.zoomed = self.config.viewer.default_zoom;
+                viewer.zoomed = false;  // Always show help in non-zoomed mode (80 chars)
                 self.mode = AppMode::Viewer(viewer);
             }
             Err(e) => self.notify(format!("Cannot open help: {}", e)),
@@ -3393,7 +3393,7 @@ impl App {
         match Viewer::open(&help_path, self.config.viewer.word_wrap) {
             Ok(mut viewer) => {
                 viewer.set_mode(ViewMode::Markdown);
-                viewer.zoomed = self.config.viewer.default_zoom;
+                viewer.zoomed = false;  // Always show help in non-zoomed mode (80 chars)
                 // Jump to the anchor
                 viewer.markdown_goto_anchor(anchor);
                 self.help_return_mode = Some(return_panel.to_string());

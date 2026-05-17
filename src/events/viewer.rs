@@ -202,16 +202,72 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
                 v.audio_prev_tab();
             }
             KeyCode::Tab if matches!(v.mode, ViewMode::Markdown) => {
-                status_message = v
-                    .markdown_select_next_link(display_rows)
-                    .map(|target| format!("Markdown link: #{target} (Enter to open)"))
-                    .or_else(|| Some("No markdown links in this document".to_string()));
+                // Check if selected link is still visible, if not, select first visible link
+                if let Some(link_line_str) = v.plugin_state.get("__md_link_line") {
+                    if let Ok(link_line) = link_line_str.parse::<usize>() {
+                        let display_rows = display_rows.max(1);
+                        let is_visible = link_line >= v.scroll && link_line < v.scroll + display_rows;
+                        
+                        if !is_visible {
+                            // Link is off-screen, select first visible link instead
+                            status_message = v
+                                .markdown_select_first_visible_link(display_rows)
+                                .map(|target| format!("Markdown link: #{target} (Enter to open)"))
+                                .or_else(|| Some("No visible markdown links".to_string()));
+                        } else {
+                            // Link is visible, select next link as usual
+                            status_message = v
+                                .markdown_select_next_link(display_rows)
+                                .map(|target| format!("Markdown link: #{target} (Enter to open)"))
+                                .or_else(|| Some("No markdown links in this document".to_string()));
+                        }
+                    } else {
+                        status_message = v
+                            .markdown_select_next_link(display_rows)
+                            .map(|target| format!("Markdown link: #{target} (Enter to open)"))
+                            .or_else(|| Some("No markdown links in this document".to_string()));
+                    }
+                } else {
+                    // No link selected yet, select first visible link
+                    status_message = v
+                        .markdown_select_first_visible_link(display_rows)
+                        .map(|target| format!("Markdown link: #{target} (Enter to open)"))
+                        .or_else(|| Some("No visible markdown links".to_string()));
+                }
             }
             KeyCode::BackTab if matches!(v.mode, ViewMode::Markdown) => {
-                status_message = v
-                    .markdown_select_prev_link(display_rows)
-                    .map(|target| format!("Markdown link: #{target} (Enter to open)"))
-                    .or_else(|| Some("No markdown links in this document".to_string()));
+                // Check if selected link is still visible, if not, select first visible link
+                if let Some(link_line_str) = v.plugin_state.get("__md_link_line") {
+                    if let Ok(link_line) = link_line_str.parse::<usize>() {
+                        let display_rows = display_rows.max(1);
+                        let is_visible = link_line >= v.scroll && link_line < v.scroll + display_rows;
+                        
+                        if !is_visible {
+                            // Link is off-screen, select first visible link instead
+                            status_message = v
+                                .markdown_select_first_visible_link(display_rows)
+                                .map(|target| format!("Markdown link: #{target} (Enter to open)"))
+                                .or_else(|| Some("No visible markdown links".to_string()));
+                        } else {
+                            // Link is visible, select previous link as usual
+                            status_message = v
+                                .markdown_select_prev_link(display_rows)
+                                .map(|target| format!("Markdown link: #{target} (Enter to open)"))
+                                .or_else(|| Some("No markdown links in this document".to_string()));
+                        }
+                    } else {
+                        status_message = v
+                            .markdown_select_prev_link(display_rows)
+                            .map(|target| format!("Markdown link: #{target} (Enter to open)"))
+                            .or_else(|| Some("No markdown links in this document".to_string()));
+                    }
+                } else {
+                    // No link selected yet, select first visible link
+                    status_message = v
+                        .markdown_select_first_visible_link(display_rows)
+                        .map(|target| format!("Markdown link: #{target} (Enter to open)"))
+                        .or_else(|| Some("No visible markdown links".to_string()));
+                }
             }
             KeyCode::Enter if matches!(v.mode, ViewMode::Markdown) => {
                 status_message = match v.markdown_open_selected_link() {
