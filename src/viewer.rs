@@ -851,6 +851,8 @@ impl Viewer {
         // Invalidate markdown cache when toggling zoom, so it re-renders with new width
         self.markdown_lines = Vec::new();
         self.markdown_plain_lines = Vec::new();
+        // Reset scroll since line count may change when wrapping is applied/removed
+        self.scroll = 0;
     }
 
     pub fn audio_next_tab(&mut self) -> bool {
@@ -2571,7 +2573,8 @@ impl Viewer {
                     let source =
                         text_lines(&self.raw, self.line_feed, &self.preproc_ops, self.encoding)
                             .join("\n");
-                    let rendered = markdown::render_commonmark(&source, self.markdown_table_width_hint());
+                    // Pass wrap_text=true only when not zoomed (fixed 80-char mode)
+                    let rendered = markdown::render_commonmark(&source, self.markdown_table_width_hint(), !self.zoomed);
                     self.markdown_plain_lines =
                         rendered.iter().map(|line| line.plain.clone()).collect();
                     self.markdown_lines = rendered.into_iter().map(|line| line.styled).collect();

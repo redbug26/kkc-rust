@@ -583,7 +583,7 @@ fn wrap_markdown_lines(lines: Vec<MarkdownRenderedLine>, max_width: usize) -> Ve
     wrapped
 }
 
-pub(crate) fn render_commonmark(source: &str, max_table_width: usize) -> Vec<MarkdownRenderedLine> {
+pub(crate) fn render_commonmark(source: &str, max_table_width: usize, wrap_text: bool) -> Vec<MarkdownRenderedLine> {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
@@ -890,6 +890,10 @@ pub(crate) fn render_commonmark(source: &str, max_table_width: usize) -> Vec<Mar
         });
     }
     
-    // Wrap lines to max_table_width to enforce fixed-width display (e.g. 80 chars for help)
-    wrap_markdown_lines(state.lines, max_table_width)
+    // Wrap lines to max_table_width only when wrap_text is true (non-zoomed mode)
+    if wrap_text {
+        wrap_markdown_lines(state.lines, max_table_width)
+    } else {
+        state.lines
+    }
 }
