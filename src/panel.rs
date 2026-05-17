@@ -479,6 +479,7 @@ impl Panel {
             self.entries.clear();
             return self.reload();
         }
+        let path = resolve_directory_symlink(path);
         if self.archive.is_some() && !self.is_inside_archive_temp(&path) {
             self.clear_archive_mount();
         }
@@ -817,6 +818,17 @@ fn ext_of(name: &str) -> String {
         .to_lowercase()
 }
 
+fn resolve_directory_symlink(path: PathBuf) -> PathBuf {
+    let is_symlink = fs::symlink_metadata(&path)
+        .map(|meta| meta.file_type().is_symlink())
+        .unwrap_or(false);
+    if !is_symlink {
+        return path;
+    }
+
+    fs::canonicalize(&path).unwrap_or(path)
+}
+
 fn find_file_id_in_dir(dir: &Path) -> Option<PathBuf> {
     for name in [
         "FILE_ID.DIZ",
@@ -884,5 +896,38 @@ fn glob_rec(p: &[char], t: &[char], pi: usize, ti: usize) -> bool {
                 false
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::symlink;
+
+    fn temp_root(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("kkc-panel-{name}-{}", std::process::id()))
+    }
+
+    #[test]
+    fn symlinked_directory_entries_resolve_to_target_path() {
+        let root = temp_root("symlink-dir");
+        let target = root.join("target");
+        let link = root.join("link");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&target).expect("create target dir");
+        symlink(&target, &link).expect("create symlink");
+
+        let entry = Entry::from_path(&link).expect("read symlink entry");
+        assert!(entry.is_symlink);
+        assert!(entry.is_dir);
+
+        let mut panel = Panel::new(root.clone(), SortMode::Name, true);
+        panel.enter_dir(link).expect("enter symlink dir");
+        assert_eq!(
+            panel.path,
+            fs::canonicalize(&target).expect("canonical target")
+        );
+
+        let _ = fs::remove_dir_all(root);
     }
 }

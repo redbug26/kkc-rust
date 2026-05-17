@@ -1,5 +1,7 @@
 use super::*;
 
+const SYMLINK_ICON: &str = "↩";
+
 pub(super) fn render_panel_or_file_id(
     f: &mut Frame,
     app: &App,
@@ -339,35 +341,11 @@ fn render_panel_entries(
                 Style::default().fg(fg)
             };
 
-            let display_name = if show_file_icons && entry.is_dir && !is_disconnect_entry {
-                format!("{} {}", entry.file_icon.unwrap_or("\u{e5ff}"), entry.name)
-            } else if entry.is_dir && entry.name != ".." && !is_disconnect_entry {
-                format!("/{}", entry.name)
-            } else {
-                format!(" {}", entry.name)
-            };
-            let suffix_icon = if show_cloud_icons && entry.cloud_only {
-                Some("\u{f0c2}")
-            } else if entry.is_dir || !show_file_icons {
-                None
-            } else {
-                entry.file_icon
-            };
+            let display_name = panel_display_name(entry, show_file_icons, is_disconnect_entry);
+            let suffix_icon = panel_suffix_icon(entry, show_cloud_icons, show_file_icons);
             let name_str = format_panel_name(&display_name, suffix_icon, name_w);
 
-            let size_str = if entry.name == ".." {
-                format!("{:>width$}", "↑ up-dir ↑", width = size_w)
-            } else if is_disconnect_entry {
-                truncate_str(&format!("{:^width$}", "action", width = size_w), size_w)
-            } else if entry.is_dir {
-                format!("{:>width$}", "⌦sub--dir⌫", width = size_w)
-            } else {
-                format!(
-                    "{:>width$}",
-                    format_panel_size(entry.size, size_w),
-                    width = size_w
-                )
-            };
+            let size_str = panel_size_text(entry, is_disconnect_entry, size_w);
 
             let date_str = match entry.modified {
                 Some(dt) => format!("{:>width$}", dt.format("%d/%m/%y"), width = date_w),
@@ -394,6 +372,58 @@ fn render_panel_entries(
 
     let list = List::new(items).style(Style::default().bg(clr_panel_bg()));
     f.render_widget(list, list_area);
+}
+
+fn panel_display_name(
+    entry: &crate::panel::Entry,
+    show_file_icons: bool,
+    is_disconnect_entry: bool,
+) -> String {
+    if show_file_icons && entry.is_dir && !is_disconnect_entry {
+        format!("{} {}", entry.file_icon.unwrap_or("\u{e5ff}"), entry.name)
+    } else if entry.is_dir && entry.name != ".." && !is_disconnect_entry {
+        format!("/{}", entry.name)
+    } else {
+        format!(" {}", entry.name)
+    }
+}
+
+fn panel_suffix_icon(
+    entry: &crate::panel::Entry,
+    show_cloud_icons: bool,
+    show_file_icons: bool,
+) -> Option<&'static str> {
+    if entry.is_symlink && !entry.is_dir {
+        Some(SYMLINK_ICON)
+    } else if show_cloud_icons && entry.cloud_only {
+        Some("\u{f0c2}")
+    } else if entry.is_dir || !show_file_icons {
+        None
+    } else {
+        entry.file_icon
+    }
+}
+
+fn panel_size_text(
+    entry: &crate::panel::Entry,
+    is_disconnect_entry: bool,
+    size_w: usize,
+) -> String {
+    if entry.name == ".." {
+        format!("{:>width$}", "↑ up-dir ↑", width = size_w)
+    } else if is_disconnect_entry {
+        truncate_str(&format!("{:^width$}", "action", width = size_w), size_w)
+    } else if entry.is_dir && entry.is_symlink {
+        format!("{:>width$}", "↩  link  ↩", width = size_w)
+    } else if entry.is_dir {
+        format!("{:>width$}", "⌦ subdir ⌫", width = size_w)
+    } else {
+        format!(
+            "{:>width$}",
+            format_panel_size(entry.size, size_w),
+            width = size_w
+        )
+    }
 }
 
 fn format_panel_name(display_name: &str, suffix_icon: Option<&str>, width: usize) -> String {
@@ -755,4 +785,47 @@ fn render_menu_button(f: &mut Frame, area: Rect, label: &str) {
         ),
         text_area,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::file_types::FileCategory;
+    use std::path::PathBuf;
+
+    fn entry(name: &str, is_dir: bool, is_symlink: bool) -> crate::panel::Entry {
+        crate::panel::Entry {
+            name: name.into(),
+            path: PathBuf::from(name),
+            is_dir,
+            is_symlink,
+            size: 0,
+            modified: None,
+            category: if is_dir {
+                FileCategory::Directory
+            } else {
+                FileCategory::Unknown
+            },
+            selected: false,
+            mode: 0o644,
+            cloud_only: false,
+            file_icon: Some("x"),
+        }
+    }
+
+    #[test]
+    fn symlink_directory_uses_link_marker_as_size_text() {
+        let entry = entry("linked-dir", true, true);
+        assert_eq!(panel_display_name(&entry, false, false), "/linked-dir");
+        assert_eq!(panel_suffix_icon(&entry, true, true), None);
+        assert_eq!(panel_size_text(&entry, false, 12), "  ↩  link  ↩");
+    }
+
+    #[test]
+    fn symlink_file_uses_suffix_icon_slot() {
+        let entry = entry("linked-file.txt", false, true);
+        assert_eq!(panel_display_name(&entry, true, false), " linked-file.txt");
+        assert_eq!(panel_suffix_icon(&entry, true, true), Some("↩"));
+        assert_eq!(panel_suffix_icon(&entry, true, false), Some("↩"));
+    }
 }

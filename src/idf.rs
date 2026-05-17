@@ -701,7 +701,7 @@ fn probe_file(path: &Path) -> Result<Option<IdInfo>> {
         ))
     } else if data.len() > 2
         && data[0] == b'P'
-        && (1..=7).contains(&(data[1] - b'0' + 1))
+        && matches!(data[1], b'1'..=b'7')
         && (data.len() > 2 && matches!(data[2], b' ' | b'\t' | b'\n' | b'\r'))
     {
         let format_name = match data[1] {

@@ -136,7 +136,7 @@ impl Default for InputDialogSpec {
             buttons: vec![
                 ConfirmDialogButtonSpec {
                     callback: "confirm".into(),
-                    label: "▶ OK ◀".into(),
+                    label: "▶   OK   ◀".into(),
                     width: 9,
                 },
                 ConfirmDialogButtonSpec {
@@ -1348,7 +1348,7 @@ fn run_palette_dialog(
                 width: body_area.width,
                 height: checks_h,
             };
-            let ok_label = "▶  OK  ◀";
+            let ok_label = "▶   OK   ◀";
             let cancel_label = "▶ Cancel ◀";
             let ok_w = display_width(ok_label);
             let cancel_w = display_width(cancel_label);

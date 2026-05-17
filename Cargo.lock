@@ -1495,7 +1495,7 @@ dependencies = [
 
 [[package]]
 name = "kkc"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "abi_stable",
  "anyhow",
