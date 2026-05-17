@@ -127,18 +127,25 @@ fn markdown_slug(value: &str) -> String {
     out.trim_matches('-').to_string()
 }
 
-fn markdown_line_link_targets(line: &str) -> Vec<String> {
+fn markdown_source_line_links(line: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
     let mut start = 0usize;
-    while let Some(open) = line[start..].find("(#") {
-        let from = start + open + 2;
-        if let Some(close_rel) = line[from..].find(')') {
-            let to = from + close_rel;
-            let target = line[from..to].trim();
-            if !target.is_empty() {
-                out.push(target.to_string());
+    while let Some(open_rel) = line[start..].find('[') {
+        let open = start + open_rel;
+        let text_start = open + 1;
+        let Some(mid_rel) = line[text_start..].find("](#") else {
+            break;
+        };
+        let text_end = text_start + mid_rel;
+        let target_start = text_end + 3;
+        if let Some(close_rel) = line[target_start..].find(')') {
+            let target_end = target_start + close_rel;
+            let display_text = line[text_start..text_end].trim();
+            let target = line[target_start..target_end].trim();
+            if !display_text.is_empty() && !target.is_empty() {
+                out.push((display_text.to_string(), target.to_string()));
             }
-            start = to + 1;
+            start = target_end + 1;
         } else {
             break;
         }
@@ -887,14 +894,40 @@ impl Viewer {
         self.mouse_selection = None;
     }
 
-    fn markdown_internal_links(&self) -> Vec<(String, usize)> {
+    fn markdown_internal_links(&self) -> Vec<((String, String), usize)> {
         if !matches!(self.mode, ViewMode::Markdown) {
             return Vec::new();
         }
+
+        let source = text_lines(&self.raw, self.line_feed, &self.preproc_ops, self.encoding).join("\n");
+        let source_links: Vec<(String, String)> = source
+            .lines()
+            .flat_map(markdown_source_line_links)
+            .collect();
+        if source_links.is_empty() {
+            return Vec::new();
+        }
+
+        let rendered_plain: Vec<String> = self
+            .markdown_lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect();
+
         let mut links = Vec::new();
-        for (line_idx, line) in self.markdown_plain_lines.iter().enumerate() {
-            for target in markdown_line_link_targets(line) {
-                links.push((target, line_idx));
+        let mut cursor = 0usize;
+        for (display_text, target) in source_links {
+            for idx in cursor..rendered_plain.len() {
+                if rendered_plain[idx].contains(&display_text) {
+                    links.push(((display_text.clone(), target.clone()), idx));
+                    cursor = idx;
+                    break;
+                }
             }
         }
         links
@@ -919,11 +952,12 @@ impl Viewer {
         targets
     }
 
-    pub fn markdown_select_next_link(&mut self) -> Option<String> {
+    pub fn markdown_select_next_link(&mut self, visible_rows: usize) -> Option<String> {
         self.ensure_mode_decoded(ViewMode::Markdown);
         let links = self.markdown_internal_links();
         if links.is_empty() {
             self.plugin_state.remove("__md_link_line");
+            self.plugin_state.remove("__md_link_text");
             return None;
         }
         let idx = self
@@ -934,18 +968,25 @@ impl Viewer {
             .unwrap_or(0);
         self.plugin_state
             .insert("__md_link_idx".into(), idx.to_string());
-        let (target, line_idx) = links[idx].clone();
+        let ((display_text, target), line_idx) = links[idx].clone();
         self.plugin_state
             .insert("__md_link_line".into(), line_idx.to_string());
-        self.scroll = line_idx;
+        // Store the display text (what the user sees), not the target
+        self.plugin_state
+            .insert("__md_link_text".into(), display_text.clone());
+        let display_rows = visible_rows.max(1);
+        if line_idx < self.scroll || line_idx >= self.scroll + display_rows {
+            self.scroll = line_idx.saturating_sub(display_rows / 3);
+        }
         Some(target)
     }
 
-    pub fn markdown_select_prev_link(&mut self) -> Option<String> {
+    pub fn markdown_select_prev_link(&mut self, visible_rows: usize) -> Option<String> {
         self.ensure_mode_decoded(ViewMode::Markdown);
         let links = self.markdown_internal_links();
         if links.is_empty() {
             self.plugin_state.remove("__md_link_line");
+            self.plugin_state.remove("__md_link_text");
             return None;
         }
         let idx = self
@@ -956,10 +997,16 @@ impl Viewer {
             .unwrap_or(links.len() - 1);
         self.plugin_state
             .insert("__md_link_idx".into(), idx.to_string());
-        let (target, line_idx) = links[idx].clone();
+        let ((display_text, target), line_idx) = links[idx].clone();
         self.plugin_state
             .insert("__md_link_line".into(), line_idx.to_string());
-        self.scroll = line_idx;
+        // Store the display text (what the user sees), not the target
+        self.plugin_state
+            .insert("__md_link_text".into(), display_text.clone());
+        let display_rows = visible_rows.max(1);
+        if line_idx < self.scroll || line_idx >= self.scroll + display_rows {
+            self.scroll = line_idx.saturating_sub(display_rows / 3);
+        }
         Some(target)
     }
 
@@ -976,7 +1023,7 @@ impl Viewer {
             .and_then(|s| s.parse::<usize>().ok())
             .unwrap_or(0)
             .min(links.len() - 1);
-        let (target, line_idx) = links[idx].clone();
+        let ((_display_text, target), line_idx) = links[idx].clone();
         self.plugin_state
             .insert("__md_link_idx".into(), idx.to_string());
         self.plugin_state
@@ -988,6 +1035,17 @@ impl Viewer {
             Some((target, true))
         } else {
             Some((target, false))
+        }
+    }
+
+    pub fn markdown_goto_anchor(&mut self, anchor: &str) -> bool {
+        self.ensure_mode_decoded(ViewMode::Markdown);
+        let target_line = self.markdown_heading_targets().get(anchor).copied();
+        if let Some(line) = target_line {
+            self.goto_line(line);
+            true
+        } else {
+            false
         }
     }
 
@@ -1382,6 +1440,10 @@ impl Viewer {
             .plugin_state
             .get("__md_link_line")
             .and_then(|s| s.parse::<usize>().ok());
+        let selected_text = self
+            .plugin_state
+            .get("__md_link_text")
+            .map(|s| s.as_str());
 
         self.markdown_lines
             .iter()
@@ -1391,8 +1453,31 @@ impl Viewer {
             .map(|(idx, line)| {
                 let mut line = line.clone();
                 if Some(idx) == selected_line {
+                    // Only highlight spans that contain the link text.
+                    // If no span matches (e.g. segmented table cells),
+                    // fallback to highlighting the full line.
+                    let mut matched = false;
                     for span in &mut line.spans {
-                        span.style = span.style.bg(Color::DarkGray);
+                        if let Some(link_text) = selected_text {
+                            if span.content.contains(link_text) {
+                                matched = true;
+                                span.style = span.style
+                                    .add_modifier(Modifier::REVERSED)
+                                    .add_modifier(Modifier::BOLD);
+                            }
+                        } else {
+                            // Fallback: highlight all if no text stored
+                            span.style = span.style
+                                .add_modifier(Modifier::REVERSED)
+                                .add_modifier(Modifier::BOLD);
+                        }
+                    }
+                    if selected_text.is_some() && !matched {
+                        for span in &mut line.spans {
+                            span.style = span.style
+                                .add_modifier(Modifier::REVERSED)
+                                .add_modifier(Modifier::BOLD);
+                        }
                     }
                 }
                 line

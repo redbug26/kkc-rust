@@ -681,6 +681,7 @@ pub(super) fn render_viewer(
             } else {
                 content_line
             };
+
             let rendered_line = if !v.wrap
                 || !matches!(v.mode, ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi)
             {

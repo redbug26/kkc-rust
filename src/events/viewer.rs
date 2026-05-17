@@ -65,7 +65,11 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
             if let AppMode::Viewer(ref v) = app.mode {
                 v.save_position();
             }
-            app.mode = AppMode::Browse;
+            if let Some(return_mode) = app.help_return_mode.take() {
+                app.restore_mode_from_help(&return_mode);
+            } else {
+                app.mode = AppMode::Browse;
+            }
             return Ok(false);
         }
         KeyCode::Char('/') => {
@@ -199,13 +203,13 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
             }
             KeyCode::Tab if matches!(v.mode, ViewMode::Markdown) => {
                 status_message = v
-                    .markdown_select_next_link()
+                    .markdown_select_next_link(display_rows)
                     .map(|target| format!("Markdown link: #{target} (Enter to open)"))
                     .or_else(|| Some("No markdown links in this document".to_string()));
             }
             KeyCode::BackTab if matches!(v.mode, ViewMode::Markdown) => {
                 status_message = v
-                    .markdown_select_prev_link()
+                    .markdown_select_prev_link(display_rows)
                     .map(|target| format!("Markdown link: #{target} (Enter to open)"))
                     .or_else(|| Some("No markdown links in this document".to_string()));
             }

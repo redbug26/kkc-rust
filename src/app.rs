@@ -6,6 +6,8 @@ mod panel_tabs;
 mod panel_text_editor;
 mod remote_edit;
 
+use crate::viewer::debug_log;
+
 pub use self::command_palette::{
     CommandPaletteState, PALETTE_DATA, PALETTE_SEP, normalize_shortcut, palette_label_for_action,
     palette_shortname_for_action, shortcut_from_key_event,
@@ -863,6 +865,9 @@ pub struct App {
     pub center_buttons: Vec<MenuAction>,
     /// Last command action executed via menu/palette/shortcuts.
     pub last_menu_action: Option<MenuAction>,
+    /// When help is opened from a context panel (search, associations, remote, bookmarks),
+    /// this stores the panel name so we can restore it after exiting the help viewer.
+    pub help_return_mode: Option<String>,
 }
 
 pub fn default_center_button_actions() -> Vec<MenuAction> {
@@ -1031,6 +1036,7 @@ impl App {
             needs_full_redraw: false,
             center_buttons: default_center_button_actions(),
             last_menu_action: None,
+            help_return_mode: None,
         };
 
         match app.config.panel_view_type {
@@ -3364,6 +3370,68 @@ impl App {
             }
             Err(e) => self.notify(format!("Cannot open help: {}", e)),
         }
+    }
+
+    pub fn open_help_with_anchor_and_return(&mut self, anchor: &str, return_panel: &str) {
+        debug_log(&format!("open_help_with_anchor_and_return: anchor={}, return_panel={}", anchor, return_panel));
+        // ... rest of the code
+        let help_path = if let Ok(dirs) = crate::config::project_dirs() {
+            let path = dirs.preference_dir().join("kkc.hlp");
+            if !path.is_file() {
+                let _ = fs::create_dir_all(dirs.preference_dir());
+                let _ = fs::write(&path, include_bytes!("../assets/kkc.hlp"));
+            }
+            path
+        } else {
+            let path = std::env::temp_dir().join("kkc-help.hlp");
+            if !path.is_file() {
+                let _ = fs::write(&path, include_bytes!("../assets/kkc.hlp"));
+            }
+            path
+        };
+
+        match Viewer::open(&help_path, self.config.viewer.word_wrap) {
+            Ok(mut viewer) => {
+                viewer.set_mode(ViewMode::Markdown);
+                viewer.zoomed = self.config.viewer.default_zoom;
+                // Jump to the anchor
+                viewer.markdown_goto_anchor(anchor);
+                self.help_return_mode = Some(return_panel.to_string());
+                self.mode = AppMode::Viewer(viewer);
+            }
+            Err(e) => self.notify(format!("Cannot open help: {}", e)),
+        }
+    }
+
+    pub fn restore_mode_from_help(&mut self, panel: &str) {
+        self.mode = match panel {
+            "search" => {
+                let start = self.active_panel().persisted_path();
+                let dir_str = start.to_string_lossy().into_owned();
+                AppMode::SearchPanel(SearchState {
+                    query: "*".into(),
+                    content_query: String::new(),
+                    dir_query: dir_str,
+                    input_field: 0,
+                    results: Vec::new(),
+                    cursor: 0,
+                    scroll: 0,
+                    running: false,
+                    start_dir: start,
+                    backend: SearchBackend::best_default(),
+                    follow_links: false,
+                    search_rx: None,
+                    cancel_flag: None,
+                    dirs_visited: 0,
+                })
+            }
+            "bookmarks" => AppMode::DirBookmarks,
+            "associations" => {
+                AppMode::AssocEditor(AssocEditorState::from_config(&self.config))
+            }
+            "remote" => AppMode::RemoteConnect(RemoteConnectState::load()),
+            _ => AppMode::Browse,
+        };
     }
 
     pub fn run_search(&mut self) {

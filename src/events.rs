@@ -3802,6 +3802,10 @@ fn handle_search(app: &mut App, key: KeyEvent) -> Result<bool> {
     let page_size = 10usize;
     let fn_key = fx_shortcut(key);
     match key.code {
+        KeyCode::F(1) => {
+            app.open_help_with_anchor_and_return("search-file-s", "search");
+            return Ok(false);
+        }
         KeyCode::Esc => {
             // If a search is running, cancel it then close the panel
             app.cancel_search();
@@ -4201,6 +4205,12 @@ fn handle_compare_panel(app: &mut App, key: KeyEvent) -> Result<bool> {
 // ---------------------------------------------------------------------------
 
 fn handle_dir_bookmarks(app: &mut App, key: KeyEvent) -> Result<bool> {
+    let _fn_key = fx_shortcut(key);
+    if matches!(key.code, KeyCode::F(1)) {
+        app.open_help_with_anchor_and_return("directory-bookmarks", "bookmarks");
+        return Ok(false);
+    }
+    // Continue with existing logic
     match key.code {
         KeyCode::Esc => {
             app.mode = AppMode::Browse;
@@ -4745,7 +4755,12 @@ fn handle_opener(app: &mut App, key: KeyEvent) -> Result<bool> {
 // ---------------------------------------------------------------------------
 
 fn handle_assoc_editor(app: &mut App, key: KeyEvent) -> Result<bool> {
-    let fn_key = fx_shortcut(key);
+    let _fn_key = fx_shortcut(key);
+    if matches!(key.code, KeyCode::F(1)) {
+        app.open_help_with_anchor_and_return("file-associations", "associations");
+        return Ok(false);
+    }
+    // Continue with existing logic
     if key.modifiers.contains(KeyModifiers::CONTROL)
         && matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V'))
     {
@@ -4779,9 +4794,6 @@ fn handle_assoc_editor(app: &mut App, key: KeyEvent) -> Result<bool> {
         }
         // Add new association
         KeyCode::Char('a') | KeyCode::Char('A') | KeyCode::Char('+') => {
-            app.mode = assoc_mime_input_dialog(app);
-        }
-        _ if fn_key == Some(1) => {
             app.mode = assoc_mime_input_dialog(app);
         }
         KeyCode::Char(ch)
@@ -4868,6 +4880,11 @@ fn default_assoc_mime_type(app: &App) -> Option<String> {
 
 fn handle_remote_connect(app: &mut App, key: KeyEvent) -> Result<bool> {
     let fn_key = fx_shortcut(key);
+    if matches!(key.code, KeyCode::F(1)) {
+        app.open_help_with_anchor_and_return("remote-browsing", "remote");
+        return Ok(false);
+    }
+    // Continue with existing logic
     match key.code {
         KeyCode::Esc => app.mode = AppMode::Browse,
         KeyCode::Tab => {

@@ -3,6 +3,9 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
+const TABLE_LINK_OPEN: &str = "[[[KKC_LINK]]]";
+const TABLE_LINK_CLOSE: &str = "[[[/KKC_LINK]]]";
+
 #[derive(Debug, Clone)]
 pub(crate) struct MarkdownRenderedLine {
     pub(crate) plain: String,
@@ -372,6 +375,15 @@ fn wrap_cell_text(text: &str, width: usize) -> Vec<String> {
     out
 }
 
+fn table_strip_link_markers(cell: &str) -> String {
+    cell.replace(TABLE_LINK_OPEN, "")
+        .replace(TABLE_LINK_CLOSE, "")
+}
+
+fn table_cell_contains_link(cell: &str) -> bool {
+    cell.contains(TABLE_LINK_OPEN) && cell.contains(TABLE_LINK_CLOSE)
+}
+
 fn render_table_lines(table: TableState, max_total_width: usize) -> Vec<MarkdownRenderedLine> {
     if table.rows.is_empty() {
         return Vec::new();
@@ -391,7 +403,8 @@ fn render_table_lines(table: TableState, max_total_width: usize) -> Vec<Markdown
     let mut widths = vec![3usize; col_count];
     for row in &table.rows {
         for (idx, cell) in row.iter().enumerate() {
-            widths[idx] = widths[idx].max(UnicodeWidthStr::width(cell.as_str()));
+            let visible = table_strip_link_markers(cell);
+            widths[idx] = widths[idx].max(UnicodeWidthStr::width(visible.as_str()));
         }
     }
 
@@ -428,7 +441,7 @@ fn render_table_lines(table: TableState, max_total_width: usize) -> Vec<Markdown
         let wrapped_cells = (0..col_count)
             .map(|col| {
                 let text = row.get(col).map(String::as_str).unwrap_or("");
-                wrap_cell_text(text, widths[col])
+                wrap_cell_text(&table_strip_link_markers(text), widths[col])
             })
             .collect::<Vec<_>>();
         let visual_rows = wrapped_cells
@@ -456,13 +469,19 @@ fn render_table_lines(table: TableState, max_total_width: usize) -> Vec<Markdown
                     .map(String::as_str)
                     .unwrap_or("");
                 let padded = pad_cell_text(text, widths[col], align);
-                let cell_style = if row_idx < header_rows {
+                let mut cell_style = if row_idx < header_rows {
                     Style::default()
                         .fg(Color::LightCyan)
                         .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(Color::White)
                 };
+                let raw_cell = row.get(col).map(String::as_str).unwrap_or("");
+                if table_cell_contains_link(raw_cell) {
+                    cell_style = cell_style
+                        .fg(Color::LightCyan)
+                        .add_modifier(Modifier::UNDERLINED);
+                }
                 spans.push(Span::styled(padded.clone(), cell_style));
                 plain.push_str(&padded);
             }
@@ -574,6 +593,9 @@ pub(crate) fn render_commonmark(source: &str, max_table_width: usize) -> Vec<Mar
                 Tag::Link { dest_url, .. } => {
                     state.link_depth = state.link_depth.saturating_add(1);
                     state.current_link_dest = Some(dest_url.to_string());
+                    if let Some(table) = state.table.as_mut() {
+                        table.push_cell_text(TABLE_LINK_OPEN);
+                    }
                 }
                 _ => {}
             },
@@ -649,17 +671,11 @@ pub(crate) fn render_commonmark(source: &str, max_table_width: usize) -> Vec<Mar
                 }
                 TagEnd::Link => {
                     state.link_depth = state.link_depth.saturating_sub(1);
-                    if state.link_depth == 0
-                        && let Some(dest) = state.current_link_dest.take()
-                    {
+                    if state.link_depth == 0 {
                         if let Some(table) = state.table.as_mut() {
-                            table.push_cell_text(&format!(" ({dest})"));
-                        } else {
-                            state.push_with_style(
-                                &format!(" ({dest})"),
-                                Style::default().fg(Color::DarkGray),
-                            );
+                            table.push_cell_text(TABLE_LINK_CLOSE);
                         }
+                        state.current_link_dest = None;
                     }
                 }
                 _ => {}
