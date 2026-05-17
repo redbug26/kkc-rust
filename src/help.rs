@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use std::collections::HashMap;

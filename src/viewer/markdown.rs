@@ -652,10 +652,14 @@ pub(crate) fn render_commonmark(source: &str, max_table_width: usize) -> Vec<Mar
                     if state.link_depth == 0
                         && let Some(dest) = state.current_link_dest.take()
                     {
-                        state.push_with_style(
-                            &format!(" ({dest})"),
-                            Style::default().fg(Color::DarkGray),
-                        );
+                        if let Some(table) = state.table.as_mut() {
+                            table.push_cell_text(&format!(" ({dest})"));
+                        } else {
+                            state.push_with_style(
+                                &format!(" ({dest})"),
+                                Style::default().fg(Color::DarkGray),
+                            );
+                        }
                     }
                 }
                 _ => {}

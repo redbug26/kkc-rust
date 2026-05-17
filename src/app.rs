@@ -124,6 +124,7 @@ pub enum AppMode {
     /// Directory bookmarks popup.
     DirBookmarks,
     /// Help overlay.
+    #[allow(dead_code)]
     Help(HelpState),
     /// Menu bar / dropdown (F2).
     Menu(MenuState),
@@ -3340,7 +3341,29 @@ impl App {
     }
 
     pub fn open_help(&mut self) {
-        self.mode = AppMode::Help(HelpState::load());
+        let help_path = if let Ok(dirs) = crate::config::project_dirs() {
+            let path = dirs.preference_dir().join("kkc.hlp");
+            if !path.is_file() {
+                let _ = fs::create_dir_all(dirs.preference_dir());
+                let _ = fs::write(&path, include_bytes!("../assets/kkc.hlp"));
+            }
+            path
+        } else {
+            let path = std::env::temp_dir().join("kkc-help.hlp");
+            if !path.is_file() {
+                let _ = fs::write(&path, include_bytes!("../assets/kkc.hlp"));
+            }
+            path
+        };
+
+        match Viewer::open(&help_path, self.config.viewer.word_wrap) {
+            Ok(mut viewer) => {
+                viewer.set_mode(ViewMode::Markdown);
+                viewer.zoomed = self.config.viewer.default_zoom;
+                self.mode = AppMode::Viewer(viewer);
+            }
+            Err(e) => self.notify(format!("Cannot open help: {}", e)),
+        }
     }
 
     pub fn run_search(&mut self) {

@@ -112,6 +112,40 @@ fn is_markdown_path(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+fn markdown_slug(value: &str) -> String {
+    let mut out = String::new();
+    let mut last_dash = false;
+    for ch in value.trim().chars().flat_map(|c| c.to_lowercase()) {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch);
+            last_dash = false;
+        } else if !last_dash {
+            out.push('-');
+            last_dash = true;
+        }
+    }
+    out.trim_matches('-').to_string()
+}
+
+fn markdown_line_link_targets(line: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut start = 0usize;
+    while let Some(open) = line[start..].find("(#") {
+        let from = start + open + 2;
+        if let Some(close_rel) = line[from..].find(')') {
+            let to = from + close_rel;
+            let target = line[from..to].trim();
+            if !target.is_empty() {
+                out.push(target.to_string());
+            }
+            start = to + 1;
+        } else {
+            break;
+        }
+    }
+    out
+}
+
 #[derive(Debug)]
 pub struct Viewer {
     pub path: PathBuf,
@@ -853,6 +887,110 @@ impl Viewer {
         self.mouse_selection = None;
     }
 
+    fn markdown_internal_links(&self) -> Vec<(String, usize)> {
+        if !matches!(self.mode, ViewMode::Markdown) {
+            return Vec::new();
+        }
+        let mut links = Vec::new();
+        for (line_idx, line) in self.markdown_plain_lines.iter().enumerate() {
+            for target in markdown_line_link_targets(line) {
+                links.push((target, line_idx));
+            }
+        }
+        links
+    }
+
+    fn markdown_heading_targets(&self) -> HashMap<String, usize> {
+        let mut targets = HashMap::new();
+        for (idx, line) in self.markdown_plain_lines.iter().enumerate() {
+            let trimmed = line.trim_start();
+            if !trimmed.starts_with('#') {
+                continue;
+            }
+            let title = trimmed.trim_start_matches('#').trim();
+            if title.is_empty() {
+                continue;
+            }
+            let slug = markdown_slug(title);
+            if !slug.is_empty() {
+                targets.entry(slug).or_insert(idx);
+            }
+        }
+        targets
+    }
+
+    pub fn markdown_select_next_link(&mut self) -> Option<String> {
+        self.ensure_mode_decoded(ViewMode::Markdown);
+        let links = self.markdown_internal_links();
+        if links.is_empty() {
+            self.plugin_state.remove("__md_link_line");
+            return None;
+        }
+        let idx = self
+            .plugin_state
+            .get("__md_link_idx")
+            .and_then(|s| s.parse::<usize>().ok())
+            .map(|i| (i + 1) % links.len())
+            .unwrap_or(0);
+        self.plugin_state
+            .insert("__md_link_idx".into(), idx.to_string());
+        let (target, line_idx) = links[idx].clone();
+        self.plugin_state
+            .insert("__md_link_line".into(), line_idx.to_string());
+        self.scroll = line_idx;
+        Some(target)
+    }
+
+    pub fn markdown_select_prev_link(&mut self) -> Option<String> {
+        self.ensure_mode_decoded(ViewMode::Markdown);
+        let links = self.markdown_internal_links();
+        if links.is_empty() {
+            self.plugin_state.remove("__md_link_line");
+            return None;
+        }
+        let idx = self
+            .plugin_state
+            .get("__md_link_idx")
+            .and_then(|s| s.parse::<usize>().ok())
+            .map(|i| if i == 0 { links.len() - 1 } else { i - 1 })
+            .unwrap_or(links.len() - 1);
+        self.plugin_state
+            .insert("__md_link_idx".into(), idx.to_string());
+        let (target, line_idx) = links[idx].clone();
+        self.plugin_state
+            .insert("__md_link_line".into(), line_idx.to_string());
+        self.scroll = line_idx;
+        Some(target)
+    }
+
+    pub fn markdown_open_selected_link(&mut self) -> Option<(String, bool)> {
+        self.ensure_mode_decoded(ViewMode::Markdown);
+        let links = self.markdown_internal_links();
+        if links.is_empty() {
+            self.plugin_state.remove("__md_link_line");
+            return None;
+        }
+        let idx = self
+            .plugin_state
+            .get("__md_link_idx")
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(0)
+            .min(links.len() - 1);
+        let (target, line_idx) = links[idx].clone();
+        self.plugin_state
+            .insert("__md_link_idx".into(), idx.to_string());
+        self.plugin_state
+            .insert("__md_link_line".into(), line_idx.to_string());
+
+        let target_line = self.markdown_heading_targets().get(&markdown_slug(&target)).copied();
+        if let Some(line) = target_line {
+            self.goto_line(line);
+            Some((target, true))
+        } else {
+            Some((target, false))
+        }
+    }
+
     pub fn start_mouse_selection(
         &mut self,
         row: usize,
@@ -1240,11 +1378,25 @@ impl Viewer {
     }
 
     fn render_markdown_lines(&self, start: usize, height: usize) -> Vec<Line<'static>> {
+        let selected_line = self
+            .plugin_state
+            .get("__md_link_line")
+            .and_then(|s| s.parse::<usize>().ok());
+
         self.markdown_lines
             .iter()
+            .enumerate()
             .skip(start)
             .take(height)
-            .cloned()
+            .map(|(idx, line)| {
+                let mut line = line.clone();
+                if Some(idx) == selected_line {
+                    for span in &mut line.spans {
+                        span.style = span.style.bg(Color::DarkGray);
+                    }
+                }
+                line
+            })
             .collect()
     }
 

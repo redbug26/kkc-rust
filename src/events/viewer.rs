@@ -161,6 +161,8 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(false);
     };
 
+    let mut status_message: Option<String> = None;
+
     let page_size = viewer_page_size(v);
     let display_rows = viewer_display_rows();
     let text_width = viewer_text_width(v);
@@ -195,6 +197,25 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
             KeyCode::BackTab if matches!(v.mode, ViewMode::Module) => {
                 v.audio_prev_tab();
             }
+            KeyCode::Tab if matches!(v.mode, ViewMode::Markdown) => {
+                status_message = v
+                    .markdown_select_next_link()
+                    .map(|target| format!("Markdown link: #{target} (Enter to open)"))
+                    .or_else(|| Some("No markdown links in this document".to_string()));
+            }
+            KeyCode::BackTab if matches!(v.mode, ViewMode::Markdown) => {
+                status_message = v
+                    .markdown_select_prev_link()
+                    .map(|target| format!("Markdown link: #{target} (Enter to open)"))
+                    .or_else(|| Some("No markdown links in this document".to_string()));
+            }
+            KeyCode::Enter if matches!(v.mode, ViewMode::Markdown) => {
+                status_message = match v.markdown_open_selected_link() {
+                    Some((target, true)) => Some(format!("Opened link: #{target}")),
+                    Some((target, false)) => Some(format!("Unknown markdown target: #{target}")),
+                    None => Some("No markdown links in this document".to_string()),
+                };
+            }
             KeyCode::Up => v.scroll_up_visual(text_width),
             KeyCode::Down => v.scroll_down_visual(text_width),
             KeyCode::PageUp => v.page_up_visual(display_rows, text_width),
@@ -214,6 +235,9 @@ pub(super) fn handle_viewer(app: &mut App, key: KeyEvent) -> Result<bool> {
             Some(5) => v.toggle_zoom(),
             _ => {}
         }
+    }
+    if let Some(message) = status_message {
+        app.set_status(message);
     }
     Ok(false)
 }
