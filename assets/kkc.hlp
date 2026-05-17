@@ -684,24 +684,24 @@ The goal of KKC is simple: keep daily file operations fast, scriptable, and comf
 
 ### History
 
-**Next release (in progress)**
-- Gemini support in the internal viewer (open and browse gemini:// pages).
-- Help moved to the Markdown viewer; F1 behavior fixed in multiple panels.
-- Better help navigation (Tab/Shift-Tab on links, improved table link visibility).
-- Help displayed in fixed-width non-zoomed mode; zoom switching issues corrected.
-- Help documentation updated and reorganized.
-- Quick Preview improved (speed, stability, fallback behavior).
-- Tree View added/improved.
-- Search and QuickSearch updated (including multi-pattern search).
-- Mouse interaction and GIF capture/recording improved.
-- Plugin Store and application launch/store flow updated.
-- Remote features expanded (including SMB) with connection/authentication/TLS fixes.
-- Cloud-only file handling improved.
-- Viewer updates: markdown/text rendering, goto/navigation, ANSI/Image/Hex quality.
-- Audio updates: plugins, autoplay, playlist handling.
-- File type detection expanded (more formats recognized).
-- Internal editor, command palette shortcuts/history, and general UI details improved.
-- Theme/palette work and visual consistency updates.
+**Version 0.1.19 (2026-05-17)**
+- Gemini support in the internal viewer (open and browse gemini:// pages) (**view_file**).
+- Help moved to the Markdown viewer; F1 behavior fixed in multiple panels (**help**).
+- Better help navigation (Tab/Shift-Tab on links, improved table link visibility) (**help**).
+- Help displayed in fixed-width non-zoomed mode; zoom switching issues corrected (**help**).
+- Help documentation updated and reorganized (**help**).
+- Quick Preview improved (speed, stability, fallback behavior) (**quick_preview**).
+- Tree View added/improved (**tree_view**).
+- Search and QuickSearch updated (including multi-pattern search) (**search_files**).
+- Mouse interaction and GIF capture/recording improved (**capture_gif**).
+- Plugin Store and application launch/store flow updated (**install_plugin_from_store**).
+- Remote features expanded (including SMB) with connection/authentication/TLS fixes (**remote_connect**).
+- Cloud-only file handling improved (**download_cloud_file**).
+- Viewer updates: markdown/text rendering, goto/navigation, ANSI/Image/Hex quality (**view_file**).
+- Audio updates: plugins, autoplay, playlist handling (**view_file**).
+- File type detection expanded (more formats recognized) (**view_file**).
+- Internal editor, command palette shortcuts/history, and general UI details improved (**panel_text_editor**).
+- Theme/palette work and visual consistency updates (**switch_theme**).
 - Performance and startup improvements in several code paths.
 
 **Version 0.1.18**

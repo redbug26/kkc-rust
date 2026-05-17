@@ -52,6 +52,16 @@
       "homepage": null
     },
     {
+      "name": "aes",
+      "version": "0.9.0",
+      "authors": [
+        "RustCrypto Developers"
+      ],
+      "description": "Pure Rust implementation of the Advanced Encryption Standard (a.k.a. Rijndael)",
+      "repository": "https://github.com/RustCrypto/block-ciphers",
+      "homepage": null
+    },
+    {
       "name": "aho-corasick",
       "version": "1.1.4",
       "authors": [
@@ -141,6 +151,16 @@
       "homepage": null
     },
     {
+      "name": "atomic",
+      "version": "0.6.1",
+      "authors": [
+        "Amanieu d'Antras <amanieu@gmail.com>"
+      ],
+      "description": "Generic Atomic<T> wrapper type",
+      "repository": "https://github.com/Amanieu/atomic-rs",
+      "homepage": null
+    },
+    {
       "name": "autocfg",
       "version": "1.5.0",
       "authors": [
@@ -152,17 +172,6 @@
     },
     {
       "name": "base64",
-      "version": "0.13.1",
-      "authors": [
-        "Alice Maz <alice@alicemaz.com>",
-        "Marshall Pierce <marshall@mpierce.org>"
-      ],
-      "description": "encodes and decodes base64 as bytes or utf8",
-      "repository": "https://github.com/marshallpierce/rust-base64",
-      "homepage": null
-    },
-    {
-      "name": "base64",
       "version": "0.22.1",
       "authors": [
         "Marshall Pierce <marshall@mpierce.org>"
@@ -170,6 +179,16 @@
       "description": "encodes and decodes base64 as bytes or utf8",
       "repository": "https://github.com/marshallpierce/rust-base64",
       "homepage": null
+    },
+    {
+      "name": "base64ct",
+      "version": "1.8.3",
+      "authors": [
+        "RustCrypto Developers"
+      ],
+      "description": "Pure Rust implementation of Base64 (RFC 4648) which avoids any usages of\ndata-dependent branches/LUTs and thereby provides portable \"best effort\"\nconstant-time operation and embedded-friendly no_std support\n",
+      "repository": "https://github.com/RustCrypto/formats",
+      "homepage": "https://github.com/RustCrypto/formats/tree/master/base64ct"
     },
     {
       "name": "bincode",
@@ -195,6 +214,26 @@
       "homepage": null
     },
     {
+      "name": "bit-set",
+      "version": "0.5.3",
+      "authors": [
+        "Alexis Beingessner <a.beingessner@gmail.com>"
+      ],
+      "description": "A set of bits",
+      "repository": "https://github.com/contain-rs/bit-set",
+      "homepage": "https://github.com/contain-rs/bit-set"
+    },
+    {
+      "name": "bit-vec",
+      "version": "0.6.3",
+      "authors": [
+        "Alexis Beingessner <a.beingessner@gmail.com>"
+      ],
+      "description": "A vector of bits",
+      "repository": "https://github.com/contain-rs/bit-vec",
+      "homepage": "https://github.com/contain-rs/bit-vec"
+    },
+    {
       "name": "bitflags",
       "version": "1.3.2",
       "authors": [
@@ -206,7 +245,7 @@
     },
     {
       "name": "bitflags",
-      "version": "2.11.0",
+      "version": "2.11.1",
       "authors": [
         "The Rust Project Developers"
       ],
@@ -231,6 +270,16 @@
         "RustCrypto Developers"
       ],
       "description": "Buffer type for block processing of data",
+      "repository": "https://github.com/RustCrypto/utils",
+      "homepage": null
+    },
+    {
+      "name": "block-buffer",
+      "version": "0.12.0",
+      "authors": [
+        "RustCrypto Developers"
+      ],
+      "description": "Buffer types for block processing of data",
       "repository": "https://github.com/RustCrypto/utils",
       "homepage": null
     },
@@ -332,16 +381,6 @@
       "homepage": "https://github.com/trifectatechfoundation/bzip2-rs"
     },
     {
-      "name": "cassowary",
-      "version": "0.3.0",
-      "authors": [
-        "Dylan Ede <dylanede@googlemail.com>"
-      ],
-      "description": "A Rust implementation of the Cassowary linear constraint solving algorithm.\n\nThe Cassowary algorithm is designed for naturally laying out user interfaces using linear constraints,\nlike 'this button must line up with this text box'.\n",
-      "repository": "https://github.com/dylanede/cassowary-rs",
-      "homepage": "https://github.com/dylanede/cassowary-rs"
-    },
-    {
       "name": "castaway",
       "version": "0.2.4",
       "authors": [
@@ -363,7 +402,7 @@
     },
     {
       "name": "cc",
-      "version": "1.2.60",
+      "version": "1.2.62",
       "authors": [
         "Alex Crichton <alex@alexcrichton.com>"
       ],
@@ -390,6 +429,16 @@
       "description": "A macro to ergonomically define an item depending on a large number of #[cfg]\nparameters. Structured like an if-else chain, the first matching branch is the\nitem that gets emitted.\n",
       "repository": "https://github.com/rust-lang/cfg-if",
       "homepage": null
+    },
+    {
+      "name": "cfg_aliases",
+      "version": "0.2.1",
+      "authors": [
+        "Zicklag <zicklag@katharostech.com>"
+      ],
+      "description": "A tiny utility to help save you a lot of effort with long winded `#[cfg()]` checks.",
+      "repository": "https://github.com/katharostech/cfg_aliases",
+      "homepage": "https://github.com/katharostech/cfg_aliases"
     },
     {
       "name": "chrono",
@@ -430,6 +479,16 @@
       "homepage": null
     },
     {
+      "name": "cmov",
+      "version": "0.5.3",
+      "authors": [
+        "RustCrypto Developers"
+      ],
+      "description": "Conditional move CPU intrinsics which are guaranteed on major platforms (ARM32/ARM64, x86/x86_64,\nRISC-V) to execute in constant-time and not be rewritten as branches by the compiler. Provides\nwrappers for the CMOV family of instructions on x86/x86_64 and CSEL on AArch64, along with a\nportable \"best-effort\" pure Rust fallback implementation.\n",
+      "repository": "https://github.com/RustCrypto/utils",
+      "homepage": null
+    },
+    {
       "name": "color_quant",
       "version": "1.1.0",
       "authors": [
@@ -451,13 +510,23 @@
     },
     {
       "name": "compact_str",
-      "version": "0.8.1",
+      "version": "0.9.0",
       "authors": [
         "Parker Timmerman <parker@parkertimmerman.com>"
       ],
       "description": "A memory efficient string type that transparently stores strings on the stack, when possible",
       "repository": "https://github.com/ParkMyCar/compact_str",
       "homepage": "https://github.com/ParkMyCar/compact_str"
+    },
+    {
+      "name": "const-oid",
+      "version": "0.10.2",
+      "authors": [
+        "RustCrypto Developers"
+      ],
+      "description": "Const-friendly implementation of the ISO/IEC Object Identifier (OID) standard\nas defined in ITU X.660, with support for BER/DER encoding/decoding as well as\nheapless no_std (i.e. embedded) support\n",
+      "repository": "https://github.com/RustCrypto/formats",
+      "homepage": "https://github.com/RustCrypto/formats/tree/master/const-oid"
     },
     {
       "name": "const_panic",
@@ -477,6 +546,16 @@
       ],
       "description": "Compares two equal-sized byte strings in constant time.",
       "repository": "https://github.com/cesarb/constant_time_eq",
+      "homepage": null
+    },
+    {
+      "name": "convert_case",
+      "version": "0.10.0",
+      "authors": [
+        "rutrum <dave@rutrum.net>"
+      ],
+      "description": "Convert strings into any case",
+      "repository": "https://github.com/rutrum/convert-case",
       "homepage": null
     },
     {
@@ -539,12 +618,32 @@
       "homepage": null
     },
     {
+      "name": "cpubits",
+      "version": "0.1.1",
+      "authors": [
+        "RustCrypto Developers"
+      ],
+      "description": "Compile-time detection heuristics for the optimal word size to use for the\ntarget CPU, which in some cases may differ from its address size a.k.a.\n`target_pointer_width`. Implemented as `macro_rules!`\n",
+      "repository": "https://github.com/RustCrypto/utils",
+      "homepage": null
+    },
+    {
       "name": "cpufeatures",
       "version": "0.2.17",
       "authors": [
         "RustCrypto Developers"
       ],
       "description": "Lightweight runtime CPU feature detection for aarch64, loongarch64, and x86/x86_64 targets, \nwith no_std support and support for mobile targets including Android and iOS\n",
+      "repository": "https://github.com/RustCrypto/utils",
+      "homepage": null
+    },
+    {
+      "name": "cpufeatures",
+      "version": "0.3.0",
+      "authors": [
+        "RustCrypto Developers"
+      ],
+      "description": "Lightweight runtime CPU feature detection for aarch64, loongarch64, and x86/x86_64 targets,\nwith no_std support and support for mobile targets including Android and iOS\n",
       "repository": "https://github.com/RustCrypto/utils",
       "homepage": null
     },
@@ -603,7 +702,7 @@
     },
     {
       "name": "crossterm",
-      "version": "0.28.1",
+      "version": "0.29.0",
       "authors": [
         "T. Post"
       ],
@@ -650,6 +749,26 @@
       "description": "Common traits used by cryptographic algorithms",
       "repository": "https://github.com/RustCrypto/traits",
       "homepage": null
+    },
+    {
+      "name": "csscolorparser",
+      "version": "0.6.2",
+      "authors": [
+        "Nor Khasyatillah <mazznoer@ymail.com>"
+      ],
+      "description": "CSS color parser library",
+      "repository": "https://github.com/mazznoer/csscolorparser-rs",
+      "homepage": null
+    },
+    {
+      "name": "ctutils",
+      "version": "0.4.2",
+      "authors": [
+        "RustCrypto Developers"
+      ],
+      "description": "Constant-time utility library with selection and equality testing support targeting cryptographic\napplications. Supports `const fn` where appropriate. Built on the `cmov` crate which provides\narchitecture-specific predication intrinsics. Heavily inspired by the `subtle` crate.\n",
+      "repository": "https://github.com/RustCrypto/utils",
+      "homepage": "https://github.com/RustCrypto/utils/tree/master/ctselect"
     },
     {
       "name": "darling",
@@ -712,6 +831,26 @@
       "homepage": "https://github.com/royaltm/rust-delharc"
     },
     {
+      "name": "deltae",
+      "version": "0.3.2",
+      "authors": [
+        "Ryan O'Beirne <ryanobeirne@ryanobeirne.com>"
+      ],
+      "description": "Calculate Delta E between two colors in CIE Lab space.",
+      "repository": "https://gitlab.com/ryanobeirne/deltae.git",
+      "homepage": "https://gitlab.com/ryanobeirne/deltae"
+    },
+    {
+      "name": "der",
+      "version": "0.8.0",
+      "authors": [
+        "RustCrypto Developers"
+      ],
+      "description": "Pure Rust embedded-friendly implementation of the Distinguished Encoding Rules\n(DER) for Abstract Syntax Notation One (ASN.1) as described in ITU X.690 with\nfull support for heapless `no_std`/`no_alloc` targets\n",
+      "repository": "https://github.com/RustCrypto/formats",
+      "homepage": "https://github.com/RustCrypto/formats/tree/master/der"
+    },
+    {
       "name": "deranged",
       "version": "0.5.8",
       "authors": [
@@ -719,6 +858,26 @@
       ],
       "description": "Ranged integers",
       "repository": "https://github.com/jhpratt/deranged",
+      "homepage": null
+    },
+    {
+      "name": "derive_more",
+      "version": "2.1.1",
+      "authors": [
+        "Jelte Fennema <github-tech@jeltef.nl>"
+      ],
+      "description": "Adds #[derive(x)] macros for more traits",
+      "repository": "https://github.com/JelteF/derive_more",
+      "homepage": null
+    },
+    {
+      "name": "derive_more-impl",
+      "version": "2.1.1",
+      "authors": [
+        "Jelte Fennema <github-tech@jeltef.nl>"
+      ],
+      "description": "Internal implementation of `derive_more` crate",
+      "repository": "https://github.com/JelteF/derive_more",
       "homepage": null
     },
     {
@@ -732,8 +891,18 @@
       "homepage": null
     },
     {
+      "name": "digest",
+      "version": "0.11.3",
+      "authors": [
+        "RustCrypto Developers"
+      ],
+      "description": "Traits for cryptographic hash functions and message authentication codes",
+      "repository": "https://github.com/RustCrypto/traits",
+      "homepage": null
+    },
+    {
       "name": "directories",
-      "version": "5.0.1",
+      "version": "6.0.0",
       "authors": [
         "Simon Ochsenreither <simon@ochsenreither.de>"
       ],
@@ -743,7 +912,7 @@
     },
     {
       "name": "dirs-sys",
-      "version": "0.4.1",
+      "version": "0.5.0",
       "authors": [
         "Simon Ochsenreither <simon@ochsenreither.de>"
       ],
@@ -763,14 +932,14 @@
       "homepage": null
     },
     {
-      "name": "displaydoc",
-      "version": "0.2.5",
+      "name": "document-features",
+      "version": "0.2.12",
       "authors": [
-        "Jane Lusby <jlusby@yaah.dev>"
+        "Slint Developers <info@slint.dev>"
       ],
-      "description": "A derive macro for implementing the display Trait via a doc comment and string interpolation\n",
-      "repository": "https://github.com/yaahc/displaydoc",
-      "homepage": "https://github.com/yaahc/displaydoc"
+      "description": "Extract documentation for the feature flags from comments in Cargo.toml",
+      "repository": "https://github.com/slint-ui/document-features",
+      "homepage": "https://slint.rs"
     },
     {
       "name": "either",
@@ -791,16 +960,6 @@
       "description": "A Gecko-oriented implementation of the Encoding Standard",
       "repository": "https://github.com/hsivonen/encoding_rs",
       "homepage": "https://docs.rs/encoding_rs/"
-    },
-    {
-      "name": "env_home",
-      "version": "0.1.0",
-      "authors": [
-        "Peter Tripp <peter.tripp@gmail.com>"
-      ],
-      "description": "Get the user home directory in a cross-platform way.",
-      "repository": "https://github.com/notpeter/env-home",
-      "homepage": "https://github.com/notpeter/env-home"
     },
     {
       "name": "equivalent",
@@ -832,6 +991,16 @@
       "homepage": null
     },
     {
+      "name": "euclid",
+      "version": "0.22.14",
+      "authors": [
+        "The Servo Project Developers"
+      ],
+      "description": "Geometry primitives",
+      "repository": "https://github.com/servo/euclid",
+      "homepage": null
+    },
+    {
       "name": "extended",
       "version": "0.1.0",
       "authors": [
@@ -840,6 +1009,17 @@
       "description": "Extended precision 80-bit floating-point numbers (f80).\n",
       "repository": "https://github.com/depp/extended-rs",
       "homepage": "https://github.com/depp/extended-rs"
+    },
+    {
+      "name": "fancy-regex",
+      "version": "0.11.0",
+      "authors": [
+        "Raph Levien <raph@google.com>",
+        "Robin Stocker <robin@nibor.org>"
+      ],
+      "description": "An implementation of regexes, supporting a relatively rich set of features, including backreferences and look-around.",
+      "repository": "https://github.com/fancy-regex/fancy-regex",
+      "homepage": null
     },
     {
       "name": "fastrand",
@@ -872,8 +1052,18 @@
       "homepage": "https://github.com/image-rs/fdeflate"
     },
     {
+      "name": "filedescriptor",
+      "version": "0.8.3",
+      "authors": [
+        "Wez Furlong"
+      ],
+      "description": "More ergonomic wrappers around RawFd and RawHandle",
+      "repository": "https://github.com/wezterm/wezterm",
+      "homepage": null
+    },
+    {
       "name": "filetime",
-      "version": "0.2.27",
+      "version": "0.2.29",
       "authors": [
         "Alex Crichton <alex@alexcrichton.com>"
       ],
@@ -890,6 +1080,24 @@
       "homepage": null
     },
     {
+      "name": "finl_unicode",
+      "version": "1.4.0",
+      "authors": [],
+      "description": "Library for handling Unicode functionality for finl (categories and grapheme segmentation)",
+      "repository": "https://github.com/dahosek/finl_unicode",
+      "homepage": "https://finl.xyz"
+    },
+    {
+      "name": "fixedbitset",
+      "version": "0.4.2",
+      "authors": [
+        "bluss"
+      ],
+      "description": "FixedBitSet is a simple bitset collection",
+      "repository": "https://github.com/petgraph/fixedbitset",
+      "homepage": null
+    },
+    {
       "name": "flate2",
       "version": "1.1.9",
       "authors": [
@@ -899,6 +1107,16 @@
       "description": "DEFLATE compression and decompression exposed as Read/BufRead/Write streams.\nSupports miniz_oxide and multiple zlib implementations. Supports zlib, gzip,\nand raw deflate streams.\n",
       "repository": "https://github.com/rust-lang/flate2-rs",
       "homepage": "https://github.com/rust-lang/flate2-rs"
+    },
+    {
+      "name": "fnv",
+      "version": "1.0.7",
+      "authors": [
+        "Alex Crichton <alex@alexcrichton.com>"
+      ],
+      "description": "Fowler–Noll–Vo hash function",
+      "repository": "https://github.com/servo/rust-fnv",
+      "homepage": null
     },
     {
       "name": "foldhash",
@@ -911,16 +1129,26 @@
       "homepage": null
     },
     {
+      "name": "foldhash",
+      "version": "0.2.0",
+      "authors": [
+        "Orson Peters <orsonpeters@gmail.com>"
+      ],
+      "description": "A fast, non-cryptographic, minimally DoS-resistant hashing algorithm.",
+      "repository": "https://github.com/orlp/foldhash",
+      "homepage": null
+    },
+    {
       "name": "font8x8",
-      "version": "0.2.7",
+      "version": "0.3.1",
       "authors": [
         "Joaquin Rosales <casabenita7@gmail.com>",
         "Philipp Oppermann <dev@phil-opp.com>",
         "Jonathan Pallant <github@thejpster.org.uk>"
       ],
       "description": "8x8 monochrome bitmap font for rendering.",
-      "repository": "https://github.com/saibatizoku/font8x8-rs",
-      "homepage": "https://github.com/saibatizoku/font8x8-rs"
+      "repository": "https://gitlab.com/saibatizoku/font8x8-rs",
+      "homepage": "https://gitlab.com/saibatizoku/font8x8-rs"
     },
     {
       "name": "foreign-types",
@@ -940,16 +1168,6 @@
       ],
       "description": "An internal crate used by foreign-types",
       "repository": "https://github.com/sfackler/foreign-types",
-      "homepage": null
-    },
-    {
-      "name": "form_urlencoded",
-      "version": "1.2.2",
-      "authors": [
-        "The rust-url developers"
-      ],
-      "description": "Parser and serializer for the application/x-www-form-urlencoded syntax, as used by HTML forms.",
-      "repository": "https://github.com/servo/rust-url",
       "homepage": null
     },
     {
@@ -1006,6 +1224,16 @@
       "description": "gethostname for all platforms",
       "repository": "https://codeberg.org/swsnr/gethostname.rs.git",
       "homepage": "https://codeberg.org/swsnr/gethostname.rs"
+    },
+    {
+      "name": "getopts",
+      "version": "0.2.24",
+      "authors": [
+        "The Rust Project Developers"
+      ],
+      "description": "getopts-like option parsing",
+      "repository": "https://github.com/rust-lang/getopts",
+      "homepage": null
     },
     {
       "name": "getrandom",
@@ -1069,10 +1297,18 @@
     },
     {
       "name": "hashbrown",
-      "version": "0.17.0",
+      "version": "0.16.1",
       "authors": [
         "Amanieu d'Antras <amanieu@gmail.com>"
       ],
+      "description": "A Rust port of Google's SwissTable hash map",
+      "repository": "https://github.com/rust-lang/hashbrown",
+      "homepage": null
+    },
+    {
+      "name": "hashbrown",
+      "version": "0.17.1",
+      "authors": [],
       "description": "A Rust port of Google's SwissTable hash map",
       "repository": "https://github.com/rust-lang/hashbrown",
       "homepage": null
@@ -1086,8 +1322,18 @@
       "homepage": null
     },
     {
+      "name": "hex",
+      "version": "0.4.3",
+      "authors": [
+        "KokaKiwi <kokakiwi@kokakiwi.net>"
+      ],
+      "description": "Encoding and decoding data into/from hexadecimal representation.",
+      "repository": "https://github.com/KokaKiwi/rust-hex",
+      "homepage": null
+    },
+    {
       "name": "hmac",
-      "version": "0.12.1",
+      "version": "0.13.0",
       "authors": [
         "RustCrypto Developers"
       ],
@@ -1096,8 +1342,30 @@
       "homepage": null
     },
     {
+      "name": "http",
+      "version": "1.4.0",
+      "authors": [
+        "Alex Crichton <alex@alexcrichton.com>",
+        "Carl Lerche <me@carllerche.com>",
+        "Sean McArthur <sean@seanmonstar.com>"
+      ],
+      "description": "A set of types for representing HTTP requests and responses.\n",
+      "repository": "https://github.com/hyperium/http",
+      "homepage": null
+    },
+    {
+      "name": "httparse",
+      "version": "1.10.1",
+      "authors": [
+        "Sean McArthur <sean@seanmonstar.com>"
+      ],
+      "description": "A tiny, safe, speedy, zero-copy HTTP/1.x parser.",
+      "repository": "https://github.com/seanmonstar/httparse",
+      "homepage": null
+    },
+    {
       "name": "hybrid-array",
-      "version": "0.4.11",
+      "version": "0.4.12",
       "authors": [
         "RustCrypto Developers"
       ],
@@ -1128,76 +1396,6 @@
       "homepage": null
     },
     {
-      "name": "icu_collections",
-      "version": "2.2.0",
-      "authors": [
-        "The ICU4X Project Developers"
-      ],
-      "description": "Collection of API for use in ICU libraries.",
-      "repository": "https://github.com/unicode-org/icu4x",
-      "homepage": "https://icu4x.unicode.org"
-    },
-    {
-      "name": "icu_locale_core",
-      "version": "2.2.0",
-      "authors": [
-        "The ICU4X Project Developers"
-      ],
-      "description": "API for managing Unicode Language and Locale Identifiers",
-      "repository": "https://github.com/unicode-org/icu4x",
-      "homepage": "https://icu4x.unicode.org"
-    },
-    {
-      "name": "icu_normalizer",
-      "version": "2.2.0",
-      "authors": [
-        "The ICU4X Project Developers"
-      ],
-      "description": "API for normalizing text into Unicode Normalization Forms",
-      "repository": "https://github.com/unicode-org/icu4x",
-      "homepage": "https://icu4x.unicode.org"
-    },
-    {
-      "name": "icu_normalizer_data",
-      "version": "2.2.0",
-      "authors": [
-        "The ICU4X Project Developers"
-      ],
-      "description": "Data for the icu_normalizer crate",
-      "repository": "https://github.com/unicode-org/icu4x",
-      "homepage": "https://icu4x.unicode.org"
-    },
-    {
-      "name": "icu_properties",
-      "version": "2.2.0",
-      "authors": [
-        "The ICU4X Project Developers"
-      ],
-      "description": "Definitions for Unicode properties",
-      "repository": "https://github.com/unicode-org/icu4x",
-      "homepage": "https://icu4x.unicode.org"
-    },
-    {
-      "name": "icu_properties_data",
-      "version": "2.2.0",
-      "authors": [
-        "The ICU4X Project Developers"
-      ],
-      "description": "Data for the icu_properties crate",
-      "repository": "https://github.com/unicode-org/icu4x",
-      "homepage": "https://icu4x.unicode.org"
-    },
-    {
-      "name": "icu_provider",
-      "version": "2.2.0",
-      "authors": [
-        "The ICU4X Project Developers"
-      ],
-      "description": "Trait and struct definitions for the ICU data provider",
-      "repository": "https://github.com/unicode-org/icu4x",
-      "homepage": "https://icu4x.unicode.org"
-    },
-    {
       "name": "id-arena",
       "version": "2.3.0",
       "authors": [
@@ -1217,26 +1415,6 @@
       "description": "Utility for applying case rules to Rust identifiers.",
       "repository": "https://github.com/TedDriggs/ident_case",
       "homepage": null
-    },
-    {
-      "name": "idna",
-      "version": "1.1.0",
-      "authors": [
-        "The rust-url developers"
-      ],
-      "description": "IDNA (Internationalizing Domain Names in Applications) and Punycode.",
-      "repository": "https://github.com/servo/rust-url/",
-      "homepage": null
-    },
-    {
-      "name": "idna_adapter",
-      "version": "1.2.2",
-      "authors": [
-        "The rust-url developers"
-      ],
-      "description": "Back end adapter for idna",
-      "repository": "https://github.com/hsivonen/idna_adapter",
-      "homepage": "https://docs.rs/crate/idna_adapter/latest"
     },
     {
       "name": "image",
@@ -1327,7 +1505,7 @@
     },
     {
       "name": "itertools",
-      "version": "0.13.0",
+      "version": "0.14.0",
       "authors": [
         "bluss"
       ],
@@ -1408,13 +1586,24 @@
     },
     {
       "name": "js-sys",
-      "version": "0.3.95",
+      "version": "0.3.98",
       "authors": [
         "The wasm-bindgen Developers"
       ],
       "description": "Bindings for all JS global objects and functions in all JS environments like\nNode.js and browsers, built on `#[wasm_bindgen]` using the `wasm-bindgen` crate.\n",
       "repository": "https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys",
       "homepage": "https://wasm-bindgen.github.io/wasm-bindgen/"
+    },
+    {
+      "name": "kasuari",
+      "version": "0.4.12",
+      "authors": [
+        "Dylan Ede <dylanede@googlemail.com>",
+        "The Ratatui Developers"
+      ],
+      "description": "A rust layout solver for GUIs, based on the Cassowary algorithm.\nA fork of the unmaintained cassowary-rs crate with improvments and bug fixes.\nKasuari is the indonesian name for the cassowary bird.\n",
+      "repository": "https://github.com/ratatui/kasuari",
+      "homepage": null
     },
     {
       "name": "kkc",
@@ -1433,6 +1622,16 @@
       "description": "Stable ABI shared by kkc and native Rust plugins",
       "repository": null,
       "homepage": null
+    },
+    {
+      "name": "lab",
+      "version": "0.11.0",
+      "authors": [
+        "Jesse Bees <jesse@toomanybees.com>"
+      ],
+      "description": "Tools for converting RGB colors to the CIE-L*a*b* color space, and\ncomparing differences in color.\n",
+      "repository": "https://github.com/TooManyBees/lab",
+      "homepage": "https://github.com/TooManyBees/lab"
     },
     {
       "name": "lazy_static",
@@ -1456,7 +1655,7 @@
     },
     {
       "name": "libbz2-rs-sys",
-      "version": "0.2.3",
+      "version": "0.2.4",
       "authors": [],
       "description": "a drop-in compatible rust bzip2 implementation",
       "repository": "https://github.com/trifectatechfoundation/libbzip2-rs",
@@ -1464,7 +1663,7 @@
     },
     {
       "name": "libc",
-      "version": "0.2.184",
+      "version": "0.2.186",
       "authors": [
         "The Rust Project Developers"
       ],
@@ -1493,13 +1692,13 @@
       "homepage": null
     },
     {
-      "name": "linux-raw-sys",
-      "version": "0.4.15",
+      "name": "line-clipping",
+      "version": "0.3.7",
       "authors": [
-        "Dan Gohman <dev@sunfishcode.online>"
+        "Josh McKinney"
       ],
-      "description": "Generated bindings for Linux's userspace API",
-      "repository": "https://github.com/sunfishcode/linux-raw-sys",
+      "description": "A simple crate implementing line clipping algorithms.",
+      "repository": "https://github.com/ratatui/line-clipping",
       "homepage": null
     },
     {
@@ -1513,13 +1712,13 @@
       "homepage": null
     },
     {
-      "name": "litemap",
-      "version": "0.8.2",
+      "name": "litrs",
+      "version": "1.0.0",
       "authors": [
-        "The ICU4X Project Developers"
+        "Lukas Kalbertodt <lukas.kalbertodt@gmail.com>"
       ],
-      "description": "A key-value Map implementation based on a flat, sorted Vec.",
-      "repository": "https://github.com/unicode-org/icu4x",
+      "description": "Parse and inspect Rust literals (i.e. tokens in the Rust programming language\nrepresenting fixed values). Particularly useful for proc macros, but can also\nbe used outside of a proc-macro context.\n",
+      "repository": "https://github.com/LukasKalbertodt/litrs",
       "homepage": null
     },
     {
@@ -1544,7 +1743,7 @@
     },
     {
       "name": "lru",
-      "version": "0.12.5",
+      "version": "0.16.4",
       "authors": [
         "Jerome Froelich <jeromefroelic@hotmail.com>"
       ],
@@ -1554,22 +1753,22 @@
     },
     {
       "name": "lua-src",
-      "version": "547.0.0",
+      "version": "550.0.0",
       "authors": [
         "Aleksandr Orlenko <zxteam@protonmail.com>"
       ],
-      "description": "Sources of Lua 5.1/5.2/5.3/5.4 and logic to build them.\n",
-      "repository": "https://github.com/khvzak/lua-src-rs",
+      "description": "Sources of Lua 5.1-5.5 and logic to build them.\n",
+      "repository": "https://github.com/mlua-rs/lua-src-rs",
       "homepage": null
     },
     {
       "name": "luajit-src",
-      "version": "210.5.12+a4f56a4",
+      "version": "210.6.6+707c12b",
       "authors": [
         "Aleksandr Orlenko <zxteam@protonmail.com>"
       ],
       "description": "Sources of LuaJIT 2.1 and logic to build it.\n",
-      "repository": "https://github.com/khvzak/luajit-src-rs",
+      "repository": "https://github.com/mlua-rs/luajit-src-rs",
       "homepage": null
     },
     {
@@ -1579,6 +1778,16 @@
       "description": "LZMA / LZMA2 / LZIP / XZ compression ported from 'tukaani xz for java'",
       "repository": "https://github.com/hasenbanck/lzma-rust2/",
       "homepage": "https://github.com/hasenbanck/lzma-rust2/"
+    },
+    {
+      "name": "mac_address",
+      "version": "1.1.8",
+      "authors": [
+        "rep-nop <repnop@outlook.com>"
+      ],
+      "description": "Cross-platform retrieval of a network interface MAC address.",
+      "repository": "https://github.com/rep-nop/mac_address",
+      "homepage": null
     },
     {
       "name": "mach2",
@@ -1598,6 +1807,36 @@
       "description": "Provides extremely fast (uses SIMD on x86_64, aarch64 and wasm32) routines for\n1, 2 or 3 byte search and single substring search.\n",
       "repository": "https://github.com/BurntSushi/memchr",
       "homepage": "https://github.com/BurntSushi/memchr"
+    },
+    {
+      "name": "memmem",
+      "version": "0.1.1",
+      "authors": [
+        "Joe Neeman <joeneeman@gmail.com>"
+      ],
+      "description": "Substring searching",
+      "repository": "http://github.com/jneem/memmem",
+      "homepage": null
+    },
+    {
+      "name": "memoffset",
+      "version": "0.9.1",
+      "authors": [
+        "Gilad Naaman <gilad.naaman@gmail.com>"
+      ],
+      "description": "offset_of functionality for Rust structs.",
+      "repository": "https://github.com/Gilnaa/memoffset",
+      "homepage": null
+    },
+    {
+      "name": "minimal-lexical",
+      "version": "0.2.1",
+      "authors": [
+        "Alex Huszagh <ahuszagh@gmail.com>"
+      ],
+      "description": "Fast float parsing conversion routines.",
+      "repository": "https://github.com/Alexhuszagh/minimal-lexical",
+      "homepage": null
     },
     {
       "name": "miniz_oxide",
@@ -1625,22 +1864,22 @@
     },
     {
       "name": "mlua",
-      "version": "0.10.5",
+      "version": "0.11.6",
       "authors": [
         "Aleksandr Orlenko <zxteam@pm.me>",
         "kyren <catherine@kyju.org>"
       ],
-      "description": "High level bindings to Lua 5.4/5.3/5.2/5.1 (including LuaJIT) and Luau\nwith async/await features and support of writing native Lua modules in Rust.\n",
+      "description": "High level bindings to Lua 5.5/5.4/5.3/5.2/5.1 (including LuaJIT) and Luau\nwith async/await features and support of writing native Lua modules in Rust.\n",
       "repository": "https://github.com/mlua-rs/mlua",
       "homepage": null
     },
     {
       "name": "mlua-sys",
-      "version": "0.6.8",
+      "version": "0.10.0",
       "authors": [
         "Aleksandr Orlenko <zxteam@pm.me>"
       ],
-      "description": "Low level (FFI) bindings to Lua 5.4/5.3/5.2/5.1 (including LuaJIT) and Luau\n",
+      "description": "Low level (FFI) bindings to Lua 5.5/5.4/5.3/5.2/5.1 (including LuaJIT) and Luau\n",
       "repository": "https://github.com/mlua-rs/mlua",
       "homepage": null
     },
@@ -1695,11 +1934,31 @@
       "homepage": "https://github.com/rust-mobile/ndk"
     },
     {
+      "name": "nix",
+      "version": "0.29.0",
+      "authors": [
+        "The nix-rust Project Developers"
+      ],
+      "description": "Rust friendly bindings to *nix APIs",
+      "repository": "https://github.com/nix-rust/nix",
+      "homepage": null
+    },
+    {
       "name": "no_std_io2",
       "version": "0.9.4",
       "authors": [],
       "description": "The bare essentials of std::io for use in no_std. Alloc support is optional.",
       "repository": "https://github.com/wcampbell0x2a/no-std-io2",
+      "homepage": null
+    },
+    {
+      "name": "nom",
+      "version": "7.1.3",
+      "authors": [
+        "contact@geoffroycouprie.com"
+      ],
+      "description": "A byte-oriented, zero-copy, parser combinators library",
+      "repository": "https://github.com/Geal/nom",
       "homepage": null
     },
     {
@@ -1794,6 +2053,16 @@
       ],
       "description": "Internal implementation details for ::num_enum (Procedural macros to make inter-operation between primitives and enums easier)",
       "repository": "https://github.com/illicitonion/num_enum",
+      "homepage": null
+    },
+    {
+      "name": "num_threads",
+      "version": "0.1.7",
+      "authors": [
+        "Jacob Pratt <open-source@jhpratt.dev>"
+      ],
+      "description": "A minimal library that determines the number of running threads for the current process.",
+      "repository": "https://github.com/jhpratt/num_threads",
       "homepage": null
     },
     {
@@ -1900,7 +2169,7 @@
     },
     {
       "name": "open",
-      "version": "5.3.3",
+      "version": "5.3.5",
       "authors": [
         "Sebastian Thiel <byronimo@gmail.com>"
       ],
@@ -1910,7 +2179,7 @@
     },
     {
       "name": "openssl",
-      "version": "0.10.76",
+      "version": "0.10.79",
       "authors": [
         "Steven Fackler <sfackler@gmail.com>"
       ],
@@ -1938,7 +2207,7 @@
     },
     {
       "name": "openssl-sys",
-      "version": "0.9.112",
+      "version": "0.9.115",
       "authors": [
         "Alex Crichton <alex@alexcrichton.com>",
         "Steven Fackler <sfackler@gmail.com>"
@@ -1956,6 +2225,17 @@
       "description": "Extends `Option` with additional operations",
       "repository": "https://github.com/soc/option-ext.git",
       "homepage": "https://github.com/soc/option-ext"
+    },
+    {
+      "name": "ordered-float",
+      "version": "4.6.0",
+      "authors": [
+        "Jonathan Reem <jonathan.reem@gmail.com>",
+        "Matt Brubeck <mbrubeck@limpet.net>"
+      ],
+      "description": "Wrappers for total ordering on floats",
+      "repository": "https://github.com/reem/rust-ordered-float",
+      "homepage": null
     },
     {
       "name": "parking_lot",
@@ -1999,13 +2279,23 @@
     },
     {
       "name": "pbkdf2",
-      "version": "0.12.2",
+      "version": "0.13.0",
       "authors": [
         "RustCrypto Developers"
       ],
       "description": "Generic implementation of PBKDF2",
-      "repository": "https://github.com/RustCrypto/password-hashes/tree/master/pbkdf2",
-      "homepage": null
+      "repository": "https://github.com/RustCrypto/password-hashes",
+      "homepage": "https://github.com/RustCrypto/password-hashes/tree/master/pbkdf2"
+    },
+    {
+      "name": "pem-rfc7468",
+      "version": "1.0.0",
+      "authors": [
+        "RustCrypto Developers"
+      ],
+      "description": "PEM Encoding (RFC 7468) for PKIX, PKCS, and CMS Structures, implementing a\nstrict subset of the original Privacy-Enhanced Mail encoding intended\nspecifically for use with cryptographic keys, certificates, and other messages.\nProvides a no_std-friendly, constant-time implementation suitable for use with\ncryptographic private keys.\n",
+      "repository": "https://github.com/RustCrypto/formats",
+      "homepage": "https://github.com/RustCrypto/formats/tree/master/pem-rfc7468"
     },
     {
       "name": "percent-encoding",
@@ -2018,6 +2308,96 @@
       "homepage": null
     },
     {
+      "name": "pest",
+      "version": "2.8.6",
+      "authors": [
+        "Dragoș Tiselice <dragostiselice@gmail.com>"
+      ],
+      "description": "The Elegant Parser",
+      "repository": "https://github.com/pest-parser/pest",
+      "homepage": "https://pest.rs/"
+    },
+    {
+      "name": "pest_derive",
+      "version": "2.8.6",
+      "authors": [
+        "Dragoș Tiselice <dragostiselice@gmail.com>"
+      ],
+      "description": "pest's derive macro",
+      "repository": "https://github.com/pest-parser/pest",
+      "homepage": "https://pest.rs/"
+    },
+    {
+      "name": "pest_generator",
+      "version": "2.8.6",
+      "authors": [
+        "Dragoș Tiselice <dragostiselice@gmail.com>"
+      ],
+      "description": "pest code generator",
+      "repository": "https://github.com/pest-parser/pest",
+      "homepage": "https://pest.rs/"
+    },
+    {
+      "name": "pest_meta",
+      "version": "2.8.6",
+      "authors": [
+        "Dragoș Tiselice <dragostiselice@gmail.com>"
+      ],
+      "description": "pest meta language parser and validator",
+      "repository": "https://github.com/pest-parser/pest",
+      "homepage": "https://pest.rs/"
+    },
+    {
+      "name": "phf",
+      "version": "0.11.3",
+      "authors": [
+        "Steven Fackler <sfackler@gmail.com>"
+      ],
+      "description": "Runtime support for perfect hash function data structures",
+      "repository": "https://github.com/rust-phf/rust-phf",
+      "homepage": null
+    },
+    {
+      "name": "phf_codegen",
+      "version": "0.11.3",
+      "authors": [
+        "Steven Fackler <sfackler@gmail.com>"
+      ],
+      "description": "Codegen library for PHF types",
+      "repository": "https://github.com/rust-phf/rust-phf",
+      "homepage": null
+    },
+    {
+      "name": "phf_generator",
+      "version": "0.11.3",
+      "authors": [
+        "Steven Fackler <sfackler@gmail.com>"
+      ],
+      "description": "PHF generation logic",
+      "repository": "https://github.com/rust-phf/rust-phf",
+      "homepage": null
+    },
+    {
+      "name": "phf_macros",
+      "version": "0.11.3",
+      "authors": [
+        "Steven Fackler <sfackler@gmail.com>"
+      ],
+      "description": "Macros to generate types in the phf crate",
+      "repository": "https://github.com/rust-phf/rust-phf",
+      "homepage": null
+    },
+    {
+      "name": "phf_shared",
+      "version": "0.11.3",
+      "authors": [
+        "Steven Fackler <sfackler@gmail.com>"
+      ],
+      "description": "Support code shared by PHF libraries",
+      "repository": "https://github.com/rust-phf/rust-phf",
+      "homepage": null
+    },
+    {
       "name": "pin-project-lite",
       "version": "0.2.17",
       "authors": [],
@@ -2027,23 +2407,13 @@
     },
     {
       "name": "pkg-config",
-      "version": "0.3.32",
+      "version": "0.3.33",
       "authors": [
         "Alex Crichton <alex@alexcrichton.com>"
       ],
       "description": "A library to run the pkg-config system tool at build time in order to be used in\nCargo build scripts.\n",
       "repository": "https://github.com/rust-lang/pkg-config-rs",
       "homepage": null
-    },
-    {
-      "name": "plain",
-      "version": "0.2.3",
-      "authors": [
-        "jzr"
-      ],
-      "description": "A small Rust library that allows users to reinterpret data of certain types safely.",
-      "repository": "https://github.com/randomites/plain",
-      "homepage": "https://github.com/randomites/plain"
     },
     {
       "name": "png",
@@ -2056,14 +2426,12 @@
       "homepage": null
     },
     {
-      "name": "potential_utf",
-      "version": "0.1.5",
-      "authors": [
-        "The ICU4X Project Developers"
-      ],
-      "description": "Unvalidated string and character types",
-      "repository": "https://github.com/unicode-org/icu4x",
-      "homepage": "https://icu4x.unicode.org"
+      "name": "portable-atomic",
+      "version": "1.13.1",
+      "authors": [],
+      "description": "Portable atomic types including support for 128-bit atomics, atomic float, etc.\n",
+      "repository": "https://github.com/taiki-e/portable-atomic",
+      "homepage": null
     },
     {
       "name": "powerfmt",
@@ -2125,8 +2493,30 @@
       "homepage": null
     },
     {
+      "name": "pulldown-cmark",
+      "version": "0.13.3",
+      "authors": [
+        "Raph Levien <raph.levien@gmail.com>",
+        "Marcus Klaas de Vries <mail@marcusklaas.nl>"
+      ],
+      "description": "A pull parser for CommonMark",
+      "repository": "https://github.com/raphlinus/pulldown-cmark",
+      "homepage": null
+    },
+    {
+      "name": "pulldown-cmark-escape",
+      "version": "0.11.0",
+      "authors": [
+        "Raph Levien <raph.levien@gmail.com>",
+        "Marcus Klaas de Vries <mail@marcusklaas.nl>"
+      ],
+      "description": "An escape library for HTML created in the pulldown-cmark project",
+      "repository": "https://github.com/raphlinus/pulldown-cmark",
+      "homepage": null
+    },
+    {
       "name": "pxfm",
-      "version": "0.1.28",
+      "version": "0.1.29",
       "authors": [
         "Radzivon Bartoshyk"
       ],
@@ -2172,13 +2562,100 @@
       "homepage": "https://github.com/r-efi/r-efi/wiki"
     },
     {
+      "name": "rand",
+      "version": "0.8.6",
+      "authors": [
+        "The Rand Project Developers",
+        "The Rust Project Developers"
+      ],
+      "description": "Random number generators and other randomness functionality.\n",
+      "repository": "https://github.com/rust-random/rand",
+      "homepage": "https://rust-random.github.io/book"
+    },
+    {
+      "name": "rand_core",
+      "version": "0.6.4",
+      "authors": [
+        "The Rand Project Developers",
+        "The Rust Project Developers"
+      ],
+      "description": "Core random number generator traits and tools for implementation.\n",
+      "repository": "https://github.com/rust-random/rand",
+      "homepage": "https://rust-random.github.io/book"
+    },
+    {
       "name": "ratatui",
-      "version": "0.29.0",
+      "version": "0.30.0",
       "authors": [
         "Florian Dehau <work@fdehau.com>",
         "The Ratatui Developers"
       ],
       "description": "A library that's all about cooking up terminal user interfaces",
+      "repository": "https://github.com/ratatui/ratatui",
+      "homepage": "https://ratatui.rs"
+    },
+    {
+      "name": "ratatui-core",
+      "version": "0.1.0",
+      "authors": [
+        "Florian Dehau <work@fdehau.com>",
+        "The Ratatui Developers"
+      ],
+      "description": "    Core types and traits for the Ratatui Terminal UI library.\n    Widget libraries should use this crate. Applications should use the main Ratatui crate.\n",
+      "repository": "https://github.com/ratatui/ratatui",
+      "homepage": "https://ratatui.rs"
+    },
+    {
+      "name": "ratatui-crossterm",
+      "version": "0.1.0",
+      "authors": [
+        "Florian Dehau <work@fdehau.com>",
+        "The Ratatui Developers"
+      ],
+      "description": "Crossterm backend for the Ratatui Terminal UI library.",
+      "repository": "https://github.com/ratatui/ratatui",
+      "homepage": "https://ratatui.rs"
+    },
+    {
+      "name": "ratatui-macros",
+      "version": "0.7.0",
+      "authors": [
+        "The Ratatui Developers"
+      ],
+      "description": "Macros for Ratatui",
+      "repository": "https://github.com/ratatui/ratatui",
+      "homepage": null
+    },
+    {
+      "name": "ratatui-termwiz",
+      "version": "0.1.0",
+      "authors": [
+        "Florian Dehau <work@fdehau.com>",
+        "The Ratatui Developers"
+      ],
+      "description": "Termwiz backend for the Ratatui Terminal UI library.",
+      "repository": "https://github.com/ratatui/ratatui",
+      "homepage": "https://ratatui.rs"
+    },
+    {
+      "name": "ratatui-textarea",
+      "version": "0.9.1",
+      "authors": [
+        "rhysd <lin90162@yahoo.co.jp>",
+        "The Ratatui Developers"
+      ],
+      "description": "ratatui-textarea is a simple yet powerful text editor widget for ratatui.\nMulti-line text editor can be easily put as part of your TUI application.\n",
+      "repository": "https://github.com/ratatui/ratatui-textarea",
+      "homepage": "https://github.com/ratatui/ratatui-textarea"
+    },
+    {
+      "name": "ratatui-widgets",
+      "version": "0.3.0",
+      "authors": [
+        "Florian Dehau <work@fdehau.com>",
+        "The Ratatui Developers"
+      ],
+      "description": "A collection of Ratatui widgets for building terminal user interfaces using Ratatui.",
       "repository": "https://github.com/ratatui/ratatui",
       "homepage": "https://ratatui.rs"
     },
@@ -2209,18 +2686,8 @@
       "homepage": null
     },
     {
-      "name": "redox_syscall",
-      "version": "0.7.5",
-      "authors": [
-        "Jeremy Soller <jackpot51@gmail.com>"
-      ],
-      "description": "A Rust library to access raw Redox system calls",
-      "repository": "https://gitlab.redox-os.org/redox-os/syscall",
-      "homepage": null
-    },
-    {
       "name": "redox_users",
-      "version": "0.4.6",
+      "version": "0.5.2",
       "authors": [
         "Jose Narvaez <goyox86@gmail.com>",
         "Wesley Hershberger <mggmugginsmc@gmail.com>"
@@ -2311,7 +2778,7 @@
     },
     {
       "name": "rustix",
-      "version": "0.38.44",
+      "version": "1.1.4",
       "authors": [
         "Dan Gohman <dev@sunfishcode.online>",
         "Jakub Konka <kubkon@jakubkonka.com>"
@@ -2321,15 +2788,12 @@
       "homepage": null
     },
     {
-      "name": "rustix",
-      "version": "1.1.4",
-      "authors": [
-        "Dan Gohman <dev@sunfishcode.online>",
-        "Jakub Konka <kubkon@jakubkonka.com>"
-      ],
-      "description": "Safe Rust bindings to POSIX/Unix/Linux/Winsock-like syscalls",
-      "repository": "https://github.com/bytecodealliance/rustix",
-      "homepage": null
+      "name": "rustls-pki-types",
+      "version": "1.14.1",
+      "authors": [],
+      "description": "Shared types for the rustls PKI ecosystem",
+      "repository": "https://github.com/rustls/pki-types",
+      "homepage": "https://github.com/rustls/pki-types"
     },
     {
       "name": "rustversion",
@@ -2481,7 +2945,7 @@
     },
     {
       "name": "serde_spanned",
-      "version": "0.6.9",
+      "version": "1.1.1",
       "authors": [],
       "description": "Serde-compatible spanned Value",
       "repository": "https://github.com/toml-rs/toml",
@@ -2507,7 +2971,7 @@
     },
     {
       "name": "sha1",
-      "version": "0.10.6",
+      "version": "0.11.0",
       "authors": [
         "RustCrypto Developers"
       ],
@@ -2584,6 +3048,16 @@
       "homepage": null
     },
     {
+      "name": "siphasher",
+      "version": "1.0.3",
+      "authors": [
+        "Frank Denis <github@pureftpd.org>"
+      ],
+      "description": "SipHash-2-4, SipHash-1-3 and 128-bit variants in pure Rust",
+      "repository": "https://github.com/jedisct1/rust-siphash",
+      "homepage": "https://docs.rs/siphasher"
+    },
+    {
       "name": "slab",
       "version": "0.4.12",
       "authors": [
@@ -2601,16 +3075,6 @@
       ],
       "description": "'Small vector' optimization: store up to a small number of items on the stack",
       "repository": "https://github.com/servo/rust-smallvec",
-      "homepage": null
-    },
-    {
-      "name": "stable_deref_trait",
-      "version": "1.2.1",
-      "authors": [
-        "Robert Grosse <n210241048576@gmail.com>"
-      ],
-      "description": "An unsafe marker trait for types like Box and Rc that dereference to a stable address even when moved, and hence can be used with libraries such as owning_ref and rental.\n",
-      "repository": "https://github.com/storyyeller/stable_deref_trait",
       "homepage": null
     },
     {
@@ -2646,7 +3110,7 @@
     },
     {
       "name": "strum",
-      "version": "0.26.3",
+      "version": "0.27.2",
       "authors": [
         "Peter Glotfelty <peter.glotfelty@microsoft.com>"
       ],
@@ -2656,7 +3120,7 @@
     },
     {
       "name": "strum_macros",
-      "version": "0.26.4",
+      "version": "0.27.2",
       "authors": [
         "Peter Glotfelty <peter.glotfelty@microsoft.com>"
       ],
@@ -2665,43 +3129,12 @@
       "homepage": "https://github.com/Peternator7/strum"
     },
     {
-      "name": "subtle",
-      "version": "2.6.1",
-      "authors": [
-        "Isis Lovecruft <isis@patternsinthevoid.net>",
-        "Henry de Valence <hdevalence@hdevalence.ca>"
-      ],
-      "description": "Pure-Rust traits and utilities for constant-time cryptographic implementations.",
-      "repository": "https://github.com/dalek-cryptography/subtle",
-      "homepage": "https://dalek.rs/"
-    },
-    {
       "name": "symphonia",
       "version": "0.5.5",
       "authors": [
         "Philip Deljanov <philip.deljanov@gmail.com>"
       ],
       "description": "Pure Rust media container and audio decoding library.",
-      "repository": "https://github.com/pdeljanov/Symphonia",
-      "homepage": "https://github.com/pdeljanov/Symphonia"
-    },
-    {
-      "name": "symphonia-bundle-flac",
-      "version": "0.5.5",
-      "authors": [
-        "Philip Deljanov <philip.deljanov@gmail.com>"
-      ],
-      "description": "Pure Rust FLAC demuxer and decoder (a part of project Symphonia).",
-      "repository": "https://github.com/pdeljanov/Symphonia",
-      "homepage": "https://github.com/pdeljanov/Symphonia"
-    },
-    {
-      "name": "symphonia-bundle-mp3",
-      "version": "0.5.5",
-      "authors": [
-        "Philip Deljanov <philip.deljanov@gmail.com>"
-      ],
-      "description": "Pure Rust MP1, MP2, and MP3 demuxer and decoder (a part of project Symphonia).",
       "repository": "https://github.com/pdeljanov/Symphonia",
       "homepage": "https://github.com/pdeljanov/Symphonia"
     },
@@ -2747,16 +3180,6 @@
       "homepage": "https://github.com/pdeljanov/Symphonia"
     },
     {
-      "name": "symphonia-utils-xiph",
-      "version": "0.5.5",
-      "authors": [
-        "Philip Deljanov <philip.deljanov@gmail.com>"
-      ],
-      "description": "Project Symphonia utilities for Xiph codecs and formats.",
-      "repository": "https://github.com/pdeljanov/Symphonia",
-      "homepage": "https://github.com/pdeljanov/Symphonia"
-    },
-    {
       "name": "syn",
       "version": "1.0.109",
       "authors": [
@@ -2774,16 +3197,6 @@
       ],
       "description": "Parser for Rust source code",
       "repository": "https://github.com/dtolnay/syn",
-      "homepage": null
-    },
-    {
-      "name": "synstructure",
-      "version": "0.13.2",
-      "authors": [
-        "Nika Layzell <nika@thelayzells.com>"
-      ],
-      "description": "Helper methods and macros for custom derives",
-      "repository": "https://github.com/mystor/synstructure",
       "homepage": null
     },
     {
@@ -2808,6 +3221,36 @@
       "description": "A library for managing temporary files and directories.",
       "repository": "https://github.com/Stebalien/tempfile",
       "homepage": "https://stebalien.com/projects/tempfile-rs/"
+    },
+    {
+      "name": "terminfo",
+      "version": "0.9.0",
+      "authors": [
+        "meh. <meh@schizofreni.co>"
+      ],
+      "description": "Terminal information.",
+      "repository": "https://github.com/meh/rust-terminfo",
+      "homepage": null
+    },
+    {
+      "name": "termios",
+      "version": "0.3.3",
+      "authors": [
+        "David Cuddeback <david.cuddeback@gmail.com>"
+      ],
+      "description": "Safe bindings for the termios library.",
+      "repository": "https://github.com/dcuddeback/termios-rs",
+      "homepage": "https://github.com/dcuddeback/termios-rs"
+    },
+    {
+      "name": "termwiz",
+      "version": "0.23.3",
+      "authors": [
+        "Wez Furlong"
+      ],
+      "description": "Terminal Wizardry for Unix and Windows",
+      "repository": "https://github.com/wezterm/wezterm",
+      "homepage": null
     },
     {
       "name": "thiserror",
@@ -2882,28 +3325,10 @@
       "homepage": null
     },
     {
-      "name": "tinystr",
-      "version": "0.8.3",
-      "authors": [
-        "The ICU4X Project Developers"
-      ],
-      "description": "A small ASCII-only bounded length string representation.",
-      "repository": "https://github.com/unicode-org/icu4x",
-      "homepage": null
-    },
-    {
       "name": "toml",
-      "version": "0.8.23",
+      "version": "1.1.2+spec-1.1.0",
       "authors": [],
       "description": "A native Rust encoder and decoder of TOML-formatted files and streams. Provides\nimplementations of the standard Serialize/Deserialize traits for TOML data to\nfacilitate deserializing and serializing Rust structures.\n",
-      "repository": "https://github.com/toml-rs/toml",
-      "homepage": null
-    },
-    {
-      "name": "toml_datetime",
-      "version": "0.6.11",
-      "authors": [],
-      "description": "A TOML-compatible datetime type",
       "repository": "https://github.com/toml-rs/toml",
       "homepage": null
     },
@@ -2912,14 +3337,6 @@
       "version": "1.1.1+spec-1.1.0",
       "authors": [],
       "description": "A TOML-compatible datetime type",
-      "repository": "https://github.com/toml-rs/toml",
-      "homepage": null
-    },
-    {
-      "name": "toml_edit",
-      "version": "0.22.27",
-      "authors": [],
-      "description": "Yet another format-preserving TOML parser.",
       "repository": "https://github.com/toml-rs/toml",
       "homepage": null
     },
@@ -2940,8 +3357,8 @@
       "homepage": null
     },
     {
-      "name": "toml_write",
-      "version": "0.1.2",
+      "name": "toml_writer",
+      "version": "1.1.1+spec-1.1.0",
       "authors": [],
       "description": "A low-level interface for writing out TOML\n",
       "repository": "https://github.com/toml-rs/toml",
@@ -3019,6 +3436,16 @@
       "homepage": null
     },
     {
+      "name": "ucd-trie",
+      "version": "0.1.7",
+      "authors": [
+        "Andrew Gallant <jamslam@gmail.com>"
+      ],
+      "description": "A trie for storing Unicode codepoint sets and maps.\n",
+      "repository": "https://github.com/BurntSushi/ucd-generate",
+      "homepage": "https://github.com/BurntSushi/ucd-generate"
+    },
+    {
       "name": "unarc-rs",
       "version": "0.6.1",
       "authors": [
@@ -3027,6 +3454,16 @@
       "description": "Universal archive extraction & decompression library for retro + modern formats (7z, ZIP, RAR, LHA/LZH, TAR, ARJ, ARC/PAK, ZOO, HA, UC2, SQ/SQ2, SQZ, HYP, gz, bz2, Z).",
       "repository": "https://github.com/mkrueger/unarc-rs",
       "homepage": "https://github.com/mkrueger/unarc-rs"
+    },
+    {
+      "name": "unicase",
+      "version": "2.9.0",
+      "authors": [
+        "Sean McArthur <sean@seanmonstar.com>"
+      ],
+      "description": "A case-insensitive wrapper around strings.",
+      "repository": "https://github.com/seanmonstar/unicase",
+      "homepage": null
     },
     {
       "name": "unicode-ident",
@@ -3051,24 +3488,13 @@
     },
     {
       "name": "unicode-truncate",
-      "version": "1.1.0",
+      "version": "2.0.1",
       "authors": [
         "Aetf <aetf@unlimitedcodeworks.xyz>"
       ],
       "description": "Unicode-aware algorithm to pad or truncate `str` in terms of displayed width.\n",
       "repository": "https://github.com/Aetf/unicode-truncate",
       "homepage": "https://github.com/Aetf/unicode-truncate"
-    },
-    {
-      "name": "unicode-width",
-      "version": "0.1.14",
-      "authors": [
-        "kwantam <kwantam@gmail.com>",
-        "Manish Goregaokar <manishsmail@gmail.com>"
-      ],
-      "description": "Determine displayed width of `char` and `str` types\naccording to Unicode Standard Annex #11 rules.\n",
-      "repository": "https://github.com/unicode-rs/unicode-width",
-      "homepage": "https://github.com/unicode-rs/unicode-width"
     },
     {
       "name": "unicode-width",
@@ -3126,7 +3552,7 @@
     },
     {
       "name": "ureq",
-      "version": "2.12.1",
+      "version": "3.3.0",
       "authors": [
         "Martin Algesten <martin@algesten.se>",
         "Jacob Hoffman-Andrews <ureq@hoffman-andrews.com>"
@@ -3136,24 +3562,48 @@
       "homepage": null
     },
     {
-      "name": "url",
-      "version": "2.5.8",
+      "name": "ureq-proto",
+      "version": "0.6.0",
       "authors": [
-        "The rust-url developers"
+        "Martin Algesten <martin@algesten.se>"
       ],
-      "description": "URL library for Rust, based on the WHATWG URL Standard",
-      "repository": "https://github.com/servo/rust-url",
+      "description": "ureq support crate",
+      "repository": "https://github.com/algesten/ureq-proto",
       "homepage": null
     },
     {
-      "name": "utf8_iter",
-      "version": "1.0.4",
+      "name": "utf8-zero",
+      "version": "0.8.1",
       "authors": [
-        "Henri Sivonen <hsivonen@hsivonen.fi>"
+        "Simon Sapin <simon.sapin@exyr.org>",
+        "Martin Algesten <martin@algesten.se>"
       ],
-      "description": "Iterator by char over potentially-invalid UTF-8 in &[u8]",
-      "repository": "https://github.com/hsivonen/utf8_iter",
-      "homepage": "https://docs.rs/utf8_iter/"
+      "description": "Zero-copy, incremental UTF-8 decoding with error handling",
+      "repository": "https://github.com/algesten/utf8-zero",
+      "homepage": null
+    },
+    {
+      "name": "utf8parse",
+      "version": "0.2.2",
+      "authors": [
+        "Joe Wilm <joe@jwilm.com>",
+        "Christian Duerr <contact@christianduerr.com>"
+      ],
+      "description": "Table-driven UTF-8 parser",
+      "repository": "https://github.com/alacritty/vte",
+      "homepage": null
+    },
+    {
+      "name": "uuid",
+      "version": "1.23.1",
+      "authors": [
+        "Ashley Mannix<ashleymannix@live.com.au>",
+        "Dylan DPC<dylan.dpc@gmail.com>",
+        "Hunar Roop Kahlon<hunar.roop@gmail.com>"
+      ],
+      "description": "A library to generate and parse UUIDs.",
+      "repository": "https://github.com/uuid-rs/uuid",
+      "homepage": "https://github.com/uuid-rs/uuid"
     },
     {
       "name": "vcpkg",
@@ -3184,6 +3634,16 @@
       "homepage": null
     },
     {
+      "name": "vtparse",
+      "version": "0.6.2",
+      "authors": [
+        "Wez Furlong <wez@wezfurlong.org>"
+      ],
+      "description": "Low level escape sequence parser",
+      "repository": "https://github.com/wez/wezterm",
+      "homepage": null
+    },
+    {
       "name": "walkdir",
       "version": "2.5.0",
       "authors": [
@@ -3205,7 +3665,7 @@
     },
     {
       "name": "wasip2",
-      "version": "1.0.2+wasi-0.2.9",
+      "version": "1.0.3+wasi-0.2.9",
       "authors": [],
       "description": "WASIp2 API bindings for Rust",
       "repository": "https://github.com/bytecodealliance/wasi-rs",
@@ -3221,7 +3681,7 @@
     },
     {
       "name": "wasm-bindgen",
-      "version": "0.2.118",
+      "version": "0.2.121",
       "authors": [
         "The wasm-bindgen Developers"
       ],
@@ -3231,7 +3691,7 @@
     },
     {
       "name": "wasm-bindgen-futures",
-      "version": "0.4.68",
+      "version": "0.4.71",
       "authors": [
         "The wasm-bindgen Developers"
       ],
@@ -3241,7 +3701,7 @@
     },
     {
       "name": "wasm-bindgen-macro",
-      "version": "0.2.118",
+      "version": "0.2.121",
       "authors": [
         "The wasm-bindgen Developers"
       ],
@@ -3251,7 +3711,7 @@
     },
     {
       "name": "wasm-bindgen-macro-support",
-      "version": "0.2.118",
+      "version": "0.2.121",
       "authors": [
         "The wasm-bindgen Developers"
       ],
@@ -3261,7 +3721,7 @@
     },
     {
       "name": "wasm-bindgen-shared",
-      "version": "0.2.118",
+      "version": "0.2.121",
       "authors": [
         "The wasm-bindgen Developers"
       ],
@@ -3299,13 +3759,21 @@
     },
     {
       "name": "web-sys",
-      "version": "0.3.95",
+      "version": "0.3.98",
       "authors": [
         "The wasm-bindgen Developers"
       ],
       "description": "Bindings for all Web APIs, a procedurally generated crate from WebIDL\n",
       "repository": "https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/web-sys",
       "homepage": "https://wasm-bindgen.github.io/wasm-bindgen/web-sys/index.html"
+    },
+    {
+      "name": "webpki-root-certs",
+      "version": "1.0.7",
+      "authors": [],
+      "description": "Mozilla trusted certificate authorities in self-signed X.509 format for use with crates other than webpki",
+      "repository": "https://github.com/rustls/webpki-roots",
+      "homepage": "https://github.com/rustls/webpki-roots"
     },
     {
       "name": "weezl",
@@ -3318,8 +3786,60 @@
       "homepage": null
     },
     {
+      "name": "wezterm-bidi",
+      "version": "0.2.3",
+      "authors": [],
+      "description": "The Unicode Bidi Algorithm (UBA)",
+      "repository": "https://github.com/wez/wezterm",
+      "homepage": null
+    },
+    {
+      "name": "wezterm-blob-leases",
+      "version": "0.1.1",
+      "authors": [],
+      "description": "Manage image blob caching/leasing for wezterm",
+      "repository": "https://github.com/wezterm/wezterm",
+      "homepage": null
+    },
+    {
+      "name": "wezterm-color-types",
+      "version": "0.3.0",
+      "authors": [
+        "Wez Furlong"
+      ],
+      "description": "Types for working with colors",
+      "repository": "https://github.com/wez/wezterm",
+      "homepage": null
+    },
+    {
+      "name": "wezterm-dynamic",
+      "version": "0.2.1",
+      "authors": [],
+      "description": "config serialization for wezterm via dynamic json-like data values",
+      "repository": "https://github.com/wezterm/wezterm",
+      "homepage": null
+    },
+    {
+      "name": "wezterm-dynamic-derive",
+      "version": "0.1.1",
+      "authors": [],
+      "description": "config serialization for wezterm via dynamic json-like data values",
+      "repository": "https://github.com/wezterm/wezterm",
+      "homepage": null
+    },
+    {
+      "name": "wezterm-input-types",
+      "version": "0.1.0",
+      "authors": [
+        "Wez Furlong <wez@wezfurlong.org>"
+      ],
+      "description": "config serialization for wezterm via dynamic json-like data values",
+      "repository": "https://github.com/wez/wezterm",
+      "homepage": null
+    },
+    {
       "name": "which",
-      "version": "7.0.3",
+      "version": "8.0.2",
       "authors": [
         "Harry Fei <tiziyuanfang@gmail.com>, Jacob Kiesel <jake@bitcrafters.co>"
       ],
@@ -3467,17 +3987,7 @@
     },
     {
       "name": "windows-sys",
-      "version": "0.48.0",
-      "authors": [
-        "Microsoft"
-      ],
-      "description": "Rust for Windows",
-      "repository": "https://github.com/microsoft/windows-rs",
-      "homepage": null
-    },
-    {
-      "name": "windows-sys",
-      "version": "0.59.0",
+      "version": "0.60.2",
       "authors": [
         "Microsoft"
       ],
@@ -3505,20 +4015,8 @@
     },
     {
       "name": "windows-targets",
-      "version": "0.48.5",
-      "authors": [
-        "Microsoft"
-      ],
-      "description": "Import libs for Windows",
-      "repository": "https://github.com/microsoft/windows-rs",
-      "homepage": null
-    },
-    {
-      "name": "windows-targets",
-      "version": "0.52.6",
-      "authors": [
-        "Microsoft"
-      ],
+      "version": "0.53.5",
+      "authors": [],
       "description": "Import libs for Windows",
       "repository": "https://github.com/microsoft/windows-rs",
       "homepage": null
@@ -3543,20 +4041,8 @@
     },
     {
       "name": "windows_aarch64_gnullvm",
-      "version": "0.48.5",
-      "authors": [
-        "Microsoft"
-      ],
-      "description": "Import lib for Windows",
-      "repository": "https://github.com/microsoft/windows-rs",
-      "homepage": null
-    },
-    {
-      "name": "windows_aarch64_gnullvm",
-      "version": "0.52.6",
-      "authors": [
-        "Microsoft"
-      ],
+      "version": "0.53.1",
+      "authors": [],
       "description": "Import lib for Windows",
       "repository": "https://github.com/microsoft/windows-rs",
       "homepage": null
@@ -3573,20 +4059,8 @@
     },
     {
       "name": "windows_aarch64_msvc",
-      "version": "0.48.5",
-      "authors": [
-        "Microsoft"
-      ],
-      "description": "Import lib for Windows",
-      "repository": "https://github.com/microsoft/windows-rs",
-      "homepage": null
-    },
-    {
-      "name": "windows_aarch64_msvc",
-      "version": "0.52.6",
-      "authors": [
-        "Microsoft"
-      ],
+      "version": "0.53.1",
+      "authors": [],
       "description": "Import lib for Windows",
       "repository": "https://github.com/microsoft/windows-rs",
       "homepage": null
@@ -3603,160 +4077,90 @@
     },
     {
       "name": "windows_i686_gnu",
-      "version": "0.48.5",
-      "authors": [
-        "Microsoft"
-      ],
-      "description": "Import lib for Windows",
-      "repository": "https://github.com/microsoft/windows-rs",
-      "homepage": null
-    },
-    {
-      "name": "windows_i686_gnu",
-      "version": "0.52.6",
-      "authors": [
-        "Microsoft"
-      ],
+      "version": "0.53.1",
+      "authors": [],
       "description": "Import lib for Windows",
       "repository": "https://github.com/microsoft/windows-rs",
       "homepage": null
     },
     {
       "name": "windows_i686_gnullvm",
-      "version": "0.52.6",
-      "authors": [
-        "Microsoft"
-      ],
-      "description": "Import lib for Windows",
-      "repository": "https://github.com/microsoft/windows-rs",
-      "homepage": null
-    },
-    {
-      "name": "windows_i686_msvc",
-      "version": "0.42.2",
-      "authors": [
-        "Microsoft"
-      ],
-      "description": "Import lib for Windows",
-      "repository": "https://github.com/microsoft/windows-rs",
-      "homepage": null
-    },
-    {
-      "name": "windows_i686_msvc",
-      "version": "0.48.5",
-      "authors": [
-        "Microsoft"
-      ],
-      "description": "Import lib for Windows",
-      "repository": "https://github.com/microsoft/windows-rs",
-      "homepage": null
-    },
-    {
-      "name": "windows_i686_msvc",
-      "version": "0.52.6",
-      "authors": [
-        "Microsoft"
-      ],
-      "description": "Import lib for Windows",
-      "repository": "https://github.com/microsoft/windows-rs",
-      "homepage": null
-    },
-    {
-      "name": "windows_x86_64_gnu",
-      "version": "0.42.2",
-      "authors": [
-        "Microsoft"
-      ],
-      "description": "Import lib for Windows",
-      "repository": "https://github.com/microsoft/windows-rs",
-      "homepage": null
-    },
-    {
-      "name": "windows_x86_64_gnu",
-      "version": "0.48.5",
-      "authors": [
-        "Microsoft"
-      ],
-      "description": "Import lib for Windows",
-      "repository": "https://github.com/microsoft/windows-rs",
-      "homepage": null
-    },
-    {
-      "name": "windows_x86_64_gnu",
-      "version": "0.52.6",
-      "authors": [
-        "Microsoft"
-      ],
-      "description": "Import lib for Windows",
-      "repository": "https://github.com/microsoft/windows-rs",
-      "homepage": null
-    },
-    {
-      "name": "windows_x86_64_gnullvm",
-      "version": "0.42.2",
-      "authors": [
-        "Microsoft"
-      ],
-      "description": "Import lib for Windows",
-      "repository": "https://github.com/microsoft/windows-rs",
-      "homepage": null
-    },
-    {
-      "name": "windows_x86_64_gnullvm",
-      "version": "0.48.5",
-      "authors": [
-        "Microsoft"
-      ],
-      "description": "Import lib for Windows",
-      "repository": "https://github.com/microsoft/windows-rs",
-      "homepage": null
-    },
-    {
-      "name": "windows_x86_64_gnullvm",
-      "version": "0.52.6",
-      "authors": [
-        "Microsoft"
-      ],
-      "description": "Import lib for Windows",
-      "repository": "https://github.com/microsoft/windows-rs",
-      "homepage": null
-    },
-    {
-      "name": "windows_x86_64_msvc",
-      "version": "0.42.2",
-      "authors": [
-        "Microsoft"
-      ],
-      "description": "Import lib for Windows",
-      "repository": "https://github.com/microsoft/windows-rs",
-      "homepage": null
-    },
-    {
-      "name": "windows_x86_64_msvc",
-      "version": "0.48.5",
-      "authors": [
-        "Microsoft"
-      ],
-      "description": "Import lib for Windows",
-      "repository": "https://github.com/microsoft/windows-rs",
-      "homepage": null
-    },
-    {
-      "name": "windows_x86_64_msvc",
-      "version": "0.52.6",
-      "authors": [
-        "Microsoft"
-      ],
-      "description": "Import lib for Windows",
-      "repository": "https://github.com/microsoft/windows-rs",
-      "homepage": null
-    },
-    {
-      "name": "winnow",
-      "version": "0.7.15",
+      "version": "0.53.1",
       "authors": [],
-      "description": "A byte-oriented, zero-copy, parser combinators library",
-      "repository": "https://github.com/winnow-rs/winnow",
+      "description": "Import lib for Windows",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "homepage": null
+    },
+    {
+      "name": "windows_i686_msvc",
+      "version": "0.42.2",
+      "authors": [
+        "Microsoft"
+      ],
+      "description": "Import lib for Windows",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "homepage": null
+    },
+    {
+      "name": "windows_i686_msvc",
+      "version": "0.53.1",
+      "authors": [],
+      "description": "Import lib for Windows",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "homepage": null
+    },
+    {
+      "name": "windows_x86_64_gnu",
+      "version": "0.42.2",
+      "authors": [
+        "Microsoft"
+      ],
+      "description": "Import lib for Windows",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "homepage": null
+    },
+    {
+      "name": "windows_x86_64_gnu",
+      "version": "0.53.1",
+      "authors": [],
+      "description": "Import lib for Windows",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "homepage": null
+    },
+    {
+      "name": "windows_x86_64_gnullvm",
+      "version": "0.42.2",
+      "authors": [
+        "Microsoft"
+      ],
+      "description": "Import lib for Windows",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "homepage": null
+    },
+    {
+      "name": "windows_x86_64_gnullvm",
+      "version": "0.53.1",
+      "authors": [],
+      "description": "Import lib for Windows",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "homepage": null
+    },
+    {
+      "name": "windows_x86_64_msvc",
+      "version": "0.42.2",
+      "authors": [
+        "Microsoft"
+      ],
+      "description": "Import lib for Windows",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "homepage": null
+    },
+    {
+      "name": "windows_x86_64_msvc",
+      "version": "0.53.1",
+      "authors": [],
+      "description": "Import lib for Windows",
+      "repository": "https://github.com/microsoft/windows-rs",
       "homepage": null
     },
     {
@@ -3768,18 +4172,18 @@
       "homepage": null
     },
     {
-      "name": "winsafe",
-      "version": "0.0.19",
+      "name": "wit-bindgen",
+      "version": "0.51.0",
       "authors": [
-        "Rodrigo Cesar de Freitas Dias <rcesar@gmail.com>"
+        "Alex Crichton <alex@alexcrichton.com>"
       ],
-      "description": "Windows API and GUI in safe, idiomatic Rust.",
-      "repository": "https://github.com/rodrigocfd/winsafe",
-      "homepage": null
+      "description": "Rust bindings generator and runtime support for WIT and the component model.\nUsed when compiling Rust programs to the component model.\n",
+      "repository": "https://github.com/bytecodealliance/wit-bindgen",
+      "homepage": "https://github.com/bytecodealliance/wit-bindgen"
     },
     {
       "name": "wit-bindgen",
-      "version": "0.51.0",
+      "version": "0.57.1",
       "authors": [
         "Alex Crichton <alex@alexcrichton.com>"
       ],
@@ -3838,16 +4242,6 @@
       "homepage": "https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wit-parser"
     },
     {
-      "name": "writeable",
-      "version": "0.6.3",
-      "authors": [
-        "The ICU4X Project Developers"
-      ],
-      "description": "A more efficient alternative to fmt::Display",
-      "repository": "https://github.com/unicode-org/icu4x",
-      "homepage": null
-    },
-    {
       "name": "x11rb",
       "version": "0.13.2",
       "authors": [
@@ -3902,26 +4296,6 @@
       "homepage": null
     },
     {
-      "name": "yoke",
-      "version": "0.8.2",
-      "authors": [
-        "Manish Goregaokar <manishsmail@gmail.com>"
-      ],
-      "description": "Abstraction allowing borrowed data to be carried along with the backing data it borrows from",
-      "repository": "https://github.com/unicode-org/icu4x",
-      "homepage": null
-    },
-    {
-      "name": "yoke-derive",
-      "version": "0.8.2",
-      "authors": [
-        "Manish Goregaokar <manishsmail@gmail.com>"
-      ],
-      "description": "Custom derive for the yoke crate",
-      "repository": "https://github.com/unicode-org/icu4x",
-      "homepage": null
-    },
-    {
       "name": "zerocopy",
       "version": "0.8.48",
       "authors": [
@@ -3944,26 +4318,6 @@
       "homepage": null
     },
     {
-      "name": "zerofrom",
-      "version": "0.1.7",
-      "authors": [
-        "Manish Goregaokar <manishsmail@gmail.com>"
-      ],
-      "description": "ZeroFrom trait for constructing",
-      "repository": "https://github.com/unicode-org/icu4x",
-      "homepage": null
-    },
-    {
-      "name": "zerofrom-derive",
-      "version": "0.1.7",
-      "authors": [
-        "Manish Goregaokar <manishsmail@gmail.com>"
-      ],
-      "description": "Custom derive for the zerofrom crate",
-      "repository": "https://github.com/unicode-org/icu4x",
-      "homepage": null
-    },
-    {
       "name": "zeroize",
       "version": "1.8.2",
       "authors": [
@@ -3974,38 +4328,8 @@
       "homepage": "https://github.com/RustCrypto/utils/tree/master/zeroize"
     },
     {
-      "name": "zerotrie",
-      "version": "0.2.4",
-      "authors": [
-        "The ICU4X Project Developers"
-      ],
-      "description": "A data structure that efficiently maps strings to integers",
-      "repository": "https://github.com/unicode-org/icu4x",
-      "homepage": "https://icu4x.unicode.org"
-    },
-    {
-      "name": "zerovec",
-      "version": "0.11.6",
-      "authors": [
-        "The ICU4X Project Developers"
-      ],
-      "description": "Zero-copy vector backed by a byte array",
-      "repository": "https://github.com/unicode-org/icu4x",
-      "homepage": null
-    },
-    {
-      "name": "zerovec-derive",
-      "version": "0.11.3",
-      "authors": [
-        "Manish Goregaokar <manishsmail@gmail.com>"
-      ],
-      "description": "Custom derive for the zerovec crate",
-      "repository": "https://github.com/unicode-org/icu4x",
-      "homepage": null
-    },
-    {
       "name": "zip",
-      "version": "8.5.1",
+      "version": "8.6.0",
       "authors": [
         "Mathijs van de Nes <git@mathijs.vd-nes.nl>",
         "Marli Frost <marli@frost.red>",
