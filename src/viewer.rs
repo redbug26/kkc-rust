@@ -24,6 +24,7 @@ use std::time::{Duration, Instant};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 mod syntax;
+mod markdown;
 mod viewer_decode;
 mod viewer_render;
 mod viewer_search;
@@ -99,6 +100,18 @@ pub fn debug_log_path() -> Option<PathBuf> {
     DEBUG_LOG_PATH.get().cloned()
 }
 
+fn is_markdown_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| {
+            matches!(
+                ext.to_ascii_lowercase().as_str(),
+                "md" | "markdown" | "mdown" | "mkd"
+            )
+        })
+        .unwrap_or(false)
+}
+
 #[derive(Debug)]
 pub struct Viewer {
     pub path: PathBuf,
@@ -124,6 +137,8 @@ pub struct Viewer {
     pub mask_enabled: bool,
     pub preproc_ops: Vec<PreprocOp>,
     text_lines: Vec<String>,
+    markdown_lines: Vec<Line<'static>>,
+    markdown_plain_lines: Vec<String>,
     ansi_lines: Vec<String>,
     ansi_screen_lines: Vec<AnsiLine>,
     image: Option<ImageInfo>,
@@ -152,6 +167,7 @@ struct PluginDocumentCache {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewMode {
     Text,
+    Markdown,
     Hex,
     Ansi,
     Image,
@@ -347,6 +363,8 @@ impl Viewer {
             mask_enabled: true,
             preproc_ops: Vec::new(),
             text_lines: lines,
+            markdown_lines: Vec::new(),
+            markdown_plain_lines: Vec::new(),
             ansi_lines: Vec::new(),
             ansi_screen_lines: Vec::new(),
             image: None,
@@ -389,7 +407,12 @@ impl Viewer {
         let mode = if music.is_some() {
             ViewMode::Module
         } else {
-            detect_mode(path, &raw)
+            let detected = detect_mode(path, &raw);
+            if matches!(detected, ViewMode::Text) && is_markdown_path(path) {
+                ViewMode::Markdown
+            } else {
+                detected
+            }
         };
         let encoding = default_encoding_for_mode(mode);
         let ansi_canvas_mode = if matches!(mode, ViewMode::Ansi) {
@@ -421,6 +444,8 @@ impl Viewer {
             mask_enabled: true,
             preproc_ops: Vec::new(),
             text_lines: Vec::new(),
+            markdown_lines: Vec::new(),
+            markdown_plain_lines: Vec::new(),
             ansi_lines: Vec::new(),
             ansi_screen_lines: Vec::new(),
             image,
@@ -459,6 +484,7 @@ impl Viewer {
         }
         match self.mode {
             ViewMode::Text => "Text",
+            ViewMode::Markdown => "Markdown",
             ViewMode::Hex => "Hex",
             ViewMode::Ansi => "Ansi",
             ViewMode::Image => "Image",
@@ -576,6 +602,7 @@ impl Viewer {
             ViewMode::Image => 1,
             ViewMode::Module => self.module_info_line_count().max(1),
             ViewMode::Hex => self.hex_line_count(),
+            ViewMode::Markdown => self.markdown_plain_lines.len().max(1),
             _ => self.current_plain_lines().len().max(1),
         }
     }
@@ -770,7 +797,7 @@ impl Viewer {
     }
 
     pub fn toggle_wrap(&mut self) {
-        if matches!(self.mode, ViewMode::Text | ViewMode::Ansi) {
+        if matches!(self.mode, ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi) {
             self.wrap = !self.wrap;
             self.wrap_row_offset = 0;
         }
@@ -819,7 +846,7 @@ impl Viewer {
     pub fn supports_mouse_text_selection(&self) -> bool {
         !self.wrap
             && self.viewer_plugin.is_none()
-            && matches!(self.mode, ViewMode::Text | ViewMode::Ansi)
+            && matches!(self.mode, ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi)
     }
 
     pub fn clear_mouse_selection(&mut self) {
@@ -967,7 +994,7 @@ impl Viewer {
     pub fn scroll_up_visual(&mut self, text_width: usize) {
         if !self.wrap
             || self.viewer_plugin.is_some()
-            || !matches!(self.mode, ViewMode::Text | ViewMode::Ansi)
+            || !matches!(self.mode, ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi)
             || text_width == 0
         {
             self.scroll_up();
@@ -989,7 +1016,7 @@ impl Viewer {
     pub fn scroll_down_visual(&mut self, text_width: usize) {
         if !self.wrap
             || self.viewer_plugin.is_some()
-            || !matches!(self.mode, ViewMode::Text | ViewMode::Ansi)
+            || !matches!(self.mode, ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi)
             || text_width == 0
         {
             self.scroll_down();
@@ -1026,7 +1053,7 @@ impl Viewer {
     pub fn page_up_visual(&mut self, visual_rows: usize, text_width: usize) {
         if !self.wrap
             || self.viewer_plugin.is_some()
-            || !matches!(self.mode, ViewMode::Text | ViewMode::Ansi)
+            || !matches!(self.mode, ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi)
             || text_width == 0
         {
             self.page_up(visual_rows);
@@ -1046,7 +1073,7 @@ impl Viewer {
     pub fn page_down_visual(&mut self, visual_rows: usize, text_width: usize) {
         if !self.wrap
             || self.viewer_plugin.is_some()
-            || !matches!(self.mode, ViewMode::Text | ViewMode::Ansi)
+            || !matches!(self.mode, ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi)
             || text_width == 0
         {
             self.page_down(visual_rows);
@@ -1069,7 +1096,11 @@ impl Viewer {
     }
 
     pub fn goto_first_non_blank(&mut self) {
-        if matches!(self.mode, ViewMode::Text | ViewMode::Ansi) && self.viewer_plugin.is_none() {
+        if matches!(
+            self.mode,
+            ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi
+        ) && self.viewer_plugin.is_none()
+        {
             let line = self
                 .current_plain_lines()
                 .iter()
@@ -1097,7 +1128,7 @@ impl Viewer {
             return 1;
         }
         if !self.wrap
-            || !matches!(self.mode, ViewMode::Text | ViewMode::Ansi)
+            || !matches!(self.mode, ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi)
             || self.viewer_plugin.is_some()
             || text_width == 0
         {
@@ -1128,7 +1159,11 @@ impl Viewer {
     /// e.g. for 999 lines → "999│ " = 5, for 9 lines → "9│ " = 3.
     /// Returns 0 for hex/image/plugin-document modes.
     pub fn line_number_width(&self) -> usize {
-        if !matches!(self.mode, ViewMode::Text | ViewMode::Ansi) || self.viewer_plugin.is_some() {
+        if !matches!(
+            self.mode,
+            ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi
+        ) || self.viewer_plugin.is_some()
+        {
             return 0;
         }
         let n = self.line_count().max(1);
@@ -1137,19 +1172,19 @@ impl Viewer {
     }
 
     pub fn scroll_left(&mut self, amount: usize) {
-        if matches!(self.mode, ViewMode::Text | ViewMode::Ansi) && !self.wrap {
+        if matches!(self.mode, ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi) && !self.wrap {
             self.hscroll = self.hscroll.saturating_sub(amount);
         }
     }
 
     pub fn scroll_right(&mut self, amount: usize) {
-        if matches!(self.mode, ViewMode::Text | ViewMode::Ansi) && !self.wrap {
+        if matches!(self.mode, ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi) && !self.wrap {
             self.hscroll = self.hscroll.saturating_add(amount);
         }
     }
 
     pub fn scroll_left_max(&mut self) {
-        if matches!(self.mode, ViewMode::Text | ViewMode::Ansi) {
+        if matches!(self.mode, ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi) {
             self.hscroll = 0;
         }
     }
@@ -1196,11 +1231,21 @@ impl Viewer {
         }
         match self.mode {
             ViewMode::Text => self.render_text_like_lines(selected_width, start, height),
+            ViewMode::Markdown => self.render_markdown_lines(start, height),
             ViewMode::Ansi => self.render_ansi_lines(selected_width, start, height),
             ViewMode::Image => self.render_image_fallback_lines(selected_width, height),
             ViewMode::Module => self.render_module_lines(selected_width, start, height),
             ViewMode::Hex => self.render_hex_lines(selected_width, start, height),
         }
+    }
+
+    fn render_markdown_lines(&self, start: usize, height: usize) -> Vec<Line<'static>> {
+        self.markdown_lines
+            .iter()
+            .skip(start)
+            .take(height)
+            .cloned()
+            .collect()
     }
 
     fn render_module_lines(
@@ -1871,6 +1916,7 @@ impl Viewer {
     pub fn current_plain_lines(&self) -> &[String] {
         match self.mode {
             ViewMode::Text => &self.text_lines,
+            ViewMode::Markdown => &self.markdown_plain_lines,
             ViewMode::Hex => &[],
             ViewMode::Ansi => &self.ansi_lines,
             ViewMode::Image => &[],
@@ -1881,6 +1927,7 @@ impl Viewer {
     fn plain_line_at(&self, idx: usize) -> String {
         match self.mode {
             ViewMode::Text => self.text_lines.get(idx).cloned().unwrap_or_default(),
+            ViewMode::Markdown => self.markdown_plain_lines.get(idx).cloned().unwrap_or_default(),
             ViewMode::Hex => self.hex_plain_line_at(idx),
             ViewMode::Ansi => self.ansi_lines.get(idx).cloned().unwrap_or_default(),
             ViewMode::Image => String::new(),
@@ -2175,6 +2222,7 @@ impl Viewer {
     fn viewer_mode_key(&self) -> Option<&'static str> {
         match self.mode {
             ViewMode::Text => Some("text"),
+            ViewMode::Markdown => None,
             ViewMode::Ansi => Some("ansi"),
             ViewMode::Image => Some("image"),
             ViewMode::Module => None,
@@ -2217,6 +2265,8 @@ impl Viewer {
 
         // Clear cached lines — other modes will be rebuilt lazily when accessed.
         self.text_lines = Vec::new();
+        self.markdown_lines = Vec::new();
+        self.markdown_plain_lines = Vec::new();
         self.ansi_lines = Vec::new();
         self.ansi_screen_lines = Vec::new();
         self.image = detect_image_info(&self.path, &self.raw);
@@ -2232,6 +2282,17 @@ impl Viewer {
                 if self.text_lines.is_empty() {
                     self.text_lines =
                         text_lines(&self.raw, self.line_feed, &self.preproc_ops, self.encoding);
+                }
+            }
+            ViewMode::Markdown => {
+                if self.markdown_lines.is_empty() {
+                    let source =
+                        text_lines(&self.raw, self.line_feed, &self.preproc_ops, self.encoding)
+                            .join("\n");
+                    let rendered = markdown::render_commonmark(&source, self.markdown_table_width_hint());
+                    self.markdown_plain_lines =
+                        rendered.iter().map(|line| line.plain.clone()).collect();
+                    self.markdown_lines = rendered.into_iter().map(|line| line.styled).collect();
                 }
             }
             ViewMode::Hex => {}
@@ -2260,6 +2321,19 @@ impl Viewer {
             ViewMode::Image => {}
             ViewMode::Module => {}
         }
+    }
+
+    fn markdown_table_width_hint(&self) -> usize {
+        // Keep markdown tables responsive to the current terminal width.
+        // We subtract borders/margins and line-number gutter to approximate the
+        // effective viewer content width.
+        terminal_size()
+            .map(|(cols, _)| {
+                let cols = cols as usize;
+                let gutter = self.line_number_width();
+                cols.saturating_sub(gutter + 4).clamp(24, 220)
+            })
+            .unwrap_or(96)
     }
 
     pub fn start_module_playback(&mut self) {

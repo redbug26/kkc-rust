@@ -55,6 +55,7 @@ fn render_quick_preview(
     let mode_str = match app.quick_preview_forced_mode {
         None => format!("Auto:{}", viewer.mode_label()),
         Some(ViewMode::Text) => "Text".to_string(),
+        Some(ViewMode::Markdown) => "Markdown".to_string(),
         Some(ViewMode::Hex) => "Hex".to_string(),
         Some(ViewMode::Ansi) => "Ansi".to_string(),
         Some(ViewMode::Image) => "Image".to_string(),

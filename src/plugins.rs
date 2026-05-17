@@ -27,10 +27,6 @@ const BUNDLED_XML_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/xml_view
 const BUNDLED_XML_VIEWER_MANIFEST: &str = include_str!("../assets/plugins/xml_viewer/plugin.toml");
 const BUNDLED_CSV_VIEWER_PLUGIN: &str = include_str!("../assets/plugins/csv_viewer/plugin.lua");
 const BUNDLED_CSV_VIEWER_MANIFEST: &str = include_str!("../assets/plugins/csv_viewer/plugin.toml");
-const BUNDLED_MARKDOWN_VIEWER_PLUGIN: &str =
-    include_str!("../assets/plugins/markdown_viewer/plugin.lua");
-const BUNDLED_MARKDOWN_VIEWER_MANIFEST: &str =
-    include_str!("../assets/plugins/markdown_viewer/plugin.toml");
 const BUNDLED_TEXT_SYNTAX_PLUGIN: &str = include_str!("../assets/plugins/text_syntax/plugin.lua");
 const BUNDLED_TEXT_SYNTAX_MANIFEST: &str =
     include_str!("../assets/plugins/text_syntax/plugin.toml");
@@ -49,7 +45,6 @@ const BUNDLED_PLUGIN_DIRS: &[&str] = &[
     "json_viewer",
     "xml_viewer",
     "csv_viewer",
-    "markdown_viewer",
     "text_syntax",
     "git_action",
     "git_commits",
@@ -2547,17 +2542,6 @@ fn install_bundled_plugins(plugins_dir: &Path) -> Result<()> {
     write_bundled_file(&csv_dir.join("plugin.lua"), BUNDLED_CSV_VIEWER_PLUGIN)?;
     write_bundled_file(&csv_dir.join("plugin.toml"), BUNDLED_CSV_VIEWER_MANIFEST)?;
 
-    let markdown_dir = plugins_dir.join("markdown_viewer");
-    fs::create_dir_all(&markdown_dir)?;
-    write_bundled_file(
-        &markdown_dir.join("plugin.lua"),
-        BUNDLED_MARKDOWN_VIEWER_PLUGIN,
-    )?;
-    write_bundled_file(
-        &markdown_dir.join("plugin.toml"),
-        BUNDLED_MARKDOWN_VIEWER_MANIFEST,
-    )?;
-
     let syntax_dir = plugins_dir.join("text_syntax");
     fs::create_dir_all(&syntax_dir)?;
     write_bundled_file(&syntax_dir.join("plugin.lua"), BUNDLED_TEXT_SYNTAX_PLUGIN)?;
@@ -3493,12 +3477,18 @@ impl PluginRegistry {
         let mime_types = path_mime_types(path);
         self.viewer_plugins
             .iter()
-            .find(|plugin| plugin.supports_path(path, mime_types.as_deref()))
+            .find(|plugin| {
+                plugin.name != "markdown_viewer"
+                    && plugin.supports_path(path, mime_types.as_deref())
+            })
             .map(|plugin| plugin.name.as_str())
             .or_else(|| {
                 self.viewer_rust_plugins
                     .iter()
-                    .find(|plugin| plugin.supports_path(path, mime_types.as_deref()))
+                    .find(|plugin| {
+                        plugin.name != "markdown_viewer"
+                            && plugin.supports_path(path, mime_types.as_deref())
+                    })
                     .map(|plugin| plugin.name.as_str())
             })
     }

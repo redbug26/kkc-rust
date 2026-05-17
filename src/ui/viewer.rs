@@ -393,16 +393,23 @@ pub(super) fn render_viewer(
     };
     let col_info = (matches!(v.mode, ViewMode::Text | ViewMode::Ansi) && !v.wrap && v.hscroll > 0)
         .then(|| v.hscroll.to_string());
-    let lf_info = matches!(v.mode, ViewMode::Text | ViewMode::Ansi).then(|| v.line_feed_label());
-    let pre_info = matches!(v.mode, ViewMode::Text | ViewMode::Ansi).then(|| v.preproc_label());
-    let enc_info = matches!(v.mode, ViewMode::Text | ViewMode::Ansi | ViewMode::Hex)
+    let lf_info = matches!(v.mode, ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi)
+        .then(|| v.line_feed_label());
+    let pre_info = matches!(v.mode, ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi)
+        .then(|| v.preproc_label());
+    let enc_info = matches!(
+        v.mode,
+        ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi | ViewMode::Hex
+    )
         .then(|| v.encoding_label());
-    let mask_info = matches!(v.mode, ViewMode::Text | ViewMode::Ansi).then(|| v.mask_label());
+    let mask_info = matches!(v.mode, ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi)
+        .then(|| v.mask_label());
     let ansi_canvas_info = matches!(v.mode, ViewMode::Ansi).then(|| v.ansi_canvas_label());
     let plugin_info = v.viewer_plugin.as_deref();
     let zoom_info = v.zoom_label();
     let autoplay_info = v.autoplay_display(autoplay_delay_secs);
-    let auto_detected_info = if matches!(v.mode, ViewMode::Text | ViewMode::Ansi) {
+    let auto_detected_info =
+        if matches!(v.mode, ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi) {
         v.detected_mask_label()
             .map(|label| format!("({label}) "))
             .unwrap_or_default()
@@ -674,7 +681,9 @@ pub(super) fn render_viewer(
             } else {
                 content_line
             };
-            let rendered_line = if !v.wrap || !matches!(v.mode, ViewMode::Text | ViewMode::Ansi) {
+            let rendered_line = if !v.wrap
+                || !matches!(v.mode, ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi)
+            {
                 clip_line_to_width(rendered_line, width)
             } else {
                 rendered_line
@@ -683,7 +692,10 @@ pub(super) fn render_viewer(
         })
         .collect();
 
-    if v.viewer_plugin.is_none() && v.wrap && matches!(v.mode, ViewMode::Text | ViewMode::Ansi) {
+    if v.viewer_plugin.is_none()
+        && v.wrap
+        && matches!(v.mode, ViewMode::Text | ViewMode::Markdown | ViewMode::Ansi)
+    {
         f.render_widget(
             Paragraph::new(items)
                 .wrap(Wrap { trim: false })
@@ -832,11 +844,13 @@ pub(super) fn render_viewer_menu(
     let items: Vec<String> = match menu.kind {
         ViewerMenuKind::Mode => vec![
             "Text: as plain text",
+            "Markdown: CommonMark viewer",
             "Binary: as hex dump",
             "Ansi: with ANSI escapes",
             "Image: as inline preview",
             "Audio: as inline preview",
             "Plugins viewer",
+            "Audio player",
         ]
         .into_iter()
         .map(str::to_string)
@@ -1006,10 +1020,17 @@ pub(super) fn render_viewer_menu(
 }
 
 fn viewer_mode_menu_line(idx: usize, item: &str, style: Style) -> Line<'static> {
-    if idx == 5 {
+    if idx == 6 {
         return Line::from(vec![
             Span::styled(" ", style),
             Span::styled("P. ", style.add_modifier(Modifier::BOLD)),
+            Span::styled(item.to_string(), style),
+        ]);
+    }
+    if idx == 7 {
+        return Line::from(vec![
+            Span::styled(" ", style),
+            Span::styled("A. ", style.add_modifier(Modifier::BOLD)),
             Span::styled(item.to_string(), style),
         ]);
     }

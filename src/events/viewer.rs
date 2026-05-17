@@ -545,6 +545,7 @@ fn viewer_menu_items(kind: ViewerMenuKind) -> &'static [&'static str] {
     match kind {
         ViewerMenuKind::Mode => &[
             "Text",
+            "Markdown",
             "Binary",
             "Ansi",
             "Image",
@@ -586,8 +587,8 @@ const PREPROC_ADD_ITEMS: &[(&str, PreprocOpKind)] = &[
     ("Add Latin", PreprocOpKind::Latin),
     ("Add Elite", PreprocOpKind::Elite),
 ];
-const VIEWER_PLUGIN_MENU_INDEX: usize = 5;
-const VIEWER_AUDIO_PLAYER_MENU_INDEX: usize = 6;
+const VIEWER_PLUGIN_MENU_INDEX: usize = 6;
+const VIEWER_AUDIO_PLAYER_MENU_INDEX: usize = 7;
 
 fn viewer_menu_len(viewer: &crate::viewer::Viewer, kind: ViewerMenuKind) -> usize {
     match kind {
@@ -604,10 +605,11 @@ fn viewer_menu_len(viewer: &crate::viewer::Viewer, kind: ViewerMenuKind) -> usiz
 fn set_viewer_mode(viewer: &mut crate::viewer::Viewer, cursor: usize) {
     match cursor {
         0 => viewer.set_mode(ViewMode::Text),
-        1 => viewer.set_mode(ViewMode::Hex),
-        2 => viewer.set_mode(ViewMode::Ansi),
-        3 => viewer.set_mode(ViewMode::Image),
-        4 => viewer.set_mode(ViewMode::Module),
+        1 => viewer.set_mode(ViewMode::Markdown),
+        2 => viewer.set_mode(ViewMode::Hex),
+        3 => viewer.set_mode(ViewMode::Ansi),
+        4 => viewer.set_mode(ViewMode::Image),
+        5 => viewer.set_mode(ViewMode::Module),
         _ => {}
     }
 }
@@ -629,7 +631,7 @@ fn apply_viewer_menu_selection(
                 return;
             }
             set_viewer_mode(&mut viewer, menu.cursor);
-            if menu.cursor == 4 {
+            if menu.cursor == 5 {
                 let state = AudioPlayerPaletteState::load(&viewer);
                 app.mode = AppMode::AudioPlayerPalette(viewer, state);
                 return;

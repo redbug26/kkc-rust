@@ -2231,10 +2231,11 @@ fn handle_browse(app: &mut App, key: KeyEvent) -> Result<bool> {
                 app.quick_preview_scroll_down();
             }
             _ if fn_key == Some(4) => {
-                // Cycle forced mode: Auto → Text → Hex → Ansi → Image → Audio → Auto
+                // Cycle forced mode: Auto → Text → Markdown → Hex → Ansi → Image → Audio → Auto
                 app.quick_preview_forced_mode = match app.quick_preview_forced_mode {
                     None => Some(ViewMode::Text),
-                    Some(ViewMode::Text) => Some(ViewMode::Hex),
+                    Some(ViewMode::Text) => Some(ViewMode::Markdown),
+                    Some(ViewMode::Markdown) => Some(ViewMode::Hex),
                     Some(ViewMode::Hex) => Some(ViewMode::Ansi),
                     Some(ViewMode::Ansi) => Some(ViewMode::Image),
                     Some(ViewMode::Image) => Some(ViewMode::Module),
