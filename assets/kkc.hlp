@@ -8,7 +8,7 @@
                                                                          
 K I L L E R S   C O M M A N D E R   ::   K K C       
 
-[Ploum](gemini://ploum.net)
+---
 
 ## Introduction
 
@@ -32,8 +32,6 @@ Key features:
 - Hundreds of color themes
 - Configurable via [Options > Setup](#configuration-options--setup)
 
----
-
 ### Disclaimer and Warranty
 
 KKC is distributed "AS IS". The author specifically disclaims all
@@ -45,6 +43,8 @@ as a consequence of the use of this product.
 
 KKC is open-source software released under the MIT license.
 Source code: https://github.com/redbug26/kkc-rust
+
+---
 
 ## Keyboard Reference
 
@@ -184,6 +184,8 @@ Press Ctrl-F to open the connection panel.
 Navigation works the same as locally.
    File operations (view, copy out, delete, rename) are supported.
    Editing uploads the file back after the editor exits.
+
+---
 
 ## Commands in Details
 
@@ -547,6 +549,8 @@ If multiple openers exist for a file, a picker is shown on ENTER.
 | DELETE / D | Delete selected |
 | ESC | Close |
 
+---
+
 ## Lua Applications
 
 KKC can run Lua applications (games, tools, utilities) inside the terminal.
@@ -560,6 +564,8 @@ Applications can access:
 - KKC internals via `kkc` module
 
 For developers, see the template in `assets/applications/template_lua_app`.
+
+---
 
 ## Menu System
 
@@ -647,19 +653,29 @@ F10 exits KKC. A confirmation dialog appears if:
 - There are unsaved changes in the internal editor
 - There are ongoing operations
 
+---
+
 ## About
 
 ### About KKC
 
 KKC - **Ketchup Killers Commander**
 
-Rust rewrite by [RedBug](#contact) (Miguel Vanhove)
+Created by [RedBug](#contact) (Miguel Vanhove).
 
-Originally created in 1997 as a DOS file manager. This version is a complete rewrite in Rust using the ratatui TUI library.
+Originally started in 1997 as a DOS file manager, KKC is now a modern Rust rewrite focused on speed, keyboard-first navigation, and a practical dual-panel workflow.
 
-**Source code and releases:** https://github.com/redbug26/kkc-rust
+KKC combines classic file-manager ergonomics with modern features:
+- local and remote browsing (SFTP / IMAP / SMB)
+- built-in multi-mode viewer (text, markdown, hex, ansi, image, audio)
+- archive browsing, plugin support, and Lua applications
+- configurable interface, shortcuts, and theme system
 
-**Report bugs and ideas:** GitHub Issues
+The goal of KKC is simple: keep daily file operations fast, scriptable, and comfortable in a terminal environment.
+
+**Project repository and releases:** https://github.com/redbug26/kkc-rust
+
+**Bug reports and feature requests:** https://github.com/redbug26/kkc-rust/issues
 
 ### Contact
 
@@ -667,6 +683,26 @@ Originally created in 1997 as a DOS file manager. This version is a complete rew
 - **Issues:** https://github.com/redbug26/kkc-rust/issues
 
 ### History
+
+**Next release (in progress)**
+- Gemini support in the internal viewer (open and browse gemini:// pages).
+- Help moved to the Markdown viewer; F1 behavior fixed in multiple panels.
+- Better help navigation (Tab/Shift-Tab on links, improved table link visibility).
+- Help displayed in fixed-width non-zoomed mode; zoom switching issues corrected.
+- Help documentation updated and reorganized.
+- Quick Preview improved (speed, stability, fallback behavior).
+- Tree View added/improved.
+- Search and QuickSearch updated (including multi-pattern search).
+- Mouse interaction and GIF capture/recording improved.
+- Plugin Store and application launch/store flow updated.
+- Remote features expanded (including SMB) with connection/authentication/TLS fixes.
+- Cloud-only file handling improved.
+- Viewer updates: markdown/text rendering, goto/navigation, ANSI/Image/Hex quality.
+- Audio updates: plugins, autoplay, playlist handling.
+- File type detection expanded (more formats recognized).
+- Internal editor, command palette shortcuts/history, and general UI details improved.
+- Theme/palette work and visual consistency updates.
+- Performance and startup improvements in several code paths.
 
 **Version 0.1.18**
 - Error/status messages now displayed in a proper dialog box

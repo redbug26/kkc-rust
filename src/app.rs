@@ -3476,9 +3476,7 @@ impl App {
 
     pub fn open_help(&mut self) {
         let help_path = std::env::temp_dir().join("kkc-help.hlp");
-        if !help_path.is_file() {
-            let _ = fs::write(&help_path, include_bytes!("../assets/kkc.hlp"));
-        }
+        let _ = fs::write(&help_path, include_bytes!("../assets/kkc.hlp"));
 
         match Viewer::open(&help_path, self.config.viewer.word_wrap) {
             Ok(mut viewer) => {
@@ -3496,9 +3494,7 @@ impl App {
             anchor, return_panel
         ));
         let help_path = std::env::temp_dir().join("kkc-help.hlp");
-        if !help_path.is_file() {
-            let _ = fs::write(&help_path, include_bytes!("../assets/kkc.hlp"));
-        }
+        let _ = fs::write(&help_path, include_bytes!("../assets/kkc.hlp"));
 
         match Viewer::open(&help_path, self.config.viewer.word_wrap) {
             Ok(mut viewer) => {
