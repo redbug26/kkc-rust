@@ -5,6 +5,7 @@ use unicode_width::UnicodeWidthStr;
 
 const TABLE_LINK_OPEN: &str = "[[[KKC_LINK]]]";
 const TABLE_LINK_CLOSE: &str = "[[[/KKC_LINK]]]";
+const LINK_SUFFIX: &str = " 🔗";
 
 #[derive(Debug, Clone)]
 pub(crate) struct MarkdownRenderedLine {
@@ -618,6 +619,56 @@ fn wrap_markdown_lines(
 
         for (word, style) in word_spans {
             let word_width = UnicodeWidthStr::width(word.as_str());
+            if current_line_width == continuation_prefix_width
+                && word.chars().all(char::is_whitespace)
+            {
+                continue;
+            }
+            if word_width > max_width {
+                if current_line_width > 0 {
+                    wrapped.push(MarkdownRenderedLine {
+                        plain: current_line_plain.clone(),
+                        styled: Line::from(current_line_spans),
+                    });
+                    current_line_plain = continuation_prefix.clone();
+                    current_line_spans = if continuation_prefix.is_empty() {
+                        Vec::new()
+                    } else {
+                        vec![Span::styled(
+                            continuation_prefix.clone(),
+                            continuation_prefix_style,
+                        )]
+                    };
+                    current_line_width = continuation_prefix_width;
+                }
+
+                let mut rest = word.as_str();
+                while !rest.is_empty() {
+                    let available = max_width.saturating_sub(current_line_width).max(1);
+                    let (part, tail) = take_prefix_by_width(rest, available);
+                    current_line_plain.push_str(part);
+                    current_line_spans.push(Span::styled(part.to_string(), style));
+                    current_line_width += UnicodeWidthStr::width(part);
+                    rest = tail;
+                    if !rest.is_empty() {
+                        wrapped.push(MarkdownRenderedLine {
+                            plain: current_line_plain.clone(),
+                            styled: Line::from(current_line_spans),
+                        });
+                        current_line_plain = continuation_prefix.clone();
+                        current_line_spans = if continuation_prefix.is_empty() {
+                            Vec::new()
+                        } else {
+                            vec![Span::styled(
+                                continuation_prefix.clone(),
+                                continuation_prefix_style,
+                            )]
+                        };
+                        current_line_width = continuation_prefix_width;
+                    }
+                }
+                continue;
+            }
 
             // If adding this word to current line would exceed max_width, flush current line
             if current_line_width > 0 && current_line_width + word_width > max_width {
@@ -635,6 +686,9 @@ fn wrap_markdown_lines(
                     )]
                 };
                 current_line_width = continuation_prefix_width;
+                if word.chars().all(char::is_whitespace) {
+                    continue;
+                }
             }
 
             // Add word to current line
@@ -850,7 +904,15 @@ pub(crate) fn render_commonmark(
                     state.link_depth = state.link_depth.saturating_sub(1);
                     if state.link_depth == 0 {
                         if let Some(table) = state.table.as_mut() {
+                            table.push_cell_text(LINK_SUFFIX);
                             table.push_cell_text(TABLE_LINK_CLOSE);
+                        } else {
+                            state.push_with_style(
+                                LINK_SUFFIX,
+                                Style::default()
+                                    .fg(Color::LightCyan)
+                                    .add_modifier(Modifier::BOLD),
+                            );
                         }
                         state.current_link_dest = None;
                     }
@@ -1015,5 +1077,40 @@ mod tests {
 
         assert!(quote_lines.len() >= 2);
         assert!(quote_lines.iter().all(|line| line.plain.starts_with("│ ")));
+    }
+
+    #[test]
+    fn wrapped_links_break_long_urls() {
+        let lines = render_commonmark(
+            "[Picture](https://commons.wikimedia.org/wiki/File:The_Brain_Machine_(4906298386%29.jpg)",
+            40,
+            true,
+        );
+
+        assert!(lines.len() >= 2);
+        assert!(
+            lines
+                .iter()
+                .all(|line| UnicodeWidthStr::width(line.plain.as_str()) <= 40)
+        );
+    }
+
+    #[test]
+    fn wrapped_lines_drop_leading_break_space() {
+        let lines = render_commonmark(
+            "La pub nous prend pour des cretins. Et experimentalement parlant elle a raison.",
+            38,
+            true,
+        );
+
+        assert!(lines.len() >= 2);
+        assert!(lines.iter().all(|line| !line.plain.starts_with(' ')));
+    }
+
+    #[test]
+    fn rendered_links_show_link_suffix() {
+        let lines = render_commonmark("[Ploum](gemini://ploum.net)", 80, true);
+
+        assert!(lines.iter().any(|line| line.plain.contains("Ploum 🔗")));
     }
 }
