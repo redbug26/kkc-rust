@@ -31,7 +31,8 @@ mod viewer_search;
 
 use self::viewer_decode::{
     AnsiCanvasMode, AnsiLine, ansi_screen_lines_with_canvas, byte_to_display_char,
-    detect_ansi_canvas_mode, detect_mode, hex_column_width, hex_line, preproc_op_label,
+    detect_ansi_canvas_mode, detect_mode, hex_column_width, hex_line, hex_offset_digits,
+    preproc_op_label,
     preprocess_bytes, text_lines,
 };
 use self::viewer_render::{pad_visible, slice_visible};
@@ -2315,13 +2316,14 @@ impl Viewer {
 
     fn hex_plain_line_at(&self, idx: usize) -> String {
         let bpr = self.hex_bytes_per_row.get();
+        let offset_digits = hex_offset_digits(self.raw.len());
         let offset = idx.saturating_mul(bpr);
         if offset >= self.raw.len() {
             return String::new();
         }
         let end = offset.saturating_add(bpr).min(self.raw.len());
         let chunk = preprocess_bytes(&self.raw[offset..end], &self.preproc_ops);
-        hex_line(offset, &chunk, bpr, self.encoding)
+        hex_line(offset, &chunk, bpr, self.encoding, offset_digits)
     }
 
     fn render_hex_lines(
@@ -2332,8 +2334,9 @@ impl Viewer {
     ) -> Vec<Line<'static>> {
         // Compute bytes-per-row from the available panel width and cache it so that
         // hex_line_count() and scroll arithmetic stay consistent across frames.
-        // Layout: 8 offset + 2 spaces + grouped hex + 2 spaces + ASCII.
-        let bpr = hex_bytes_per_row_for_width(selected_width);
+        // Layout: dynamic offset + 2 spaces + grouped hex + 2 spaces + ASCII.
+        let offset_digits = hex_offset_digits(self.raw.len());
+        let bpr = hex_bytes_per_row_for_width(selected_width, offset_digits);
         self.hex_bytes_per_row.set(bpr);
         let end = start.saturating_add(height).min(self.hex_line_count());
         (start..end)
@@ -2344,7 +2347,7 @@ impl Viewer {
                 }
                 let end = offset.saturating_add(bpr).min(self.raw.len());
                 let chunk = preprocess_bytes(&self.raw[offset..end], &self.preproc_ops);
-                let segments = hex_line_segments(offset, &chunk, bpr, self.encoding);
+                let segments = hex_line_segments(offset, &chunk, bpr, self.encoding, offset_digits);
                 if self.wrap {
                     Line::from(
                         segments
@@ -3137,11 +3140,11 @@ struct StyledSegment {
     style: Style,
 }
 
-fn hex_bytes_per_row_for_width(width: usize) -> usize {
+fn hex_bytes_per_row_for_width(width: usize, offset_digits: usize) -> usize {
     let mut bpr = 4;
     loop {
         let next = bpr + 4;
-        let next_width = 8 + 2 + hex_column_width(next) + 2 + next;
+        let next_width = offset_digits + 2 + hex_column_width(next) + 2 + next;
         if next_width > width {
             return bpr;
         }
@@ -3154,10 +3157,11 @@ fn hex_line_segments(
     chunk: &[u8],
     bpr: usize,
     encoding: EncodingMode,
+    offset_digits: usize,
 ) -> Vec<StyledSegment> {
     let pad = hex_column_width(bpr);
     let mut segments = vec![StyledSegment {
-        text: format!("{:08X}  ", offset),
+        text: format!("{offset:0offset_digits$X}  ", offset_digits = offset_digits),
         style: Style::default(),
     }];
 

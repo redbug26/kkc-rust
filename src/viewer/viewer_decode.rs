@@ -423,7 +423,13 @@ pub(super) fn ansi_screen_lines_with_canvas(
     }
 }
 
-pub(super) fn hex_line(offset: usize, chunk: &[u8], bpr: usize, encoding: EncodingMode) -> String {
+pub(super) fn hex_line(
+    offset: usize,
+    chunk: &[u8],
+    bpr: usize,
+    encoding: EncodingMode,
+    offset_digits: usize,
+) -> String {
     let hex = grouped_hex_bytes(chunk);
     let ascii: String = chunk
         .iter()
@@ -436,7 +442,26 @@ pub(super) fn hex_line(offset: usize, chunk: &[u8], bpr: usize, encoding: Encodi
         })
         .collect();
     let pad = hex_column_width(bpr);
-    format!("{:08X}  {:<width$}  {}", offset, hex, ascii, width = pad)
+    format!(
+        "{offset:0offset_digits$X}  {hex:<width$}  {ascii}",
+        offset_digits = offset_digits,
+        width = pad
+    )
+}
+
+/// Compute hex offset width from file size.
+///
+/// Uses 2 bytes (4 hex digits) up to 16-bit files, 3 bytes (6 digits)
+/// up to 24-bit files, etc.
+pub(super) fn hex_offset_digits(file_len: usize) -> usize {
+    let max_offset = file_len.saturating_sub(1);
+    let bytes = if max_offset <= 0xFFFF {
+        2
+    } else {
+        let bits = usize::BITS as usize - max_offset.leading_zeros() as usize;
+        bits.div_ceil(8)
+    };
+    bytes.max(2) * 2
 }
 
 pub(super) fn hex_column_width(byte_count: usize) -> usize {
@@ -1348,8 +1373,8 @@ mod tests {
 
     #[test]
     fn hex_line_groups_hex_bytes_by_four() {
-        let line = hex_line(0, &[0, 1, 2, 3, 4, 5, 6, 7], 8, EncodingMode::Plain);
-        assert!(line.starts_with("00000000  00 01 02 03  04 05 06 07  "));
+        let line = hex_line(0, &[0, 1, 2, 3, 4, 5, 6, 7], 8, EncodingMode::Plain, 4);
+        assert!(line.starts_with("0000  00 01 02 03  04 05 06 07  "));
     }
 
     #[test]
